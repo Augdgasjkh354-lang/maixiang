@@ -1,4 +1,5 @@
 import { itemQeqUnitsPerInventoryUnit } from "../economy/inventory.js";
+import { bookAddAll } from "../economy/books.js";
 import { purchaseItemForResidents } from "./consumer-market.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdList, householdPopulation, isActiveHousehold } from "./households.js";
@@ -79,11 +80,7 @@ export function buyStaplesForResidents(state, population, content) {
   const townBreadCogs = bread.sellerRows.filter(row => row.seller === "town")
     .reduce((sum, row) => sum + (row.sellerCostVoucherUnits || 0), 0);
   if (townBreadSold > 0) {
-    for (const group of [state.business.day, state.business.year, state.business.cumulative]) {
-      group.soldBreadUnits = (group.soldBreadUnits || 0) + townBreadSold;
-      group.revenueWheatUnits = (group.revenueWheatUnits || 0) + townBreadRevenue;
-      group.breadCogsWheatUnits = (group.breadCogsWheatUnits || 0) + townBreadCogs;
-    }
+    bookAddAll(state.business, { soldBreadUnits: townBreadSold, revenueWheatUnits: townBreadRevenue, breadCogsWheatUnits: townBreadCogs });
   }
 
   state.market.staplesLastDay = {

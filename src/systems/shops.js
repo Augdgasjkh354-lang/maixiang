@@ -1,4 +1,5 @@
 import { currencyScale, voucherBalance } from "../economy/currency.js";
+import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { recordEvent } from "../economy/ledger.js";
@@ -40,9 +41,8 @@ function blankShopPeriod() {
 }
 
 function ensureShopBooks(shop, content = null) {
-  shop.accounts ||= { day: blankShopPeriod(), year: blankShopPeriod(), cumulative: blankShopPeriod() };
-  for (const period of ["day", "year", "cumulative"]) {
-    shop.accounts[period] ||= blankShopPeriod();
+  ensureBook(shop.accounts ||= {}, blankShopPeriod);
+  for (const period of PERIODS) {
     shop.accounts[period].soldUnits ||= {};
     shop.accounts[period].purchasedUnits ||= {};
     shop.accounts[period].serviceUses ||= {};
@@ -85,18 +85,15 @@ export function ensureShops(state, content) {
 }
 
 function addBookValue(shop, key, units) {
-  for (const period of ["day", "year", "cumulative"]) period && (shop.accounts[period][key] = (shop.accounts[period][key] || 0) + units);
+  bookAdd(shop.accounts, key, units);
 }
 
 function addBookMap(shop, key, itemId, units) {
-  for (const period of ["day", "year", "cumulative"]) {
-    shop.accounts[period][key] ||= {};
-    shop.accounts[period][key][itemId] = (shop.accounts[period][key][itemId] || 0) + units;
-  }
+  bookAddMap(shop.accounts, key, itemId, units);
 }
 
 function applyProfit(shop, delta) {
-  for (const period of ["day", "year", "cumulative"]) shop.accounts[period].profitVoucherUnits = (shop.accounts[period].profitVoucherUnits || 0) + delta;
+  bookAdd(shop.accounts, "profitVoucherUnits", delta);
   shop.settlement.profitVoucherUnits = (shop.settlement.profitVoucherUnits || 0) + delta;
   shop.retainedEarningsVoucherUnits = (shop.retainedEarningsVoucherUnits || 0) + delta;
 }
@@ -459,7 +456,7 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
   addBookValue(shop, "revenueVoucherUnits", paymentUnits);
   addBookValue(shop, "cogsVoucherUnits", cogs);
   addBookMap(shop, "soldUnits", itemId, actual);
-  for (const period of ["day", "year", "cumulative"]) shop.accounts[period].customerCount = (shop.accounts[period].customerCount || 0) + 1;
+  bookAdd(shop.accounts, "customerCount", 1);
   applyProfit(shop, paymentUnits - cogs);
   // 0.2.3 动态加价：把这一笔成交记入按商品的利润率窗口（收入/进货成本/销量）。
   recordShopItemSale(shop, itemId, actual, paymentUnits, cogs, content);
@@ -473,9 +470,7 @@ export function registerRejectedCustomers(state, shopId, units, content) {
   if (!shop || shop.status !== "open" || !(units > 0)) return 0;
   const perCustomer = Math.max(1, (content.rules.foodPerPersonDay || 2) * content.precision.inventoryUnitsPerJin);
   const count = Math.ceil(units / perCustomer);
-  for (const period of ["day", "year", "cumulative"]) {
-    shop.accounts[period].rejectedCustomerCount = (shop.accounts[period].rejectedCustomerCount || 0) + count;
-  }
+  bookAdd(shop.accounts, "rejectedCustomerCount", count);
   return count;
 }
 
@@ -510,7 +505,7 @@ export function recordShopServiceSale(state, shopId, householdId, serviceId, con
   addBookValue(shop, "revenueVoucherUnits", priceUnits);
   addBookValue(shop, "cogsVoucherUnits", cogs);
   addBookMap(shop, "serviceUses", serviceId, 1);
-  for (const period of ["day", "year", "cumulative"]) shop.accounts[period].customerCount = (shop.accounts[period].customerCount || 0) + 1;
+  bookAdd(shop.accounts, "customerCount", 1);
   applyProfit(shop, priceUnits - cogs);
   return { ok: true, paidValueUnits: priceUnits, cogsVoucherUnits: cogs, transactionId: payment.transactionId };
 }

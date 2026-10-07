@@ -1,4 +1,5 @@
 import { currencyScale } from "../economy/currency.js";
+import { bookAddAll, PERIODS } from "../economy/books.js";
 import { quantityToUnits } from "../economy/inventory.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
@@ -30,10 +31,8 @@ export function settleHousingRent(state, housingAtStart, content) {
   if (!previousDefer) syncResidentAggregates(state, content);
   const waivedUnits = dueUnits - collectedUnits;
   state.fiscal ||= { day: {}, year: {}, cumulative: {} };
-  for (const period of [state.fiscal.day, state.fiscal.year, state.fiscal.cumulative]) {
-    period.dueWheatUnits = (period.dueWheatUnits || 0) + dueUnits;
-    period.collectedWheatUnits = (period.collectedWheatUnits || 0) + collectedUnits;
-    period.waivedWheatUnits = (period.waivedWheatUnits || 0) + waivedUnits;
+  bookAddAll(state.fiscal, { dueWheatUnits: dueUnits, collectedWheatUnits: collectedUnits, waivedWheatUnits: waivedUnits });
+  for (const period of PERIODS.map(key => state.fiscal[key])) {
     period.dueVoucherUnits = period.dueWheatUnits;
     period.collectedVoucherUnits = period.collectedWheatUnits;
     period.waivedVoucherUnits = period.waivedWheatUnits;

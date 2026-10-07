@@ -15,6 +15,7 @@
 // 旧档与旧测试不受影响；收购价放在新字段 `purchasePricesVoucherPerUnit`（||= 初始化）。
 
 import { currencyScale, ensureCurrencyState } from "../economy/currency.js";
+import { bookAdd, bookAddMap } from "../economy/books.js";
 import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
 import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/business.js";
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
@@ -124,16 +125,8 @@ export function hasWholesaleMarket(state) {
   return (state.buildings || []).some(building => building.typeId === "wholesale_market" && (building.level || 1) > 0);
 }
 
-function addPeriodMap(market, key, itemId, units) {
-  for (const period of ["day", "year", "cumulative"]) {
-    market[period][key] ||= emptyItemMap(0);
-    market[period][key][itemId] = (market[period][key][itemId] || 0) + units;
-  }
-}
-
-function addPeriodValue(market, key, units) {
-  for (const period of ["day", "year", "cumulative"]) market[period][key] = (market[period][key] || 0) + units;
-}
+const addPeriodMap = bookAddMap;
+const addPeriodValue = bookAdd;
 
 export function resetWholesaleDay(state, content) {
   const market = ensureWholesaleMarket(state, content);
@@ -153,9 +146,7 @@ export function resetWholesaleYear(state, content) {
 function addValueFlow(market, key, amountUnits) {
   const amount = Math.max(0, Math.round(Number(amountUnits) || 0));
   if (!amount) return;
-  market.valueFlow.day[key] = (market.valueFlow.day[key] || 0) + amount;
-  market.valueFlow.year[key] = (market.valueFlow.year[key] || 0) + amount;
-  market.valueFlow.cumulative[key] = (market.valueFlow.cumulative[key] || 0) + amount;
+  bookAdd(market.valueFlow, key, amount);
 }
 
 // ---------------------------------------------------------------- 做市商定价

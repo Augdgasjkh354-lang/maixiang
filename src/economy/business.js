@@ -1,4 +1,5 @@
 import { qeqUnitsForInventoryUnits } from "./inventory.js";
+import { bookAdd, bookAddAll, bookAddMap } from "./books.js";
 
 function ensureBusiness(state) {
   if (!state.business) state.business = { inventoryCostWheatUnits: { town: {} }, buildings: {}, day: {}, year: {}, cumulative: {} };
@@ -126,13 +127,7 @@ export function commitProductionAccounting(state, plan) {
   for (const row of plan.outputs) {
     business.inventoryCostWheatUnits.town[row.itemId] =
       (business.inventoryCostWheatUnits.town[row.itemId] || 0) + row.costWheatUnits;
-    const groups = industry
-      ? [industry.day, industry.year, industry.cumulative]
-      : [business.day, business.year, business.cumulative];
-    for (const group of groups) {
-      counter(group, row.itemId);
-      group.producedUnits[row.itemId] += row.quantityUnits;
-    }
+    bookAddMap(industry || business, "producedUnits", row.itemId, row.quantityUnits);
     const record = business.buildings[plan.buildingId] ||
       (business.buildings[plan.buildingId] = { todayOutputUnits: {}, yearOutputUnits: {}, lifetimeOutputUnits: {} });
     for (const target of [record.todayOutputUnits, record.yearOutputUnits, record.lifetimeOutputUnits]) {
@@ -140,10 +135,7 @@ export function commitProductionAccounting(state, plan) {
     }
   }
   if (!industry) {
-    for (const group of [business.day, business.year, business.cumulative]) {
-      group.processingLossWheatUnits = (group.processingLossWheatUnits || 0) + plan.processingLossWheatUnits;
-      group.rawInputCostWheatUnits = (group.rawInputCostWheatUnits || 0) + plan.rawInputCostWheatUnits;
-    }
+    bookAddAll(business, { processingLossWheatUnits: plan.processingLossWheatUnits, rawInputCostWheatUnits: plan.rawInputCostWheatUnits });
   }
   return plan;
 }
@@ -154,11 +146,7 @@ export function tradeAccounting(state, { breadUnits, wheatUnits, breadCostWheatU
   if (quote.costWheatUnits !== breadCostWheatUnits) throw new Error("面包库存成本在交易中发生变化");
   applyTownCostRemoval(state, quote);
   addTownCostBasis(state, "wheat", wheatUnits);
-  for (const group of [business.day, business.year, business.cumulative]) {
-    group.soldBreadUnits = (group.soldBreadUnits || 0) + breadUnits;
-    group.revenueWheatUnits = (group.revenueWheatUnits || 0) + wheatUnits;
-    group.breadCogsWheatUnits = (group.breadCogsWheatUnits || 0) + breadCostWheatUnits;
-  }
+  bookAddAll(business, { soldBreadUnits: breadUnits, revenueWheatUnits: wheatUnits, breadCogsWheatUnits: breadCostWheatUnits });
   return quote;
 }
 
@@ -166,14 +154,10 @@ export function addWageExpense(state, kind, wheatUnits, sector = "bread") {
   if (kind !== "construction" && sector !== "bread") {
     const industry = state.industries?.[sector];
     if (!industry) return;
-    for (const group of [industry.day, industry.year, industry.cumulative]) {
-      group.operatingWagesWheatUnits = (group.operatingWagesWheatUnits || 0) + wheatUnits;
-    }
+    bookAdd(industry, "operatingWagesWheatUnits", wheatUnits);
     return;
   }
   const business = ensureBusiness(state);
   const key = kind === "construction" ? "constructionWagesWheatUnits" : "operatingWagesWheatUnits";
-  for (const group of [business.day, business.year, business.cumulative]) {
-    group[key] = (group[key] || 0) + wheatUnits;
-  }
+  bookAdd(business, key, wheatUnits);
 }

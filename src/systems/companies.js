@@ -1,4 +1,5 @@
 import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
+import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { recordFundDividend } from "./social-security.js";
 import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
@@ -32,9 +33,8 @@ function blankPeriod() {
 }
 
 function ensureCompanyBooks(company) {
-  company.accounts ||= { day: blankPeriod(), year: blankPeriod(), cumulative: blankPeriod() };
-  for (const period of ["day", "year", "cumulative"]) {
-    company.accounts[period] = { ...blankPeriod(), ...(company.accounts[period] || {}) };
+  ensureBook(company.accounts ||= {}, blankPeriod);
+  for (const period of PERIODS) {
     for (const key of ["producedUnits", "soldUnits", "taxedUnits", "purchasedInputUnits"]) {
       company.accounts[period][key] ||= {};
     }
@@ -75,29 +75,17 @@ export function ensureCompanies(state, content) {
   return state.companies;
 }
 
-function addMap(map, key, amount) {
-  map[key] = (map[key] || 0) + amount;
-}
-
 function addPeriodValue(company, key, amount) {
-  if (!amount) return;
-  for (const period of [company.accounts.day, company.accounts.year, company.accounts.cumulative]) {
-    period[key] = (period[key] || 0) + amount;
-  }
+  if (amount) bookAdd(company.accounts, key, amount);
 }
 
 function addPeriodMap(company, key, itemId, amount) {
-  if (!amount) return;
-  for (const period of [company.accounts.day, company.accounts.year, company.accounts.cumulative]) {
-    addMap(period[key], itemId, amount);
-  }
+  if (amount) bookAddMap(company.accounts, key, itemId, amount);
 }
 
 function applyProfit(company, delta) {
   if (!delta) return;
-  for (const period of [company.accounts.day, company.accounts.year, company.accounts.cumulative]) {
-    period.profitVoucherUnits = (period.profitVoucherUnits || 0) + delta;
-  }
+  bookAdd(company.accounts, "profitVoucherUnits", delta);
   company.retainedEarningsVoucherUnits = (company.retainedEarningsVoucherUnits || 0) + delta;
 }
 

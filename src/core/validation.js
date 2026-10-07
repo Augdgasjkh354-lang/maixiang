@@ -1,4 +1,5 @@
 import { populationStats, selectJobRows } from "../selectors/labor.js";
+import { PERIODS } from "../economy/books.js";
 import { householdList, householdPopulation, householdWorkingAge, householdEmploymentCount, totalHouseholdAgeBands, jobCount, isActiveHousehold } from "../systems/households.js";
 import { validateContent } from "../content/validate.js";
 import { validateCurrencyInvariant } from "../economy/currency.js";
@@ -198,7 +199,7 @@ export function validateState(state, content) {
       errors.push("缺少行业经营账：" + sector);
       continue;
     }
-    for (const period of ["day", "year", "cumulative"]) {
+    for (const period of PERIODS) {
       const group = industry[period];
       if (!group || !group.producedUnits ||
           !Number.isSafeInteger(group.soldUnits || 0) || (group.soldUnits || 0) < 0 ||
@@ -208,7 +209,7 @@ export function validateState(state, content) {
       }
     }
   }
-  for (const period of ["day", "year", "cumulative"]) {
+  for (const period of PERIODS) {
     const row = state.fiscal?.[period];
     if (!row || ["dueWheatUnits", "collectedWheatUnits", "waivedWheatUnits"]
       .some(key => !Number.isSafeInteger(row[key]) || row[key] < 0)) {
@@ -269,7 +270,7 @@ export function validateState(state, content) {
           !Number.isSafeInteger(company.shareSale?.cumulativeProceedsVoucherUnits || 0) || (company.shareSale?.cumulativeProceedsVoucherUnits || 0) < 0) {
         errors.push("企业股份出售记录无效：" + companyId);
       }
-      for (const period of ["day", "year", "cumulative"]) {
+      for (const period of PERIODS) {
         const account = company.accounts?.[period];
         if (!account || ["revenueVoucherUnits", "cogsVoucherUnits", "wageExpenseVoucherUnits", "wagesPaidVoucherUnits", "inputPurchaseVoucherUnits", "taxCostVoucherUnits", "processingLossVoucherUnits", "profitVoucherUnits"]
           .some(key => !Number.isSafeInteger(account[key] || 0))) errors.push("企业核算账无效：" + companyId + "/" + period);

@@ -1,4 +1,5 @@
 import { CONTENT } from "../content/index.js";
+import { PERIODS } from "../economy/books.js";
 import { validateState } from "../core/validation.js";
 import { addTownCostBasis } from "../economy/business.js";
 import { syncShopEmployment } from "../systems/shops.js";
@@ -272,7 +273,7 @@ function normalizeV13(raw, definitions, legacyCompleted = false) {
     shop.itemId = shop.primaryItemId || shop.itemId || def?.itemIds?.[0] || null;
     shop.itemIds = def?.kind === "retail" ? [...(def.itemIds || [])] : [];
     shop.serviceId = def?.kind === "service" ? def.serviceId : null;
-    for (const period of ["day", "year", "cumulative"]) {
+    for (const period of PERIODS) {
       shop.accounts ||= {};
       shop.accounts[period] ||= {};
       shop.accounts[period].soldUnits ||= {};
@@ -354,7 +355,7 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
   state.version = 15;
   state.schemaVersion = 15;
   for (const shop of Object.values(state.shops || {})) {
-    for (const period of ["day", "year", "cumulative"]) {
+    for (const period of PERIODS) {
       shop.accounts ||= {};
       shop.accounts[period] ||= {};
       shop.accounts[period].distributedVoucherUnits ??= 0;
@@ -498,7 +499,7 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
     last: null,
     history: []
   };
-  for (const period of ["day", "year", "cumulative"]) {
+  for (const period of PERIODS) {
     state.agriculture.reclaim[period] ||= { acres: 0, workDays: 0, paidVoucherUnits: 0 };
   }
   if (!Array.isArray(state.agriculture.reclaim.history)) state.agriculture.reclaim.history = [];

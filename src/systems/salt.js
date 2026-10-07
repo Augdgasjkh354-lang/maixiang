@@ -1,4 +1,5 @@
 import { purchaseItemForResidents } from "./consumer-market.js";
+import { bookAddAll } from "../economy/books.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
 import { recordHouseholdInKind } from "./household-life.js";
@@ -50,10 +51,7 @@ export function buySaltForResidents(state, content) {
   const shopSold = shopRows.reduce((sum, row) => sum + row.quantityUnits, 0);
   const shopRevenue = shopRows.reduce((sum, row) => sum + row.paidVoucherUnits, 0);
   if (shopSold > 0) {
-    for (const group of [state.industries.salt.day, state.industries.salt.year, state.industries.salt.cumulative]) {
-      group.soldUnits = (group.soldUnits || 0) + shopSold;
-      group.revenueWheatUnits = (group.revenueWheatUnits || 0) + shopRevenue;
-    }
+    bookAddAll(state.industries.salt, { soldUnits: shopSold, revenueWheatUnits: shopRevenue });
   }
   state.salt.day.purchasedUnits = result.purchasedUnits;
   // paidWheatUnits 存的是券单位（1券=1斤麦等值），字段名历史遗留，UI按小麦等值显示无误。

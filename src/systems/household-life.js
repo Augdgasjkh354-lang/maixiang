@@ -1,3 +1,4 @@
+import { bookAdd, ensureBook } from "../economy/books.js";
 import { householdFoodQeqUnits, householdList, householdPopulation } from "./households.js";
 
 const PERIOD_FIELDS = [
@@ -13,9 +14,7 @@ function zeroPeriod() { return Object.fromEntries(PERIOD_FIELDS.map(key => [key,
 export function ensureHouseholdLife(household, content) {
   if (household.life?._v012Ready) return household.life;
   household.life ||= { day: blankPeriod(), year: blankPeriod(), cumulative: blankPeriod(), recent: [], observation: { rows: [], totals: blankPeriod() }, satisfaction: null, satisfactionHistory: [] };
-  for (const period of ["day", "year", "cumulative"]) {
-    household.life[period] ||= blankPeriod();
-  }
+  ensureBook(household.life, blankPeriod);
   household.life.recent = Array.isArray(household.life.recent) ? household.life.recent : [];
   household.life.satisfactionHistory = Array.isArray(household.life.satisfactionHistory) ? household.life.satisfactionHistory : [];
   household.life.observation ||= { rows: [], totals: blankPeriod() };
@@ -36,7 +35,7 @@ export function resetHouseholdLifeYear(state, content) {
 function add(household, key, units, content) {
   if (!Number.isFinite(units) || units <= 0) return;
   const life = ensureHouseholdLife(household, content);
-  for (const period of [life.day, life.year, life.cumulative]) period[key] = (period[key] || 0) + units;
+  bookAdd(life, key, units);
 }
 
 function householdIdFromOwner(owner) { return typeof owner === "string" && owner.startsWith("household:") ? owner.slice(10) : null; }

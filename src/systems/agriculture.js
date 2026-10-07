@@ -1,4 +1,5 @@
 import { changeInventory, quantityToUnits } from "../economy/inventory.js";
+import { bookAddAll, ensureBook } from "../economy/books.js";
 import { recordEvent, recordLedger } from "../economy/ledger.js";
 import { jobAssignments, jobCount, distributeResidentInventory, householdList, householdIdleWorkers, householdEmploymentCount } from "./households.js";
 import { addTownCostBasis } from "../economy/business.js";
@@ -20,9 +21,7 @@ export function ensureAgricultureState(state, content) {
   }
   state.agriculture.reclaimedAcres = Math.max(0, Math.min(maximum, Math.floor(state.agriculture.reclaimedAcres)));
   state.agriculture.reclaim ||= emptyReclaimState();
-  for (const key of ["day", "year", "cumulative"]) {
-    state.agriculture.reclaim[key] ||= emptyReclaimPeriod();
-  }
+  ensureBook(state.agriculture.reclaim, emptyReclaimPeriod);
   return state.agriculture;
 }
 
@@ -102,12 +101,7 @@ export function reclaimFarmland(state, content, options = {}) {
   }
   agriculture.reclaimedAcres = Math.min(estimate.maximum, agriculture.reclaimedAcres + estimate.allowed);
   const period = { acres: estimate.allowed, workDays, paidVoucherUnits };
-  for (const key of ["day", "year", "cumulative"]) {
-    const row = agriculture.reclaim[key];
-    row.acres += period.acres;
-    row.workDays += period.workDays;
-    row.paidVoucherUnits += period.paidVoucherUnits;
-  }
+  bookAddAll(agriculture.reclaim, period);
   agriculture.reclaim.last = {
     year: state.year, day: state.day + 1, ...period, workers, days, requested: estimate.requested,
     clamped: estimate.clamped, wagePerWorkerDay, maximum: estimate.maximum,

@@ -1,4 +1,5 @@
 import { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } from "../economy/inventory.js";
+import { bookAdd, bookAddMap } from "../economy/books.js";
 import { recordEvent } from "../economy/ledger.js";
 import { privateJobKeyForBuilding, readJobCount, selectJobRows } from "../selectors/labor.js";
 import { setPrivateWorkers } from "./employment.js";
@@ -212,13 +213,12 @@ export function processPrivateBuilding(state, building, content) {
       addTownCostBasis(state, row.itemId, Math.round(row.taxUnits * unitCost));
       taxRows.push(row);
     }
-    const periodRows = [state.privateEconomy.day, state.privateEconomy.year, state.privateEconomy.cumulative];
-    for (const row of localTaxRows) for (const period of periodRows) {
-      period.producedUnits[row.itemId] = (period.producedUnits[row.itemId] || 0) + row.totalUnits;
-      period.taxedUnits[row.itemId] = (period.taxedUnits[row.itemId] || 0) + row.taxUnits;
-      period.outputUnits[row.itemId] = (period.outputUnits[row.itemId] || 0) + row.residentUnits;
+    for (const row of localTaxRows) {
+      bookAddMap(state.privateEconomy, "producedUnits", row.itemId, row.totalUnits);
+      bookAddMap(state.privateEconomy, "taxedUnits", row.itemId, row.taxUnits);
+      bookAddMap(state.privateEconomy, "outputUnits", row.itemId, row.residentUnits);
     }
-    for (const input of inputs) for (const period of periodRows) period.inputUnits[input.itemId] = (period.inputUnits[input.itemId] || 0) + input.quantityUnits;
+    for (const input of inputs) bookAddMap(state.privateEconomy, "inputUnits", input.itemId, input.quantityUnits);
     transactionIds.push(transaction.transactionId);
     completed += batches;
     batchesLeft -= batches;
@@ -230,9 +230,8 @@ export function processPrivateBuilding(state, building, content) {
     return { buildingId: building.id, status: "no_materials", batches: 0,
       reason: first ? `缺${itemName}：${first.reason}` : "经营家庭没有可用于生产的原料", inputPurchases, inputShortages };
   }
-  const periodRows = [state.privateEconomy.day, state.privateEconomy.year, state.privateEconomy.cumulative];
   const internalLaborCostWheatUnits = Math.round(workers * (state.employment.wageRates[definition.productionRoleId] || 0) * content.precision.inventoryUnitsPerJin);
-  for (const period of periodRows) period.internalLaborCostWheatUnits += internalLaborCostWheatUnits;
+  bookAdd(state.privateEconomy, "internalLaborCostWheatUnits", internalLaborCostWheatUnits);
   const arrears = state.privateEconomy?.payrollByBuilding?.[building.id]?.arrearsVoucherUnits || 0;
   const firstShortage = inputShortages[0];
   const shortageReason = firstShortage ? `缺${content.items[firstShortage.itemId]?.name || firstShortage.itemId}：${firstShortage.reason}` : null;
