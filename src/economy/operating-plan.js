@@ -173,6 +173,34 @@ function producerRows(state, typeId, content) {
   return rows.sort((a, b) => a.key.localeCompare(b.key));
 }
 
+// 处理型产业的原料现货（单位）：镇库小麦；其他原料取批发市场库存（没有市场则镇库），
+// 加上本产业自有生产者手里的库存（公司库存、民营业主家庭库存），再加上上游上一周期计划的日产量。
+// 只读：不调用会改 state 的函数（如 privateOwners）。
+function inputAvailableUnits(state, typeId, itemId, previousOutputUnits) {
+  if (itemId === "wheat") return Math.max(0, state.accounts?.town?.wheat || 0) + (previousOutputUnits[itemId] || 0);
+  const hasMarket = (state.buildings || []).some(row => row.typeId === "wholesale_market");
+  let units = hasMarket ? (state.wholesaleMarket?.inventory?.[itemId] || 0) : (state.accounts?.town?.[itemId] || 0);
+  for (const company of Object.values(state.companies || {})) if (company.typeId === typeId) units += company.inventory?.[itemId] || 0;
+  for (const building of state.buildings || []) {
+    if (building.typeId !== typeId || !(building.ownership?.privateLevels > 0)) continue;
+    for (const ownerId of new Set(building.privateOwners || [])) units += state.households?.byId?.[ownerId]?.inventory?.[itemId] || 0;
+  }
+  return Math.max(0, units) + (previousOutputUnits[itemId] || 0);
+}
+
+// 处理型产业按原料能撑起的最多批次（无原料配方返回 null）。
+function inputBatchCap(state, typeId, content, previousOutputUnits) {
+  const inputs = content.recipes[content.buildings[typeId]?.recipeId]?.inputs || [];
+  if (!inputs.length) return null;
+  let cap = Infinity;
+  for (const input of inputs) {
+    const perBatch = input.quantity * content.precision.inventoryUnitsPerJin;
+    if (!(perBatch > 0)) continue;
+    cap = Math.min(cap, Math.floor(inputAvailableUnits(state, typeId, input.itemId, previousOutputUnits) / perBatch));
+  }
+  return Number.isFinite(cap) ? Math.max(0, cap) : null;
+}
+
 function distributeBatches(totalBatches, producers, rotation = 0) {
   const result = Object.fromEntries(producers.map(row => [row.key, 0]));
   if (totalBatches <= 0 || !producers.length) return result;
@@ -246,7 +274,8 @@ function productionTargetForType(state, typeId, content, downstreamUnits) {
 
 export function ensureOperatingPlanState(state) {
   state.market ||= {};
-  state.market.operatingPlan ||= { updatedSerial: -1, rotation: {}, rows: {}, demand: {} };
+  state.market.operatingPlan ||= { updatedSerial: -1, rotation: {}, rows: {}, demand: {}, plannedOutputUnits: {} };
+  state.market.operatingPlan.plannedOutputUnits ||= {};
   state.market.consumerHistory ||= { bread: [], salt: [], wood: [] };
   state.privateEconomy ||= {};
   state.privateEconomy.plans ||= {};
@@ -263,6 +292,9 @@ export function refreshOperatingPlan(state, content, force = false) {
     return plan;
   }
   plan.updatedSerial = serial;
+  // 上一周期各产业的计划日产量：下游排产时要用上游的产出，但上游本周期还没排。
+  const previousOutputUnits = plan.plannedOutputUnits || {};
+  plan.plannedOutputUnits = {};
   plan.rows = {};
   plan.demand = {};
   // 从下游往上游排：先定面包、酒、布的产量，再按它们要用的原料推出面粉、棉花的产量。
@@ -273,7 +305,17 @@ export function refreshOperatingPlan(state, content, force = false) {
     let totalBatches = perBatch > 0 ? Math.ceil(target.targetUnits / perBatch) : 0;
     const producers = producerRows(state, typeId, content);
     if (totalBatches <= 0 && producers.some(row => row.ageDays < (content.rules.newBusinessTrialDays || 6))) totalBatches = 1;
+    // 原料封顶：原料撑不起的批次不排（试营业也一样，原料为 0 时不招人空转）。
+    const inputCap = inputBatchCap(state, typeId, content, previousOutputUnits);
+    const inputLimitedBatches = inputCap;
+    const inputBound = inputCap !== null && inputCap < totalBatches;
+    // 需求照实向上游传递（未封顶），只有供给（原料）封顶；否则下游被卡住后上游跟着减产，形成负反馈死循环。
     const rotation = plan.rotation[typeId] || 0;
+    const demandBatches = Object.values(distributeBatches(totalBatches, producers, rotation)).reduce((sum, value) => sum + value, 0);
+    if (inputBound) {
+      totalBatches = inputCap;
+      target.basis = `原料不足：${target.basis}`;
+    }
     const batches = distributeBatches(totalBatches, producers, rotation);
     if (producers.length) plan.rotation[typeId] = (rotation + 1) % producers.length;
     for (const row of producers) {
@@ -289,10 +331,15 @@ export function refreshOperatingPlan(state, content, force = false) {
         state.privateEconomy.plans[row.buildingId] = { ...old, ...entry, ageDays: (old.ageDays || 0) + interval, updatedSerial: serial };
       }
     }
-    plan.demand[typeId] = target;
+    plan.demand[typeId] = { ...target, inputLimitedBatches: inputLimitedBatches ?? null };
     const plannedBatches = Object.values(batches).reduce((sum, value) => sum + value, 0);
-    for (const input of content.recipes[content.buildings[typeId]?.recipeId]?.inputs || []) {
-      downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(plannedBatches * input.quantity * content.precision.inventoryUnitsPerJin);
+    const recipe = content.recipes[content.buildings[typeId]?.recipeId];
+    for (const input of recipe?.inputs || []) {
+      downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(demandBatches * input.quantity * content.precision.inventoryUnitsPerJin);
+    }
+    for (const output of recipe?.outputs || []) {
+      plan.plannedOutputUnits[output.itemId] = (plan.plannedOutputUnits[output.itemId] || 0)
+        + Math.round(plannedBatches * output.quantity * content.precision.inventoryUnitsPerJin);
     }
   }
   return plan;

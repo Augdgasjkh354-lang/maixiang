@@ -116,7 +116,8 @@ test("磨坊企业采购居民小麦、向面包房企业供粉、面包销售�
   const market = state.wholesaleMarket;
   const residentWheatBefore = state.accounts.residents.wheat;
 
-  simulation.advanceDays(state, 2);
+  // 面包房排产要等磨坊上一周期的计划产量（一个计划周期），因此多推进几天。
+  simulation.advanceDays(state, 8);
   assert.ok(millCompany.accounts.cumulative.purchasedInputUnits.wheat > 0, "磨坊必须真实买入小麦");
   assert.ok(bakeryCompany.accounts.cumulative.purchasedInputUnits.flour > 0, "面包房必须从可售面粉中真实采购");
   assert.ok(millCompany.accounts.cumulative.revenueVoucherUnits > 0, "磨坊卖出面粉后取得粮券收入");

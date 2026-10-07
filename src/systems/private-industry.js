@@ -9,7 +9,7 @@ import { addTownCostBasis } from "../economy/business.js";
 import { currencyScale } from "../economy/currency.js";
 import { plannedBatchesForProducer, plannedWorkersForProducer } from "../economy/operating-plan.js";
 import { currentUnitPrice } from "../economy/prices.js";
-import { buyWholesaleForOwner } from "./wholesale-market.js";
+import { buyWholesaleForOwner, depositProductionTaxToWholesale } from "./wholesale-market.js";
 import { householdConvertibleWheatUnits, householdFoodQeqUnits, householdList, householdReserveQeqUnits, syncResidentAggregates, jobAssignments, isActiveHousehold, creditHouseholdInventory } from "./households.js";
 
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
@@ -198,7 +198,11 @@ export function processPrivateBuilding(state, building, content) {
     for (const [key, value] of Object.entries(carryAfter)) state.privateEconomy.taxRemainders[key] = value;
     for (const row of localTaxRows) {
       const unitCost = content.items[row.itemId]?.openingCostWheatPerJin ?? 0;
-      addTownCostBasis(state, row.itemId, Math.round(row.taxUnits * unitCost));
+      const costUnits = Math.round(row.taxUnits * unitCost);
+      // 统购品税货直接入批发市场（从镇库扣回，成本随货带入）；没有批发市场时仍留在镇库。
+      const intake = depositProductionTaxToWholesale(state, row.itemId, row.taxUnits, costUnits, content,
+        { fromTown: true, source: "private_production", reason: `${definition.name}民营实物税入批发市场` });
+      if (!intake.ok) addTownCostBasis(state, row.itemId, costUnits);
       taxRows.push(row);
     }
     for (const row of localTaxRows) {

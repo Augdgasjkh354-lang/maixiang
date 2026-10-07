@@ -116,7 +116,8 @@ test("0.1.10-r03 完整日结中民营磨坊→面包房采购链能连续运转
   let millBatches = 0;
   let bakeryBatches = 0;
   let inputPurchases = 0;
-  for (let day = 0; day < 3; day += 1) {
+  // 面包房要等磨坊上一周期的计划产量，链路在第二个计划周期（约第 3 日）之后才开始运转。
+  for (let day = 0; day < 9; day += 1) {
     const outcome = simulation.advanceDay(state);
     const millRow = outcome.privateProduction.find(row => row.buildingId === mill.id);
     const bakeryRow = outcome.privateProduction.find(row => row.buildingId === bakery.id);

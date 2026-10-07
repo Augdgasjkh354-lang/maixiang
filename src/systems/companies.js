@@ -16,7 +16,7 @@ import { householdConvertibleWheatUnits, householdList, householdPopulation, isA
 import { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } from "../economy/operating-plan.js";
 
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
-import { buyWholesaleForOwner, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } from "./wholesale-market.js";
+import { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } from "./wholesale-market.js";
 
 function blankPeriod() {
   return {
@@ -657,17 +657,22 @@ export function processListedCompany(state, company, content) {
     const taxCost = output.units > 0 ? Math.floor(grossCost * taxUnits / output.units) : 0;
     const netCost = grossCost - taxCost;
     if (taxUnits > 0) {
-      state.accounts.town[output.itemId] = (state.accounts.town[output.itemId] || 0) + taxUnits;
-      addTownCostBasis(state, output.itemId, taxCost);
+      // 统购品税货直接入批发市场（成本随货带入）；没有批发市场时仍入镇库。
+      const intake = depositProductionTaxToWholesale(state, output.itemId, taxUnits, taxCost, content,
+        { source: "company:" + company.id, reason: `${company.name}按行业生产税以实物缴税` });
+      if (!intake.ok) {
+        state.accounts.town[output.itemId] = (state.accounts.town[output.itemId] || 0) + taxUnits;
+        addTownCostBasis(state, output.itemId, taxCost);
+        recordLedger(state, {
+          type: "enterprise_production_tax", transactionId: makeTransactionId(state),
+          source: "company:" + company.id, destination: "town", itemId: output.itemId,
+          quantityUnits: taxUnits, qeqUnits: 0,
+          reason: `${company.name}按行业生产税以实物缴税；不再重复扣粮券税`
+        }, content);
+      }
       addPeriodMap(company, "taxedUnits", output.itemId, taxUnits);
       addPeriodValue(company, "taxCostVoucherUnits", taxCost);
       applyProfit(company, -taxCost);
-      recordLedger(state, {
-        type: "enterprise_production_tax", transactionId: makeTransactionId(state),
-        source: "company:" + company.id, destination: "town", itemId: output.itemId,
-        quantityUnits: taxUnits, qeqUnits: 0,
-        reason: `${company.name}按行业生产税以实物缴税；不再重复扣粮券税`
-      }, content);
     }
     addInventory(company, output.itemId, netUnits, netCost);
     addPeriodMap(company, "producedUnits", output.itemId, output.units);

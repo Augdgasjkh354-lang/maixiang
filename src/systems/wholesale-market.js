@@ -371,6 +371,26 @@ export function depositWholesalePurchasedInventory(state, itemId, units, costVou
   return { ok: true, units: Math.floor(units) };
 }
 
+// 民营/公司实物生产税入市：统购品的税货不进镇库账，直接成为批发市场库存，成本基础随货带入市场。
+// 只搬货、不付钱（镇里内部，AGENTS.md 钱与货规则）。fromTown=true 表示税货已由原子交易记入镇库，这里从镇库扣回。
+// 无批发市场或非统购品时返回 ok:false，调用方保留原来的镇库入账。
+export function depositProductionTaxToWholesale(state, itemId, units, costVoucherUnits, content, { fromTown = false, source = "town", reason = "实物生产税入批发市场" } = {}) {
+  if (!hasWholesaleMarket(state) || !WHOLESALE_MONOPOLY_ITEM_IDS.includes(itemId)) return { ok: false, movedUnits: 0 };
+  const quantity = Math.floor(Number(units) || 0);
+  if (quantity <= 0) return { ok: false, movedUnits: 0 };
+  const market = ensureWholesaleMarket(state, content);
+  const cost = Math.max(0, Math.floor(Number(costVoucherUnits) || 0));
+  if (fromTown) state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) - quantity;
+  addInventory(market, itemId, quantity, cost);
+  addPeriodMap(market, "intakeUnits", itemId, quantity);
+  recordLedger(state, {
+    type: "wholesale_production_tax_intake", transactionId: makeTransactionId(state),
+    source, destination: "wholesale_market", itemId, quantityUnits: quantity, qeqUnits: 0,
+    reason: `${reason}（内部无偿，成本基础 ${cost} 随货转移）`
+  }, content);
+  return { ok: true, movedUnits: quantity, costVoucherUnits: cost };
+}
+
 export function runWholesaleIntake(state, productionRows, privateRows, content, options = {}) {
   const market = ensureWholesaleMarket(state, content);
   if (!hasWholesaleMarket(state)) return { active: false, intakeUnits: emptyItemMap(0) };

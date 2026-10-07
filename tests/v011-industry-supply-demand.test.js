@@ -61,7 +61,8 @@ test("0.1.1真实面包链：采购、生产、批发、零售分别记账且实
   assert.equal(simulation.configureShopClerks(state, opened.shopId, 1).ok, true);
   assert.equal(transferVouchers(state, "town", `shop:${opened.shopId}`, 1000 * V, CONTENT, "test_shop_capital", "补足测试进货资金").ok, true);
   assert.equal(simulation.configureWholesaleTownAllocation(state, "wheat", 1000).ok, true);
-  simulation.advanceDays(state, 10);
+  // 原料链分两个计划周期才通：面包坊先等上游上一周期的面粉计划产量，再排产、进货、零售。
+  simulation.advanceDays(state, 20);
   const shop = state.shops[opened.shopId];
   assert.ok((mill.accounts.cumulative.purchasedInputUnits.wheat || 0) > 0);
   assert.ok((bakery.accounts.cumulative.purchasedInputUnits.flour || 0) > 0);
@@ -83,6 +84,8 @@ test("0.1.1多家企业共享同一需求，过剩库存后按周期缩减计划
   addBuilding(state, "bakery", "011-bakery-a");
   addBuilding(state, "bakery", "011-bakery-b");
   fundTown(state, 100000);
+  // 面粉现货：无批发市场时看镇库存量。无原料的面包坊不排产，本测试只比较需求与积压减产。
+  state.accounts.town.flour = 100000 * I;
   const a = list(state, "011-bakery-a");
   const b = list(state, "011-bakery-b");
   refreshOperatingPlan(state, CONTENT, true);
