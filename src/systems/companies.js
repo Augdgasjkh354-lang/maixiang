@@ -1,5 +1,6 @@
 import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
 import { householdIdOf } from "../economy/accounts.js";
+import { putStock, sellCompanyGoods, takeStock } from "../economy/trade.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { recordFundDividend } from "./social-security.js";
 import { currencyScale, voucherBalance } from "../economy/currency.js";
@@ -91,23 +92,10 @@ function applyProfit(company, delta) {
 }
 
 function removeInventoryWithCost(company, itemId, quantityUnits) {
-  const available = company.inventory[itemId] || 0;
-  if (!Number.isSafeInteger(quantityUnits) || quantityUnits < 0 || quantityUnits > available) {
-    throw new RangeError("企业库存扣除超限：" + itemId);
-  }
-  const basis = company.inventoryCostVoucherUnits[itemId] || 0;
-  const cost = quantityUnits === available
-    ? basis
-    : (available === 0 ? 0 : Math.floor(basis * quantityUnits / available));
-  company.inventory[itemId] = available - quantityUnits;
-  company.inventoryCostVoucherUnits[itemId] = basis - cost;
-  return cost;
+  return takeStock(company, itemId, quantityUnits, { strict: true }).costUnits;
 }
 
-function addInventory(company, itemId, quantityUnits, costVoucherUnits = 0) {
-  company.inventory[itemId] = (company.inventory[itemId] || 0) + quantityUnits;
-  company.inventoryCostVoucherUnits[itemId] = (company.inventoryCostVoucherUnits[itemId] || 0) + costVoucherUnits;
-}
+const addInventory = putStock;
 
 function marketUnitPrice(state, itemId, content) {
   return currentUnitPrice(state, itemId, content);
@@ -707,26 +695,10 @@ export function processListedCompanies(state, content) {
 export function sellCompanyProduct(state, companyId, buyer, itemId, quantityUnits, unitPrice, content, reason) {
   const company = state.companies?.[companyId];
   if (!company || quantityUnits <= 0) return { ok: false, reason: "企业或数量无效" };
-  const available = company.inventory[itemId] || 0;
-  const units = Math.min(available, quantityUnits);
-  if (units <= 0) return { ok: false, reason: "企业库存不足" };
-  const price = Number(unitPrice);
-  const costUnits = voucherCost(units, price, content);
-  const buyerHouseholdId = householdIdOf(buyer);
-  const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
-  const maxWheatUnits = buyerHousehold
-    ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30)
-    : undefined;
-  const payment = settleMonetaryPayment(state, buyer, "company:" + companyId, currentPaymentComposition(state, costUnits), content,
-    "enterprise_sale", reason || `${company.name}销售${content.items[itemId]?.name || itemId}`,
-    { requireFull: true, ...(maxWheatUnits === undefined ? {} : { maxWheatUnits }) });
-  if (!payment.ok) return payment;
-  const cogs = removeInventoryWithCost(company, itemId, units);
-  addPeriodValue(company, "revenueVoucherUnits", costUnits);
-  addPeriodValue(company, "cogsVoucherUnits", cogs);
-  addPeriodMap(company, "soldUnits", itemId, units);
-  applyProfit(company, costUnits - cogs);
-  return { ok: true, quantityUnits: units, revenueVoucherUnits: costUnits, cogsVoucherUnits: cogs, transactionId: payment.transactionId };
+  // 家庭买方要留够口粮储备。
+  const buyerHousehold = state.households?.byId?.[householdIdOf(buyer)];
+  const options = buyerHousehold ? { maxWheatUnits: householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30) } : {};
+  return sellCompanyGoods(state, company, buyer, itemId, quantityUnits, unitPrice, content, reason, options);
 }
 
 

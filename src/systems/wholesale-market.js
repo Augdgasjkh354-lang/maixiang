@@ -17,6 +17,7 @@ import { householdIdOf } from "../economy/accounts.js";
 
 import { currencyScale, ensureCurrencyState } from "../economy/currency.js";
 import { bookAdd, bookAddMap } from "../economy/books.js";
+import { buyDirect, directSellers, putStock, takeStock } from "../economy/trade.js";
 import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
 import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/business.js";
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
@@ -240,20 +241,11 @@ export function setWholesaleTownAllocation(state, itemId, quantity, content) {
 
 // ---------------------------------------------------------------- 库存与资金
 
-function addInventory(market, itemId, units, costUnits) {
-  market.inventory[itemId] = (market.inventory[itemId] || 0) + units;
-  market.inventoryCostVoucherUnits[itemId] = (market.inventoryCostVoucherUnits[itemId] || 0) + Math.max(0, Math.floor(costUnits || 0));
-}
+const addInventory = putStock;
 
 function removeInventory(market, itemId, units) {
-  const available = market.inventory[itemId] || 0;
-  const quantity = Math.min(Math.max(0, Math.floor(units)), available);
-  if (quantity <= 0) return { units: 0, costVoucherUnits: 0 };
-  const basis = market.inventoryCostVoucherUnits[itemId] || 0;
-  const cost = quantity === available ? basis : Math.floor(basis * quantity / available);
-  market.inventory[itemId] -= quantity;
-  market.inventoryCostVoucherUnits[itemId] = Math.max(0, basis - cost);
-  return { units: quantity, costVoucherUnits: cost };
+  const taken = takeStock(market, itemId, units);
+  return { units: taken.units, costVoucherUnits: taken.costUnits };
 }
 
 // 对外出口从批发市场取货（外镇贸易用）：返回实际取出单位数
@@ -472,72 +464,13 @@ export function procureTownInputFromWholesale(state, itemId, requestedUnits, con
 // 无批发市场时，公司/民营/住户可直接从镇库按镇库价采购（0.1.10 契约）。
 // 库存与成本同步移除（removeTownInventoryWithCost），货款进入镇库。
 function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, content, reason) {
-  // 多卖家聚合：镇库优先，不足时继续从其他住户（民营业主）购买，sellerRows 记录来源顺序。
+  // 镇库优先，不足时依次向其他家庭买；小麦给卖方家庭留够口粮。
   const price = currentUnitPrice(state, itemId, content);
   if (!(price > 0)) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "镇库价未定", sellerRows: [] };
-  const sellerRows = [];
-  let totalBought = 0;
-  let totalPaid = 0;
-  const wanted = Math.max(0, Math.floor(requestedUnits));
-
-  // 1) 镇库优先
-  const townAvailable = Math.max(0, state.accounts?.town?.[itemId] || 0);
-  if (townAvailable > 0 && totalBought < wanted) {
-    const maxPayable = maximumPayableValueUnits(state, buyerOwner, content);
-    const maxUnitsByCash = Math.floor(maxPayable * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
-    let units = Math.min(townAvailable, wanted - totalBought, Math.max(0, maxUnitsByCash));
-    if (units > 0) {
-      const value = Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content));
-      const payment = settleMonetaryPayment(state, buyerOwner, "town", currentPaymentComposition(state, value), content,
-        "town_direct_sale", reason || `从镇库直购${content.items[itemId]?.name || itemId}`, { requireFull: true });
-      if (payment.ok) {
-        const quote = removeTownInventoryWithCost(state, itemId, units, content);
-        totalBought += quote.quantityUnits;
-        totalPaid += value;
-        sellerRows.push({ seller: "town", units: quote.quantityUnits, paidVoucherUnits: value });
-        recordLedger(state, { type: "town_direct_sale", buyer: buyerOwner, itemId, quantityUnits: quote.quantityUnits,
-          qeqUnits: quote.quantityUnits * content.precision.qeqUnitsPerJin / content.precision.inventoryUnitsPerJin,
-          paidVoucherUnits: value, reason: "无批发市场，镇库直售" }, content);
-      }
-    }
-  }
-
-  // 2) 镇库不足时，从其他住户购买（不含买方自己；小麦保留对方口粮储备）
-  if (totalBought < wanted) {
-    const buyerHouseholdId = householdIdOf(buyerOwner);
-    const isStaple = !!content.items[itemId]?.edible;
-    for (const household of Object.values(state.households?.byId || {})) {
-      if (totalBought >= wanted) break;
-      if (!household || household.id === buyerHouseholdId) continue;
-      const stock = Math.max(0, household.inventory?.[itemId] || 0);
-      if (stock <= 0) continue;
-      let sellable = stock;
-      if (itemId === "wheat") {
-        // 小麦是主粮：保留对方口粮储备（30 天口粮），不买空人家的口粮。
-        // 面粉等加工品是贸易品，不保留。
-        const reserveDays = content.rules.householdFoodReserveDays ?? 30;
-        const dailyNeed = (household.population || 1) * (content.rules.foodPerPersonDay || 2) * content.precision.inventoryUnitsPerJin;
-        const reserve = dailyNeed * reserveDays;
-        sellable = Math.max(0, stock - reserve);
-      }
-      if (sellable <= 0) continue;
-      const maxPayable = maximumPayableValueUnits(state, buyerOwner, content);
-      const maxUnitsByCash = Math.floor(maxPayable * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
-      let units = Math.min(sellable, wanted - totalBought, Math.max(0, maxUnitsByCash));
-      if (units <= 0) continue;
-      const value = Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content));
-      const payment = settleMonetaryPayment(state, buyerOwner, `household:${household.id}`, currentPaymentComposition(state, value), content,
-        "household_direct_sale", reason || `从${household.name}直购${content.items[itemId]?.name || itemId}`, { requireFull: true });
-      if (!payment.ok) continue;
-      household.inventory[itemId] = stock - units;
-      totalBought += units;
-      totalPaid += value;
-      sellerRows.push({ seller: `household:${household.id}`, units, paidVoucherUnits: value });
-    }
-  }
-
-  if (totalBought <= 0) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "镇库与民营业主均缺货（建成批发市场后可从市场采购）", sellerRows };
-  return { ok: true, boughtUnits: totalBought, paidVoucherUnits: totalPaid, unitPrice: price, fromTown: sellerRows.length > 0 && sellerRows[0].seller === "town", sellerRows };
+  const sellers = directSellers(state, itemId, content, { town: true, households: true, excludeBuyer: buyerOwner, keepFoodReserve: true });
+  const result = buyDirect(state, buyerOwner, itemId, Math.max(0, Math.floor(requestedUnits)), content, { price, sellers, reason });
+  if (!result.ok) return { ...result, reason: "镇库与民营业主均缺货（建成批发市场后可从市场采购）" };
+  return { ...result, fromTown: result.sellerRows[0]?.seller === "town" };
 }
 
 // ---------------------------------------------------------------- 销售（做市商卖出）
