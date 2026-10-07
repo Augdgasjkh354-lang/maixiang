@@ -1,3 +1,4 @@
+// 存档结构版本：只在彻底不兼容时才加一。日常加字段不用改（读档会自动补默认值，见 persistence/save-compat.js）。
 export const SAVE_VERSION = 17;
 
 export const RULES = Object.freeze({

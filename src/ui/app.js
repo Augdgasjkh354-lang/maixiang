@@ -1,4 +1,5 @@
 import { simulation } from "../engine.js";
+import { loadReportMessage } from "../persistence/migrations.js";
 import { exportState } from "../persistence/storage.js";
 import { classifyPersistenceError } from "../persistence/save-container.js";
 import { createIndexedSaveManager, SAVE_DB_NAME } from "../persistence/indexed-save-manager.js";
@@ -555,6 +556,8 @@ export function mountGame(root) {
 
   function adoptSave(entry) {
     state = entry.state;
+    const loadMessage = loadReportMessage(state);
+    if (loadMessage) setTimeout(() => showToast(loadMessage, 6000), 0);
     resetAutosaveClock();
     dashboardViews.clear();
     activeId = entry.id;
@@ -753,7 +756,7 @@ export function mountGame(root) {
       if (!state) {
         try {
           const loaded = saves.initialize();
-          state = loaded.state; activeId = loaded.activeId; saveWarning = loaded.warning;
+          state = loaded.state; activeId = loaded.activeId; saveWarning = loadReportMessage(loaded.state) || loaded.warning;
           resetAutosaveClock();
           if (state && activeId) {
             const entry = saves.read(activeId);
@@ -1830,7 +1833,7 @@ export function mountGame(root) {
       saveSession += 1;
       stateRevision = 0;
       autosave.clearFailure();
-      saveWarning = loaded.warning;
+      saveWarning = loadReportMessage(loaded.state) || loaded.warning;
       const current = loaded.slots.find(slot => slot.current);
       saveNotice = current?.savedAt ? `最近保存：${new Date(current.savedAt).toLocaleString("zh-CN", { hour12: false })} · 成功` : "尚未保存";
       startupError = null;

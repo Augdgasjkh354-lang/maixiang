@@ -61,7 +61,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 
 ## 铁律
 
-1. **不做旧档兼容**：只读当前 `SAVE_VERSION`（现为 17）的存档，旧版本直接拒绝、提示开新游戏。新字段在 `createInitialState` 给默认值、运行时用 `||=` 兜底；不兼容的结构改动就把 `SAVE_VERSION` 加一，不写迁移代码。
+1. **存档一直能读**：读档时用新开局状态当底板，把存档盖上去（`persistence/save-compat.js`）——新增字段、新系统、新商品不用写任何迁移代码，也不用改 `SAVE_VERSION`（固定 17）。字段**改名或搬家**时必须在 `RENAMES` 里加一行 `{ from, to }`；含义变了（单位、口径）要在那里写换算。按实体 id 存的表（如 `households.byId`）要登记进 `ENTITY_MAPS`，否则旧档会被底板"补出"不存在的实体。能重算的派生数据尽量不进存档。坏数据读档时自动修复，修不了的子系统重置并提示玩家
 2. **测试全绿**：`node --test` 零失败，新功能和修 bug 都要加测试。设计变了，验证旧行为的测试直接删掉，不必改写。
 3. **selector 只读**：`src/selectors/` 和 `selectDashboard` 里绝不写 state。
 4. **状态合法**：`validateState` 必须通过，禁止 NaN / Infinity / 负钱负粮。
