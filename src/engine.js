@@ -16,8 +16,8 @@ import {
   configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice,
   configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares,
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
-  setEmploymentExchangeQuota, setShopRent, setShopProfitTax, setWholesaleDailyWheat, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
-  configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, fundWholesaleMarket, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
+  setEmploymentExchangeQuota, setShopRent, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
+  configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
   startCurrencyReform, configureVoucherPaymentTarget, configureResidentExchange, finishCurrencyReform,
   reclaimFarmland
 } from "./core/commands.js";
@@ -156,16 +156,14 @@ export function createSimulation(content) {
     finishCurrencyReform: function (state) { return finishCurrencyReform(state, definitions); },
     setShopRent: function (state, value) { return setShopRent(state, value); },
     setShopProfitTax: function (state, value) { return setShopProfitTax(state, value, definitions); },
-    setWholesaleDailyWheat: function (state, value) { return setWholesaleDailyWheat(state, value); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
     configureShopMerchants: function (state, shopId, count) { return configureShopMerchants(state, shopId, count, definitions); },
     configureShopClerks: function (state, shopId, count) { return configureShopClerks(state, shopId, count, definitions); },
     closeResidentShop: function (state, shopId) { return closeResidentShop(state, shopId, definitions); },
     fundResidentShopLiquidation: function (state, shopId) { return fundResidentShopLiquidation(state, shopId, definitions); },
     configureWholesalePrice: function (state, itemId, value) { return configureWholesalePrice(state, itemId, value, definitions); },
-    // 0.2.3 流通改革：做市商收购价 / 镇库注资 / 综合商店目标利润率。
+    // 0.2.3 流通改革：做市商收购价 / 综合商店目标利润率。
     configureWholesalePurchasePrice: function (state, itemId, value) { return configureWholesalePurchasePrice(state, itemId, value, definitions); },
-    fundWholesaleMarket: function (state, amountJin) { return fundWholesaleMarket(state, amountJin, definitions); },
     configureShopTargetMargin: function (state, shopId, percent) { return configureShopTargetMargin(state, shopId, percent, definitions); },
     configureAllShopsTargetMargin: function (state, percent) { return configureAllShopsTargetMargin(state, percent, definitions); },
     configureShopRetailPrice: function (state, shopId, itemId, value) { return configureShopRetailPrice(state, shopId, itemId, value, definitions); },

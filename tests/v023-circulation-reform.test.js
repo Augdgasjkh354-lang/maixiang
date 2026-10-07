@@ -7,7 +7,7 @@ import { initializeBuildingJobs } from "../src/systems/employment.js";
 import { householdList, householdIdleWorkers, setJobCount, syncResidentAggregates } from "../src/systems/households.js";
 import { processBuilding } from "../src/systems/production.js";
 import { runWholesaleIntake, setWholesaleTownAllocation, transferTownToWholesale, buyWholesaleForOwner,
-  wholesalePurchasePrice, wholesaleUnitPrice, ensureWholesaleMarket, hasWholesaleMarket } from "../src/systems/wholesale-market.js";
+  wholesalePurchasePrice, wholesaleUnitPrice, ensureWholesaleMarket, hasWholesaleMarket, mergeWholesaleCashIntoTown } from "../src/systems/wholesale-market.js";
 import { payDailyWages } from "../src/systems/payroll.js";
 import { employmentSnapshot } from "../src/systems/employment.js";
 import { shopTradePrices } from "../src/economy/operating-plan.js";
@@ -89,21 +89,22 @@ test("0.2.3 公司/民营从批发市场采购原料并支付粮券（统一入�
   const owner = householdList(state).find(h => householdIdleWorkers(h) > 0);
   assert.equal(grantResidentVouchers(state, 5000, CONTENT, owner.id).ok, true);
   const cashBefore = voucherBalance(state, `household:${owner.id}`);
+  const townBefore = voucherBalance(state, "town");
   const stockBefore = market.inventory.flour;
   // 公司/民营采购原料走统一入口 buyWholesaleForOwner（companies/private-industry 都调它）
   const result = buyWholesaleForOwner(state, `household:${owner.id}`, "flour", 100 * I, CONTENT, "测试采购");
   assert.equal(result.ok, true, result.reason);
   assert.equal(result.boughtUnits, 100 * I);
   assert.equal(market.inventory.flour, stockBefore - 100 * I);
-  // 货款进入批发市场现金账户，而不是镇库
-  assert.equal(voucherBalance(state, "wholesale"), result.paidVoucherUnits);
+  // 批发市场没有独立现金，货款直接进入镇库
+  assert.equal(voucherBalance(state, "town"), townBefore + result.paidVoucherUnits);
   assert.equal(voucherBalance(state, `household:${owner.id}`), cashBefore - result.paidVoucherUnits);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
 // ---------------------------------------------------------------- 需求 2：统购统销
 
-test("0.2.3 统购统销：镇营产成品无偿调拨入市，销售利润留在批发市场", () => {
+test("0.2.3 统购统销：镇营产成品无偿调拨入市", () => {
   const state = legacyVoucherState({ seed: 2305 });
   const market = addBuilding(state, "wholesale_market", "wm-5");
   void market;
@@ -113,32 +114,26 @@ test("0.2.3 统购统销：镇营产成品无偿调拨入市，销售利润留�
   const produced = processBuilding(state, lumberyard, CONTENT);
   assert.ok(produced.batches > 0, "伐木场应能生产");
   const before = state.wholesaleMarket.inventory.wood;
+  const townCashBefore = voucherBalance(state, "town");
   const intake = runWholesaleIntake(state, [produced], [], CONTENT, { includeTownAllocation: false });
   assert.ok(intake.intakeUnits.wood > 0, "镇营木材应无偿调拨入市");
   assert.equal(state.wholesaleMarket.inventory.wood, before + intake.intakeUnits.wood);
-  // 无偿：镇库没有因此收到任何粮券
-  assert.equal(voucherBalance(state, "wholesale"), 0, "无偿调拨不应产生市场现金支出");
+  // 无偿：镇库现金不因调拨变化
+  assert.equal(voucherBalance(state, "town"), townCashBefore, "无偿调拨不应产生现金往来");
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
-test("0.2.3 统购统销：批发市场统一发放镇营建筑工资，镇库不再承担", () => {
+test("0.2.3 镇营建筑工资由镇库发放（批发市场没有独立现金）", () => {
   const state = legacyVoucherState({ seed: 2306 });
   addBuilding(state, "wholesale_market", "wm-6");
   const mill = addBuilding(state, "mill", "mill-6");
   const role = CONTENT.buildings.mill.jobs[0];
   assert.equal(setJobCount(state, `${mill.id}::${role.id}`, 2, CONTENT, { type: "town", id: mill.id }).assigned, 2);
-  // 先给镇库印券，再给批发市场注入启动资金
   assert.equal(simulation.issueGrainVouchers(state, "town", 1000).ok, true);
-  assert.equal(simulation.fundWholesaleMarket(state, 500).ok, true);
-  const marketCashBefore = voucherBalance(state, "wholesale");
   const townCashBefore = voucherBalance(state, "town");
-  const snapshot = employmentSnapshot(state, CONTENT);
-  const wages = payDailyWages(state, snapshot, CONTENT);
-  void wages;
-  // 市场现金减少（发了工资），镇库现金不变（工资主体已变更）
-  assert.ok(voucherBalance(state, "wholesale") < marketCashBefore, "批发市场现金应因发工资减少");
-  assert.equal(voucherBalance(state, "town"), townCashBefore, "镇库不应再为镇营建筑工资出券");
-  assert.ok((state.wholesaleMarket.monopolyWages.day || 0) > 0, "应记录市场发放的工资额");
+  payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
+  assert.ok(voucherBalance(state, "town") < townCashBefore, "镇库应为镇营建筑发工资");
+  assert.equal(state.wholesaleMarket.cashVoucherUnits, undefined);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
   assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
 });
@@ -149,15 +144,12 @@ test("0.2.3 统购统销：镇营原料（磨坊小麦、面包房面粉）内�
   const mill = addBuilding(state, "mill", "mill-7");
   const role = CONTENT.buildings.mill.jobs[0];
   assert.equal(setJobCount(state, `${mill.id}::${role.id}`, 1, CONTENT, { type: "town", id: mill.id }).assigned, 1);
-  // 未经批发市场，镇营小麦不能直接生产（既有契约）
-  const blocked = processBuilding(state, mill, CONTENT);
-  assert.equal(blocked.batches, 0, "镇库库存不得绕过批发市场");
-  // 投放小麦进市场后即可生产
-  assert.equal(setWholesaleTownAllocation(state, "wheat", 1000, CONTENT).ok, true);
-  const intake = runWholesaleIntake(state, [], [], CONTENT, { includeTownAllocation: true });
-  assert.ok(intake.intakeUnits.wheat > 0);
+  // 小麦由镇库直管，磨坊直接用镇库小麦，无需先投放市场
+  assert.ok((state.accounts.town.wheat || 0) > 0);
+  const wheatBefore = state.accounts.town.wheat;
   const produced = processBuilding(state, mill, CONTENT);
-  assert.ok(produced.batches > 0, "小麦到位后磨坊应能生产");
+  assert.ok(produced.batches > 0, "磨坊应能直接用镇库小麦生产");
+  assert.ok(state.accounts.town.wheat < wheatBefore);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
@@ -299,24 +291,26 @@ test("0.2.3 动态加价不影响其他小店（保持固定加价）", () => {
 
 // ---------------------------------------------------------------- 守恒与存档
 
-test("0.2.3 批发市场现金账户纳入粮券守恒，注资不凭空造券", () => {
+test("旧档批发市场现金并回镇库：粮券守恒，旧欠薪缺券键改名", () => {
   const state = legacyVoucherState({ seed: 2315 });
   addBuilding(state, "wholesale_market", "wm-15");
-  const issuedBefore = state.currency.issuedUnits;
-  const totalBefore = totalVoucherBalances(state);
-  const townBefore = voucherBalance(state, "town");
-  // 镇库先印券（注资是账户间转移，不是增发）
   assert.equal(simulation.issueGrainVouchers(state, "town", 1000).ok, true);
-  const issuedAfterMint = state.currency.issuedUnits;
-  const totalAfterMint = totalVoucherBalances(state);
-  const funded = simulation.fundWholesaleMarket(state, 500);
-  assert.equal(funded.ok, true, funded.reason);
-  assert.equal(voucherBalance(state, "wholesale"), 500 * V);
-  assert.equal(voucherBalance(state, "town"), townBefore + 1000 * V - 500 * V, "注资是账户间转移");
-  assert.equal(state.currency.issuedUnits, issuedAfterMint, "注资不增发粮券");
-  assert.equal(totalVoucherBalances(state), totalAfterMint, "注资前后粮券总量不变");
-  assert.ok(totalAfterMint > totalBefore);
-  void issuedBefore;
+  // 构造旧档：从镇库挪 500 券、200 斤小麦到市场现金，并留一条旧付款方命名的缺券记录
+  const townVouchers = voucherBalance(state, "town");
+  const townWheat = state.accounts.town.wheat;
+  state.currency.balances.town = townVouchers - 500 * V;
+  state.wholesaleMarket.cashVoucherUnits = 500 * V;
+  state.accounts.town.wheat = townWheat - 200 * I;
+  state.wholesaleMarket.cashWheatUnits = 200 * I;
+  state.monetaryReform.voucherShortfallByKey ||= {};
+  state.monetaryReform.voucherShortfallByKey["wholesale-wage:mill-x::millers:household-1"] = 7;
+  mergeWholesaleCashIntoTown(state);
+  assert.equal(voucherBalance(state, "town"), townVouchers);
+  assert.equal(state.accounts.town.wheat, townWheat);
+  assert.equal(state.wholesaleMarket.cashVoucherUnits, undefined);
+  assert.equal(state.wholesaleMarket.cashWheatUnits, undefined);
+  assert.equal(state.monetaryReform.voucherShortfallByKey["wholesale-wage:mill-x::millers:household-1"], undefined);
+  assert.equal(state.monetaryReform.voucherShortfallByKey["town-wage:mill-x::millers:household-1"], 7);
   assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
 });
 
@@ -324,15 +318,12 @@ test("0.2.3 存档兼容：新字段一律 ||= 初始化，SAVE_VERSION 保持 v
   assert.equal(SAVE_VERSION, 15, "SAVE_VERSION 必须保持 v15");
   const state = legacyVoucherState({ seed: 2316 });
   // 模拟旧档：删掉所有 0.2.3 新字段
-  delete state.wholesaleMarket.cashVoucherUnits;
   delete state.wholesaleMarket.purchasePricesVoucherPerUnit;
   delete state.wholesaleMarket.monopoly;
-  delete state.wholesaleMarket.monopolyWages;
   for (const shop of Object.values(state.shops)) delete shop.pricing;
   ensureWholesaleMarket(state, CONTENT);
-  assert.equal(state.wholesaleMarket.cashVoucherUnits, 0);
   assert.equal(state.wholesaleMarket.purchasePricesVoucherPerUnit.flour, 1.4);
-  assert.ok(state.wholesaleMarket.monopoly && state.wholesaleMarket.monopolyWages);
+  assert.ok(state.wholesaleMarket.monopoly);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
@@ -349,7 +340,6 @@ test("0.2.3 流通改革端到端：建市场+商店跑30天，状态与粮券�
   assert.equal(simulation.openResidentShop(state, street.id, "general", owner.id).ok, true);
   assert.equal(setJobCount(state, `${mill.id}::${CONTENT.buildings.mill.jobs[0].id}`, 2, CONTENT, { type: "town", id: mill.id }).assigned, 2);
   assert.equal(simulation.issueGrainVouchers(state, "town", 3000).ok, true);
-  assert.equal(simulation.fundWholesaleMarket(state, 2000).ok, true);
   simulation.advanceDays(state, 30);
   const check = simulation.validateState(state);
   assert.equal(check.valid, true, check.errors.join("；"));

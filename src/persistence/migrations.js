@@ -6,7 +6,7 @@ import { emptyFinancialFlowPeriod } from "../economy/financial-flows.js";
 import { addTownCostBasis } from "../economy/business.js";
 import { syncShopEmployment } from "../systems/shops.js";
 import { summarizeLegacyAnnualReports } from "../systems/annual-reports.js";
-import { ensureWholesaleMarket } from "../systems/wholesale-market.js";
+import { ensureWholesaleMarket, mergeWholesaleCashIntoTown } from "../systems/wholesale-market.js";
 import { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } from "../systems/households.js";
 import {
   defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor
@@ -702,6 +702,7 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
   state.payroll.arrearsWheatUnits = state.payroll.arrearsVoucherUnits;
 
   // 0.2.3 做市商：旧档若已有批发市场挂价则沿用（玩家可能已调过），缺项补做市商默认价。
+  mergeWholesaleCashIntoTown(state);
   ensureWholesaleMarket(state, definitions);
   state.services ||= {};
   state.services.demandByHousehold ||= {};

@@ -71,13 +71,6 @@
     },
     {
       "year": 2,
-      "action": "fundWholesaleMarket",
-      "args": {
-        "amountJin": 20000
-      }
-    },
-    {
-      "year": 2,
       "action": "grantResidentVouchers",
       "args": {
         "amountVoucher": 200000

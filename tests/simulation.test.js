@@ -237,12 +237,8 @@ test("processing is atomic; wages settle separately even when materials are shor
   assert.equal(simulation.issueGrainVouchers(state, "town", 5000).ok, true);
   addInventory(state, "town", "wood", 600, "test stock", "test", CONTENT);
   const start = simulation.buildAt(state, "mill", "east");
-  // 本测试测生产原子性，关闭每日小麦补贴以隔离变量
-  state.policy ||= {};
-  state.policy.wholesaleDailyWheatJin = 0;
   simulation.advanceDays(state, 40);
-  // 基线清理：0.2.3 起「镇营生产原料必须经过批发市场」，镇库余粮不能直接投产。
-  // 批发市场建筑是镇营调拨原料的前提（hasWholesaleMarket），所以先建成它。
+  // 镇营产出进入批发市场，故先建成它。
   // 批发市场占地与磨坊同为空地，故必须在磨坊落成后再建。
   const wholesalePlot = state.plots.find(row => !row.feature &&
     !state.buildings.some(building => building.plotId === row.id));
@@ -258,14 +254,8 @@ test("processing is atomic; wages settle separately even when materials are shor
   const scale = CONTENT.precision.inventoryUnitsPerJin;
   changeInventory(state, "town", "wheat", 30 * scale - state.accounts.town.wheat,
     "test stock balance", "test_adjustment", CONTENT);
-  // 调拨前 30 斤小麦仍在镇库、市场无麦：磨坊拿不到料，状态必须是缺料而不是可开工。
-  assert.equal(productionStatus(state, state.buildings[0], CONTENT).status, "no_materials");
-  // 把 30 斤小麦调拨进批发市场（镇库→市场内部搬运），此时 30 斤只够 1 批（每批 20 斤），
-  // 而 1 名磨坊工满产 4 批 —— 这正是 "limited_materials" 要覆盖的产能不满场景。
+  // 镇库 30 斤小麦只够 1 批（每批 20 斤），而 1 名磨坊工满产 4 批 —— 产能不满。
   const market = state.wholesaleMarket;
-  const movedUnits = 30 * scale;
-  changeInventory(state, "town", "wheat", -movedUnits, "调拨至批发市场", "test_adjustment", CONTENT);
-  market.cashWheatUnits = (market.cashWheatUnits || 0) + movedUnits;
   assert.equal(productionStatus(state, state.buildings[0], CONTENT).status, "limited_materials");
   const beforeStocks = {
     wheat: state.accounts.town.wheat,
@@ -277,7 +267,7 @@ test("processing is atomic; wages settle separately even when materials are shor
   // 0.2.3：镇营产成品当日无偿调拨进批发市场（统购统销），不再留在镇库。
   assert.equal((market.inventory.flour || 0) / scale, 16);
   assert.equal(state.accounts.town.flour / scale, 0);
-  // 磨坊只领用当日所需（1 批 20 斤），投放进市场后未被领用的 10 斤仍归镇库直管。
+  // 磨坊只用当日所需（1 批 20 斤），余下 10 斤留在镇库。
   assert.equal(state.accounts.town.wheat / scale, 10);
   assert.equal(market.inventory.wheat / scale, 0);
   assert.equal(state.accounts.residents.flour / scale, 0);

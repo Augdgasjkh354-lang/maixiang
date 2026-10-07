@@ -73,7 +73,7 @@ test("综合商店50店员、2000客流上限，店员未满30日不能解雇", 
   assert.equal(simulation.selectDashboard(state, { panel: "site" }).shops.find(row => row.id === shop.id).maxClerks, 50);
 });
 
-test("镇营生产原料必须经过批发市场；固定调拨后才可生产", () => {
+test("镇营磨坊直接用镇库小麦生产，产出进入批发市场", () => {
   const state = legacyVoucherState({ seed: 110803 });
   addBuilding(state, "wholesale_market", "r08-wholesale");
   const mill = addBuilding(state, "mill", "r08-mill");
@@ -81,12 +81,7 @@ test("镇营生产原料必须经过批发市场；固定调拨后才可生产",
   assert.equal(setJobCount(state, `${mill.id}::${role.id}`, 1, CONTENT, { type: "town", id: mill.id }).assigned, 1);
   const beforeTownWheat = state.accounts.town.wheat;
   assert.ok(beforeTownWheat > 0);
-  const blocked = processBuilding(state, mill, CONTENT);
-  assert.equal(blocked.batches, 0, "town stock must not bypass wholesale market");
-
-  assert.equal(setWholesaleTownAllocation(state, "wheat", 1000, CONTENT).ok, true);
-  const intake = runWholesaleIntake(state, [], [], CONTENT, { includeTownAllocation: true });
-  assert.ok(intake.intakeUnits.wheat > 0);
+  // 小麦由镇库直管，无需先投放批发市场
   const produced = processBuilding(state, mill, CONTENT);
   assert.ok(produced.batches > 0);
   const outputIntake = runWholesaleIntake(state, [produced], [], CONTENT, { includeTownAllocation: false });
@@ -140,7 +135,6 @@ test("民营、公司与综合商店的原料采购统一经过批发市场", ()
   addBuilding(state, "wholesale_market", "r08-chain-wholesale");
   assert.equal(simulation.issueGrainVouchers(state, "town", 100000).ok, true);
   state.accounts.town.wheat += 5000 * I;
-  assert.ok(transferTownToWholesale(state, "wheat", 3000 * I, CONTENT).movedUnits > 0);
 
   const privateOwner = fundedOwner(state, 20000);
   privateOwner.inventory.wheat = 0;

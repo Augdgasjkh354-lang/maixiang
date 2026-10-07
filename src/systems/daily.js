@@ -34,7 +34,7 @@ import { settleStockMarketDay, settleHouseholdStockBuying } from "./stock-exchan
 import { settleLiquidityDay } from "./liquidity.js";
 import { maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
-import { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, ensureWholesaleWheatForTown, townMillWheatDemandUnits, snapshotWholesaleHistory, subsidizeWholesaleWheat } from "./wholesale-market.js";
+import { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
 import { settleNeighborAid, resetNeighborAidYear } from "./neighbor-aid.js";
 
@@ -101,10 +101,6 @@ export function settleOneDay(state, content) {
   const construction = advanceConstruction(state, content);
   // 固定调拨先执行，镇营生产者也必须从批发市场取得当日原料。
   const wholesaleTownAllocation = runWholesaleIntake(state, [], [], content, { includeTownAllocation: true });
-  // 统购统销保障原料：镇库小麦自动投放市场，供磨坊领用（小麦产权仍归镇库）。
-  const wholesaleWheatPreroll = ensureWholesaleWheatForTown(state, content, townMillWheatDemandUnits(state, content));
-  // 每日小麦补贴：前期市场不盈利，镇库默认每天给市场1000斤运营资金（政策可调）。
-  const wholesaleWheatSubsidy = subsidizeWholesaleWheat(state, content);
   const production = processAllBuildings(state, content);
   // 当日镇营产成品立即回到批发市场，供后续民营、公司与商铺采购。
   const wholesaleTownOutput = runWholesaleIntake(state, production, [], content, { includeTownAllocation: false });
@@ -112,7 +108,7 @@ export function settleOneDay(state, content) {
   const wholesalePrivateIntake = runWholesaleIntake(state, [], privateProduction, content, { includeTownAllocation: false });
   const companyProduction = processListedCompanies(state, content);
   const wholesaleCompanyIntake = sellCompanyOutputsToWholesale(state, content);
-  const wholesaleIntake = { allocation: wholesaleTownAllocation, wheatPreroll: wholesaleWheatPreroll, town: wholesaleTownOutput, private: wholesalePrivateIntake, company: wholesaleCompanyIntake };
+  const wholesaleIntake = { allocation: wholesaleTownAllocation, town: wholesaleTownOutput, private: wholesalePrivateIntake, company: wholesaleCompanyIntake };
   // 6. Shops accrue wages/rent and restock after producers finish.
   const shopPreparation = prepareShopsForDay(state, content);
   // 7. Rent uses the opening occupancy snapshot, so housing completed today earns rent tomorrow.

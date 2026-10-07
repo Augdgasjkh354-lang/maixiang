@@ -35,7 +35,6 @@ export function renderPolicy(view) {
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
       <div class="row"><span class="label">营业店铺日租</span><div class="setting-input">${renderNumericInput(view, { key: "shop-rent", kind: "shop-rent", target: "shops", value: view.policy.shopRentVoucher ?? 1, label: "每间营业店铺每日租金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       <div class="row"><span class="label">商业利润税</span><div class="setting-input">${renderNumericInput(view, { key: "shop-tax", kind: "shop-profit-tax", target: "shops", value: view.policy.shopProfitTaxPercent ?? 10, label: "商业利润税", minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">批发市场每日小麦补贴</span><div class="setting-input">${renderNumericInput(view, { key: "wholesale-wheat", kind: "wholesale-daily-wheat", target: "wholesale", value: view.policy.wholesaleDailyWheatJin ?? 1000, label: "批发市场每日小麦补贴", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>斤</b></div></div>
       
       <div class="row"><span class="label">今日住宅实收租金</span><strong class="value">${number(view.housing.lastRentDay?.collectedVoucher || 0,1)}${moneyUnit}</strong></div>
       <div class="row"><span class="label">最近店铺利润税</span><strong class="value">${number(shopTax,1)}${moneyUnit}</strong></div>

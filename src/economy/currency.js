@@ -47,8 +47,6 @@ export function voucherBalance(state, owner) {
   if (owner?.startsWith("household:")) return state.households?.byId?.[owner.slice(10)]?.voucherUnits || 0;
   if (owner?.startsWith("company:")) return state.companies?.[owner.slice(8)]?.cashVoucherUnits || 0;
   if (owner?.startsWith("shop:")) return state.shops?.[owner.slice(5)]?.cashVoucherUnits || 0;
-  // 0.2.3 流通改革：批发市场成为独立做市商，自持粮券现金账户（统购统销的清算主体）。
-  if (owner === "wholesale") return state.wholesaleMarket?.cashVoucherUnits || 0;
   throw new Error("未知粮券账户：" + owner);
 }
 
@@ -78,10 +76,6 @@ function setVoucherBalance(state, owner, value, content = null) {
     if (!shop) throw new Error("店铺不存在：" + owner.slice(5));
     shop.cashVoucherUnits = value; return;
   }
-  if (owner === "wholesale") {
-    state.wholesaleMarket ||= {};
-    state.wholesaleMarket.cashVoucherUnits = value; return;
-  }
   throw new Error("未知粮券账户：" + owner);
 }
 
@@ -102,8 +96,6 @@ export function totalVoucherBalances(state) {
   total += hasHouseholds(state) ? residentVoucherUnits(state) : (currency.balances.residents || 0);
   for (const company of Object.values(state.companies || {})) total += company.cashVoucherUnits || 0;
   for (const shop of Object.values(state.shops || {})) total += shop.cashVoucherUnits || 0;
-  // 批发市场现金是粮券总账的一部分；漏算会让守恒校验（validateCurrencyInvariant）失败。
-  total += state.wholesaleMarket?.cashVoucherUnits || 0;
   // 银行现金是粮券总账的一部分（金融扩展二期）；deposits 台账只是归属明细，不重复计入。
   total += state.bank?.cashVoucherUnits || 0;
   return total;
@@ -215,12 +207,6 @@ export function issueVouchersFromWheat(state, owner, wheatUnits, content, reason
     if (owner.startsWith("company:")) state.companies[owner.slice(8)].cashWheatUnits -= wheatUnits;
     else state.shops[owner.slice(5)].cashWheatUnits -= wheatUnits;
     setVoucherBalance(state, owner, voucherBalance(state, owner) + voucherUnits, content);
-  } else if (owner === "wholesale") {
-    // 0.2.3 流通改革：批发市场做市商同样是银行合法账户，可用实物粮换券周转。
-    const available = state.wholesaleMarket?.cashWheatUnits || 0;
-    if (available < wheatUnits) return { ok: false, reason: "可用小麦不足" };
-    state.wholesaleMarket.cashWheatUnits -= wheatUnits;
-    setVoucherBalance(state, owner, voucherBalance(state, owner) + voucherUnits, content);
   } else {
     return { ok: false, reason: "该账户不能通过银行换券" };
   }
@@ -244,7 +230,7 @@ export function issueVouchersFromWheat(state, owner, wheatUnits, content, reason
 
 export function redeemVouchersForWheat(state, owner, voucherUnits, content, reason = "注销粮券兑回小麦") {
   if (!Number.isSafeInteger(voucherUnits) || voucherUnits <= 0) return { ok: false, reason: "兑换数量必须大于0" };
-  const supportedOwner = owner === "town" || owner === "residents" || owner === "wholesale" || owner?.startsWith("household:") || owner?.startsWith("company:") || owner?.startsWith("shop:");
+  const supportedOwner = owner === "town" || owner === "residents" || owner?.startsWith("household:") || owner?.startsWith("company:") || owner?.startsWith("shop:");
   if (!supportedOwner) return { ok: false, reason: "该账户不能直接兑回小麦" };
   const currency = ensureCurrencyState(state);
   const wheatUnits = wheatUnitsForVoucherUnits(voucherUnits, content, "floor");
@@ -274,10 +260,6 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
     setVoucherBalance(state, owner, voucherBalance(state, owner) - voucherUnits, content);
     if (owner.startsWith("company:")) state.companies[owner.slice(8)].cashWheatUnits = (state.companies[owner.slice(8)].cashWheatUnits || 0) + wheatUnits;
     else state.shops[owner.slice(5)].cashWheatUnits = (state.shops[owner.slice(5)].cashWheatUnits || 0) + wheatUnits;
-  } else if (owner === "wholesale") {
-    setVoucherBalance(state, owner, voucherBalance(state, owner) - voucherUnits, content);
-    state.wholesaleMarket ||= {};
-    state.wholesaleMarket.cashWheatUnits = (state.wholesaleMarket.cashWheatUnits || 0) + wheatUnits;
   }
   // 扣券成功后才扣镇库小麦（之前先扣麦，若扣券失败麦会凭空消失）。
   if (owner !== "town") {

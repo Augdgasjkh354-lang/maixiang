@@ -100,8 +100,7 @@ test("磨坊企业采购居民小麦、向面包房企业供粉、面包销售�
   state.policy.unemploymentBenefit.enabled = false;
   // 基线清理：0.2.3 起公司/民营的原料与产成品都走批发市场（企业产出由
   // sellCompanyOutputsToWholesale 交售给市场，公司再从市场采购原料）。
-  // 因此必须先建成批发市场，并把小麦按"镇库调拨入市"的既有契约放进市场，
-  // 否则企业两头都拿不到货，链路根本不成立。
+  // 因此必须先建成批发市场，否则企业两头都拿不到货。
   addBuilding(state, "wholesale_market", "wholesale-mill-chain");
   addBuilding(state, "mill", "listed-mill");
   addBuilding(state, "bakery", "listed-bakery");
@@ -112,13 +111,9 @@ test("磨坊企业采购居民小麦、向面包房企业供粉、面包销售�
   assert.equal(bakery.ok, true, bakery.reason);
   const millCompany = state.companies[mill.companyId];
   const bakeryCompany = state.companies[bakery.companyId];
-  // 镇库直管小麦：通过"镇库调拨至批发市场"把小麦交给市场，供磨坊企业采购。
-  const wheatUnits = state.accounts.town.wheat;
-  assert.ok(wheatUnits > 0, "镇库应持有可调拨的小麦");
-  changeInventory(state, "town", "wheat", -wheatUnits, "镇库调拨至批发市场供磨坊企业采购", "test_adjustment", CONTENT);
+  // 小麦由镇库直管，磨坊企业经批发市场按售价从镇库存量采购。
+  assert.ok(state.accounts.town.wheat > 0, "镇库应持有可售小麦");
   const market = state.wholesaleMarket;
-  // 小麦就是市场现金：直接进 cashWheatUnits
-  market.cashWheatUnits = (market.cashWheatUnits || 0) + wheatUnits;
   const residentWheatBefore = state.accounts.residents.wheat;
 
   simulation.advanceDays(state, 2);

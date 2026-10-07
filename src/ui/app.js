@@ -452,9 +452,6 @@ export function mountGame(root) {
     } else if (kind === "shop-profit-tax") {
       result = simulation.setShopProfitTax(state, parsed.value);
       successMessage = `商业利润税已设为${number(parsed.value, 2)}%。`;
-    } else if (kind === "wholesale-daily-wheat") {
-      result = simulation.setWholesaleDailyWheat(state, parsed.value);
-      successMessage = `批发市场每日小麦补贴已设为${number(parsed.value, 1)}斤。`;
     } else if (kind === "wholesale-price") {
       result = simulation.configureWholesalePrice(state, input.dataset.draftTarget, parsed.value);
       successMessage = `批发价已设为${number(parsed.value, 3)}小麦等值。`;
@@ -1599,22 +1596,6 @@ export function mountGame(root) {
       render(true);
       const itemUnit = itemId === "wood" ? "单位" : "斤";
       showToast(`${isStockpile ? "已从批发市场收储" : "已向批发市场投放"}${number(result.movedJin, 2)}${itemUnit}。`);
-      return;
-    }
-    // 0.2.3 流通改革：镇库向批发市场一次性注资。
-    const fundButton = closest(target, "[data-wholesale-fund]");
-    if (fundButton && state) {
-      const key = "wholesale-fund";
-      const input = numericInputFor(key);
-      const rawValue = numericDrafts.has(key) ? numericDrafts.get(key).value : input?.value;
-      const parsed = parseNumericDraft(rawValue, { label: "注资金额", minimum: 0, maximum: 1000000000, positive: true });
-      if (!parsed.ok) { setDraftError(key, parsed.reason, input); return; }
-      const result = simulation.fundWholesaleMarket(state, parsed.value);
-      if (!result?.ok) { setDraftError(key, result?.reason || "注资失败", input); return; }
-      numericDrafts.delete(key);
-      changed(true);
-      render(true);
-      showToast(`已向批发市场注资${number(result.injectedJin, 1)}斤小麦等值。`);
       return;
     }
     // 0.2.3 流通改革：把目标利润率一键应用到所有综合商店。

@@ -262,7 +262,7 @@ export function selectDashboard(state, content, selection) {
           rows.push({
             itemId, kind: "input",
             priceVoucherPerJin: salePriceOf(itemId),
-            marketStockJin: (itemId === "wheat" ? (market.cashWheatUnits || 0) : (market.inventory?.[itemId] || 0)) / scale
+            marketStockJin: (itemId === "wheat" ? (state.accounts?.town?.wheat || 0) : (market.inventory?.[itemId] || 0)) / scale
           });
         }
         for (const output of recipe.outputs || []) {

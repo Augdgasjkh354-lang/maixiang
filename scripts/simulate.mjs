@@ -252,10 +252,6 @@ const ACTIONS = {
     desc: "批发市场售价 {itemId, value}",
     run: (sim, state, a) => sim.configureWholesalePrice(state, a.itemId, Number(a.value)),
   },
-  fundWholesaleMarket: {
-    desc: "镇库向批发市场一次性注资 {amountJin}",
-    run: (sim, state, a) => sim.fundWholesaleMarket(state, Number(a.amountJin)),
-  },
   setShopTargetMargin: {
     desc: "综合商店目标利润率 {percent}（全镇统一）",
     run: (sim, state, a) => sim.configureAllShopsTargetMargin(state, Number(a.percent)),
@@ -592,15 +588,6 @@ const METRICS = [
   },
   // ---- 0.2.3 流通改革：批发市场做市商 ----
   {
-    key: "wholesale_cash_jin",
-    compute: (ctx) => round2((ctx.state.wholesaleMarket?.cashVoucherUnits || 0) / CONTENT.precision.currencyUnitsPerVoucher),
-  },
-  {
-    // 小麦阶段批发市场以实物小麦结算，故同时跟踪小麦现金余额（斤）。
-    key: "wholesale_cash_wheat_jin",
-    compute: (ctx) => round2((ctx.state.wholesaleMarket?.cashWheatUnits || 0) / CONTENT.precision.inventoryUnitsPerJin),
-  },
-  {
     key: "monetary_stage",
     compute: (ctx) => ctx.state.monetaryReform?.stage || "wheat",
   },
@@ -636,10 +623,6 @@ const METRICS = [
   },
   // ---- 0.2.3 流通改革：镇营统购统销 ----
   {
-    key: "wholesale_wages_paid_jin",
-    compute: (ctx) => round2((ctx.state.wholesaleMarket?.monopolyWages?.cumulative || 0) / CONTENT.precision.currencyUnitsPerVoucher),
-  },
-  {
     key: "wholesale_sales_jin",
     compute: (ctx) => round2((ctx.state.wholesaleMarket?.cumulative?.salesVoucherUnits || 0) / CONTENT.precision.currencyUnitsPerVoucher),
   },
@@ -648,45 +631,8 @@ const METRICS = [
     compute: (ctx) => round2((ctx.state.wholesaleMarket?.cumulative?.purchaseVoucherUnits || 0) / CONTENT.precision.currencyUnitsPerVoucher),
   },
   {
-    key: "wholesale_injected_jin",
-    compute: (ctx) => round2((ctx.state.wholesaleMarket?.monopoly?.injectedVoucherUnits || 0) / CONTENT.precision.currencyUnitsPerVoucher),
-  },
-  {
-    // 批发市场现金流覆盖倍数：累计销售回款 / (市场自付镇营工资 + 累计收购支出)。
-    // ≥1 表示市场靠自身销售回款即可覆盖其支出（允许一次性启动注资，不允许长期失血）。
-    key: "wholesale_coverage_ratio",
-    compute: (ctx) => {
-      const flow = ctx.state.wholesaleMarket?.valueFlow?.cumulative || {};
-      const split = ctx.state.wholesaleMarket?.monopoly?.wageSplit?.cumulative || {};
-      const inflow = flow.sales || 0;
-      const outflow = (split.market || 0) + (flow.purchases || 0);
-      return outflow > 0 ? round2(inflow / outflow) : 0;
-    },
-  },
-  {
-    // 市场自付工资占镇营工资总额的比例（%）：越高说明发放主体迁移得越彻底。
-    key: "wholesale_wage_self_pay_pct",
-    compute: (ctx) => {
-      const split = ctx.state.wholesaleMarket?.monopoly?.wageSplit?.cumulative || {};
-      const total = (split.market || 0) + (split.town || 0);
-      return total > 0 ? round2((split.market || 0) * 100 / total) : 0;
-    },
-  },
-  {
-    key: "wholesale_wages_market_jin",
-    compute: (ctx) => round2((ctx.state.wholesaleMarket?.monopoly?.wageSplit?.cumulative?.market || 0) / CONTENT.precision.currencyUnitsPerVoucher),
-  },
-  {
-    key: "wholesale_wages_town_jin",
-    compute: (ctx) => round2((ctx.state.wholesaleMarket?.monopoly?.wageSplit?.cumulative?.town || 0) / CONTENT.precision.currencyUnitsPerVoucher),
-  },
-  {
     key: "wholesale_value_sales_jin",
     compute: (ctx) => round2((ctx.state.wholesaleMarket?.valueFlow?.cumulative?.sales || 0) / CONTENT.precision.currencyUnitsPerVoucher),
-  },
-  {
-    key: "wholesale_value_wages_jin",
-    compute: (ctx) => round2((ctx.state.wholesaleMarket?.valueFlow?.cumulative?.wages || 0) / CONTENT.precision.currencyUnitsPerVoucher),
   },
   {
     key: "wholesale_value_purchases_jin",

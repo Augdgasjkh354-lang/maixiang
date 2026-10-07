@@ -5,16 +5,11 @@
   "metrics": [
     "year",
     "monetary_stage",
-    "wholesale_cash_jin",
     "wholesale_purchase_flour",
     "wholesale_purchase_wood",
     "wholesale_inventory_flour_jin",
     "wholesale_value_sales_jin",
     "wholesale_value_purchases_jin",
-    "wholesale_wages_market_jin",
-    "wholesale_wages_town_jin",
-    "wholesale_wage_self_pay_pct",
-    "wholesale_coverage_ratio",
     "wholesale_year_net_jin",
     "town_wage_arrears_jin",
     "wage_paid_jin",
@@ -211,13 +206,6 @@
       "action": "convertTownWheatToVouchers",
       "args": {
         "amountVoucher": 800000
-      }
-    },
-    {
-      "year": 2,
-      "action": "fundWholesaleMarket",
-      "args": {
-        "amountJin": 40000
       }
     },
     {

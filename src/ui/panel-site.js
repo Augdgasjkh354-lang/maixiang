@@ -184,28 +184,11 @@ export function renderSite(view) {
         <div class="row"><span class="label">镇库每日固定调拨</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-allocation:${itemId}`, kind: "wholesale-allocation", target: itemId, value: market.dailyTownAllocation?.[itemId] || 0, label: `${name}每日调拨量`, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>${escapeHtml(itemUnit)}/日</b></div></div>
         <div class="business-form-row"><label>单次调运<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(moveShown)}" aria-label="${escapeHtml(name)}单次调运量" data-draft-key="${escapeHtml(moveKey)}" data-draft-kind="stage" data-draft-label="${escapeHtml(name)}单次调运量" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-stockpile="${escapeHtml(itemId)}">收储入镇库</button><button class="secondary" data-wholesale-release="${escapeHtml(itemId)}">镇库投放</button></div></div></div>`;
     }).join("");
-    // 小麦即市场现金：库存读 cashWheatUnits（之前误读 inventory["wheat"] 永远显示 0）。
-    const wheatName = view.itemNames?.["wheat"] || "小麦";
-    const wheatUnit = view.itemUnits?.["wheat"] || "斤";
-    const wheatMoveKey = `wholesale-move:wheat`;
-    const wheatMoveShown = view.numericDrafts?.[wheatMoveKey]?.value ?? "";
-    const wheatCashJin = (market.cashWheatUnits || 0) / (view.inventoryUnitsPerJin || 1);
-    const wheatRow = `<div class="cardlet"><div class="row"><span class="label">${escapeHtml(wheatName)}库存（市场现金）</span><strong class="value">${number(wheatCashJin, 2)}${escapeHtml(wheatUnit)}</strong></div>
-        <div class="row"><span class="label">镇库每日固定调拨</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-allocation:wheat`, kind: "wholesale-allocation", target: "wheat", value: market.dailyTownAllocation?.["wheat"] || 0, label: `${wheatName}每日调拨量`, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>${escapeHtml(wheatUnit)}/日</b></div></div>
-        <div class="business-form-row"><label>单次调运<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(wheatMoveShown)}" aria-label="${escapeHtml(wheatName)}单次调运量" data-draft-key="${escapeHtml(wheatMoveKey)}" data-draft-kind="stage" data-draft-label="${escapeHtml(wheatName)}单次调运量" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-stockpile="wheat">收储入镇库</button><button class="secondary" data-wholesale-release="wheat">镇库投放</button></div></div>
-        <div class="subtle">小麦即批发市场的现金：镇库补贴/调拨直接进这笔钱；公司、民营可按镇库价从这里采购小麦做原料；镇营磨坊走免费内部调拨。</div></div>`;
-    const marketRows = marketRowsAll + wheatRow;
-    const cash = market.cashflow || {};
-    const cumulative = cash.cumulative || {};
-    const fundKey = "wholesale-fund";
-    const fundShown = view.numericDrafts?.[fundKey]?.value ?? "";
-    const cashCard = `<div class="cardlet"><div class="row"><span class="label">批发市场现金</span><strong class="value">${number(market.cashJin || 0, 2)}${escapeHtml(unit)}</strong></div>
-      <div class="row"><span class="label">累计销售 / 累计收购</span><strong class="value">${number(cumulative.salesVoucherUnits || 0, 0)} / ${number(cumulative.purchaseVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
-      <div class="row"><span class="label">累计发放镇营工资</span><strong class="value">${number(cumulative.wagesVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
-      <div class="row"><span class="label">累计注资</span><strong class="value">${number(cumulative.injectedVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
-      <div class="business-form-row"><label>注资金额<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(fundShown)}" aria-label="向批发市场注资金额" data-draft-key="${escapeHtml(fundKey)}" data-draft-kind="stage" data-draft-label="注资金额" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-fund="1">镇库注资</button></div></div>
-      <div class="subtle">批发市场统购统销：镇营产成品无偿调拨入市，销售利润留在市场，并由市场统一发放镇营建筑工资。库存越多收购价自动越低，防止大公司一次性抽干市场粮券。</div></div>`;
-    body = `<div class="status-strip"><span class="status-light working"></span><strong>镇营批发市场 · 做市商</strong><span>${number(building.level)}级</span></div><div class="subtle">镇营、民营和公司产成品汇入这里；综合商店及各类生产者统一从这里采购原料。市场对每个商品同时挂收购价与售价；小麦仍归镇库直管。固定调拨用于把镇库小麦或既有库存每天送入批发市场；单次调运可一次性收储或投放，用来平抑库存。</div>${buildingStaffingMarkup(view, building)}${cashCard}${marketRows}${developmentMarkup(view, building, development)}`;
+    const marketRows = marketRowsAll;
+    const cumulative = (market.cashflow || {}).cumulative || {};
+    const cashCard = `<div class="cardlet"><div class="row"><span class="label">累计销售 / 累计收购</span><strong class="value">${number(cumulative.salesVoucherUnits || 0, 0)} / ${number(cumulative.purchaseVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
+      <div class="subtle">收付款都走镇库；库存越多收购价自动越低。</div></div>`;
+    body = `<div class="status-strip"><span class="status-light working"></span><strong>镇营批发市场 · 做市商</strong><span>${number(building.level)}级</span></div><div class="subtle">各方产品汇入这里，商店和生产者从这里进货；小麦由镇库直管。</div>${buildingStaffingMarkup(view, building)}${cashCard}${marketRows}${developmentMarkup(view, building, development)}`;
   } else if (building?.typeId === "commercial_street") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const shops = (view.shops || []).filter(shop => shop.buildingId === building.id && shop.status !== "closed");

@@ -16,12 +16,7 @@
     "labor_target_shop_wage",
     "labor_poach_year",
     "labor_mood",
-    "wholesale_cash_jin",
     "wholesale_value_sales_jin",
-    "wholesale_wages_market_jin",
-    "wholesale_wages_town_jin",
-    "wholesale_wage_self_pay_pct",
-    "wholesale_coverage_ratio",
     "town_wage_arrears_jin",
     "wage_paid_jin",
     "satisfaction",
@@ -202,13 +197,6 @@
       "action": "convertTownWheatToVouchers",
       "args": {
         "amountVoucher": 1200000
-      }
-    },
-    {
-      "year": 2,
-      "action": "fundWholesaleMarket",
-      "args": {
-        "amountJin": 40000
       }
     },
     {

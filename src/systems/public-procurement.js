@@ -161,7 +161,7 @@ export function previewTownMaterialProcurement(state, itemId, wantedUnits, conte
   const residentAvailableUnits = sellers.filter(row => row.id.startsWith("household:")).reduce((sum, row) => sum + row.stockUnits, 0);
   const companyAvailableUnits = sellers.filter(row => row.id.startsWith("company:")).reduce((sum, row) => sum + row.stockUnits, 0);
   const paidAvailableUnits = residentAvailableUnits + companyAvailableUnits;
-  // 批发市场按售价由镇库付费采购（AGENTS.md 铁律：要付钱，别写成白嫖），计入成本。
+  // 批发市场与镇库同属镇里，市场库存内部无偿领用。
   const wholesaleAvailableUnits = wholesaleStockUnits(state, itemId);
   const totalAvailableUnits = paidAvailableUnits + wholesaleAvailableUnits;
   if (wanted <= 0) return { wantedUnits: 0, residentAvailableUnits, companyAvailableUnits, wholesaleAvailableUnits, wholesaleUsableUnits: 0, totalAvailableUnits, purchasableUnits: 0, costVoucherUnits: 0, priceVoucherPerUnit: price, reason: "暂无采购需求" };
@@ -192,7 +192,7 @@ export function procureTownMaterial(state, itemId, wantedUnits, content) {
   const sellerRows = [];
   let bought = 0;
   let paid = 0;
-  // 先从批发市场领用：按做市售价由镇库付费采购（AGENTS.md 铁律：要付钱，别写成白嫖）
+  // 先从批发市场内部无偿领用
   const wholesaleWanted = Math.min(preview.wholesaleUsableUnits || 0, preview.purchasableUnits);
   if (wholesaleWanted > 0) {
     const issued = procureTownInputFromWholesale(state, itemId, wholesaleWanted, content,

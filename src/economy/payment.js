@@ -104,8 +104,6 @@ export function paymentWheatBalanceUnits(state, owner) {
   if (owner?.startsWith("household:")) return state.households?.byId?.[owner.slice(10)]?.inventory?.wheat || 0;
   if (owner?.startsWith("company:")) return state.companies?.[owner.slice(8)]?.cashWheatUnits || 0;
   if (owner?.startsWith("shop:")) return state.shops?.[owner.slice(5)]?.cashWheatUnits || 0;
-  // 0.2.3 流通改革：批发市场自持小麦支付余额（统购实物结算）。
-  if (owner === "wholesale") return state.wholesaleMarket?.cashWheatUnits || 0;
   return 0;
 }
 
@@ -131,9 +129,6 @@ function setSimpleWheatBalance(state, owner, value, content) {
     const shop = state.shops?.[owner.slice(5)];
     if (!shop) throw new Error("店铺不存在");
     shop.cashWheatUnits = value;
-  } else if (owner === "wholesale") {
-    state.wholesaleMarket ||= {};
-    state.wholesaleMarket.cashWheatUnits = value;
   } else throw new Error("未知小麦支付账户：" + owner);
 }
 
