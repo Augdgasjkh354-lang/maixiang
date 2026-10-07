@@ -1100,15 +1100,6 @@ export function mountGame(root) {
       render(true);
       return;
     }
-    if (closest(target, "#manualAid") && state) {
-      const result = simulation.sendRelief(state, simulation.content.rules.manualReliefAmountJin);
-      changed(true);
-      render();
-      showToast(result.movedQeqUnits > 0
-        ? `已向居民账拨出 ${number(result.movedQeqUnits / simulation.content.precision.qeqUnitsPerJin)}斤口粮。`
-        : "镇库已无可拨口粮。");
-      return;
-    }
     const currencyPreviewButton = closest(target, "[data-currency-preview]");
     if (currencyPreviewButton && state) {
       const amount = readStagedNumber("currency-amount", { label: "粮券数量", positive: true });

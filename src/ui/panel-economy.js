@@ -15,9 +15,7 @@ export function renderEconomy(view) {
   return `${renderEnterpriseFinance(view)}
     <section class="panel-section" id="foodSection"><h2>口粮</h2>
       ${view.shortageQeq > 0 ? `<div class="shortage-banner visible">口粮短缺 ${shortageJin(view.shortageQeq, view.qeqUnitsPerJin)}，时光已暂停。</div>` : ""}
-      <div class="cardlet"><div class="row"><span class="label">居民可吃</span><strong class="value">${numberMax(view.residentFoodDays, 1)}天</strong></div><div class="row"><span class="label">每日需要</span><strong class="value">${view.dailyNeed.toLocaleString("zh-CN")}斤</strong></div>
-      <label class="toggle"><input id="autoRelief" type="checkbox" ${view.autoRelief ? "checked" : ""}><span>自动救济</span></label>
-      <div class="settings-actions"><button class="secondary" id="manualAid" ${view.accounts.town.qeq <= 0 ? "disabled" : ""}>拨粮 ${view.manualReliefAmountJin.toLocaleString("zh-CN")}斤</button></div></div></section>
+      <div class="cardlet"><div class="row"><span class="label">居民可吃</span><strong class="value">${numberMax(view.residentFoodDays, 1)}天</strong></div><div class="row"><span class="label">每日需要</span><strong class="value">${view.dailyNeed.toLocaleString("zh-CN")}斤</strong></div></div></section>
     ${detail("bread-trade", "居民主粮购买", renderTrade(view))}
     ${detail("outside-town", "外贸 · 民镇", renderOutsideTown(view))}
     ${detail("industry-accounts", "林业、盐业与住房", renderIndustryAccounts(view))}

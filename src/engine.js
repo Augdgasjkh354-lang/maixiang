@@ -6,7 +6,7 @@ import {
   advanceGameDays as advanceDaysWithClock
 } from "./core/clock.js";
 import {
-  setEmployment, buildAt, sendRelief, toggleAutomaticRelief,
+  setEmployment, buildAt, toggleAutomaticRelief,
   setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl,
   setBankPolicy, issueGovernmentBond,
   setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setTradeTariffRate, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax,
@@ -68,9 +68,6 @@ export function createSimulation(content) {
     },
     selectDemolitionPreview: function (state, buildingId) {
       return selectDemolitionPreview(state, buildingId, definitions);
-    },
-    sendRelief: function (state, amountJin) {
-      return sendRelief(state, amountJin, definitions);
     },
     toggleAutomaticRelief: function (state, enabled) {
       return toggleAutomaticRelief(state, enabled);

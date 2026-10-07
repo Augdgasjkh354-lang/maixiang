@@ -127,10 +127,6 @@ const ACTIONS = {
       return { ok: true, enabled: state.autoRelief };
     },
   },
-  sendRelief: {
-    desc: "一次性发放救济 {amountJin}",
-    run: (sim, state, a) => sim.sendRelief(state, a.amountJin),
-  },
   startCurrencyReform: {
     desc: "启动货币改革 {}",
     run: (sim, state) => sim.startCurrencyReform(state),
@@ -577,19 +573,6 @@ const METRICS = [
   {
     key: "trade_count",
     compute: (ctx) => ctx.state.outsideTown?.stats?.trades || 0,
-  },
-  // 邻里互助（用户 0.1.11；用累计口径，年桶在跨年结算时已清零）
-  {
-    key: "neighbor_aid_jin",
-    compute: (ctx) => round2(qeqToJin(ctx.state.neighborAid?.cumulative?.movedQeqUnits || 0)),
-  },
-  {
-    key: "neighbor_aid_helped",
-    compute: (ctx) => ctx.state.neighborAid?.cumulative?.helpedHouseholds || 0,
-  },
-  {
-    key: "neighbor_aid_needy_today",
-    compute: (ctx) => ctx.state.neighborAid?.lastDay?.needyHouseholds || 0,
   },
   // ---- 0.2.3 流通改革：批发市场做市商 ----
   {

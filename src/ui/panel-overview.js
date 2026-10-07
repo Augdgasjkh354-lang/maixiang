@@ -10,8 +10,6 @@ export function renderOverview(view) {
       <div class="row"><span class="label">居民口粮</span><strong class="value large">${numberMax(view.residentFoodDays, 1)}天</strong></div>
       <div class="row"><span class="label">居民 / 镇库口粮</span><strong class="value">${number(view.accounts.residents.qeq)} / ${number(view.accounts.town.qeq)}斤</strong></div>
       <div class="row"><span class="label">舒心值</span><strong class="value">${number(view.satisfaction)} / 100</strong></div>
-      <label class="toggle" style="margin-top:9px"><input id="autoRelief" type="checkbox" ${view.autoRelief ? "checked" : ""}><span>自动救济</span></label>
-      <div><button class="secondary" id="manualAid" ${view.accounts.town.qeq <= 0 ? "disabled" : ""}>拨粮 ${number(view.manualReliefAmountJin)}斤</button></div>
     </div>
     <div class="cardlet" style="margin-top:9px">
       <div class="row"><span class="label">${escapeHtml(view.season.name)} · ${escapeHtml(view.season.field)}</span><strong class="value">${number(view.labor.rows.find(row => row.roleId === "farmers")?.count || 0)} / ${number(view.farmCapacity)}名农人</strong></div>

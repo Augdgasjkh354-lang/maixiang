@@ -120,9 +120,6 @@ test("wages, relief and construction start preserve total food until workers are
   );
   assert.equal(wage.ok, true);
   assert.equal(simulation.totalQeq(state), 6000000);
-  const relief = simulation.sendRelief(state, 30000);
-  assert.equal(relief.movedQeqUnits / CONTENT.precision.qeqUnitsPerJin, 0, "0.1.2实物救济只拨给存在家庭口粮缺口者");
-  assert.equal(simulation.totalQeq(state), 6000000);
   const afterTransfers = Object.fromEntries(Object.keys(CONTENT.items).map(function (id) {
     return [id, totalItemUnits(state, id)];
   }));

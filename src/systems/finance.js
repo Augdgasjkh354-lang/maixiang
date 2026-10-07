@@ -1,5 +1,6 @@
+import { chargeFundForRelief } from "./social-security.js";
 import { transferFoodQeq } from "../economy/inventory.js";
-import { redeemVouchersForWheat } from "../economy/currency.js";
+import { currencyScale, redeemVouchersForWheat } from "../economy/currency.js";
 import { wheatUnitsForVoucherUnits } from "../economy/money-units.js";
 import { recordEvent } from "../economy/ledger.js";
 import { householdFoodQeqUnits, householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
@@ -122,22 +123,6 @@ function relieveEligibleHouseholds(state, eligible, limitQeqUnits, content, reas
   return { movedQeqUnits: moved, missingQeqUnits: Math.max(0, targetQeqUnits - moved), rows };
 }
 
-export function payManualRelief(state, amountJin, content) {
-  const qeqUnits = Math.max(0, Math.round(amountJin * content.precision.qeqUnitsPerJin));
-  if (qeqUnits <= 0) return { movedQeqUnits: 0, missingQeqUnits: 0, rows: [], redeemedWheatUnits: 0, eligibleHouseholds: 0, servedHouseholds: 0, unmetHouseholds: 0 };
-  const prepared = prepareReliefHouseholds(state, content);
-  const result = relieveEligibleHouseholds(state, prepared.eligible, qeqUnits, content, "镇长手动救济：家庭先自费兑付，再按口粮紧迫度补足缺口");
-  const summary = {
-    ...result,
-    redeemedWheatUnits: prepared.redeemedUnits,
-    eligibleHouseholds: prepared.eligible.length,
-    servedHouseholds: result.rows.length,
-    unmetHouseholds: prepared.eligible.filter(row => householdFoodQeqUnits(state, row.household, content) < row.targetQeqUnits).length
-  };
-  if (result.movedQeqUnits > 0) recordEvent(state, "镇长按家庭口粮缺口拨出 " + Math.round(result.movedQeqUnits / content.precision.qeqUnitsPerJin).toLocaleString("zh-CN") + "斤口粮。", content, { day: state.day + 1 });
-  return summary;
-}
-
 export function setAutomaticRelief(state, enabled) { state.autoRelief = Boolean(enabled); return state.autoRelief; }
 
 export function applyAutomaticRelief(state, population, content) {
@@ -150,14 +135,18 @@ export function applyAutomaticRelief(state, population, content) {
 
   const prepared = prepareReliefHouseholds(state, content);
   const totalNeedQeqUnits = prepared.eligible.reduce((sum, row) => sum + row.needQeqUnits, 0);
-  const result = relieveEligibleHouseholds(state, prepared.eligible, totalNeedQeqUnits, content, "自动救济：家庭先自费兑付，再按口粮缺口和紧迫程度拨付");
+  const result = relieveEligibleHouseholds(state, prepared.eligible, totalNeedQeqUnits, content, "救济：家庭先自费兑付，再按口粮缺口和紧迫程度拨付");
+  const reliefValueUnits = Math.round(result.movedQeqUnits / content.precision.qeqUnitsPerJin * currencyScale(content));
+  const fund = chargeFundForRelief(state, reliefValueUnits, content);
   state.relief ||= {};
   state.relief.lastDay = {
     ...result,
     redeemedWheatUnits: prepared.redeemedUnits,
     eligibleHouseholds: prepared.eligible.length,
     servedHouseholds: result.rows.length,
-    unmetHouseholds: prepared.eligible.filter(row => householdFoodQeqUnits(state, row.household, content) < row.targetQeqUnits).length
+    unmetHouseholds: prepared.eligible.filter(row => householdFoodQeqUnits(state, row.household, content) < row.targetQeqUnits).length,
+    fundPaidValueUnits: fund.fromFund,
+    fundOwedValueUnits: fund.owed
   };
   if (result.movedQeqUnits > 0) recordEvent(state, "镇库按家庭缺粮紧迫度拨出 " + Math.round(result.movedQeqUnits / content.precision.qeqUnitsPerJin).toLocaleString("zh-CN") + "斤口粮。", content, {
     day: state.day + 1, mergeKey: "auto-relief", mergeWindowDays: 30, amount: result.movedQeqUnits,

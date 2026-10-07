@@ -142,6 +142,20 @@ export function payFromFund(state, householdId, dueUnits, content, type, reason)
   return { paidValueUnits: fromFund + fromTown, fromFund, fromTown };
 }
 
+// 救济口粮由镇库实物拨付；基金开启时按口粮价值向镇库结算，付不起的部分计入基金负债。
+export function chargeFundForRelief(state, valueUnits, content) {
+  const ss = ensureSocialSecurity(state);
+  if (!ss.enabled || valueUnits <= 0) return { fromFund: 0, owed: 0 };
+  const result = settleMonetaryPayment(state, SOCIAL_OWNER, "town", currentPaymentComposition(state, valueUnits), content,
+    "relief_reimbursement", "社保基金承担救济口粮", { requireFull: false });
+  const fromFund = result.paidValueUnits || 0;
+  const owed = Math.max(0, valueUnits - fromFund);
+  ss.debtToTownUnits += owed;
+  ss.totalAdvancedUnits += owed;
+  ss.totalPaidUnits += valueUnits;
+  return { fromFund, owed };
+}
+
 // 工资代扣：payDailyWages 在发放完毕后调用。
 export function collectSocialContributions(state, workerPay, currentPaidByKey, paidByHousehold, content) {
   const ss = ensureSocialSecurity(state);

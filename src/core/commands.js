@@ -1,6 +1,6 @@
 import { assignWorkers } from "../systems/employment.js";
 import { startConstruction, setProjectWorkers as setProjectWorkersSystem } from "../systems/construction.js";
-import { payManualRelief, setAutomaticRelief } from "../systems/finance.js";
+import { setAutomaticRelief } from "../systems/finance.js";
 import { demolishBuilding, startBuildingUpgrade } from "../systems/building-development.js";
 import { sellOperatingLevel as sellOperatingLevelSystem } from "../systems/operating-rights.js";
 import { issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, currencyScale } from "../economy/currency.js";
@@ -151,10 +151,6 @@ export function setOperatingRightPrice(state, buildingId, priceWheatJin) {
   return { ok: true, buildingId, priceWheatJin: state.market.operatingRightPrices[buildingId] / 3000 };
 }
 
-export function transferFood(state, amountJin, content) {
-  return payManualRelief(state, amountJin, content);
-}
-
 export function setEmployment(state, jobKey, count, content) {
   return assignWorkers(state, jobKey, count, content);
 }
@@ -178,10 +174,6 @@ export function demolishAt(state, buildingId, content) {
 
 export function sellOperatingLevel(state, buildingId, content) {
   return sellOperatingLevelSystem(state, buildingId, content);
-}
-
-export function sendRelief(state, amountJin, content) {
-  return payManualRelief(state, amountJin, content);
 }
 
 export function toggleAutomaticRelief(state, enabled) {

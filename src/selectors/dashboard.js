@@ -448,7 +448,6 @@ export function selectDashboard(state, content, selection) {
     shortageQeq: state.shortageQeq,
     autoRelief: state.autoRelief,
     relief: state.relief?.lastDay || null,
-    neighborAid: state.neighborAid || null,
     buildings,
     constructionOptions: options,
     projects: projectViews,
@@ -668,7 +667,6 @@ export function selectDashboard(state, content, selection) {
       ((reclaimedAcres(state, content) / content.agriculture.acresPerFarmer) *
         content.rules.growingDays) * 100) : 0,
     growingDays: (needResidents || needSite) ? content.rules.growingDays : 0,
-    manualReliefAmountJin: needBusiness ? content.rules.manualReliefAmountJin : 0,
     automaticReliefTriggerDays: content.rules.automaticReliefTriggerDays,
     automaticReliefTargetDays: content.rules.automaticReliefTargetDays,
     farmAcres: reclaimedAcres(state, content),

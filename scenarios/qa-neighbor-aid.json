@@ -1,1 +1,0 @@
-{"metrics":["year","neighbor_aid_jin","neighbor_aid_helped","neighbor_aid_needy_today","town_balance_jin","satisfaction","population_total"],"name":"qa-neighbor-aid","script":[{"action":"drainHouseholdFood","args":{"count":10},"year":1},{"action":"drainHouseholdFood","args":{"count":10},"year":2}],"seed":7,"years":3}

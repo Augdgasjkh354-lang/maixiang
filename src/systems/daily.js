@@ -35,7 +35,6 @@ import { maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
 import { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
-import { settleNeighborAid, resetNeighborAidYear } from "./neighbor-aid.js";
 
 export function settleOneDay(state, content) {
   const beforeTotal = totalQeqUnits(state, content);
@@ -84,8 +83,6 @@ export function settleOneDay(state, content) {
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
   if (state.agriculture?.reclaim) state.agriculture.reclaim.day = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
 
-  // 0. 邻里互助（用户 0.1.11）：缺粮 3 天先由富户接济，自动救济随后补剩余缺口。
-  const neighborAid = settleNeighborAid(state, content);
   // 1. Basic relief protects residents before any discretionary payment.
   const relief = applyAutomaticRelief(state, peopleAtStart.total, content);
   // 2. Settle old wage arrears, then today's wages. Builders are captured before completion.
@@ -209,7 +206,6 @@ export function settleOneDay(state, content) {
     resetShopYear(state, content);
     resetWholesaleYear(state, content);
     resetLaborCompetitionYear(state);
-    resetNeighborAidYear(state);
     state.financialFlows.year = emptyFinancialFlowPeriod();
     if (state.fiscal) state.fiscal.year = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
     if (state.agriculture?.reclaim) state.agriculture.reclaim.year = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
@@ -240,7 +236,6 @@ export function settleOneDay(state, content) {
     shopPreparation,
     shops,
     relief,
-    neighborAid,
     companyWages,
     privateWages,
     wages,

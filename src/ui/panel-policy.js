@@ -13,8 +13,6 @@ export function renderPolicy(view) {
   const hasIndustry = industries.some(([id]) => buildingTypeIds.has(id));
   const shopTax = (view.shops || []).reduce((sum, row) => sum + (row.lastTaxVoucher || 0), 0);
   const relief = view.relief || {};
-  const neighborAid = view.neighborAid || {};
-  const neighborAidDay = neighborAid.lastDay || {};
   const reform = view.monetaryReform;
   const moneyUnit = reform.stage === "wheat" ? "斤小麦" : "粮券";
   const reformAction = reform.stage === "wheat"
@@ -80,7 +78,7 @@ export function renderPolicy(view) {
       <div class="row"><span class="label">预计秋收分粮</span><strong class="value">镇库${number(agriculture.townShareJin)} / 居民${number(agriculture.residentShareJin)}斤</strong></div>
       <div class="subtle">${agriculture.lastHarvest ? `上次秋收实际：镇库${number(agriculture.lastHarvest.townJin)} / 居民${number(agriculture.lastHarvest.residentJin)}斤` : "尚未到秋收结算；税率按农事日累计。"}</div>
     </div></details>
-    <details class="detail-block" data-detail-key="policy-relief"><summary>救济</summary><div class="detail-body"><div class="row"><span class="label">需救济 / 已拨家庭</span><strong class="value">${number(relief.eligibleHouseholds||0)} / ${number(relief.servedHouseholds||0)}户</strong></div><div class="row"><span class="label">今日正常兑付 / 救济</span><strong class="value">${number((relief.redeemedWheatUnits||0)/view.inventoryUnitsPerJin,1)} / ${number((relief.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div>${(relief.missingQeqUnits||0)>0?`<div class="shortage-banner visible">镇库不足，尚缺 ${number(relief.missingQeqUnits/view.qeqUnitsPerJin,1)}斤口粮</div>`:""}<div class="row"><span class="label">今日邻里互助</span><strong class="value">${number(neighborAidDay.donorHouseholds||0)}户接济${number(neighborAidDay.helpedHouseholds||0)}户 · ${number((neighborAidDay.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div><div class="row"><span class="label">本年邻里接济</span><strong class="value">${number((neighborAid.year?.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div></div></details>
+    <details class="detail-block" data-detail-key="policy-relief"><summary>救济</summary><div class="detail-body"><div class="row"><span class="label">需救济 / 已拨家庭</span><strong class="value">${number(relief.eligibleHouseholds||0)} / ${number(relief.servedHouseholds||0)}户</strong></div><div class="row"><span class="label">今日正常兑付 / 救济</span><strong class="value">${number((relief.redeemedWheatUnits||0)/view.inventoryUnitsPerJin,1)} / ${number((relief.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div>${(relief.missingQeqUnits||0)>0?`<div class="shortage-banner visible">镇库不足，尚缺 ${number(relief.missingQeqUnits/view.qeqUnitsPerJin,1)}斤口粮</div>`:""}<label class="toggle"><input id="autoRelief" type="checkbox" ${view.autoRelief ? "checked" : ""}><span>开启救济</span></label><div class="subtle">口粮不足7天的家庭补到14天；社保基金开启时由基金承担。</div></div></details>
     ${hasIndustry ? `<details class="detail-block" data-detail-key="policy-privatetax"><summary>民营生产税</summary><div class="detail-body">${privateTaxes}</div></details>` : ""}
     <details class="detail-block" data-detail-key="policy-detail"><summary>政策详情</summary><div class="detail-body">
       <div class="row"><span class="label">本季农业税平均</span><strong class="value">${number(agriculture.accumulatedAveragePercent, 2)}%</strong></div>

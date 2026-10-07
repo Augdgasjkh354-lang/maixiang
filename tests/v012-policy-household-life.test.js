@@ -5,7 +5,7 @@ import { CONTENT } from "../src/content/index.js";
 import { householdList, householdIdleWorkers, householdPopulation, syncResidentAggregates, releaseJobFromHousehold, setHouseholdJobCount, householdExchangeAllowanceUnits, householdFoodQeqUnits } from "../src/systems/households.js";
 import { transferVouchers } from "../src/economy/currency.js";
 import { accountQeqUnits, totalQeqUnits } from "../src/economy/inventory.js";
-import { applyAutomaticRelief, payManualRelief, redeemEssentialFoodForHouseholds } from "../src/systems/finance.js";
+import { applyAutomaticRelief, redeemEssentialFoodForHouseholds } from "../src/systems/finance.js";
 import { ensureHouseholdLife, householdRecentTotals } from "../src/systems/household-life.js";
 import { exportState, importState } from "../src/persistence/storage.js";
 import { grantResidentVouchers, setHouseholdInventoryJin } from "./helpers-v16.js";
@@ -74,12 +74,9 @@ test("0.1.2就业兑换额度0/2/4严格约束实际存粮换券，工资福利�
 
 test("0.1.2全镇有粮但个别家庭缺粮时，自动救济按户到达而不是被全镇平均掩盖", () => {
   const s=cloneInitial(1206); const h=householdList(s)[0]; clearFamilyFood(s,h); h.voucherUnits=0; syncResidentAggregates(s,CONTENT); simulation.advanceDay(s);
-  // 用户 0.1.11：邻里互助（口粮<3天）先于自动救济触发；两系统任一按户接济即算到达。
-  const helpedByNeighbor = (s.neighborAid?.lastDay?.helpedHouseholds || 0) >= 1;
-  const helpedByRelief = (s.relief.lastDay?.servedHouseholds || 0) >= 1;
-  assert.ok(helpedByNeighbor || helpedByRelief);
+  assert.ok((s.relief.lastDay?.servedHouseholds || 0) >= 1);
   assert.equal(s.shortageQeq,0);
-  assert.ok((h.life?.day?.reliefQeqUnits||0) > 0 || (h.life?.day?.neighborAidReceivedQeqUnits||0) > 0);
+  assert.ok((h.life?.day?.reliefQeqUnits||0) > 0);
 });
 
 test("0.1.2家庭有券无食物时先按1:1正常兑付，避免虚假饥饿且不消耗就业换券额度", () => {
@@ -88,15 +85,12 @@ test("0.1.2家庭有券无食物时先按1:1正常兑付，避免虚假饥饿且
   // 1券兑1斤的正常兑付本身：有券无粮时先自费兑付，而不是直接吃免费救济。
   const essential = redeemEssentialFoodForHouseholds(s, CONTENT);
   assert.ok(essential.redeemedUnits > 0, "有券无粮家庭应按1:1自费兑付");
-  // 基线调整：人口 1100→3300（8cf03ae）后户均 13—14 人，邻里互助（口粮<3天，先于自动救济）
-  // 会在日循环里先补足口粮，因此当日不再是"兑付"路径，而是"邻里互助"路径。
-  // 本用例的核心不变量仍成立：不出现虚假饥饿、家庭得到口粮、且不占用就业换券额度。
+  // 日循环里：有券家庭先自费兑付，不够的部分由救济补足；不出现饥饿，也不占用就业换券额度。
   const s2=cloneInitial(1207); const h2=householdList(s2)[0]; clearFamilyFood(s2,h2); simulation.issueGrainVouchers(s2,"town",100); transferVouchers(s2,"town",`household:${h2.id}`,20*V,CONTENT,"unemployment_benefit","测试已有收入");
   const usedBefore2=s2.households.exchange?.usedByHousehold?.[h2.id]||0;
-  simulation.toggleAutomaticRelief(s2,false); simulation.advanceDay(s2);
+  simulation.advanceDay(s2);
   assert.equal(s2.shortageQeq,0);
-  const fed = (s2.relief.lastDay?.redeemedWheatUnits||0) > 0 || (s2.neighborAid?.lastDay?.helpedHouseholds||0) > 0;
-  assert.ok(fed, "有券无粮家庭应通过自费兑付或邻里互助得到口粮");
+  assert.ok((s2.relief.lastDay?.redeemedWheatUnits||0) > 0, "有券无粮家庭应先自费兑付");
   assert.equal(s2.households.exchange.usedByHousehold[h2.id]||0,usedBefore2);
   assert.equal(usedBefore, usedBefore2);
 });
@@ -215,14 +209,16 @@ test("0.1.2-r02镇库救济粮不足：只拨实际库存并保留剩余缺口�
   assertReliefConservation(before, after, result); assert.equal(simulation.validateCurrencyInvariant(s).valid, true);
 });
 
-test("0.1.2-r02手动与自动救济共用资格判断：部分粮券场景得到相同兑付与救济结果", () => {
-  const auto = makeReliefHouseholdState(1216, 50); const manual = makeReliefHouseholdState(1216, 50);
-  const autoResult = applyAutomaticRelief(auto.state, auto.state.population, CONTENT);
-  const manualResult = payManualRelief(manual.state, 10000, CONTENT);
-  assert.deepEqual(
-    { redeemed: autoResult.redeemedWheatUnits, moved: autoResult.movedQeqUnits, eligible: autoResult.eligibleHouseholds, served: autoResult.servedHouseholds },
-    { redeemed: manualResult.redeemedWheatUnits, moved: manualResult.movedQeqUnits, eligible: manualResult.eligibleHouseholds, served: manualResult.servedHouseholds }
-  );
-  assert.equal(auto.household.voucherUnits, manual.household.voucherUnits);
-  assert.equal(householdFoodQeqUnits(auto.state, auto.household, CONTENT), householdFoodQeqUnits(manual.state, manual.household, CONTENT));
+
+test("社保基金开启时救济口粮由基金承担，基金不足部分计入欠国库", () => {
+  const s=cloneInitial(1299); const h=householdList(s)[0]; clearFamilyFood(s,h); h.voucherUnits=0; syncResidentAggregates(s,CONTENT);
+  const plot = s.plots.find(row => !row.feature);
+  s.buildings.push({ id: "ss-t", typeId: "social_security_office", level: 1, ownership: { townLevels: 1, privateLevels: 0, listedLevels: 0 }, plotId: plot.id, x: plot.x, y: plot.y, materialInvestments: [], completed: { year: 1, day: 1 } });
+  assert.equal(simulation.setSocialSecurityPolicy(s, { enabled: true }).ok, true);
+  simulation.advanceDay(s);
+  assert.ok((s.relief.lastDay?.servedHouseholds || 0) >= 1);
+  const charged = (s.relief.lastDay.fundPaidValueUnits || 0) + (s.relief.lastDay.fundOwedValueUnits || 0);
+  assert.ok(charged > 0, "救济应计到社保基金账上");
+  assert.ok(s.socialSecurity.debtToTownUnits >= s.relief.lastDay.fundOwedValueUnits);
+  assert.equal(simulation.validateState(s).valid, true);
 });
