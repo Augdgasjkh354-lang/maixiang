@@ -6,7 +6,7 @@ import { jobAssignments, householdList, householdIdleWorkers, householdPopulatio
 import { allocateIntegerByWeight } from "../core/allocation.js";
 import { recordHouseholdWageDue } from "./household-life.js";
 import { attributeLegacyUnattributedWageClaims } from "./wage-claims.js";
-import { collectSocialContributions, deductFromFund, ensureSocialSecurity } from "./social-security.js";
+import { collectSocialContributions, ensureSocialSecurity, payFromFund } from "./social-security.js";
 
 function ensurePayroll(state) {
   state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
@@ -20,7 +20,7 @@ function ensurePayroll(state) {
 
 // 工资调控分类：公务员类（政务/警察/银行/交易所）与镇营产业类（其余镇营岗位）。
 // 上市公司工资走 payListedCompanyWages，不在此调控范围内。
-export const WAGE_CONTROL_CIVIL_ROLE_IDS = Object.freeze(["civil_servants", "police", "bank_staff", "exchange_staff"]);
+export const WAGE_CONTROL_CIVIL_ROLE_IDS = Object.freeze(["civil_servants", "police", "bank_staff", "exchange_staff", "social_staff"]);
 
 export function wageControlFactor(state, roleId) {
   const control = state.policy?.wageControl;
@@ -315,29 +315,20 @@ export function payUnemploymentBenefit(state, laborAtStart, content) {
   const perWorker = Math.max(0, Number(policy.dailyPerWorkerJin) || 0);
   const expectedUnits = Math.round(laborAtStart.idle * perWorker * scale);
   const perPersonUnits = Math.round(perWorker * scale);
-  // 社保基金开启时，失业金从基金支出（基金不足时镇库兜底）；未开启时仍由镇库直付。
-  const ss = ensureSocialSecurity(state);
-  const useFund = Boolean(ss.enabled);
+  // 社保基金开启时，失业金由基金支付（不足部分镇库垫付并计入基金负债）；未开启时由镇库直付。
+  const useFund = Boolean(ensureSocialSecurity(state).enabled);
   let paid = 0;
   let paidPeople = 0;
   for (const row of idleRows) {
     if (perPersonUnits <= 0) break;
     const due = row.idle * perPersonUnits;
-    const result = settleMonetaryPayment(state, "town", `household:${row.household.id}`, currentPaymentComposition(state, due), content,
-      "unemployment_benefit", useFund ? "社保基金发放失业金；基金不足时镇库兜底" : "劳动年龄待业者失业金；镇库不足时优先口粮与货币储备更少的家庭",
-      { requireFull: false, countsForReform: true });
-    paid += result.paidValueUnits || 0;
-    paidPeople += Math.min(row.idle, Math.floor((result.paidValueUnits || 0) / perPersonUnits));
-  }
-  if (useFund && paid > 0) {
-    const { fromFund } = deductFromFund(state, paid);
-    ss.totalPaidUnits = (ss.totalPaidUnits || 0) + paid;
-    const transactionId = makeTransactionId(state);
-    recordLedger(state, {
-      type: "unemployment_benefit", transactionId, source: "social_security_fund", destination: "residents",
-      itemId: "money_value", quantityUnits: paid, qeqUnits: 0,
-      reason: `社保基金发放失业金${paid}小麦等值单位（基金承担${fromFund}，镇库兜底${Math.max(0, paid - fromFund)}）`
-    }, content);
+    const rowPaid = useFund
+      ? payFromFund(state, row.household.id, due, content, "unemployment_benefit", "社保基金发放失业金").paidValueUnits
+      : (settleMonetaryPayment(state, "town", `household:${row.household.id}`, currentPaymentComposition(state, due), content,
+        "unemployment_benefit", "劳动年龄待业者失业金；镇库不足时优先口粮与货币储备更少的家庭",
+        { requireFull: false, countsForReform: true }).paidValueUnits || 0);
+    paid += rowPaid;
+    paidPeople += Math.min(row.idle, Math.floor(rowPaid / perPersonUnits));
   }
   const short = Math.max(0, expectedUnits - paid);
   payroll.totals.unemploymentPaidVoucherUnits = (payroll.totals.unemploymentPaidVoucherUnits || 0) + paid;

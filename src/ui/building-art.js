@@ -16,7 +16,7 @@ export const BUILDING_ART_CATALOG = Object.freeze({
   stock_exchange:{name:'交易所',connected:true}, bank:{name:'银行',connected:true},
   saltworks:{name:'盐场',connected:true}, wholesale_market:{name:'批发市场',connected:true},
   commercial_street:{name:'商业街',connected:true}, town_hall:{name:'政务厅',connected:true},
-  police_station:{name:'警察局',connected:true},
+  police_station:{name:'警察局',connected:true}, social_security_office:{name:'社保局',connected:true},
   school:{name:'学堂',connected:false}, clinic:{name:'医馆',connected:false},
   restaurant:{name:'饭馆',connected:false}, granary:{name:'粮仓',connected:false},
   housing:{name:'民居',connected:false}, tea_house:{name:'茶馆',connected:false}
@@ -42,6 +42,7 @@ case 'bank':return courtyard()+house(0,-6,.98,'银号',true)+`<g fill="#babaa0">
 case 'stock_exchange':return courtyard()+house(0,-8,1,'交易',true)+`<path d="M-50-20v48M55-12v44" stroke="#7a7861" stroke-width="2"/><path d="M-50-20l14 5v20l-14-5Z M55-12l14 5v20l-14-5Z" fill="#a9785c"/>`;
 case 'saltworks':return house(16,-19,.7,'盐')+`<path d="M-61 10l39-20 46 21-39 23Z" fill="#c3d3c5"/><path d="M-54 12l17-9 18 9-17 10ZM-15 29l17-10 19 9-18 10Z" fill="#f9f5de"/><path d="M28 31l12-21 19 31Z" fill="#f3eed8"/>`;
 case 'town_hall':return courtyard()+house(0,-5,1,'镇署')+`<path d="M-34 20l45 16v8l-45-16Z" fill="#c2c3ac"/>`;
+case 'social_security_office':return courtyard()+house(0,-5,.96,'社保')+`<path d="M-34 20l45 16v8l-45-16Z" fill="#c8c6ae"/>`;
 case 'police_station':return courtyard()+house(0,-5,.98,'巡署')+`<path d="M48-29v53" stroke="#79755b" stroke-width="2"/><path d="M48-29l17 5v22l-17-5Z" fill="#9a765c"/>`;
 case 'school':return courtyard()+house(0,-10,1,'学堂');
 case 'clinic':return house(0,0,1,'医馆')+awning(-10,8);

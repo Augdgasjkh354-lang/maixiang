@@ -483,6 +483,7 @@ export function selectDashboard(state, content, selection) {
     } : null,
     outsideTown: needBusiness ? selectOutsideTownView(state, content) : null,
     tradeAgreements: needBusiness ? selectTradeAgreementView(state, content) : null,
+    socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,
     policy: needPolicy ? {
       ...(state.policy || { unemploymentBenefit: { enabled: false, dailyPerWorkerJin: 1 } }),
       unemployed: labor.idle,
@@ -494,7 +495,6 @@ export function selectDashboard(state, content, selection) {
       villaStats: selectVillaStats(state, content),
       wageControl: state.policy?.wageControl || { civil: 1.0, industry: 1.0 },
       wageLastDay: state.payroll?.lastDay || null,
-      socialSecurity: selectSocialSecurityStats(state, content),
       // 银行统计（金融扩展二期）：只读，不初始化 state.bank
       bankStats: (function () {
         const bank = state.bank || {};

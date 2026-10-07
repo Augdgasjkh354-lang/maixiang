@@ -49,6 +49,37 @@ function stagedBankInput(view, key, label, value) {  const shown = view.numericD
     data-draft-integer="false" data-draft-positive="true">`;
 }
 
+function socialSecurityMarkup(view) {
+  const ss = view.socialSecurity;
+  if (!ss) return "";
+  const input = (key, kind, value, label, extra = {}) => renderNumericInput(view, { key, kind, target: "socialSecurity", value, label, minimum: 0, maximum: 1000000000, className: "setting-editor", ...extra });
+  // 暂存输入：只记录草稿，由旁边的操作按钮提交。
+  const staged = (key, value, label, integer = false) => `<input class="staged-input" type="text" inputmode="${integer ? "numeric" : "decimal"}" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(view.numericDrafts?.[key]?.value ?? String(value))}" aria-label="${escapeHtml(label)}" data-draft-key="${escapeHtml(key)}" data-draft-kind="stage" data-draft-label="${escapeHtml(label)}" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="${integer}" data-draft-positive="true">`;
+  const holdings = (ss.holdings || []).map(row => `<div class="cardlet"><div class="row"><strong>${escapeHtml(row.name)}</strong><span class="badge">股价 ${number(row.priceJin, 2)}</span></div>
+      <div class="row"><span class="label">持股 / 市值</span><strong class="value">${number(row.shares)}股 / ${number(row.valueJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">镇库可售</span><strong class="value">${number(row.townAvailable)}股</strong></div>
+      <div class="row"><span class="label">股数</span><div class="setting-input">${staged(`social-shares:${row.companyId}`, 100, `${row.name}交易股数`, true)}<button class="secondary" data-social-buy="${escapeHtml(row.companyId)}">买入</button><button class="secondary" data-social-sell="${escapeHtml(row.companyId)}">卖出</button></div></div></div>`).join("");
+  return `<div class="cardlet">
+      <label class="toggle"><input id="socialSecurityEnabled" type="checkbox" ${ss.enabled ? "checked" : ""}><span>开启社保基金</span></label>
+      <div class="row"><span class="label">每劳动力每日缴纳</span><div class="setting-input">${input("social-daily", "social-daily", ss.dailyPerWorkerJin, "社保每日缴费")}<b>斤</b></div></div>
+      <div class="row"><span class="label">每老人每日养老金</span><div class="setting-input">${input("social-pension", "social-pension", ss.pensionPerElderJin, "养老金标准")}<b>斤</b></div></div>
+      <div class="subtle">开启后失业金也由基金发放；基金不够时镇库垫付，计入负债。</div>
+    </div>
+    <div class="cardlet">
+      <div class="row"><span class="label">基金现金</span><strong class="value">${number(ss.cashJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">股票市值</span><strong class="value">${number(ss.stockValueJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">欠国库</span><strong class="value">${number(ss.debtJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">注资（镇库→基金）</span><div class="setting-input">${staged("social-inject", 10000, "社保基金注资金额")}<button class="secondary" data-social-inject>注资</button></div></div>
+      <div class="row"><span class="label">还款（基金→镇库）</span><div class="setting-input">${staged("social-repay", Math.max(0, Math.round(ss.debtJin)), "社保基金还款金额")}<button class="secondary" data-social-repay ${ss.debtJin > 0 ? "" : "disabled"}>还款</button></div></div>
+    </div>
+    <details class="detail-block" data-detail-key="social-totals"><summary>累计收支</summary><div class="detail-body">
+      <div class="row"><span class="label">缴费收入 / 分红收入</span><strong class="value">${number(ss.totalCollectedJin, 1)} / ${number(ss.totalDividendJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">养老金与失业金支出</span><strong class="value">${number(ss.totalPaidJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">注资 / 镇库垫付 / 已还</span><strong class="value">${number(ss.totalInjectedJin, 1)} / ${number(ss.totalAdvancedJin, 1)} / ${number(ss.totalRepaidJin, 1)}斤</strong></div>
+    </div></details>
+    ${holdings ? `<h3>股票投资</h3>${holdings}` : `<div class="cardlet subtle">暂无上市公司可投资。</div>`}`;
+}
+
 function bankManagementMarkup(view, physical = true) {
   const reform = view.monetaryReform;
   const c = view.currency;
@@ -146,6 +177,9 @@ export function renderSite(view) {
     title = "银行 · 旧存档兼容入口";
     body = bankManagementMarkup(view, false);
     actions = `<button class="secondary" data-go="policy">返回政策</button>`;
+  } else if (building?.typeId === "social_security_office") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = `${socialSecurityMarkup(view)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
   } else if (building?.typeId === "bank") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${bankManagementMarkup(view, true)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;

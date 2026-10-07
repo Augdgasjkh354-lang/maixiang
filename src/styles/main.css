@@ -576,3 +576,4 @@ button.wide { width: 100%; }
 .enterprise-section { margin-bottom: 0; }
 .enterprise-section + .enterprise-section, .enterprise-section + .panel-section { margin-top: 20px; }
 .enterprise-section + .panel-section { padding-top: 0; border-top: 0; }
+.staged-input { width: 92px; min-height: 40px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: white; font: inherit; font-weight: 700; color: var(--deep-green); text-align: right; }

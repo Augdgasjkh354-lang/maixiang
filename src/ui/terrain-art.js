@@ -399,7 +399,7 @@ export function drawBuilding(ctx, x, y, size, building, time = 0) {
     drawBank(ctx, px, py, size);
   } else if (type.includes('stock_exchange')) {
     drawStockExchange(ctx, px, py, size);
-  } else if (type.includes('town_hall')) {
+  } else if (type.includes('town_hall') || type.includes('social_security')) {
     drawTownHall(ctx, px, py, size);
   } else if (type.includes('police')) {
     drawPoliceStation(ctx, px, py, size);

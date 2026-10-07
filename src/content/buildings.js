@@ -118,6 +118,14 @@ export const BUILDINGS = Object.freeze({
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
     construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 })
   }),
+  social_security_office: Object.freeze({
+    id: "social_security_office", name: "社保局", icon: "🛡️",
+    description: "管理社保基金：缴费、养老金、注资还款与股票投资 · 全镇限建一座",
+    maxInstances: 1,
+    jobs: Object.freeze([Object.freeze({ id: "social_staff", name: "社保专员", slots: 6, capacityMode: "building", wagePerWorkerDay: 5, note: "社保收缴与发放", releasePriority: 55 })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 600 }]),
+    construction: Object.freeze({ workDays: 500, recommendedWorkers: 10 })
+  }),
   stock_exchange: Object.freeze({
     id: "stock_exchange", name: "交易所", icon: "📈",
     description: "挂牌、认购与回购 · 全镇限建一座",

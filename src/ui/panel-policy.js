@@ -54,15 +54,6 @@ export function renderPolicy(view) {
       <div class="row"><span class="label">今日镇营工资应发</span><strong class="value">${number(view.policy.wageLastDay?.expectedVoucher || 0, 1)}${moneyUnit}</strong></div>
       <div class="subtle">系数1为基准，不影响上市公司。</div>
     </div></details>
-    <details class="detail-block" data-detail-key="policy-social"><summary>社保基金</summary><div class="detail-body">
-      <label class="toggle"><input id="socialSecurityEnabled" type="checkbox" ${view.policy.socialSecurity?.enabled ? "checked" : ""}><span>开启社保基金</span></label>
-      <div class="row"><span class="label">每劳动力每日缴纳</span><div class="setting-input">${renderNumericInput(view, { key: "social-daily", kind: "social-daily", target: "socialSecurity", value: view.policy.socialSecurity?.dailyPerWorkerJin ?? 1, label: "社保每日缴费", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>斤</b></div></div>
-      <div class="row"><span class="label">每老人每日养老金</span><div class="setting-input">${renderNumericInput(view, { key: "social-pension", kind: "social-pension", target: "socialSecurity", value: view.policy.socialSecurity?.pensionPerElderJin ?? 2, label: "养老金标准", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>斤</b></div></div>
-      <div class="row"><span class="label">手动注资（镇库→基金）</span><div class="setting-input">${renderNumericInput(view, { key: "social-inject", kind: "social-inject", target: "socialSecurity", value: 10000, label: "社保基金注资金额", minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>斤</b><button class="secondary" data-social-inject>注资</button></div></div>
-      <div class="row"><span class="label">基金余额</span><strong class="value">${number(view.policy.socialSecurity?.balanceJin || 0, 1)}斤</strong></div>
-      <div class="row"><span class="label">累计注资 / 收缴 / 支出</span><strong class="value">${number(view.policy.socialSecurity?.totalInjectedJin || 0, 1)} / ${number(view.policy.socialSecurity?.totalCollectedJin || 0, 1)} / ${number(view.policy.socialSecurity?.totalPaidJin || 0, 1)}斤</strong></div>
-      <div class="subtle">工资代扣；基金不足时镇库兜底。</div>
-    </div></details>
     <details class="detail-block" data-detail-key="policy-villa"><summary>别墅</summary><div class="detail-body">
       <div class="row"><span class="label">别墅定价</span><div class="setting-input">${renderNumericInput(view, { key: "villa-price", kind: "villa-price", target: "villa", value: view.policy.villa?.priceWheatJin ?? 10000, label: "别墅定价", minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>小麦等值</b></div></div>
       <div class="row"><span class="label">房产税率（每年1月1日征收）</span><div class="setting-input">${renderNumericInput(view, { key: "villa-tax-rate", kind: "villa-tax-rate", target: "villa", value: view.policy.villa?.taxRatePercent ?? 0.5, label: "别墅房产税率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>

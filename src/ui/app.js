@@ -1525,6 +1525,25 @@ export function mountGame(root) {
       latestMapModel = null;
       render();
     }
+    const socialTrade = closest(target, "[data-social-repay], [data-social-buy], [data-social-sell]");
+    if (socialTrade && state) {
+      const companyId = socialTrade.dataset.socialBuy || socialTrade.dataset.socialSell || null;
+      const key = companyId ? `social-shares:${companyId}` : "social-repay";
+      const input = numericInputFor(key);
+      const rawValue = numericDrafts.has(key) ? numericDrafts.get(key).value : input?.value;
+      const parsed = parseNumericDraft(rawValue, { label: companyId ? "股数" : "还款金额", minimum: 0, maximum: 1000000000, positive: true, integer: Boolean(companyId) });
+      if (!parsed.ok) { setDraftError(key, parsed.reason, input); return; }
+      const result = socialTrade.dataset.socialRepay !== undefined ? simulation.repaySocialSecurityDebt(state, parsed.value)
+        : socialTrade.dataset.socialBuy ? simulation.socialBuyShares(state, companyId, parsed.value)
+        : simulation.socialSellShares(state, companyId, parsed.value);
+      if (!result?.ok) { setDraftError(key, result?.reason || "操作失败", input); return; }
+      numericDrafts.delete(key);
+      changed(true);
+      render(true);
+      showToast(socialTrade.dataset.socialRepay !== undefined ? `社保基金已还款${number(result.repaidJin, 1)}斤。`
+        : socialTrade.dataset.socialBuy ? `社保基金买入${number(result.shares)}股。` : `社保基金卖出${number(result.shares)}股。`);
+      return;
+    }
     if (target.matches("[data-social-inject]") && state) {
       const input = numericInputFor("social-inject");
       const rawValue = numericDrafts.has("social-inject") ? numericDrafts.get("social-inject").value : input?.value;

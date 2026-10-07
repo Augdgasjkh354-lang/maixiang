@@ -7,6 +7,12 @@ export function validateState(state, content) {
   const errors = [];
   const contentCheck = validateContent(content);
   errors.push(...contentCheck.errors);
+  const ss = state?.socialSecurity;
+  if (ss) {
+    for (const key of ["cashVoucherUnits", "cashWheatUnits", "debtToTownUnits"]) {
+      if (!Number.isSafeInteger(ss[key] || 0) || (ss[key] || 0) < 0) errors.push("社保基金账户无效：" + key);
+    }
+  }
   const saveVersion = content.rules.saveVersion || 3;
   if (!state || state.schemaVersion !== saveVersion || state.version !== saveVersion) {
     errors.push("存档版本不是" + saveVersion);
@@ -257,11 +263,12 @@ export function validateState(state, content) {
         if (!Number.isInteger(company.totalShares) || company.totalShares <= 0 || company.totalShares % company.listedLevels !== 0 ||
             !Number.isInteger(company.townShares) || company.townShares < 0 ||
             !Number.isInteger(company.residentShares) || company.residentShares < 0 ||
-            company.townShares + company.residentShares !== company.totalShares) errors.push("上市公司股份总数或持股结构无效：" + companyId);
+            !Number.isInteger(company.fundShares || 0) || (company.fundShares || 0) < 0 ||
+            company.townShares + company.residentShares + (company.fundShares || 0) !== company.totalShares) errors.push("上市公司股份总数或持股结构无效：" + companyId);
         const householdShareSum = Object.values(company.householdShares || {}).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
         if (householdShareSum !== company.residentShares) errors.push("居民逐户持股与公司居民持股不一致：" + companyId);
       } else {
-        if ((company.totalShares || 0) !== 0 || (company.townShares || 0) !== 0 || (company.residentShares || 0) !== 0 || Object.values(company.householdShares || {}).some(value => value)) errors.push("未上市公司不应存在股票：" + companyId);
+        if ((company.totalShares || 0) !== 0 || (company.townShares || 0) !== 0 || (company.residentShares || 0) !== 0 || (company.fundShares || 0) !== 0 || Object.values(company.householdShares || {}).some(value => value)) errors.push("未上市公司不应存在股票：" + companyId);
       }
       if (!Number.isSafeInteger(company.cashVoucherUnits) || company.cashVoucherUnits < 0) errors.push("企业粮券余额无效：" + companyId);
       if (!Number.isSafeInteger(company.cashWheatUnits || 0) || (company.cashWheatUnits || 0) < 0) errors.push("企业支付小麦余额无效：" + companyId);

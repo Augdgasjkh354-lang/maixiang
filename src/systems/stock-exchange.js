@@ -65,6 +65,7 @@ export function listCompanyOnExchange(state, companyId, options, content) {
   company.totalShares = totalShares;
   company.townShares = totalShares;
   company.residentShares = 0;
+  company.fundShares = 0;
   company.householdShares = {};
   company.listing = { listed: true, ticker, listedAt: { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) } };
   // 实时股价（金融扩展四期）：挂牌价起步，每日向利润锚波动

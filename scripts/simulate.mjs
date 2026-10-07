@@ -67,6 +67,16 @@ function pickAutoPlot(sim, state, typeId) {
   return { ok: false, reason: top[0] + (reasons.size > 1 ? `（另有${reasons.size - 1}种失败原因）` : "") };
 }
 
+function ensureSocialOffice(state) {
+  if (state.buildings.some(b => b.typeId === "social_security_office")) return true;
+  const plot = state.plots.find(p => !p.feature && !state.buildings.some(b => b.plotId === p.id) && !(state.projects || []).some(pr => pr.plotId === p.id));
+  if (!plot) return true;
+  state.buildings.push({ id: "social-office-sim", typeId: "social_security_office", level: 1,
+    ownership: { townLevels: 1, privateLevels: 0, listedLevels: 0 }, plotId: plot.id, x: plot.x, y: plot.y,
+    materialInvestments: [], completed: { year: state.year, day: state.day + 1 } });
+  return true;
+}
+
 const ACTIONS = {
   // 调工资
   setWageRate: {
@@ -198,10 +208,10 @@ const ACTIONS = {
       return { ok: true, assigned: total };
     },
   },
-  // 社保基金
+  // 社保基金（场景捷径：没有社保局时直接放一座建成的，免得每个场景都排工期）
   setSocialSecurityPolicy: {
     desc: "社保基金政策 {enabled?, dailyPerWorkerJin?, pensionPerElderJin?}",
-    run: (sim, state, a) => sim.setSocialSecurityPolicy(state, {
+    run: (sim, state, a) => ensureSocialOffice(state) && sim.setSocialSecurityPolicy(state, {
       ...(a.enabled !== undefined ? { enabled: a.enabled } : {}),
       ...(a.dailyPerWorkerJin !== undefined ? { dailyPerWorkerJin: a.dailyPerWorkerJin } : {}),
       ...(a.pensionPerElderJin !== undefined ? { pensionPerElderJin: a.pensionPerElderJin } : {}),
@@ -211,6 +221,7 @@ const ACTIONS = {
     desc: "社保基金注资 {amountJin}",
     run: (sim, state, a) => {
       if (!Number.isFinite(Number(a.amountJin))) return { ok: false, reason: "需要 amountJin" };
+      ensureSocialOffice(state);
       return sim.injectSocialSecurity(state, Number(a.amountJin));
     },
   },
@@ -518,7 +529,7 @@ const METRICS = [
   // 社保基金
   {
     key: "social_fund_jin",
-    compute: (ctx) => round2((ctx.state.socialSecurity?.balanceUnits || 0) / CONTENT.precision.currencyUnitsPerVoucher),
+    compute: (ctx) => round2(((ctx.state.socialSecurity?.cashVoucherUnits || 0) + (ctx.state.socialSecurity?.cashWheatUnits || 0)) / CONTENT.precision.currencyUnitsPerVoucher),
   },
   {
     key: "social_collected_jin",

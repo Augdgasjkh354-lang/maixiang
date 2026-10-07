@@ -47,6 +47,8 @@ export function voucherBalance(state, owner) {
   if (owner?.startsWith("household:")) return state.households?.byId?.[owner.slice(10)]?.voucherUnits || 0;
   if (owner?.startsWith("company:")) return state.companies?.[owner.slice(8)]?.cashVoucherUnits || 0;
   if (owner?.startsWith("shop:")) return state.shops?.[owner.slice(5)]?.cashVoucherUnits || 0;
+  // 社保基金独立钱包。
+  if (owner === "social") return state.socialSecurity?.cashVoucherUnits || 0;
   throw new Error("未知粮券账户：" + owner);
 }
 
@@ -76,6 +78,10 @@ function setVoucherBalance(state, owner, value, content = null) {
     if (!shop) throw new Error("店铺不存在：" + owner.slice(5));
     shop.cashVoucherUnits = value; return;
   }
+  if (owner === "social") {
+    state.socialSecurity ||= {};
+    state.socialSecurity.cashVoucherUnits = value; return;
+  }
   throw new Error("未知粮券账户：" + owner);
 }
 
@@ -96,6 +102,7 @@ export function totalVoucherBalances(state) {
   total += hasHouseholds(state) ? residentVoucherUnits(state) : (currency.balances.residents || 0);
   for (const company of Object.values(state.companies || {})) total += company.cashVoucherUnits || 0;
   for (const shop of Object.values(state.shops || {})) total += shop.cashVoucherUnits || 0;
+  total += state.socialSecurity?.cashVoucherUnits || 0;
   // 银行现金是粮券总账的一部分（金融扩展二期）；deposits 台账只是归属明细，不重复计入。
   total += state.bank?.cashVoucherUnits || 0;
   return total;

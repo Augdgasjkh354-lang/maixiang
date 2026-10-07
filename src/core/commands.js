@@ -23,7 +23,7 @@ import { setVillaPolicy as setVillaPolicySystem } from "../systems/villas.js";
 import { setBankPolicy as setBankPolicySystem } from "../systems/bank.js";
 import { issueGovernmentBond as issueGovernmentBondSystem } from "../systems/bonds.js";
 import { setWageControlPolicy as setWageControlPolicySystem } from "../systems/payroll.js";
-import { setSocialSecurityPolicy as setSocialSecurityPolicySystem, injectSocialSecurity as injectSocialSecuritySystem } from "../systems/social-security.js";
+import { setSocialSecurityPolicy as setSocialSecurityPolicySystem, injectSocialSecurity as injectSocialSecuritySystem, repaySocialSecurityDebt as repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares } from "../systems/social-security.js";
 import { setTradeTariffRate as setTradeTariffRateSystem, tradeWithOutsideTown as tradeWithOutsideTownSystem, issueWheatLoan as issueWheatLoanSystem } from "../systems/outside-town.js";
 import { signTradeAgreement as signTradeAgreementSystem, terminateTradeAgreement as terminateTradeAgreementSystem } from "../systems/trade-agreements.js";
 
@@ -106,6 +106,18 @@ export function terminateTradeAgreement(state, id, content) {
 
 export function injectSocialSecurity(state, amountJin, content) {
   return injectSocialSecuritySystem(state, amountJin, content);
+}
+
+export function repaySocialSecurityDebt(state, amountJin, content) {
+  return repaySocialSecurityDebtSystem(state, amountJin, content);
+}
+
+export function socialBuyShares(state, companyId, shares, content) {
+  return fundBuyShares(state, companyId, shares, content);
+}
+
+export function socialSellShares(state, companyId, shares, content) {
+  return fundSellShares(state, companyId, shares, content);
 }
 
 export function setAgricultureTax(state, percent) {

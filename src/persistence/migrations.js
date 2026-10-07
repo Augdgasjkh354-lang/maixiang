@@ -7,6 +7,7 @@ import { addTownCostBasis } from "../economy/business.js";
 import { syncShopEmployment } from "../systems/shops.js";
 import { summarizeLegacyAnnualReports } from "../systems/annual-reports.js";
 import { ensureWholesaleMarket, mergeWholesaleCashIntoTown } from "../systems/wholesale-market.js";
+import { migrateSocialSecurityWallet } from "../systems/social-security.js";
 import { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } from "../systems/households.js";
 import {
   defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor
@@ -729,14 +730,14 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
   state.policy.tradeTariffRate ??= 5;
   // 自动存档频率是 v15 内新增的策略字段，旧档缺失时补默认"每月"（读取方虽有 ?? 1 兜底，仍按铁律补齐）。
   state.policy.autosaveMonths ??= 1;
-  state.socialSecurity ||= { enabled: false, balanceUnits: 0, dailyPerWorkerJin: 1, pensionPerElderJin: 2, totalInjectedUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0 };
+  state.socialSecurity ||= { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 };
   state.socialSecurity.enabled ??= false;
-  state.socialSecurity.balanceUnits ??= 0;
   state.socialSecurity.dailyPerWorkerJin ??= 1;
   state.socialSecurity.pensionPerElderJin ??= 2;
   state.socialSecurity.totalInjectedUnits ??= 0;
   state.socialSecurity.totalCollectedUnits ??= 0;
   state.socialSecurity.totalPaidUnits ??= 0;
+  migrateSocialSecurityWallet(state);
   state.villas ||= { sold: [], taxArrearsValueUnits: {}, stats: {} };
   if (!Array.isArray(state.villas.sold)) state.villas.sold = [];
   state.villas.taxArrearsValueUnits ||= {};
@@ -1083,14 +1084,14 @@ function upgradeV5ToV6(raw, content, fromVersion = 5) {
   state.policy.wageControl ||= { civil: 1.0, industry: 1.0 };
   state.policy.wageControl.civil ??= 1.0;
   state.policy.wageControl.industry ??= 1.0;
-  state.socialSecurity ||= { enabled: false, balanceUnits: 0, dailyPerWorkerJin: 1, pensionPerElderJin: 2, totalInjectedUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0 };
+  state.socialSecurity ||= { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 };
   state.socialSecurity.enabled ??= false;
-  state.socialSecurity.balanceUnits ??= 0;
   state.socialSecurity.dailyPerWorkerJin ??= 1;
   state.socialSecurity.pensionPerElderJin ??= 2;
   state.socialSecurity.totalInjectedUnits ??= 0;
   state.socialSecurity.totalCollectedUnits ??= 0;
   state.socialSecurity.totalPaidUnits ??= 0;
+  migrateSocialSecurityWallet(state);
   state.villas ||= { sold: [], taxArrearsValueUnits: {}, stats: {} };
   if (!Array.isArray(state.villas.sold)) state.villas.sold = [];
   state.villas.taxArrearsValueUnits ||= {};

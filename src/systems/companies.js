@@ -1,4 +1,5 @@
 import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
+import { recordFundDividend } from "./social-security.js";
 import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
 import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, paymentWheatBalanceUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
@@ -352,6 +353,7 @@ export function liquidateCompanyToTown(state, companyId, content) {
   const company = state.companies?.[companyId];
   if (!company) return { ok: false, reason: "企业不存在" };
   if (company.listing?.listed && (company.residentShares || 0) > 0) return { ok: false, reason: "仍有居民持股，须先完成镇库回购" };
+  if ((company.fundShares || 0) > 0) return { ok: false, reason: "社保基金仍持股，须先卖回镇库" };
   if ((company.payroll?.arrearsVoucherUnits || 0) > 0) return { ok: false, reason: "公司仍有工资债务，不能先向股东返还资产" };
   const building = state.buildings.find(row => row.id === company.buildingId);
   if (!building) return { ok: false, reason: "公司建筑不存在" };
@@ -829,7 +831,18 @@ export function settleAnnualCompanyProfits(state, endingYear, content) {
         householdRows.push({ householdId, shares, voucherUnits: amount });
       }
     }
-    const townPart = distributable - residentPart;
+    let fundPart = 0;
+    if (distributable > 0 && company.listing?.listed && company.totalShares > 0 && (company.fundShares || 0) > 0) {
+      const amount = Math.floor(distributable * company.fundShares / company.totalShares);
+      if (amount > 0) {
+        const result = settleMonetaryPayment(state, "company:" + company.id, "social", currentPaymentComposition(state, amount), content,
+          "enterprise_annual_distribution", `${company.name}第${endingYear}年社保基金股东利润分配`, { requireFull: true });
+        if (!result.ok) throw new Error("企业社保基金股东年度分配转账失败");
+        fundPart = amount;
+        recordFundDividend(state, amount);
+      }
+    }
+    const townPart = distributable - residentPart - fundPart;
     if (townPart > 0) {
       const result = settleMonetaryPayment(state, "company:" + company.id, "town", currentPaymentComposition(state, townPart), content,
         "enterprise_annual_distribution", `${company.name}第${endingYear}年镇库利润上交`, { requireFull: true });
@@ -844,6 +857,7 @@ export function settleAnnualCompanyProfits(state, endingYear, content) {
       distributedVoucherUnits: distributable,
       townVoucherUnits: townPart,
       residentVoucherUnits: residentPart,
+      fundVoucherUnits: fundPart,
       undistributedVoucherUnits: company.retainedEarningsVoucherUnits,
       debtPaidVoucherUnits: debtResult?.paid || 0
     };
