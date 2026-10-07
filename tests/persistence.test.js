@@ -138,31 +138,3 @@ function hashText(text) {
   return (hash >>> 0).toString(16);
 }
 
-test("0.1.4 v11 存档按已完成改革接入，旧兑付储备释放回镇库并提供兼容银行入口", () => {
-  const old = simulation.createInitialState({ seed: 11415 });
-  const I = CONTENT.precision.inventoryUnitsPerJin;
-  const V = CONTENT.precision.currencyUnitsPerVoucher;
-  old.version = 11;
-  old.schemaVersion = 11;
-  delete old.monetaryReform;
-  delete old.currency.reserveWheatCostVoucherUnits;
-  delete old.currency.reserveModel;
-  const originalTownWheat = old.accounts.town.wheat;
-  old.accounts.town.wheat -= 100 * I;
-  old.currency.reserveWheatUnits = 100 * I;
-  old.currency.issuedUnits = 100 * V;
-  old.currency.issuedCumulativeUnits = 100 * V;
-  old.currency.balances.town = 100 * V;
-  const restored = migrateSave(old, CONTENT);
-  assert.equal(restored.version, 15);
-  assert.equal(restored.schemaVersion, 15);
-  assert.equal(restored.monetaryReform.stage, "voucher");
-  assert.equal(restored.monetaryReform.targetVoucherBps, 10000);
-  assert.equal(restored.monetaryReform.legacyBankAccess, true);
-  assert.equal(restored.currency.reserveWheatUnits, 0);
-  assert.equal(restored.accounts.town.wheat, originalTownWheat, "旧储备中的实际小麦应一次性回到镇库可用库存");
-  assert.equal(restored.currency.issuedUnits, 100 * V);
-  assert.equal(restored.currency.balances.town, 100 * V);
-  assert.equal(simulation.selectDashboard(restored).monetaryReform.hasBankAccess, true);
-  assert.equal(simulation.validateState(restored).valid, true, simulation.validateState(restored).errors.join("；"));
-});

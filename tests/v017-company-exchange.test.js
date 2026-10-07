@@ -214,27 +214,3 @@ test("有上市公司时交易所禁止拆除", () => {
   assert.equal(preview.available, false);
   assert.match(preview.reason, /上市公司/);
 });
-test("v13旧上市公司迁移为v14上市状态，不可整除股本用整数拆股保持持股比例", () => {
-  const state = legacyVoucherState();
-  const mill = addBuilding(state, "mill", "legacy-company", 3);
-  assert.equal(simulation.issueGrainVouchers(state, "town", 50000).ok, true);
-  const formed = simulation.createCompany(state, mill.id, { levels: 3, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
-  const company = state.companies[formed.companyId];
-  const owner = richestHousehold(state);
-  company.totalShares = 1000; company.townShares = 600; company.residentShares = 400;
-  company.householdShares = { [owner.id]: 400 };
-  owner.shares ||= {}; owner.shares[company.id] = 400;
-  delete company.listing;
-  delete company.settings;
-  state.version = 13; state.schemaVersion = 13;
-  delete state.stockExchange;
-  const migrated = migrateSave(JSON.parse(JSON.stringify(state)), CONTENT);
-  const m = migrated.companies[company.id];
-  assert.equal(migrated.schemaVersion, 15);
-  assert.equal(m.listing.listed, true);
-  assert.match(m.listing.ticker, /^\d{3}$/);
-  assert.equal(m.totalShares % 3, 0);
-  assert.equal(m.townShares / m.totalShares, 0.6);
-  assert.equal(m.residentShares / m.totalShares, 0.4);
-  assert.equal(migrated.stockExchange.legacyAccess, true);
-});

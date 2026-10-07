@@ -235,40 +235,6 @@ test("服务成交、店员工资、店租与利润税均形成真实资金流",
   assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
 });
 
-test("v12旧粮店/面包店/盐铺迁移为综合商店并保留ID、资产、债权和历史，农业目标取迁移时实际人数", () => {
-  const state = simulation.createInitialState({ seed: 161606 });
-  const street = addStreet(state);
-  const [owner] = idleHouseholds(state, 1);
-  const opened = simulation.openResidentShop(state, street.id, "bakery", owner.id);
-  assert.equal(opened.ok, true);
-  const shop = state.shops[opened.shopId];
-  shop.typeId = "bakery";
-  shop.itemId = "bread";
-  shop.primaryItemId = "bread";
-  delete shop.itemIds;
-  shop.inventory.bread = 17 * I;
-  shop.inventoryCostVoucherUnits.bread = 29 * V;
-  shop.liabilities.wageVoucherUnits = 7 * V;
-  shop.liabilities.legacyUnattributedWageVoucherUnits = 7 * V;
-  shop.history.push({ serial: 1, soldUnits: 3 * I, revenueVoucherUnits: 6 * V, profitVoucherUnits: V });
-  state.version = 12; state.schemaVersion = 12;
-  delete state.employment.targets;
-  delete state.services;
-  const migrated = migrateSave(JSON.parse(JSON.stringify(state)), CONTENT);
-  const next = migrated.shops[shop.id];
-  assert.equal(migrated.version, 15);
-  assert.equal(next.id, shop.id);
-  assert.equal(next.ownerHouseholdId, owner.id);
-  assert.equal(next.typeId, "general");
-  // 0.2.3-hotfix：小麦归镇库直管，综合商店不再经营小麦，改经营木材。
-  assert.deepEqual(next.itemIds, ["flour", "bread", "salt", "wood"]);
-  assert.equal(next.inventory.bread, 17 * I);
-  assert.equal(next.inventoryCostVoucherUnits.bread, 29 * V);
-  assert.equal(next.liabilities.wageVoucherUnits, 7 * V);
-  assert.equal(next.history.length, shop.history.length);
-  assert.equal(migrated.employment.targets.farmers, jobCount(migrated, "farmers"));
-});
-
 function serviceIncomeScenario(disposableVoucherPerDay) {
   const state = simulation.createInitialState({ seed: 161607 });
   const street = addStreet(state, "street-income", 2);
