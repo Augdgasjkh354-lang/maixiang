@@ -32,6 +32,8 @@ function blankShopPeriod() {
     taxExpenseVoucherUnits: 0,
     purchaseVoucherUnits: 0,
     soldUnits: {},
+    // 断货时居民想买而店里没货的未满足需求（进货口径用，见 procureShopInventory）。
+    stockoutUnits: {},
     purchasedUnits: {},
     serviceUses: {},
     customerCount: 0,
@@ -45,6 +47,7 @@ function ensureShopBooks(shop, content = null) {
   ensureBook(shop.accounts ||= {}, blankShopPeriod);
   for (const period of PERIODS) {
     shop.accounts[period].soldUnits ||= {};
+    shop.accounts[period].stockoutUnits ||= {};
     shop.accounts[period].purchasedUnits ||= {};
     shop.accounts[period].serviceUses ||= {};
     shop.accounts[period].customerCount ||= 0;
@@ -481,6 +484,19 @@ export function registerRejectedCustomers(state, shopId, units, content) {
   return count;
 }
 
+// 断货的未满足需求：居民想买、该店却已无货时记入当日口径，次日进货据此放量（不影响当日销量与收入）。
+// 同时计为拒客（店铺增员的需求依据）；单店当日记入量不超过其日接待能力，超出部分不是可实现的需求。
+export function registerShopStockoutDemand(state, shopId, itemId, units, content) {
+  const shop = state.shops?.[shopId];
+  if (!shop || shop.status !== "open" || !(units > 0)) return 0;
+  ensureShopBooks(shop, content);
+  const count = Math.min(Math.floor(units), shopSalesCapacityUnits(state, shop, content));
+  if (count <= 0) return 0;
+  bookAddMap(shop.accounts, "stockoutUnits", itemId, count);
+  registerRejectedCustomers(state, shopId, count, content);
+  return count;
+}
+
 export function recordShopServiceSale(state, shopId, householdId, serviceId, content) {
   const shop = ensureShops(state, content)[shopId];
   const def = shopDefinition(content, shop?.typeId);
@@ -526,9 +542,13 @@ export function procureShopInventory(state, shop, content) {
     const itemIds = activeRetailItemIds(state, shop, content);
     const capacity = shopSalesCapacityUnits(state, shop, content);
     const history = shop.history || [];
+    const observation = Math.max(1, content.rules.operatingObservationDays || 7);
+    const window = history.slice(-observation);
     const targetDays = Math.max(1, content.rules.shopInventoryTargetDays || 2);
     for (const itemId of itemIds) {
-      const avgItemSales = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.soldUnitsByItem?.[itemId] || 0), 0) / Math.max(1, Math.min(history.length, content.rules.operatingObservationDays || 7)) : 0;
+      // 进货口径 = 实际售出 + 断货时居民想买而没买到的未满足需求（否则断货会把目标压低，形成爬坡）。
+      const demandOf = row => Math.max(0, row.soldUnitsByItem?.[itemId] || 0) + Math.max(0, row.stockoutUnitsByItem?.[itemId] || 0);
+      const avgItemSales = window.length ? window.reduce((sum, row) => sum + demandOf(row), 0) / window.length : 0;
       const hasItemSalesHistory = history.some(row => Math.max(0, row.soldUnitsByItem?.[itemId] || 0) > 0);
       // 试进货按商品独立判断：某商品开店首日缺货时，不能因为别的商品已有营业历史就永久放弃补货。
       // 基线清理：客容量为 0（如无店员）时给保底试进货（20 斤），否则商店空转永不进货。
@@ -671,7 +691,8 @@ function archiveShopDay(state, shop, content) {
   const soldUnitsByItem = { ...(shop.accounts?.day?.soldUnits || {}) };
   const soldUnits = Object.values(soldUnitsByItem).reduce((sum, units) => sum + Math.max(0, units || 0), 0);
   const serviceUses = { ...(shop.accounts?.day?.serviceUses || {}) };
-  const row = { serial, soldUnits, soldUnitsByItem, serviceUses,
+  const stockoutUnitsByItem = { ...(shop.accounts?.day?.stockoutUnits || {}) };
+  const row = { serial, soldUnits, soldUnitsByItem, stockoutUnitsByItem, serviceUses,
     customerCount: shop.accounts?.day?.customerCount || 0,
     rejectedCustomerCount: shop.accounts?.day?.rejectedCustomerCount || 0,
     revenueVoucherUnits: shop.accounts?.day?.revenueVoucherUnits || 0,

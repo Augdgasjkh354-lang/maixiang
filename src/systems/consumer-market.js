@@ -8,7 +8,7 @@ import {
 } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { sellCompanyProduct, companySalePrice } from "./companies.js";
-import { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedCustomers } from "./shops.js";
+import { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedCustomers, registerShopStockoutDemand } from "./shops.js";
 import { shopTradePrices } from "../economy/operating-plan.js";
 import {
   householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits,
@@ -38,6 +38,8 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
   // 用户 0.1.11（-5）：库存超过当日剩余接待能力的店铺，溢出部分记 capped，
   // 未满足的需求按比例折算成各店的拒客数（registerCappedRejection）。
   const capped = options.capped && Array.isArray(options.capped) ? options.capped : null;
+  // 断货店（库存为 0）：居民想买时记为断货需求，供次日进货口径使用。
+  const stockouts = options.stockouts && Array.isArray(options.stockouts) ? options.stockouts : null;
   const generalStoreOnly = new Set(["flour", "bread", "salt", "wine", "cloth"]).has(itemId);
   const townStock = state.accounts.town[itemId] || 0;
   // 镇库木材属于建设储备，居民修缮需求不向镇库购买，避免挤占施工用材。
@@ -63,7 +65,11 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
     if (stock > available && capped && def && prices) {
       capped.push({ shopId: shop.id, cappedUnits: stock - available, price: prices.retailVoucherPerUnit });
     }
-    if (available > 0 && def && prices) sellers.push({ id: `shop:${shop.id}`, type: "shop", shopId: shop.id, shopTypeId: def.id, stockUnits: available, price: prices.retailVoucherPerUnit });
+    // 断货需求只记在本店经营的品类上（兜底售卖的非经营品不参与进货口径）。
+    const businessItem = shopRetailItemIds(shop, content).includes(itemId);
+    if (stock <= 0 && stockouts && businessItem && def && prices) stockouts.push({ shopId: shop.id, price: prices.retailVoucherPerUnit });
+    // stockLimited：可售量受库存（而非接待能力）限制，售罄即断货。
+    if (available > 0 && def && prices) sellers.push({ id: `shop:${shop.id}`, type: "shop", shopId: shop.id, shopTypeId: def.id, stockUnits: available, price: prices.retailVoucherPerUnit, stockLimited: available === stock && businessItem });
   }
   // Snapshot direct household suppliers once, before resident demand is processed.
   // This lets private producers sell without a shop while preventing goods bought
@@ -161,11 +167,8 @@ export function residentPurchasePowerUnits(state, priceVoucherPerPhysicalUnit, c
   return Math.max(0, Math.floor(availableValue / price));
 }
 
-// 用户 0.1.11（-5）原 f9：未满足的需求里居民买得起的部分，按各店铺被限流的
-// 库存比例折算成拒客数，记到对应店铺（店铺增员判断的依据之一）。
-function registerCappedRejection(state, itemId, unmetUnits, capped, householdNeed, content) {
-  if (!(unmetUnits > 0) || !capped.length) return;
-  const minPrice = Math.min(...capped.map(row => row.price));
+// 未满足需求里居民买得起（按最低售价）的部分。
+function affordableUnmetUnits(state, unmetUnits, minPrice, householdNeed, content) {
   const reserveDays = content.rules.basicCommerceFoodReserveDays ?? 30;
   const totalPeople = Math.max(1, populationStats(state).total);
   let affordable = 0;
@@ -177,11 +180,30 @@ function registerCappedRejection(state, itemId, unmetUnits, capped, householdNee
     if (need <= 0) continue;
     affordable += Math.min(need, maximumAffordableUnits(state, household, minPrice, content, reserveDays));
   }
-  affordable = Math.min(unmetUnits, affordable);
+  return Math.min(unmetUnits, affordable);
+}
+
+// 用户 0.1.11（-5）原 f9：未满足的需求里居民买得起的部分，按各店铺被限流的
+// 库存比例折算成拒客数，记到对应店铺（店铺增员判断的依据之一）。
+function registerCappedRejection(state, itemId, unmetUnits, capped, householdNeed, content) {
+  if (!(unmetUnits > 0) || !capped.length) return;
+  const minPrice = Math.min(...capped.map(row => row.price));
+  const affordable = affordableUnmetUnits(state, unmetUnits, minPrice, householdNeed, content);
   const totalCapped = capped.reduce((sum, row) => sum + row.cappedUnits, 0);
   for (const row of capped) {
     const units = Math.min(row.cappedUnits, Math.round(affordable * row.cappedUnits / Math.max(1, totalCapped)));
     if (units > 0) registerRejectedCustomers(state, row.shopId, units, content);
+  }
+}
+
+// 断货需求：居民买得起的未满足量，按断货店均分记入各店当日断货需求。
+function registerStockoutDemand(state, itemId, unmetUnits, stockouts, householdNeed, content) {
+  if (!(unmetUnits > 0) || !stockouts.length) return;
+  const minPrice = Math.min(...stockouts.map(row => row.price));
+  const affordable = affordableUnmetUnits(state, unmetUnits, minPrice, householdNeed, content);
+  const allocation = allocateIntegerByWeight(Math.floor(affordable), stockouts, () => 1);
+  for (const row of allocation.rows || []) {
+    if (row.units > 0) registerShopStockoutDemand(state, row.recipient.shopId, itemId, row.units, content);
   }
 }
 
@@ -214,12 +236,14 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
     return { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: desiredUnits <= 0 ? "需求已满足" : "售价无效" };
   }
   const cappedSellers = [];
-  const sellers = sellerRowsForItem(state, itemId, directPrice, content, { ...options, capped: cappedSellers });
+  const stockoutSellers = [];
+  const sellers = sellerRowsForItem(state, itemId, directPrice, content, { ...options, capped: cappedSellers, stockouts: stockoutSellers });
   // 弹性只在综合商店是卖家时才应用，避免误伤其他卖家。
   desiredUnits = applyRetailElasticity(state, itemId, desiredUnits, content, sellers);
   if (!sellers.length) {
     // 用户 0.1.11（-5）：无可用卖家但有店铺被接待能力限流，记拒客并返回对应原因。
     registerCappedRejection(state, itemId, Math.max(0, Math.floor(desiredUnits)), cappedSellers, null, content);
+    registerStockoutDemand(state, itemId, Math.max(0, Math.floor(desiredUnits)), stockoutSellers, null, content);
     return { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: cappedSellers.length ? "店铺接待能力已满" : "市场没有可售库存" };
   }
 
@@ -273,6 +297,7 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
       paid += sale.paidVoucherUnits;
     }
     if (sellerSold > 0) sellerRows.push({ seller: seller.id, quantityUnits: sellerSold, paidVoucherUnits: sellerPaid, sellerCostVoucherUnits: sellerCost });
+    if (seller.type === "shop" && seller.stockLimited && sellerLeft <= 0) stockoutSellers.push({ shopId: seller.shopId, price: seller.price });
   }
   state._deferHouseholdSync = previousDefer;
   if (!previousDefer) syncResidentAggregates(state, content);
@@ -280,6 +305,10 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
   // 用户 0.1.11（-5）：部分成交时，未满足且居民买得起的需求按店铺限流比例记拒客。
   if (purchased < desiredUnits && cappedSellers.length) {
     registerCappedRejection(state, itemId, desiredUnits - purchased, cappedSellers, householdNeed, content);
+  }
+  // 部分成交且有店铺售罄（库存限制）：未满足的买得起需求记为断货需求，次日补货。
+  if (purchased < desiredUnits && stockoutSellers.length) {
+    registerStockoutDemand(state, itemId, desiredUnits - purchased, stockoutSellers, householdNeed, content);
   }
   const stockUnits = sellers.reduce((sum, row) => sum + row.stockUnits, 0);
   return {
