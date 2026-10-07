@@ -1990,7 +1990,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod13 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-bdec22c";
+       const BUILD_ID = "0203-405cac5";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -15624,11 +15624,7 @@ const { maybeRefreshHouseholdIncomeExpectations } = __mxmod68;
 const { accrueServiceDemand, processServiceDemand } = __mxmod52;
 const { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } = __mxmod32;
 const { applyCompanyDistributionsToAnnualReport, buildAnnualReport } = __mxmod69;
-function settleOneDay(state, content) {
-  const beforeTotal = totalQeqUnits(state, content);
-  const isNewYearDay = state.day === 0;
-  const peopleAtStart = populationStats(state);
-  const saltDemandUnits = accrueSaltNeed(state, peopleAtStart.total, content);
+function resetDayBooks(state, content) {
   state.financialFlows ||= { day: emptyFinancialFlowPeriod(), year: emptyFinancialFlowPeriod(), cumulative: emptyFinancialFlowPeriod() };
   state.financialFlows.day = emptyFinancialFlowPeriod();
   resetCompanyDaily(state, content);
@@ -15636,27 +15632,6 @@ function settleOneDay(state, content) {
   resetWholesaleDay(state, content);
   clearDailyHouseholdIncome(state);
   resetHouseholdLifeDay(state, content);
-  // 新年首日先清空新日账，再结算上一年度利润；居民实际到账立即进入本日/本年/累计投资收入。
-  const yearStartCompanyDistributions = state.day === 0 && state.year > 1
-    ? settleAnnualCompanyDividends(state, state.year - 1, content) : [];
-  if (yearStartCompanyDistributions.length) applyCompanyDistributionsToAnnualReport(state, state.year - 1, yearStartCompanyDistributions);
-  // 每年1月1日征收别墅房产税（含补扣历史欠税）。
-  const villaTax = state.day === 0 ? settleVillaPropertyTax(state, content) : null;
-  accrueServiceDemand(state, content);
-  refreshOperatingPlan(state, content);
-  arrangePrivateWorkers(state, content);
-  arrangeListedWorkers(state, content);
-  syncShopEmployment(state, content);
-  refillAgricultureToTarget(state, content);
-  ensureEmploymentExchangeDay(state, content);
-  const laborAtStart = employmentSnapshot(state, content);
-  const housingAtStart = selectHousing(state, content);
-  state.policy.agricultureTaxRecent ||= [];
-  state.policy.agricultureTaxRecent.push({ year: state.year, day: state.day + 1,
-    rateBps: Math.round((state.policy.agricultureTaxPercent ?? 50) * 100) });
-  state.policy.agricultureTaxRecent = state.policy.agricultureTaxRecent.slice(-(content.rules.agricultureTaxLookbackDays || 30));
-
-  // Reset only the current-day business view; annual and lifetime books remain intact.
   if (state.business) {
     state.business.day = {
       producedUnits: {}, soldBreadUnits: 0, revenueWheatUnits: 0, breadCogsWheatUnits: 0, rawInputCostWheatUnits: 0,
@@ -15670,188 +15645,190 @@ function settleOneDay(state, content) {
   resetPrivateDaily(state);
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
   if (state.agriculture?.reclaim) state.agriculture.reclaim.day = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
+}
 
-  // 1. Basic relief protects residents before any discretionary payment.
-  const relief = applyAutomaticRelief(state, peopleAtStart.total, content);
-  // 2. Settle old wage arrears, then today's wages. Builders are captured before completion.
-  const wages = payDailyWages(state, laborAtStart, content);
-  const companyWages = payListedCompanyWages(state, content);
-  const privateWages = payPrivateIndustryWages(state, content);
-  // 3. Unemployment benefit uses that same start-of-day employment snapshot.
-  const unemployment = payUnemploymentBenefit(state, laborAtStart, content);
-  // 3b. 社保基金开启时发放养老金（按老人人数到户）。
-  const pension = payPensions(state, content);
-  // 4–5. Construction consumes committed materials once; operating buildings then process.
-  const construction = advanceConstruction(state, content);
-  // 固定调拨先执行，镇营生产者也必须从批发市场取得当日原料。
-  const wholesaleTownAllocation = runWholesaleIntake(state, [], [], content, { includeTownAllocation: true });
-  const production = processAllBuildings(state, content);
-  // 当日镇营产成品立即回到批发市场，供后续民营、公司与商铺采购。
-  const wholesaleTownOutput = runWholesaleIntake(state, production, [], content, { includeTownAllocation: false });
-  const privateProduction = processPrivateIndustries(state, content);
-  const wholesalePrivateIntake = runWholesaleIntake(state, [], privateProduction, content, { includeTownAllocation: false });
-  const companyProduction = processListedCompanies(state, content);
-  const wholesaleCompanyIntake = sellCompanyOutputsToWholesale(state, content);
-  const wholesaleIntake = { allocation: wholesaleTownAllocation, town: wholesaleTownOutput, private: wholesalePrivateIntake, company: wholesaleCompanyIntake };
-  // 6. Shops accrue wages/rent and restock after producers finish.
-  const shopPreparation = prepareShopsForDay(state, content);
-  // 7. Rent uses the opening occupancy snapshot, so housing completed today earns rent tomorrow.
-  const rent = settleHousingRent(state, housingAtStart, content);
-  // 7b. 别墅购买：检查空置别墅，按流动资产从高到低撮合富裕家庭购房（购房款进镇库）。
-  const villaSales = settleVillaPurchases(state, content);
-  // 8. Salt purchase is independent of food, but protects the same thirty-day staple reserve.
-  const saltTrade = buySaltForResidents(state, content);
-  // 9. 主食购买按固定份额拆分到小麦、面粉、面包，并复核盐后的剩余粮食与预算。
-  const trade = buyStaplesForResidents(state, peopleAtStart.total, content);
-  // 9b. 主食之后居民再买木材修缮房屋，买入即消耗，不留在家庭库存。
-  const repairWood = buyRepairWoodForResidents(state, content);
-  // 10. Services spend only the household's remaining discretionary budget after basic living payments.
-  const services = processServiceDemand(state, content);
-  // 11. Grain and salt are consumed independently; salt never replaces口粮.
-  const meal = consumeDailyRations(state, peopleAtStart.total, content);
-  const saltMeal = consumeDailySalt(state, content);
-  const comfortQeq = meal.moves.reduce(function (sum, move) {
-    const item = content.items[move.itemId];
-    return sum + move.qeqUnits * (item?.satisfactionPerQeq || 0);
-  }, 0);
-  const satisfactionInterval = content.rules.satisfactionUpdateIntervalDays || 1;
-  const satisfactionSerial = (state.year - 1) * content.rules.daysPerYear + state.day;
-  const urgentLifeIssue = meal.missingQeqUnits > 0 || saltMeal.missingUnits > 0 || housingAtStart.shortage > 0 || (wages.unpaidCurrentVoucher || 0) > 0;
-  if (urgentLifeIssue || satisfactionSerial % satisfactionInterval === 0 || !state.satisfactionFactors?.householdWeighted) {
-    updateSatisfaction(state, peopleAtStart.total, comfortQeq, content, {
-      housing: housingAtStart,
-      saltCoverage: selectSaltCoverage(state, content).coverage,
-      saltGrace: state.salt.graceDaysElapsed < content.rules.saltGraceDays
-    });
+function resetYearBooks(state, content) {
+  state.yearTotals = emptyYearTotals();
+  if (state.business) {
+    state.business.year = {
+      producedUnits: {}, soldBreadUnits: 0, revenueWheatUnits: 0, breadCogsWheatUnits: 0, rawInputCostWheatUnits: 0,
+      operatingWagesWheatUnits: 0, constructionWagesWheatUnits: 0, processingLossWheatUnits: 0
+    };
+    for (const row of Object.values(state.business.buildings || {})) row.yearOutputUnits = {};
   }
-  finalizeHouseholdLifeDay(state, content);
-  // 收入预期：7—30 天随机刷新一次（为下版本满意度/消费/跳槽打地基；本期只计算存储）。
-  maybeRefreshHouseholdIncomeExpectations(state, content);
-  finishSaltGraceDay(state, content);
-  // 11. Finish shop books after retail demand is known.
-  const shops = finishShopsDay(state, content, state.day + 1 >= content.rules.daysPerYear);
-  recordConsumerDay(state, content);
-  // 12. Today's staffed farm labor accrues before the day advances.
-  accumulateFarmDay(state, content);
-  const endingYearToday = state.day + 1 >= content.rules.daysPerYear;
-  // 流动性日结算：刷新投资比例（五期算法），供银行/国债当日使用。
-  settleLiquidityDay(state, content);
-  // 银行日结算：存款计息/吸储、贷款计息/还款/核销、公司自动借款（金融扩展二期）。
-  settleBankDay(state, content);
-  // 国债日结算：认购/拍卖定价、付息、到期还本/展期/违约（金融扩展三期）。
-  settleBondsDay(state, content);
-  // 股市日结算：AI 做市商驱动股价向利润锚波动（金融扩展四期）。
-  settleStockMarketDay(state, content);
-  // 住户日常股票买入：按存款/股票倾向分流后的预算在二级市场买入（镇库做市）
-  settleHouseholdStockBuying(state, content);
-
-  state.day += 1;
-  if (state.day === 91) recordEvent(state, "春耕已过，麦苗渐渐齐整。", content);
-  if (state.day === 183) recordEvent(state, "暑气渐盛，田间进入拔节时节。", content);
-  if (state.day === content.rules.growingDays) {
-    recordEvent(state, "秋收将启，田里麦浪金黄。", content);
+  if (state.payroll) state.payroll.year = {
+    paidWheatUnits: 0, currentPaidWheatUnits: 0, arrearsPaidWheatUnits: 0,
+    unpaidWheatUnits: 0, unemploymentPaidWheatUnits: 0, accruedWheatUnits: 0
+  };
+  for (const industry of Object.values(state.industries || {})) {
+    industry.year = { producedUnits: {}, soldUnits: 0, revenueWheatUnits: 0, operatingWagesWheatUnits: 0 };
   }
+  resetPrivateYear(state);
+  resetCompanyYear(state, content, state.year - 1);
+  resetShopYear(state, content);
+  resetWholesaleYear(state, content);
+  resetLaborCompetitionYear(state);
+  state.financialFlows.year = emptyFinancialFlowPeriod();
+  if (state.fiscal) state.fiscal.year = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
+  if (state.agriculture?.reclaim) state.agriculture.reclaim.year = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
+  if (state.salt) state.salt.year = { demandUnits: 0, satisfiedUnits: 0, purchasedUnits: 0, paidWheatUnits: 0 };
+  resetYearHouseholdIncome(state);
+  resetHouseholdLifeYear(state, content);
+}
 
-  let harvestResult = null;
-  if (state.day === content.rules.growingDays &&
-      state.agriculture.lastHarvestYear !== state.year) {
-    harvestResult = harvest(state, content);
-  }
+// ---------------------------------------------------------------- 日结流水线
+//
+// 一天按下表从上到下执行。每步：
+//   id    结果名，run 的返回值存进 day[id]，最后作为 settleOneDay 的返回值
+//   when  可选，返回 false 时跳过（结果为 null）
+//   run   (state, content, day) → 结果；day 里有前面各步的结果和开日快照
+// 加新系统：在合适位置插一行即可。顺序就是经济逻辑：先发钱、再生产、再买卖、再消费、最后金融与翻日。
 
-  let demography = null;
-  let annualReport = null;
-  if (state.day >= content.rules.daysPerYear) {
+const newYearDay = (state, content, day) => day.isNewYearDay;
+const yearEndsToday = (state, content) => state.day + 1 >= content.rules.daysPerYear;
+
+       const DAILY_STEPS = [
+  // ── 开日：清当日账，做快照
+  { id: "openDay", run: (state, content, day) => {
+    day.saltDemandUnits = accrueSaltNeed(state, day.peopleAtStart.total, content);
+    resetDayBooks(state, content);
+  } },
+  // 新年首日：先结上一年公司利润（居民到账进入新一年账本），再收别墅房产税。
+  { id: "yearStartCompanyDistributions", run: (state, content) => {
+    if (!(state.day === 0 && state.year > 1)) return [];
+    const rows = settleAnnualCompanyDividends(state, state.year - 1, content);
+    if (rows.length) applyCompanyDistributionsToAnnualReport(state, state.year - 1, rows);
+    return rows;
+  } },
+  { id: "villaTax", when: (state) => state.day === 0, run: settleVillaPropertyTax },
+
+  // ── 用工：排生产计划、招工，之后的工资与失业金都按这一刻的就业快照
+  { id: "staffing", run: (state, content, day) => {
+    accrueServiceDemand(state, content);
+    refreshOperatingPlan(state, content);
+    arrangePrivateWorkers(state, content);
+    arrangeListedWorkers(state, content);
+    syncShopEmployment(state, content);
+    refillAgricultureToTarget(state, content);
+    ensureEmploymentExchangeDay(state, content);
+    day.laborAtStart = employmentSnapshot(state, content);
+    day.housingAtStart = selectHousing(state, content);
+    state.policy.agricultureTaxRecent ||= [];
+    state.policy.agricultureTaxRecent.push({ year: state.year, day: state.day + 1,
+      rateBps: Math.round((state.policy.agricultureTaxPercent ?? 50) * 100) });
+    state.policy.agricultureTaxRecent = state.policy.agricultureTaxRecent.slice(-(content.rules.agricultureTaxLookbackDays || 30));
+  } },
+
+  // ── 发钱：救济优先，再发工资（先还旧欠薪），再失业金、养老金
+  { id: "relief", run: (state, content, day) => applyAutomaticRelief(state, day.peopleAtStart.total, content) },
+  { id: "wages", run: (state, content, day) => payDailyWages(state, day.laborAtStart, content) },
+  { id: "companyWages", run: payListedCompanyWages },
+  { id: "privateWages", run: payPrivateIndustryWages },
+  { id: "unemployment", run: (state, content, day) => payUnemploymentBenefit(state, day.laborAtStart, content) },
+  { id: "pension", run: payPensions },
+
+  // ── 生产：施工 → 镇营（原料从批发市场领，产品交回）→ 民营 → 公司，产品都进批发市场
+  { id: "construction", run: advanceConstruction },
+  { id: "wholesaleTownAllocation", run: (state, content) => runWholesaleIntake(state, [], [], content, { includeTownAllocation: true }) },
+  { id: "production", run: processAllBuildings },
+  { id: "wholesaleTownOutput", run: (state, content, day) => runWholesaleIntake(state, day.production, [], content, { includeTownAllocation: false }) },
+  { id: "privateProduction", run: processPrivateIndustries },
+  { id: "wholesalePrivateIntake", run: (state, content, day) => runWholesaleIntake(state, [], day.privateProduction, content, { includeTownAllocation: false }) },
+  { id: "companyProduction", run: processListedCompanies },
+  { id: "wholesaleCompanyIntake", run: sellCompanyOutputsToWholesale },
+
+  // ── 商业与居民购买：店铺计提并补货 → 房租 → 别墅 → 盐 → 主食 → 修缮木材 → 服务
+  { id: "shopPreparation", run: prepareShopsForDay },
+  { id: "rent", run: (state, content, day) => settleHousingRent(state, day.housingAtStart, content) },
+  { id: "villaSales", run: settleVillaPurchases },
+  { id: "saltTrade", run: buySaltForResidents },
+  { id: "trade", run: (state, content, day) => buyStaplesForResidents(state, day.peopleAtStart.total, content) },
+  { id: "repairWood", run: buyRepairWoodForResidents },
+  { id: "services", run: processServiceDemand },
+
+  // ── 生活：吃饭、吃盐、舒心值、家庭日账
+  { id: "meal", run: (state, content, day) => consumeDailyRations(state, day.peopleAtStart.total, content) },
+  { id: "saltMeal", run: consumeDailySalt },
+  { id: "satisfaction", run: (state, content, day) => {
+    const comfortQeq = day.meal.moves.reduce((sum, move) => sum + move.qeqUnits * (content.items[move.itemId]?.satisfactionPerQeq || 0), 0);
+    const interval = content.rules.satisfactionUpdateIntervalDays || 1;
+    const serial = (state.year - 1) * content.rules.daysPerYear + state.day;
+    const urgent = day.meal.missingQeqUnits > 0 || day.saltMeal.missingUnits > 0 || day.housingAtStart.shortage > 0 || (day.wages.unpaidCurrentVoucher || 0) > 0;
+    if (urgent || serial % interval === 0 || !state.satisfactionFactors?.householdWeighted) {
+      updateSatisfaction(state, day.peopleAtStart.total, comfortQeq, content, {
+        housing: day.housingAtStart,
+        saltCoverage: selectSaltCoverage(state, content).coverage,
+        saltGrace: state.salt.graceDaysElapsed < content.rules.saltGraceDays
+      });
+    }
+    finalizeHouseholdLifeDay(state, content);
+    maybeRefreshHouseholdIncomeExpectations(state, content);
+    finishSaltGraceDay(state, content);
+  } },
+
+  // ── 收尾：店铺结账（年末强制结算）、记录消费、农田出工
+  { id: "shops", run: (state, content) => finishShopsDay(state, content, yearEndsToday(state, content)) },
+  { id: "farmDay", run: (state, content) => { recordConsumerDay(state, content); accumulateFarmDay(state, content); } },
+
+  // ── 金融：流动性 → 银行 → 国债 → 股市 → 住户买股
+  { id: "finance", run: (state, content) => {
+    settleLiquidityDay(state, content);
+    settleBankDay(state, content);
+    settleBondsDay(state, content);
+    settleStockMarketDay(state, content);
+    settleHouseholdStockBuying(state, content);
+  } },
+
+  // ── 翻日：节气、秋收
+  { id: "harvest", run: (state, content) => {
+    state.day += 1;
+    if (state.day === 91) recordEvent(state, "春耕已过，麦苗渐渐齐整。", content);
+    if (state.day === 183) recordEvent(state, "暑气渐盛，田间进入拔节时节。", content);
+    if (state.day === content.rules.growingDays) recordEvent(state, "秋收将启，田里麦浪金黄。", content);
+    return state.day === content.rules.growingDays && state.agriculture.lastHarvestYear !== state.year ? harvest(state, content) : null;
+  } },
+
+  // ── 年终：人口变动、年报、翻年
+  { id: "annualReport", when: (state, content) => state.day >= content.rules.daysPerYear, run: (state, content, day) => {
     const householdLifeYear = archiveHouseholdLifeYear(state, content);
     const peopleBefore = populationStats(state);
-    demography = advancePopulation(state, content);
-      syncShopEmployment(state, content);
+    day.demography = advancePopulation(state, content);
+    syncShopEmployment(state, content);
     const peopleAfter = populationStats(state);
-    annualReport = buildAnnualReport(state, content, {
-      householdLifeYear, peopleBefore, peopleAfter, demography, closingQeq: totalQeqUnits(state, content)
+    const report = buildAnnualReport(state, content, {
+      householdLifeYear, peopleBefore, peopleAfter, demography: day.demography, closingQeq: totalQeqUnits(state, content)
     });
-    state.annualReports.push(annualReport);
+    state.annualReports.push(report);
     state.year += 1;
     state.day = 0;
-    state.yearTotals = emptyYearTotals();
-    if (state.business) {
-      state.business.year = {
-        producedUnits: {}, soldBreadUnits: 0, revenueWheatUnits: 0, breadCogsWheatUnits: 0, rawInputCostWheatUnits: 0,
-        operatingWagesWheatUnits: 0, constructionWagesWheatUnits: 0, processingLossWheatUnits: 0
-      };
-      for (const row of Object.values(state.business.buildings || {})) row.yearOutputUnits = {};
-    }
-    if (state.payroll) state.payroll.year = {
-      paidWheatUnits: 0, currentPaidWheatUnits: 0, arrearsPaidWheatUnits: 0,
-      unpaidWheatUnits: 0, unemploymentPaidWheatUnits: 0, accruedWheatUnits: 0
-    };
-    if (state.industries) {
-      for (const industry of Object.values(state.industries)) {
-        industry.year = { producedUnits: {}, soldUnits: 0, revenueWheatUnits: 0, operatingWagesWheatUnits: 0 };
-      }
-    }
-    resetPrivateYear(state);
-    resetCompanyYear(state, content, state.year - 1);
-    resetShopYear(state, content);
-    resetWholesaleYear(state, content);
-    resetLaborCompetitionYear(state);
-    state.financialFlows.year = emptyFinancialFlowPeriod();
-    if (state.fiscal) state.fiscal.year = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
-    if (state.agriculture?.reclaim) state.agriculture.reclaim.year = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
-    if (state.salt) state.salt.year = { demandUnits: 0, satisfiedUnits: 0, purchasedUnits: 0, paidWheatUnits: 0 };
-    resetYearHouseholdIncome(state);
-    resetHouseholdLifeYear(state, content);
+    resetYearBooks(state, content);
+    return report;
+  } },
+
+  // ── 外镇（放最后，不扰动前面系统的随机数流）与历史记录
+  { id: "outsideTownYear", when: newYearDay, run: settleOutsideTownYear },
+  { id: "wheatLoanYear", when: newYearDay, run: settleWheatLoansYear },
+  { id: "tradeAgreementMonth", run: settleTradeAgreementsMonth },
+  { id: "tradeAgreementYear", when: newYearDay, run: settleTradeAgreementsYear },
+  { id: "outsideTownDay", run: advanceOutsideTownDay },
+  { id: "history", run: (state, content) => { recordEconomyHistory(state, content); snapshotWholesaleHistory(state, content); } }
+];
+
+       function settleOneDay(state, content) {
+  const beforeTotal = totalQeqUnits(state, content);
+  const day = { isNewYearDay: state.day === 0, peopleAtStart: populationStats(state), demography: null };
+  for (const step of DAILY_STEPS) {
+    day[step.id] = !step.when || step.when(state, content, day) ? (step.run(state, content, day) ?? null) : null;
   }
-  // 外镇动态放在一日结算末尾：年事件/生产消费在1月1日结算，每日衰减贸易记忆并重算价格。
-  // 刻意在既有系统之后推进，避免扰动既有随机数流（存档种子可复现性不受影响）。
-  const outsideTownYear = isNewYearDay ? settleOutsideTownYear(state, content) : null;
-  // 小麦贷款年结：计息 + 外镇用结余小麦还款（放在年事件之后，有当年收成可还）
-  const wheatLoanYear = isNewYearDay ? settleWheatLoansYear(state, content) : null;
-  // 长期贸易协定：每月交付 1/12（只从批发市场扣货），年结递减剩余年限。
-  const tradeAgreementMonth = settleTradeAgreementsMonth(state, content);
-  const tradeAgreementYear = isNewYearDay ? settleTradeAgreementsYear(state, content) : null;
-  const outsideTownDay = advanceOutsideTownDay(state, content);
-  // 经济历史曲线（用户 0.1.11）：每日收盘后记录，供地图"经济"面板画走势。
-  recordEconomyHistory(state, content);
-  // 批发市场历史快照（0.1.11 补回）：每日库存/销量/价格，保留30天，供趋势分析。
-  snapshotWholesaleHistory(state, content);
-  const afterTotal = totalQeqUnits(state, content);
   return {
-    construction,
-    production,
-    privateProduction,
-    companyProduction,
-    wholesaleIntake,
-    shopPreparation,
-    shops,
-    relief,
-    companyWages,
-    privateWages,
-    wages,
-    unemployment,
-    pension,
-    rent,
-    villaSales,
-    villaTax,
-    outsideTownYear,
-    outsideTownDay,
-    tradeAgreementMonth,
-    tradeAgreementYear,
-    saltTrade,
-    saltMeal,
-    trade,
-    repairWood,
-    services,
-    meal,
-    harvest: harvestResult,
-    demography,
-    annualReport,
-    yearStartCompanyDistributions,
-    shortageQeq: meal.missingQeqUnits,
-    totalChangeQeqUnits: afterTotal - beforeTotal,
+    ...day,
+    wholesaleIntake: { allocation: day.wholesaleTownAllocation, town: day.wholesaleTownOutput, private: day.wholesalePrivateIntake, company: day.wholesaleCompanyIntake },
+    shortageQeq: day.meal.missingQeqUnits,
+    totalChangeQeqUnits: totalQeqUnits(state, content) - beforeTotal,
     population: populationStats(state)
   };
 }
-return { settleOneDay };
+return { DAILY_STEPS, settleOneDay };
 })();
 
 // ===== selectors/economy.js =====

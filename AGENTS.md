@@ -28,7 +28,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 |---|---|
 | `src/content/` | 静态定义：物品、建筑、岗位、规则参数。版本号在 `version.js`，存档版本 `SAVE_VERSION` 在 `rules.js` |
 | `src/core/` | 初始状态 `state.js`、所有玩家操作 `commands.js`、状态校验 `validation.js` |
-| `src/systems/` | 日结各系统；入口 `daily.js` 的 `settleOneDay` |
+| `src/systems/` | 日结各系统。一天的执行顺序就是 `daily.js` 里的 `DAILY_STEPS` 表（开日 → 用工 → 发钱 → 生产 → 购买 → 生活 → 金融 → 翻日/年终 → 外镇）；加系统就在表里插一行 |
 | `src/economy/` | 货币、支付、库存、价格、账本。`accounts.js` 统一回答"某账户的粮券/小麦/库存存在哪"，`books.js` 统一当日/本年/累计三段记账，`trade.js` 统一买卖（带成本库存 `putStock`/`takeStock`、卖家列表 `directSellers`、直接采购 `buyDirect`） |
 | `src/selectors/` | 只读派生数据；界面数据总入口 `dashboard.js` 的 `selectDashboard` |
 | `src/persistence/` | 存档读写与旧档迁移（`migrations.js`） |
