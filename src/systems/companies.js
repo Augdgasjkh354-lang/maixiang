@@ -604,7 +604,7 @@ export function payListedCompanyWages(state, content) {
     company.payroll.cumulativeAccruedVoucherUnits += due; addPeriodValue(company, "wageExpenseVoucherUnits", due); applyProfit(company, -due);
     const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
     const result = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
-      "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`, { shortfallPrefix: `company-wage:${company.id}` });
+      "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`);
     state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
     company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + company.payroll.legacyUnattributedArrearsVoucherUnits;
     company.payroll.cumulativePaidVoucherUnits += result.paid; addPeriodValue(company, "wagesPaidVoucherUnits", result.paid);
@@ -807,7 +807,7 @@ export function settleAnnualCompanyProfits(state, endingYear, content) {
     }
     // 先尝试偿付已形成的工资债务。债权仍归原家庭，支付媒介由统一支付层决定。
     const debtResult = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
-      "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`, { shortfallPrefix: `company-wage:${company.id}` });
+      "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`);
     company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + (company.payroll.legacyUnattributedArrearsVoucherUnits || 0);
 
     const retainedBefore = Math.max(0, company.retainedEarningsVoucherUnits || 0);

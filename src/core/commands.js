@@ -4,7 +4,7 @@ import { payManualRelief, setAutomaticRelief } from "../systems/finance.js";
 import { demolishBuilding, startBuildingUpgrade } from "../systems/building-development.js";
 import { sellOperatingLevel as sellOperatingLevelSystem } from "../systems/operating-rights.js";
 import { issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, currencyScale } from "../economy/currency.js";
-import { completeMonetaryReform, setResidentExchangeEnabled, setVoucherPaymentTarget, startMonetaryReform } from "../economy/payment.js";
+import { startMonetaryReform } from "../economy/payment.js";
 import {
   createIndependentCompany, executeShareSubscription, injectCompanyCapital,
   setCompanyDividendPercent, setIntermediatePrice, setShareOffer, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice,
@@ -354,9 +354,6 @@ export function configureServicePrice(state, serviceId, value, content) {
 }
 
 export function startCurrencyReform(state, content) { return startMonetaryReform(state, content); }
-export function configureVoucherPaymentTarget(state, percent) { return setVoucherPaymentTarget(state, percent); }
-export function configureResidentExchange(state, enabled) { return setResidentExchangeEnabled(state, enabled); }
-export function finishCurrencyReform(state, content) { return completeMonetaryReform(state, content); }
 
 // 开荒：亩数与投入人数由面板输入，成本按内容比例换算，工资由镇库承担并记账。
 export function reclaimFarmland(state, acres, workers, content) {

@@ -216,22 +216,8 @@ export function validateState(state, content) {
     }
   }
   const reform = state.monetaryReform;
-  if (!reform || !["wheat", "transition", "voucher"].includes(reform.stage) ||
-      !Number.isInteger(reform.targetVoucherBps) || reform.targetVoucherBps < 0 || reform.targetVoucherBps > 10000 ||
-      typeof reform.residentExchangeEnabled !== "boolean" || typeof reform.legacyBankAccess !== "boolean" ||
-      !Array.isArray(reform.paymentHistory) || !reform.voucherShortfallByKey || Array.isArray(reform.voucherShortfallByKey)) {
+  if (!reform || !["wheat", "voucher"].includes(reform.stage) || typeof reform.legacyBankAccess !== "boolean") {
     errors.push("货币改革状态无效");
-  } else {
-    for (const row of reform.paymentHistory) {
-      if (!Number.isInteger(row?.serial) || row.serial <= 0 || !Number.isInteger(row?.year) || row.year <= 0 ||
-          !Number.isInteger(row?.day) || row.day <= 0 || row.day > content.rules.daysPerYear ||
-          ["paidValueUnits", "voucherValueUnits", "wheatValueUnits", "fallbackWheatValueUnits", "unpaidAttemptValueUnits"]
-            .some(key => !Number.isSafeInteger(row?.[key] || 0) || (row?.[key] || 0) < 0)) {
-        errors.push("货币改革支付历史无效");
-        break;
-      }
-    }
-    if (Object.values(reform.voucherShortfallByKey).some(value => !Number.isSafeInteger(value) || value < 0)) errors.push("缺券未付记录无效");
   }
   const currencyCheck = validateCurrencyInvariant(state, content);
   if (!currencyCheck.valid) errors.push("粮券总账不守恒：账户余额与未注销发行量不一致");

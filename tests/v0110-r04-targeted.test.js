@@ -53,73 +53,6 @@ function valuationCompany({ capitalVoucher = 20000, inventoryCostVoucher = 0, da
   };
 }
 
-test("r04 镇库余额充足时当日镇营工资到账且不新增欠薪；50%混合工资也可完整结算", () => {
-  const state = legacyVoucherState({ seed: 110401 });
-  const mill = addBuilding(state, "mill", "r04-town-mill");
-  simulation.setWageRate(state, "millers", 10);
-  assert.equal(simulation.setEmployment(state, `${mill.id}::millers`, 1).ok, true);
-  assert.equal(simulation.issueGrainVouchers(state, "town", 20).ok, true);
-  const assignment = jobAssignments(state, `${mill.id}::millers`)[0];
-  assert.ok(assignment);
-  const worker = state.households.byId[assignment.householdId];
-  const beforeVoucher = worker.voucherUnits;
-  const row = employmentSnapshot(state, CONTENT).rows.find(item => item.key === `${mill.id}::millers`);
-  const paid = payDailyWages(state, { rows: [row] }, CONTENT);
-  assert.equal(worker.voucherUnits - beforeVoucher, 10 * V);
-  assert.equal(paid.currentPaidVoucher, 10);
-  assert.equal(state.payroll.arrearsVoucherUnits[row.key], 0);
-
-  state.monetaryReform.stage = "transition";
-  state.monetaryReform.targetVoucherBps = 5000;
-  // 只留5券，再由镇库以5斤小麦完成另一半，验证混合支付不会制造欠薪。
-  state.currency.balances.town = 5 * V;
-  state.currency.issuedUnits = 5 * V + Object.values(state.currency.balances).filter((_, i) => i > 1).reduce((a, b) => a + (b || 0), 0);
-  // 家庭余额是独立账户，重新按实际总余额校正发行量。
-  state.currency.issuedUnits = simulation.validateCurrencyInvariant(state).balances;
-  const beforeWheat = worker.inventory.wheat;
-  const paidMixed = payDailyWages(state, { rows: [row] }, CONTENT);
-  assert.equal(paidMixed.currentPaidVoucher, 10);
-  assert.equal(worker.voucherUnits - beforeVoucher, 15 * V);
-  assert.equal(worker.inventory.wheat - beforeWheat, 5 * I);
-  assert.equal(state.payroll.arrearsVoucherUnits[row.key], 0);
-  assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
-});
-
-test("r04 商业街员工只由店铺支付一次；镇库清理r03聚合幽灵欠薪且不碰其他欠薪", () => {
-  const state = simulation.createInitialState({ seed: 110402 });
-  const { street, shop } = openTeaShop(state);
-  assert.equal(simulation.configureShopClerks(state, shop.id, 1).assigned, 1);
-  const householdWheatBefore = householdList(state).reduce((sum, h) => sum + (h.inventory.wheat || 0), 0);
-  prepareShopsForDay(state, CONTENT);
-  const householdWheatAfterShop = householdList(state).reduce((sum, h) => sum + (h.inventory.wheat || 0), 0);
-  // 基线清理：店主本人兼任商人不领固定工资（拿利润），仅店员计 5 券工资（默认日薪 10→5 斤，8cf03ae）。
-  assert.equal(shop.accounts.day.wageExpenseVoucherUnits, 5 * V, "店主商人不领工资，仅1店员计5券工资");
-  assert.equal(householdWheatAfterShop - householdWheatBefore, 5 * I, "店铺工资应真实进入家庭账户");
-
-  state.payroll ||= {};
-  state.payroll.arrearsVoucherUnits ||= {};
-  state.payroll.creditorClaims ||= {};
-  state.payroll.creditorPaymentClaims ||= {};
-  state.payroll.legacyUnattributedArrearsVoucherUnits ||= {};
-  const ghostKey = `${street.id}::shop_clerks`;
-  state.payroll.arrearsVoucherUnits[ghostKey] = 80 * V;
-  state.payroll.legacyUnattributedArrearsVoucherUnits[ghostKey] = 80 * V;
-  state.payroll.arrearsVoucherUnits["real-town-debt"] = 7 * V;
-  state.monetaryReform.voucherShortfallByKey[`town-wage:${ghostKey}:ghost`] = 80 * V;
-  const labor = simulation.selectJobRows(state);
-  const shopRows = labor.rows.filter(row => row.scope === "shop");
-  assert.ok(shopRows.length >= 2);
-  const afterShopPay = householdList(state).reduce((sum, h) => sum + (h.inventory.wheat || 0), 0);
-  const townResult = payDailyWages(state, { rows: shopRows }, CONTENT);
-  assert.equal(townResult.expectedVoucher, 0);
-  assert.equal(townResult.workers.length, 0);
-  assert.equal(householdList(state).reduce((sum, h) => sum + (h.inventory.wheat || 0), 0), afterShopPay, "镇库不得再次发店员工资");
-  assert.equal(state.payroll.arrearsVoucherUnits[ghostKey], undefined);
-  assert.equal(state.payroll.legacyUnattributedArrearsVoucherUnits[ghostKey], undefined);
-  assert.equal(state.monetaryReform.voucherShortfallByKey[`town-wage:${ghostKey}:ghost`], undefined);
-  assert.equal(state.payroll.arrearsVoucherUnits["real-town-debt"], 7 * V, "非商业街欠薪不得被兼容清理误删");
-});
-
 test("r04 单店可配置4商人/20店员，茶馆需求与服务容量按新规则扩容", () => {
   const state = simulation.createInitialState({ seed: 110403 });
   const { shop } = openTeaShop(state);
@@ -192,27 +125,6 @@ test("r04 兑付储备为0仍可直接换券；小麦进入镇库且自动换券
   assert.equal(automatic.currency.issuedCumulativeUnits - autoIssuedBefore, 0, "自动换券只能转移已印粮券，不能再次发行");
   assert.equal(automatic.currency.reserveWheatUnits, 0);
   assert.equal(simulation.validateCurrencyInvariant(automatic).valid, true);
-});
-
-test("r04 过渡期50%混合支付可同时用自动换券与小麦支付，不产生储备或虚空货币", () => {
-  const state = legacyVoucherState({ seed: 110407 });
-  state.monetaryReform.stage = "transition";
-  state.monetaryReform.targetVoucherBps = 5000;
-  const payer = householdList(state).find(h => (h.jobs?.farmers || 0) > 0);
-  payer.voucherUnits = 0;
-  syncResidentAggregates(state, CONTENT);
-  assert.equal(simulation.issueGrainVouchers(state, "town", 10).ok, true);
-  const townWheatBefore = state.accounts.town.wheat;
-  const issuedBefore = state.currency.issuedCumulativeUnits;
-  const result = settleMonetaryPayment(state, `household:${payer.id}`, "town", currentPaymentComposition(state, 2 * V), CONTENT,
-    "r04_mixed", "r04混合支付", { requireFull: true });
-  assert.equal(result.ok, true, result.reason);
-  assert.equal(result.voucherPaidValueUnits, V);
-  assert.equal(result.wheatPaidValueUnits, V);
-  assert.equal(state.accounts.town.wheat - townWheatBefore, 2 * I, "1斤自动换券+1斤直接支付都应进入镇库");
-  assert.equal(state.currency.issuedCumulativeUnits - issuedBefore, 0, "混合支付自动换券不得现场增发");
-  assert.equal(state.currency.reserveWheatUnits, 0);
-  assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
 });
 
 test("r04 旧存档兑付储备只迁移一次回镇库，商业街聚合幽灵欠薪同时安全清理", () => {

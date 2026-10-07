@@ -1925,7 +1925,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod12 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-289a32f";
+       const BUILD_ID = "0203-180297b";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -3179,16 +3179,7 @@ function emptyRentPeriod() {
       guidancePending: true,
       ledger: []
     },
-    monetaryReform: {
-      stage: "wheat",
-      targetVoucherBps: 0,
-      residentExchangeEnabled: false,
-      legacyBankAccess: false,
-      started: null,
-      completed: null,
-      paymentHistory: [],
-      voucherShortfallByKey: {}
-    },
+    monetaryReform: { stage: "wheat", legacyBankAccess: false, started: null, completed: null },
     companies: {},
     nextCompanyNumber: 1,
     stockExchange: { legacyAccess: false, rotation: 0 },
@@ -3435,13 +3426,11 @@ function takeHouseholdWheatForExchange(state, household, wheatUnits, content, re
 }
 
 function currencyAccessCheck(state, owner) {
-  const reform = state.monetaryReform || { stage: "wheat", residentExchangeEnabled: false, legacyBankAccess: false };
+  void owner;
+  const reform = state.monetaryReform || { stage: "wheat", legacyBankAccess: false };
   const bank = Boolean(reform.legacyBankAccess || (state.buildings || []).some(row => row.typeId === "bank"));
   if (reform.stage === "wheat") return { ok: false, reason: "货币改革尚未启动" };
   if (!bank) return { ok: false, reason: "需要银行才能发行或换券" };
-  if ((owner === "residents" || owner?.startsWith("household:")) && !reform.residentExchangeEnabled) {
-    return { ok: false, reason: "居民粮食换券当前已关闭" };
-  }
   return { ok: true };
 }
 
@@ -3685,35 +3674,35 @@ return { currencyScale, ensureCurrencyState, voucherBalance, totalVoucherBalance
 
 // ===== economy/payment.js =====
 const __mxmod20 = (() => {
-const { issueVouchersFromWheat, transferVouchers, voucherBalance } = __mxmod19;
+const { issueTownVouchers, issueVouchersFromWheat, transferVouchers, voucherBalance } = __mxmod19;
 const { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } = __mxmod15;
 const { makeTransactionId, recordLedger } = __mxmod8;
 const { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits } = __mxmod18;
 const { distributeResidentInventory, takeResidentInventory, syncResidentAggregates, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList } = __mxmod14;
 const { recordHouseholdVoucherTransfer } = __mxmod16;
 const MONETARY_STAGE_WHEAT = "wheat";
-       const MONETARY_STAGE_TRANSITION = "transition";
        const MONETARY_STAGE_VOUCHER = "voucher";
 
        function ensureMonetaryReform(state) {
-  state.monetaryReform ||= {
-    stage: MONETARY_STAGE_WHEAT,
-    targetVoucherBps: 0,
-    residentExchangeEnabled: false,
-    legacyBankAccess: false,
-    started: null,
-    completed: null,
-    paymentHistory: [],
-    voucherShortfallByKey: {}
-  };
+  state.monetaryReform ||= { stage: MONETARY_STAGE_WHEAT, legacyBankAccess: false, started: null, completed: null };
   const reform = state.monetaryReform;
-  if (![MONETARY_STAGE_WHEAT, MONETARY_STAGE_TRANSITION, MONETARY_STAGE_VOUCHER].includes(reform.stage)) reform.stage = MONETARY_STAGE_WHEAT;
-  reform.targetVoucherBps = Math.max(0, Math.min(10000, Math.round(Number(reform.targetVoucherBps) || 0)));
-  reform.residentExchangeEnabled = Boolean(reform.residentExchangeEnabled);
+  if (reform.stage !== MONETARY_STAGE_VOUCHER) reform.stage = MONETARY_STAGE_WHEAT;
   reform.legacyBankAccess = Boolean(reform.legacyBankAccess);
-  if (!Array.isArray(reform.paymentHistory)) reform.paymentHistory = [];
-  reform.voucherShortfallByKey ||= {};
   return reform;
+}
+
+// 旧档兼容：过渡期存档直接视为已完成改革；删除过渡期专用字段。
+       function migrateMonetaryReform(state) {
+  const reform = state.monetaryReform;
+  if (!reform) return;
+  if (reform.stage === "transition") {
+    reform.stage = MONETARY_STAGE_VOUCHER;
+    reform.completed ||= { year: state.year, day: state.day + 1, fromTransition: true };
+  }
+  delete reform.targetVoucherBps;
+  delete reform.residentExchangeEnabled;
+  delete reform.paymentHistory;
+  delete reform.voucherShortfallByKey;
 }
 
        function hasCompletedBank(state) {
@@ -3750,7 +3739,6 @@ function autoExchangeableWheatUnits(state, owner, content, options = {}) {
   if (reform.stage === MONETARY_STAGE_WHEAT) return 0;
   let units = 0;
   if (owner?.startsWith("household:")) {
-    if (!reform.residentExchangeEnabled) return 0;
     const household = state.households?.byId?.[owner.slice(10)];
     if (!household) return 0;
     units = Math.min(
@@ -3758,7 +3746,6 @@ function autoExchangeableWheatUnits(state, owner, content, options = {}) {
       householdExchangeAllowanceUnits(state, household.id, content)
     );
   } else if (owner === "residents") {
-    if (!reform.residentExchangeEnabled) return 0;
     units = householdList(state).reduce((sum, household) => sum + Math.min(
       householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30),
       householdExchangeAllowanceUnits(state, household.id, content)
@@ -3875,16 +3862,14 @@ function transferPaymentWheat(state, from, to, wheatUnits, valueUnits, content, 
   return { ok: true, wheatUnits, valueUnits, transactionId };
 }
 
-function paymentCompositionForStage(stage, targetVoucherBps, valueUnits) {
+function paymentCompositionForStage(stage, valueUnits) {
   if (!Number.isSafeInteger(valueUnits) || valueUnits < 0) throw new RangeError("应付价值必须为非负整数");
-  if (stage === MONETARY_STAGE_WHEAT) return { valueUnits, wheatValueUnits: valueUnits, voucherValueUnits: 0 };
   if (stage === MONETARY_STAGE_VOUCHER) return { valueUnits, wheatValueUnits: 0, voucherValueUnits: valueUnits };
-  const voucherValueUnits = Math.round(valueUnits * targetVoucherBps / 10000);
-  return { valueUnits, voucherValueUnits, wheatValueUnits: valueUnits - voucherValueUnits };
+  return { valueUnits, wheatValueUnits: valueUnits, voucherValueUnits: 0 };
 }
 
 function paymentCompositionFromContext(context, valueUnits) {
-  return paymentCompositionForStage(context.stage, context.targetVoucherBps, valueUnits);
+  return paymentCompositionForStage(context.stage, valueUnits);
 }
 
 // Short-lived derived data for one synchronous quote search. Never stored on state or carried across a settlement.
@@ -3896,13 +3881,11 @@ function paymentCompositionFromContext(context, valueUnits) {
   return {
     content,
     stage: reform.stage,
-    targetVoucherBps: reform.targetVoucherBps,
     voucherUnits: Math.max(0, voucherBalance(state, owner)),
     actualWheatUnits,
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, owner, content, options),
-    exchangeVoucherPoolUnits: owner === "town" ? 0 : Math.max(0, voucherBalance(state, "town")),
-    allowVoucherFallback: options.allowVoucherFallback !== false
+    exchangeVoucherPoolUnits: owner === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
   };
 }
 
@@ -3927,18 +3910,14 @@ function quoteMonetaryPaymentFromCapability(due, capability, content) {
   );
   const voucherAvailable = capability.voucherUnits + potentialExchange.voucherUnits;
   const regularVoucherPaid = Math.min(due.voucherValueUnits, voucherAvailable);
-  let voucherRemaining = due.voucherValueUnits - regularVoucherPaid;
-  const fallbackAllowed = capability.stage === MONETARY_STAGE_TRANSITION && capability.allowVoucherFallback;
+  const voucherRemaining = due.voucherValueUnits - regularVoucherPaid;
   const availableWheatUnits = Math.max(0, capability.wheatLimitUnits - potentialExchange.wheatUnits);
   const availableWheatValue = voucherUnitsForWheatUnits(availableWheatUnits, content, "floor");
   const regularWheatPaidValue = Math.min(due.wheatValueUnits, availableWheatValue);
-  const wheatCapacityLeft = Math.max(0, availableWheatValue - regularWheatPaidValue);
-  const fallbackWheatValue = fallbackAllowed ? Math.min(voucherRemaining, wheatCapacityLeft) : 0;
-  voucherRemaining -= fallbackWheatValue;
   const remainingWheatValue = due.wheatValueUnits - regularWheatPaidValue;
   const remainingValue = remainingWheatValue + voucherRemaining;
   return { due, full: remainingValue === 0, voucherPaidValueUnits: regularVoucherPaid,
-    wheatPaidValueUnits: regularWheatPaidValue + fallbackWheatValue, fallbackWheatValueUnits: fallbackWheatValue,
+    wheatPaidValueUnits: regularWheatPaidValue,
     remainingValueUnits: remainingValue, remainingComposition: { valueUnits: remainingValue, wheatValueUnits: remainingWheatValue, voucherValueUnits: voucherRemaining },
     voucherShortfallValueUnits: voucherRemaining, availableWheatUnits };
 }
@@ -3955,7 +3934,7 @@ function quoteMonetaryPaymentFromCapability(due, capability, content) {
     const wheatPaidValueUnits = Math.min(valueUnits, availableWheatValue);
     const remainingValueUnits = valueUnits - wheatPaidValueUnits;
     return { due, full: remainingValueUnits === 0, voucherPaidValueUnits: 0,
-      wheatPaidValueUnits, fallbackWheatValueUnits: 0, remainingValueUnits,
+      wheatPaidValueUnits, remainingValueUnits,
       remainingComposition: { valueUnits: remainingValueUnits, wheatValueUnits: remainingValueUnits, voucherValueUnits: 0 },
       voucherShortfallValueUnits: 0, availableWheatUnits: context.wheatLimitUnits };
   }
@@ -3995,7 +3974,7 @@ function maximumPayableValueUnitsFromContext(context) {
 
        function currentPaymentComposition(state, valueUnits) {
   const reform = ensureMonetaryReform(state);
-  return paymentCompositionForStage(reform.stage, reform.targetVoucherBps, valueUnits);
+  return paymentCompositionForStage(reform.stage, valueUnits);
 }
 
        function addPaymentObligation(left, right) {
@@ -4023,40 +4002,6 @@ function maximumPayableValueUnitsFromContext(context) {
   return { valueUnits: sum, wheatValueUnits: wheat, voucherValueUnits: voucher };
 }
 
-function paymentDaySerial(state, content) {
-  return (state.year - 1) * content.rules.daysPerYear + state.day + 1;
-}
-
-function paymentDayRow(state, content) {
-  const reform = ensureMonetaryReform(state);
-  const serial = paymentDaySerial(state, content);
-  let row = reform.paymentHistory.find(item => item.serial === serial);
-  if (!row) {
-    row = { serial, year: state.year, day: state.day + 1, paidValueUnits: 0, voucherValueUnits: 0,
-      wheatValueUnits: 0, fallbackWheatValueUnits: 0, unpaidAttemptValueUnits: 0, finalized: false };
-    reform.paymentHistory.push(row);
-    reform.paymentHistory.sort((a, b) => a.serial - b.serial);
-    if (reform.paymentHistory.length > 60) reform.paymentHistory.splice(0, reform.paymentHistory.length - 60);
-  }
-  return row;
-}
-
-function recordPaymentMetric(state, result, content, unpaidAttempt = 0) {
-  const row = paymentDayRow(state, content);
-  row.paidValueUnits += result.paidValueUnits;
-  row.voucherValueUnits += result.voucherPaidValueUnits;
-  row.wheatValueUnits += result.wheatPaidValueUnits;
-  row.fallbackWheatValueUnits += result.fallbackWheatValueUnits;
-  row.unpaidAttemptValueUnits += Math.max(0, unpaidAttempt);
-}
-
-function updateShortfall(state, key, valueUnits) {
-  if (!key) return;
-  const reform = ensureMonetaryReform(state);
-  if (valueUnits > 0) reform.voucherShortfallByKey[key] = valueUnits;
-  else delete reform.voucherShortfallByKey[key];
-}
-
        function quoteMonetaryPayment(state, from, dueInput, content, options = {}) {
   const due = normalizePaymentObligation(dueInput, state);
   const reform = ensureMonetaryReform(state);
@@ -4068,25 +4013,20 @@ function updateShortfall(state, key, valueUnits) {
     voucherUnits: Math.max(0, voucherBalance(state, from)),
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, from, content, options),
-    exchangeVoucherPoolUnits: from === "town" ? 0 : Math.max(0, voucherBalance(state, "town")),
-    allowVoucherFallback: options.allowVoucherFallback !== false
+    exchangeVoucherPoolUnits: from === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
   }, content);
 }
 
        function settleMonetaryPayment(state, from, to, dueInput, content, type = "payment", reason = "货币支付", options = {}) {
   const due = normalizePaymentObligation(dueInput, state);
   if (due.valueUnits <= 0) return { ok: true, paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-    fallbackWheatValueUnits: 0, remainingValueUnits: 0, remainingComposition: due, transactionId: null };
-  const reform = ensureMonetaryReform(state);
+    remainingValueUnits: 0, remainingComposition: due, transactionId: null };
   if (options.requireFull !== false) {
     const preflight = quoteMonetaryPayment(state, from, due, content, options);
     if (!preflight.full) {
-      if (options.trackUnpaid) updateShortfall(state, options.shortfallKey, preflight.voucherShortfallValueUnits || 0);
-      const reasonText = (preflight.voucherShortfallValueUnits || 0) > 0
-        ? (reform.stage === MONETARY_STAGE_TRANSITION ? "粮券与可支付小麦均不足" : "粮券不足，当前制度不允许小麦补付")
-        : "可支付小麦不足";
+      const reasonText = (preflight.voucherShortfallValueUnits || 0) > 0 ? "粮券不足" : "可支付小麦不足";
       return { ok: false, reason: reasonText, paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-        fallbackWheatValueUnits: 0, remainingValueUnits: due.valueUnits, remainingComposition: due,
+        remainingValueUnits: due.valueUnits, remainingComposition: due,
         voucherShortfallValueUnits: preflight.voucherShortfallValueUnits || 0 };
     }
   }
@@ -4094,31 +4034,24 @@ function updateShortfall(state, key, valueUnits) {
   autoExchangeForPayment(state, from, Math.max(0, due.voucherValueUnits - beforeVoucher), due.wheatValueUnits, content, options);
   const voucherAvailable = voucherBalance(state, from);
   const regularVoucherPaid = Math.min(due.voucherValueUnits, voucherAvailable);
-  let voucherRemaining = due.voucherValueUnits - regularVoucherPaid;
-  const fallbackAllowed = reform.stage === MONETARY_STAGE_TRANSITION && options.allowVoucherFallback !== false;
+  const voucherRemaining = due.voucherValueUnits - regularVoucherPaid;
   const regularWheatNeed = due.wheatValueUnits;
   const actualWheatUnits = paymentWheatBalanceUnits(state, from);
   const availableWheatUnits = Math.min(actualWheatUnits, Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheatUnits);
   const availableWheatValue = voucherUnitsForWheatUnits(availableWheatUnits, content, "floor");
   const regularWheatPaidValue = Math.min(regularWheatNeed, availableWheatValue);
-  let wheatCapacityLeft = Math.max(0, availableWheatValue - regularWheatPaidValue);
-  const fallbackWheatValue = fallbackAllowed ? Math.min(voucherRemaining, wheatCapacityLeft) : 0;
-  voucherRemaining -= fallbackWheatValue;
   const remainingWheatValue = regularWheatNeed - regularWheatPaidValue;
   const remainingValue = remainingWheatValue + voucherRemaining;
 
   if (options.requireFull !== false && remainingValue > 0) {
-    const reasonText = voucherRemaining > 0 && regularVoucherPaid < due.voucherValueUnits
-      ? (fallbackAllowed ? "粮券与可支付小麦均不足" : "粮券不足，当前制度不允许小麦补付")
-      : "可支付小麦不足";
-    if (options.trackUnpaid) updateShortfall(state, options.shortfallKey, voucherRemaining);
+    const reasonText = voucherRemaining > 0 ? "粮券不足" : "可支付小麦不足";
     return { ok: false, reason: reasonText, paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-      fallbackWheatValueUnits: 0, remainingValueUnits: due.valueUnits, remainingComposition: due,
+      remainingValueUnits: due.valueUnits, remainingComposition: due,
       voucherShortfallValueUnits: voucherRemaining };
   }
 
   const voucherPaidValue = regularVoucherPaid;
-  const wheatPaidValue = regularWheatPaidValue + fallbackWheatValue;
+  const wheatPaidValue = regularWheatPaidValue;
   const wheatUnits = wheatUnitsForVoucherUnits(wheatPaidValue, content, "ceil");
   if (wheatUnits > availableWheatUnits) throw new Error("小麦支付换算预检失败");
   const transactionId = makeTransactionId(state);
@@ -4141,84 +4074,31 @@ function updateShortfall(state, key, valueUnits) {
     voucherPaidValueUnits: voucherPaidValue,
     wheatPaidValueUnits: wheatPaidValue,
     wheatPaidUnits: wheatUnits,
-    fallbackWheatValueUnits: fallbackWheatValue,
     remainingValueUnits: remainingValue,
     voucherShortfallValueUnits: voucherRemaining,
     remainingComposition: { valueUnits: remainingValue, wheatValueUnits: remainingWheatValue, voucherValueUnits: voucherRemaining }
   };
-  if (options.trackUnpaid) updateShortfall(state, options.shortfallKey, voucherRemaining);
-  if (options.countsForReform !== false) recordPaymentMetric(state, result, content, options.trackUnpaid ? remainingValue : 0);
   return result;
-}
-
-       function finalizeMonetaryPaymentDay(state, content) {
-  const row = paymentDayRow(state, content);
-  row.finalized = true;
-  return row;
-}
-
-       function monetaryReformProgress(state, content) {
-  const reform = ensureMonetaryReform(state);
-  const finalized = reform.paymentHistory.filter(row => row.finalized).sort((a, b) => a.serial - b.serial);
-  const window = finalized.slice(-7);
-  const paidValueUnits = window.reduce((sum, row) => sum + row.paidValueUnits, 0);
-  const voucherValueUnits = window.reduce((sum, row) => sum + row.voucherValueUnits, 0);
-  const fallbackWheatValueUnits = window.reduce((sum, row) => sum + row.fallbackWheatValueUnits, 0);
-  const shortfallValueUnits = Object.values(reform.voucherShortfallByKey || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
-  const consecutive = window.length === 7 && window.every((row, index) => index === 0 || row.serial === window[index - 1].serial + 1);
-  const eligible = reform.stage === MONETARY_STAGE_TRANSITION && reform.targetVoucherBps === 10000 && consecutive &&
-    paidValueUnits > 0 && fallbackWheatValueUnits === 0 && shortfallValueUnits === 0;
-  return {
-    stage: reform.stage,
-    targetVoucherBps: reform.targetVoucherBps,
-    recentDays: window.length,
-    recentPaidValueUnits: paidValueUnits,
-    recentVoucherValueUnits: voucherValueUnits,
-    recentVoucherBps: paidValueUnits > 0 ? Math.round(voucherValueUnits * 10000 / paidValueUnits) : 0,
-    recentFallbackWheatValueUnits: fallbackWheatValueUnits,
-    voucherShortfallValueUnits: shortfallValueUnits,
-    consecutiveSevenDays: consecutive,
-    eligibleToComplete: eligible
-  };
 }
 
        function startMonetaryReform(state, content) {
   const reform = ensureMonetaryReform(state);
-  if (reform.stage !== MONETARY_STAGE_WHEAT) return { ok: false, reason: "货币改革已经启动" };
+  if (reform.stage !== MONETARY_STAGE_WHEAT) return { ok: false, reason: "货币改革已经完成" };
   if (!hasBankAccess(state)) return { ok: false, reason: "需先建成银行" };
-  reform.stage = MONETARY_STAGE_TRANSITION;
-  reform.targetVoucherBps = 0;
-  reform.residentExchangeEnabled = false;
-  reform.started = { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) };
-  return { ok: true, stage: reform.stage };
-}
-
-       function setVoucherPaymentTarget(state, percent) {
-  const reform = ensureMonetaryReform(state);
-  if (reform.stage !== MONETARY_STAGE_TRANSITION) return { ok: false, reason: "仅过渡期可调整粮券支付比例" };
-  const value = Number(percent);
-  if (!Number.isFinite(value) || value < 0 || value > 100) return { ok: false, reason: "粮券支付比例须为0%—100%" };
-  reform.targetVoucherBps = Math.round(value * 100);
-  return { ok: true, value: reform.targetVoucherBps / 100 };
-}
-
-       function setResidentExchangeEnabled(state, enabled) {
-  const reform = ensureMonetaryReform(state);
-  if (reform.stage === MONETARY_STAGE_WHEAT) return { ok: false, reason: "货币改革尚未启动" };
-  reform.residentExchangeEnabled = Boolean(enabled);
-  return { ok: true, enabled: reform.residentExchangeEnabled };
-}
-
-       function completeMonetaryReform(state, content) {
-  const reform = ensureMonetaryReform(state);
-  const progress = monetaryReformProgress(state, content);
-  if (!progress.eligibleToComplete) return { ok: false, reason: "尚未满足结束过渡期条件", progress };
+  // 一次性切换：镇库按自有小麦存量印制等额粮券，保证切换当天发得出工资；居民可随时以粮换券。
   reform.stage = MONETARY_STAGE_VOUCHER;
-  reform.targetVoucherBps = 10000;
-  reform.completed = { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) };
-  return { ok: true, stage: reform.stage, progress };
+  const townWheat = Math.max(0, state.accounts?.town?.wheat || 0);
+  const printUnits = voucherUnitsForWheatUnits(townWheat, content, "floor");
+  if (printUnits > 0) {
+    const printed = issueTownVouchers(state, printUnits, content, "货币改革：按镇库小麦存量印制粮券");
+    if (!printed.ok) { reform.stage = MONETARY_STAGE_WHEAT; return printed; }
+  }
+  const day = Math.min(content.rules.daysPerYear, state.day + 1);
+  reform.started = { year: state.year, day };
+  reform.completed = { year: state.year, day };
+  return { ok: true, stage: reform.stage, printedVoucherUnits: printUnits };
 }
-return { MONETARY_STAGE_WHEAT, MONETARY_STAGE_TRANSITION, MONETARY_STAGE_VOUCHER, ensureMonetaryReform, hasCompletedBank, hasBankAccess, paymentWheatBalanceUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, finalizeMonetaryPaymentDay, monetaryReformProgress, startMonetaryReform, setVoucherPaymentTarget, setResidentExchangeEnabled, completeMonetaryReform };
+return { MONETARY_STAGE_WHEAT, MONETARY_STAGE_VOUCHER, ensureMonetaryReform, migrateMonetaryReform, hasCompletedBank, hasBankAccess, paymentWheatBalanceUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, startMonetaryReform };
 })();
 
 // ===== systems/agriculture.js =====
@@ -4374,7 +4254,7 @@ function payReclaimWages(state, wageRows, workers, workDays, dueVoucherUnits, co
     const result = settleMonetaryPayment(state, "town", "household:" + row.householdId,
       currentPaymentComposition(state, due), content,
       "land_reclamation_wage", "开荒工资：镇库承担，按投入人日结算",
-      { requireFull: false, trackUnpaid: true, shortfallKey: "town-reclaim-wage:" + row.householdId, transactionId });
+      { requireFull: false, transactionId });
     const paid = result.paidValueUnits || 0;
     paidVoucherUnits += paid;
     recordLedger(state, {
@@ -4576,7 +4456,7 @@ function ensureClaimMap(owner) { owner.claimsVoucherUnits ||= {}; return owner.c
     if (due <= 0) continue;
     const obligation = normalizePaymentObligation(paymentClaims[householdId] || due, state);
     const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content, type, reason,
-      { requireFull: false, trackUnpaid: true, shortfallKey: `${options.shortfallPrefix || type}:${householdId}` });
+      { requireFull: false });
     const actual = result.paidValueUnits || 0;
     claims[householdId] = Math.max(0, due - actual);
     paymentClaims[householdId] = result.remainingComposition;
@@ -4601,17 +4481,12 @@ function ensureClaimMap(owner) { owner.claimsVoucherUnits ||= {}; return owner.c
       const payerId = typeof payer === "string" ? payer : payer.id;
       const maxWheatUnits = typeof payer === "string" ? undefined : payer.maxWheatUnits;
       const result = settleMonetaryPayment(state, payerId, `household:${householdId}`, obligation, content, type, reason,
-        { requireFull: false, maxWheatUnits, countsForReform: true });
+        { requireFull: false, maxWheatUnits });
       householdPaid += result.paidValueUnits || 0;
       obligation = result.remainingComposition;
     }
     claims[householdId] = Math.max(0, original - householdPaid);
     paymentClaims[householdId] = obligation;
-    const shortfallKey = `${options.shortfallPrefix || type}:${householdId}`;
-    state.monetaryReform ||= {};
-    state.monetaryReform.voucherShortfallByKey ||= {};
-    if (obligation.voucherValueUnits > 0) state.monetaryReform.voucherShortfallByKey[shortfallKey] = obligation.voucherValueUnits;
-    else delete state.monetaryReform.voucherShortfallByKey[shortfallKey];
     if (householdPaid > 0) rows.push({ householdId, units: householdPaid });
     paid += householdPaid;
   }
@@ -4712,7 +4587,7 @@ function requireOffice(state) {
   const amount = Math.min(requested, maximumPayableValueUnits(state, "town", content));
   if (amount <= 0) return { ok: false, reason: "镇库可用资金不足" };
   const result = settleMonetaryPayment(state, "town", SOCIAL_OWNER, currentPaymentComposition(state, amount), content,
-    "social_security_inject", "镇库向社保基金注资（计为基金负债）", { requireFull: false, countsForReform: false });
+    "social_security_inject", "镇库向社保基金注资（计为基金负债）", { requireFull: false });
   const paid = result.paidValueUnits || 0;
   if (paid <= 0) return { ok: false, reason: result.reason || "注资失败" };
   ss.totalInjectedUnits += paid;
@@ -4731,7 +4606,7 @@ function requireOffice(state) {
   const amount = Math.min(requested, ss.debtToTownUnits, fundValueUnits(state, content));
   if (amount <= 0) return { ok: false, reason: "基金可用资金不足" };
   const result = settleMonetaryPayment(state, SOCIAL_OWNER, "town", currentPaymentComposition(state, amount), content,
-    "social_security_repay", "社保基金向镇库还款", { requireFull: false, countsForReform: false });
+    "social_security_repay", "社保基金向镇库还款", { requireFull: false });
   const paid = result.paidValueUnits || 0;
   if (paid <= 0) return { ok: false, reason: result.reason || "还款失败" };
   ss.debtToTownUnits = Math.max(0, ss.debtToTownUnits - paid);
@@ -4843,7 +4718,7 @@ function listedCompany(state, companyId) {
   const cost = count * price;
   if (cost > fundValueUnits(state, content)) return { ok: false, reason: "基金资金不足" };
   const result = settleMonetaryPayment(state, SOCIAL_OWNER, "town", currentPaymentComposition(state, cost), content,
-    "social_share_buy", `社保基金买入${company.name}${count}股`, { requireFull: true, countsForReform: false });
+    "social_share_buy", `社保基金买入${company.name}${count}股`, { requireFull: true });
   if (!result.ok) return { ok: false, reason: result.reason || "支付失败" };
   company.townShares -= count;
   company.fundShares += count;
@@ -4863,7 +4738,7 @@ function listedCompany(state, companyId) {
   if (!(price > 0)) return { ok: false, reason: "暂无股价" };
   const proceeds = count * price;
   const result = settleMonetaryPayment(state, "town", SOCIAL_OWNER, currentPaymentComposition(state, proceeds), content,
-    "social_share_sell", `社保基金卖出${company.name}${count}股给镇库`, { requireFull: true, countsForReform: false });
+    "social_share_sell", `社保基金卖出${company.name}${count}股给镇库`, { requireFull: true });
   if (!result.ok) return { ok: false, reason: result.reason || "镇库资金不足，无法回购" };
   company.fundShares -= count;
   company.townShares += count;
@@ -5051,10 +4926,6 @@ function attributeLegacyTownWageClaims(state, payroll) {
     delete payroll.creditorPaymentClaims[payrollKey];
     delete payroll.legacyUnattributedArrearsVoucherUnits?.[payrollKey];
     delete payroll.legacyUnattributedPaymentClaims?.[payrollKey];
-    const prefix = `town-wage:${payrollKey}:`;
-    for (const key of Object.keys(state.monetaryReform?.voucherShortfallByKey || {})) {
-      if (key.startsWith(prefix)) delete state.monetaryReform.voucherShortfallByKey[key];
-    }
   }
 
   attributeLegacyTownWageClaims(state, payroll);
@@ -5101,7 +4972,7 @@ function attributeLegacyTownWageClaims(state, payroll) {
       const construction = payrollKey.startsWith("builders::");
       const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
         construction ? "construction_wage_arrears_payment" : "wage_arrears_payment", "偿付原债权家庭历史欠薪",
-        { requireFull: false, trackUnpaid: true, shortfallKey: `${payer}-wage:${payrollKey}:${householdId}` });
+        { requireFull: false });
       const paid = result.paidValueUnits || 0;
       claims[householdId] = Math.max(0, amount - paid);
       paymentClaims[householdId] = result.remainingComposition;
@@ -5160,7 +5031,7 @@ function attributeLegacyTownWageClaims(state, payroll) {
       const obligation = normalizePaymentObligation(paymentClaims[householdId] || amount, state);
       const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
         row.key === "builders" ? "construction_wage_payment" : "wage_payment", "支付具体债权家庭本日工资",
-        { requireFull: false, trackUnpaid: true, shortfallKey: `${payer}-wage:${row.payrollKey}:${householdId}` });
+        { requireFull: false });
       const paid = result.paidValueUnits || 0;
       paymentClaims[householdId] = result.remainingComposition;
       claims[householdId] = Math.max(0, amount - paid);
@@ -5240,7 +5111,7 @@ function attributeLegacyTownWageClaims(state, payroll) {
       ? payFromFund(state, row.household.id, due, content, "unemployment_benefit", "社保基金发放失业金").paidValueUnits
       : (settleMonetaryPayment(state, "town", `household:${row.household.id}`, currentPaymentComposition(state, due), content,
         "unemployment_benefit", "劳动年龄待业者失业金；镇库不足时优先口粮与货币储备更少的家庭",
-        { requireFull: false, countsForReform: true }).paidValueUnits || 0);
+        { requireFull: false }).paidValueUnits || 0);
     paid += rowPaid;
     paidPeople += Math.min(row.idle, Math.floor(rowPaid / perPersonUnits));
   }
@@ -5962,15 +5833,7 @@ const { householdEmploymentCount, householdList } = __mxmod14;
 function createPaymentViewState(state) {
   const preview = { ...state };
   if (state.monetaryReform) {
-    preview.monetaryReform = {
-      ...state.monetaryReform,
-      paymentHistory: Array.isArray(state.monetaryReform.paymentHistory)
-        ? state.monetaryReform.paymentHistory.slice()
-        : state.monetaryReform.paymentHistory,
-      voucherShortfallByKey: state.monetaryReform.voucherShortfallByKey
-        ? { ...state.monetaryReform.voucherShortfallByKey }
-        : state.monetaryReform.voucherShortfallByKey
-    };
+    preview.monetaryReform = { ...state.monetaryReform };
   }
   if (!state.households?.byId) return preview;
 
@@ -6413,16 +6276,6 @@ const WHOLESALE_ITEM_IDS = Object.freeze(["wheat", "flour", "bread", "wood", "sa
     delete market.monopoly.wageSplit;
   }
   if (state.policy) delete state.policy.wholesaleDailyWheatJin;
-  // 欠薪缺券记录原按付款方命名；改由镇库发薪后旧键不会再被更新，必须改名，否则会永久卡住货币改革。
-  const shortfall = state.monetaryReform?.voucherShortfallByKey;
-  if (shortfall) {
-    for (const key of Object.keys(shortfall)) {
-      if (!key.startsWith("wholesale-wage:")) continue;
-      const townKey = "town-wage:" + key.slice("wholesale-wage:".length);
-      shortfall[townKey] = Math.max(shortfall[townKey] || 0, shortfall[key] || 0);
-      delete shortfall[key];
-    }
-  }
 }
 
 function emptyItemMap(value = 0) {
@@ -7645,7 +7498,7 @@ function residentsFoodReserveQeq(state, content) {
     company.payroll.cumulativeAccruedVoucherUnits += due; addPeriodValue(company, "wageExpenseVoucherUnits", due); applyProfit(company, -due);
     const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
     const result = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
-      "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`, { shortfallPrefix: `company-wage:${company.id}` });
+      "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`);
     state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
     company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + company.payroll.legacyUnattributedArrearsVoucherUnits;
     company.payroll.cumulativePaidVoucherUnits += result.paid; addPeriodValue(company, "wagesPaidVoucherUnits", result.paid);
@@ -7848,7 +7701,7 @@ function planTaxUnits(state, company, outputItemId, outputUnits, content) {
     }
     // 先尝试偿付已形成的工资债务。债权仍归原家庭，支付媒介由统一支付层决定。
     const debtResult = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
-      "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`, { shortfallPrefix: `company-wage:${company.id}` });
+      "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`);
     company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + (company.payroll.legacyUnattributedArrearsVoucherUnits || 0);
 
     const retainedBefore = Math.max(0, company.retainedEarningsVoucherUnits || 0);
@@ -10565,7 +10418,7 @@ function chooseMerchantHousehold(state, content, preferredId = null) {
   if (!assignment.ok) {
     const refund = settleMonetaryPayment(state, `shop:${shopId}`, `household:${household.id}`, {
       valueUnits: startupUnits, voucherValueUnits: payment.voucherPaidValueUnits || 0, wheatValueUnits: payment.wheatPaidValueUnits || 0
-    }, content, "shop_capital_refund", "开店失败退回资金", { requireFull: true, allowVoucherFallback: false, countsForReform: false });
+    }, content, "shop_capital_refund", "开店失败退回资金", { requireFull: true });
     // 退款失败：镇库先行垫付给家庭。店铺即将删除，其负债记录会一并消失，
     // 故不在店上记账，直接由镇库承担并记为家庭对镇库的应收（持久化，不随店删除）。
     if (!refund.ok) {
@@ -10576,7 +10429,7 @@ function chooseMerchantHousehold(state, content, preferredId = null) {
       };
       const advance = settleMonetaryPayment(state, "town", `household:${household.id}`, due, content,
         "shop_capital_refund_advance", `${shop.name}开店失败镇库垫付启动资金`,
-        { requireFull: false, trackUnpaid: true, shortfallKey: `shop-refund:${shopId}:${household.id}` });
+        { requireFull: false });
       const paidAdvance = advance.paidValueUnits || 0;
       const remainingAdvance = Math.max(0, startupUnits - paidAdvance);
       if (remainingAdvance > 0) {
@@ -10908,7 +10761,7 @@ function payLiability(state, shop, key, destination, content, type, reason) {
   const paymentKey = key === "rentVoucherUnits" ? "rentPaymentClaim" : "taxPaymentClaim";
   const obligation = normalizePaymentObligation(shop.liabilities[paymentKey] || due, state);
   const result = settleMonetaryPayment(state, `shop:${shop.id}`, destination, obligation, content, type, reason,
-    { requireFull: false, trackUnpaid: true, shortfallKey: `${type}:${shop.id}` });
+    { requireFull: false });
   const paid = result.paidValueUnits || 0;
   shop.liabilities[key] = Math.max(0, due - paid);
   shop.liabilities[paymentKey] = result.remainingComposition;
@@ -10920,7 +10773,7 @@ function payDailyLiabilities(state, shop, content) {
   attributeLegacyShopWageClaims(state, shop);
   const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
   payMonetaryWageClaims(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment",
-    `${shop.name}偿付具体债权家庭员工工资`, { shortfallPrefix: `shop-wage:${shop.id}` });
+    `${shop.name}偿付具体债权家庭员工工资`);
   state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
   shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
   payLiability(state, shop, "rentVoucherUnits", "town", content, "shop_rent_payment", `${shop.name}支付店租`);
@@ -11154,7 +11007,7 @@ function settleTownOwesHouseholds(state, content) {
     const result = settleMonetaryPayment(state, "town", `household:${household.id}`,
       currentPaymentComposition(state, owed), content,
       "town_debt_repayment", "镇库偿付欠款",
-      { requireFull: false, trackUnpaid: true, shortfallKey: `town-owes:${household.id}` });
+      { requireFull: false });
     const paid = result.paidValueUnits || 0;
     household.townOwesVoucherUnits = Math.max(0, owed - paid);
     if (paid > 0) {
@@ -11219,7 +11072,7 @@ function finalizeShopLiquidation(state, shop, content) {
     const returned = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${owner.id}`,
       { valueUnits: wheatValue + voucherValue, wheatValueUnits: wheatValue, voucherValueUnits: voucherValue }, content,
       "shop_close_distribution", `${shop.name}清算完成后返还剩余资金`,
-      { requireFull: true, allowVoucherFallback: false, countsForReform: false });
+      { requireFull: true });
     if (!returned.ok) return false;
   }
   shop.status = "closed";
@@ -13647,7 +13500,7 @@ const { payManualRelief, setAutomaticRelief } = __mxmod35;
 const { demolishBuilding, startBuildingUpgrade } = __mxmod37;
 const { sellOperatingLevel: sellOperatingLevelSystem } = __mxmod39;
 const { issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, currencyScale } = __mxmod19;
-const { completeMonetaryReform, setResidentExchangeEnabled, setVoucherPaymentTarget, startMonetaryReform } = __mxmod20;
+const { startMonetaryReform } = __mxmod20;
 const { createIndependentCompany, executeShareSubscription, injectCompanyCapital, setCompanyDividendPercent, setIntermediatePrice, setShareOffer, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice, addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown } = __mxmod32;
 const { listCompanyOnExchange, configureListedShareOffer, executeTownBuyback } = __mxmod44;
 const { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndustryPrices } = __mxmod28;
@@ -13992,15 +13845,12 @@ function setWageRate(state, roleId, dailyJin, content) {
 }
 
        function startCurrencyReform(state, content) { return startMonetaryReform(state, content); }
-       function configureVoucherPaymentTarget(state, percent) { return setVoucherPaymentTarget(state, percent); }
-       function configureResidentExchange(state, enabled) { return setResidentExchangeEnabled(state, enabled); }
-       function finishCurrencyReform(state, content) { return completeMonetaryReform(state, content); }
 
 // 开荒：亩数与投入人数由面板输入，成本按内容比例换算，工资由镇库承担并记账。
        function reclaimFarmland(state, acres, workers, content) {
   return reclaimFarmlandSystem(state, content, { acres, workers });
 }
-return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setSocialSecurityPolicy, setTradeTariffRate, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, transferFood, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellOperatingLevel, sendRelief, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, configureVoucherPaymentTarget, configureResidentExchange, finishCurrencyReform, reclaimFarmland };
+return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setSocialSecurityPolicy, setTradeTariffRate, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, transferFood, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellOperatingLevel, sendRelief, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland };
 })();
 
 // ===== core/validation.js =====
@@ -14222,22 +14072,8 @@ function validateState(state, content) {
     }
   }
   const reform = state.monetaryReform;
-  if (!reform || !["wheat", "transition", "voucher"].includes(reform.stage) ||
-      !Number.isInteger(reform.targetVoucherBps) || reform.targetVoucherBps < 0 || reform.targetVoucherBps > 10000 ||
-      typeof reform.residentExchangeEnabled !== "boolean" || typeof reform.legacyBankAccess !== "boolean" ||
-      !Array.isArray(reform.paymentHistory) || !reform.voucherShortfallByKey || Array.isArray(reform.voucherShortfallByKey)) {
+  if (!reform || !["wheat", "voucher"].includes(reform.stage) || typeof reform.legacyBankAccess !== "boolean") {
     errors.push("货币改革状态无效");
-  } else {
-    for (const row of reform.paymentHistory) {
-      if (!Number.isInteger(row?.serial) || row.serial <= 0 || !Number.isInteger(row?.year) || row.year <= 0 ||
-          !Number.isInteger(row?.day) || row.day <= 0 || row.day > content.rules.daysPerYear ||
-          ["paidValueUnits", "voucherValueUnits", "wheatValueUnits", "fallbackWheatValueUnits", "unpaidAttemptValueUnits"]
-            .some(key => !Number.isSafeInteger(row?.[key] || 0) || (row?.[key] || 0) < 0)) {
-        errors.push("货币改革支付历史无效");
-        break;
-      }
-    }
-    if (Object.values(reform.voucherShortfallByKey).some(value => !Number.isSafeInteger(value) || value < 0)) errors.push("缺券未付记录无效");
   }
   const currencyCheck = validateCurrencyInvariant(state, content);
   if (!currencyCheck.valid) errors.push("粮券总账不守恒：账户余额与未注销发行量不一致");
@@ -15543,7 +15379,7 @@ function ownerCapacity(state, building, content) {
     }));
     const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
     const paidResult = payMonetaryWageClaimsFromPayers(state, payroll, payers, content, "private_wage_payment",
-      `${definition.name}民营业主偿付具体债权家庭工资`, { shortfallPrefix: `private-wage:${building.id}` });
+      `${definition.name}民营业主偿付具体债权家庭工资`);
     state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
     payroll.arrearsVoucherUnits = claimTotal(payroll) + (payroll.legacyUnattributedArrearsVoucherUnits || 0); payroll.cumulativePaidVoucherUnits += paidResult.paid;
     results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paidResult.paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
@@ -16079,7 +15915,6 @@ const { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, res
 const { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } = __mxmod46;
 const { refreshOperatingPlan, recordConsumerDay } = __mxmod30;
 const { archiveHouseholdLifeYear, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } = __mxmod16;
-const { finalizeMonetaryPaymentDay } = __mxmod20;
 const { settleBankDay } = __mxmod51;
 const { settleBondsDay } = __mxmod52;
 const { settleStockMarketDay, settleHouseholdStockBuying } = __mxmod44;
@@ -16201,7 +16036,6 @@ function settleOneDay(state, content) {
   // 12. Today's staffed farm labor accrues before the day advances.
   accumulateFarmDay(state, content);
   const endingYearToday = state.day + 1 >= content.rules.daysPerYear;
-  finalizeMonetaryPaymentDay(state, content);
   // 流动性日结算：刷新投资比例（五期算法），供银行/国债当日使用。
   settleLiquidityDay(state, content);
   // 银行日结算：存款计息/吸储、贷款计息/还款/核销、公司自动借款（金融扩展二期）。
@@ -16497,7 +16331,7 @@ const { currentPriceMap, currentUnitPrice } = __mxmod28;
 const { computeLaborMarket } = __mxmod25;
 const { computeWealthStats } = __mxmod40;
 const { currencyScale, validateCurrencyInvariant, voucherBalance } = __mxmod19;
-const { hasBankAccess, monetaryReformProgress } = __mxmod20;
+const { hasBankAccess } = __mxmod20;
 const { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } = __mxmod14;
 const { bondOutstandingVoucherUnits } = __mxmod52;
 const { shopSummaries } = __mxmod46;
@@ -17065,22 +16899,15 @@ function companyActualReferencePlaceholder(company, content) {
       trade: saltPeriod.market || null
     } : needResidents ? { historyCoverage: saltCoverage.coverage, grace: saltCoverage.grace, daysObserved: saltCoverage.daysObserved } : {},
     monetaryReform: needMoney ? (function () {
-      const progress = monetaryReformProgress(state, content);
-      const stageName = progress.stage === "wheat" ? "粮食结算" : progress.stage === "transition" ? "过渡期" : "全粮券结算";
+      const stage = state.monetaryReform?.stage === "voucher" ? "voucher" : "wheat";
       const bankBuilding = runtime.firstBuildingByType.get("bank") || null;
       return {
-        ...progress,
-        stageName,
+        stage,
+        stageName: stage === "wheat" ? "粮食结算" : "粮券结算",
         hasBankAccess: hasBankAccess(state),
         hasPhysicalBank: Boolean(bankBuilding),
         bankBuildingId: bankBuilding?.id || null,
         legacyBankAccess: Boolean(state.monetaryReform?.legacyBankAccess),
-        residentExchangeEnabled: Boolean(state.monetaryReform?.residentExchangeEnabled),
-        targetPercent: progress.targetVoucherBps / 100,
-        recentVoucherPercent: progress.recentVoucherBps / 100,
-        recentPaidValueVoucher: progress.recentPaidValueUnits / voucherScale,
-        recentFallbackWheatVoucher: progress.recentFallbackWheatValueUnits / voucherScale,
-        voucherShortfall: progress.voucherShortfallValueUnits / voucherScale,
         employmentExchangeJin: state.policy?.employmentExchangeJin ?? 2
       };
     })() : null,
@@ -17190,7 +17017,7 @@ const { validateContent } = __mxmod11;
 const { createInitialState } = __mxmod17;
 const { settleOneDay } = __mxmod68;
 const { advanceGameDays: advanceDaysWithClock } = __mxmod13;
-const { setEmployment, buildAt, sendRelief, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setTradeTariffRate, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, configureVoucherPaymentTarget, configureResidentExchange, finishCurrencyReform, reclaimFarmland } = __mxmod55;
+const { setEmployment, buildAt, sendRelief, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setTradeTariffRate, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod55;
 const { selectDemolitionPreview, selectUpgradePreview } = __mxmod37;
 const { validateState } = __mxmod56;
 const { selectDashboard } = __mxmod72;
@@ -17329,9 +17156,6 @@ function createSimulation(content) {
     retainExistingIndustryPrices: function (state) { return retainExistingIndustryPrices(state, definitions); },
     setEmploymentExchangeQuota: function (state, value) { return setEmploymentExchangeQuota(state, value, definitions); },
     startCurrencyReform: function (state) { return startCurrencyReform(state, definitions); },
-    setVoucherPaymentTarget: function (state, value) { return configureVoucherPaymentTarget(state, value); },
-    setResidentExchangeEnabled: function (state, enabled) { return configureResidentExchange(state, enabled); },
-    finishCurrencyReform: function (state) { return finishCurrencyReform(state, definitions); },
     setShopRent: function (state, value) { return setShopRent(state, value); },
     setShopProfitTax: function (state, value) { return setShopProfitTax(state, value, definitions); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
@@ -17384,6 +17208,7 @@ const { syncShopEmployment } = __mxmod46;
 const { summarizeLegacyAnnualReports } = __mxmod66;
 const { ensureWholesaleMarket, mergeWholesaleCashIntoTown } = __mxmod31;
 const { migrateSocialSecurityWallet } = __mxmod23;
+const { migrateMonetaryReform } = __mxmod20;
 const { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } = __mxmod14;
 const { defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor } = __mxmod17;
 function cloneJson(value) {
@@ -17570,19 +17395,9 @@ function normalizeV12(raw, definitions, legacyCompleted = false) {
   const state = normalizeV11(raw, definitions);
   state.version = 12;
   state.schemaVersion = 12;
-  state.monetaryReform ||= legacyCompleted ? {
-    stage: "voucher", targetVoucherBps: 10000, residentExchangeEnabled: true, legacyBankAccess: true,
-    started: null, completed: { legacy: true }, paymentHistory: [], voucherShortfallByKey: {}
-  } : {
-    stage: "wheat", targetVoucherBps: 0, residentExchangeEnabled: false, legacyBankAccess: false,
-    started: null, completed: null, paymentHistory: [], voucherShortfallByKey: {}
-  };
-  if (!["wheat", "transition", "voucher"].includes(state.monetaryReform.stage)) state.monetaryReform.stage = legacyCompleted ? "voucher" : "wheat";
-  state.monetaryReform.targetVoucherBps = Math.max(0, Math.min(10000, Math.round(Number(state.monetaryReform.targetVoucherBps) || 0)));
-  state.monetaryReform.residentExchangeEnabled = Boolean(state.monetaryReform.residentExchangeEnabled);
+  state.monetaryReform ||= { stage: "wheat", legacyBankAccess: false, started: null, completed: null };
+  migrateMonetaryReform(state);
   state.monetaryReform.legacyBankAccess = Boolean(state.monetaryReform.legacyBankAccess || legacyCompleted);
-  state.monetaryReform.paymentHistory = Array.isArray(state.monetaryReform.paymentHistory) ? state.monetaryReform.paymentHistory : [];
-  state.monetaryReform.voucherShortfallByKey ||= {};
 
   state.payroll.creditorPaymentClaims ||= {};
   for (const [payrollKey, claims] of Object.entries(state.payroll.creditorClaims || {})) {
@@ -17774,9 +17589,6 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
       delete state.payroll.creditorClaims[key];
       delete state.payroll.creditorPaymentClaims[key];
       delete state.payroll.legacyUnattributedArrearsVoucherUnits[key];
-      for (const shortfallKey of Object.keys(state.monetaryReform?.voucherShortfallByKey || {})) {
-        if (shortfallKey.startsWith(`town-wage:${key}:`)) delete state.monetaryReform.voucherShortfallByKey[shortfallKey];
-      }
     }
   }
   state.payroll.arrearsWheatUnits = state.payroll.arrearsVoucherUnits;
@@ -21564,16 +21376,15 @@ function renderPolicy(view) {
   const neighborAid = view.neighborAid || {};
   const neighborAidDay = neighborAid.lastDay || {};
   const reform = view.monetaryReform;
-  const moneyUnit = reform.stage === "wheat" ? "斤小麦" : reform.stage === "voucher" ? "粮券" : `小麦等值（目标${number(reform.targetPercent, 2)}%粮券）`;
+  const moneyUnit = reform.stage === "wheat" ? "斤小麦" : "粮券";
   const reformAction = reform.stage === "wheat"
-    ? `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后进入过渡期，初始粮券支付比例为0%。" : "需先建成银行后才能启动。"}</div>`
+    ? `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`
     : `<button class="secondary wide" data-bank-open>进入银行管理</button>`;
   // 货币改革简化态（0.1.11 补回）：小麦阶段且无银行时只显示一行提示
   const reformCard = (reform.stage === "wheat" && !reform.hasBankAccess)
     ? `<div class="cardlet subtle">货币改革：建成银行后可启动。</div>`
     : `<details class="detail-block" data-detail-key="policy-reform"><summary>货币改革</summary><div class="detail-body">
       <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
-      ${reform.stage !== "wheat" ? `<div class="row"><span class="label">目标粮券支付比例</span><strong class="value">${number(reform.targetPercent, 2)}%</strong></div>` : ""}
       ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
       ${reformAction}
     </div></details>`;
@@ -21774,7 +21585,6 @@ function bankManagementMarkup(view, physical = true) {
   const reform = view.monetaryReform;
   const c = view.currency;
   const preview = view.currencyPreview;
-  const finishConfirm = Boolean(view.reformFinishConfirm);
   const previewMarkup = preview ? `<div class="operation-preview">
     <strong>${preview.type === "issue" ? "印制发行确认" : "注销确认"}</strong>
     <div class="row"><span class="label">数量</span><strong class="value">${number(preview.amount, 2)}粮券</strong></div>
@@ -21782,24 +21592,13 @@ function bankManagementMarkup(view, physical = true) {
     <div class="business-sticky-actions"><button class="secondary" data-currency-preview-cancel>取消</button><button class="primary" data-currency-confirm="${preview.type}">确认${preview.type === "issue" ? "印制发行" : "注销"}</button></div>
   </div>` : "";
   const controls = reform.stage === "wheat"
-    ? `<div class="subtle">银行已具备粮券印制与换券能力。请在政策页启动货币改革；启动时不会自动转换任何家庭或镇库资产。</div><button class="secondary wide" data-go="policy">前往政策</button>`
-    : `<label class="toggle"><input id="residentExchangeEnabled" type="checkbox" ${reform.residentExchangeEnabled ? "checked" : ""}><span>允许居民以粮食换券</span></label>
-      <div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: 0, maximum: 10, className: "setting-editor" })}<b>斤</b></div></div>
-      ${reform.stage === "transition" ? `<div class="row"><span class="label">目标粮券支付比例</span><strong class="value">${number(reform.targetPercent, 2)}%</strong></div>
-        <input class="wide" type="range" min="0" max="100" step="1" value="${number(reform.targetPercent, 2)}" data-reform-target-range aria-label="粮券支付比例滑杆">
-        <div class="setting-input">${renderNumericInput(view, { key: "voucher-target", kind: "voucher-target", target: "reform", value: reform.targetPercent, label: "粮券支付比例", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div>` : `<div class="subtle">全粮券制度已固定为100%，新产生的货币交易不再自动回退小麦。</div>`}
-      <h3>粮券印制与换券</h3>
-      <div class="subtle">镇库先印制粮券。粮券进入镇库后可自由用于工资、采购、福利或换券；换券时对方交出的小麦直接进入镇库。</div>
+    ? `<div class="subtle">启动货币改革后立即改用粮券结算：镇库按小麦存量印制等额粮券，居民可随时以粮换券。</div><button class="secondary wide" data-go="policy">前往政策</button>`
+    : `<div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: 0, maximum: 10, className: "setting-editor" })}<b>斤</b></div></div>
+      <h3>粮券印制与注销</h3>
       <div class="row"><span class="label">镇库 / 居民粮券</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">流通粮券</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
       <div class="business-form-row"><label>数量${stagedBankInput(view, "currency-amount", "发行或兑付数量", 1000)}</label><div class="settings-actions"><button class="secondary" data-currency-preview="issue">印制粮券</button><button class="secondary" data-currency-preview="redeem">注销粮券</button></div></div>
-      ${previewMarkup}
-      ${reform.stage === "transition" ? `<h3>过渡进度</h3>
-        <div class="row"><span class="label">最近7日实际粮券占比</span><strong class="value">${reform.recentDays ? `${number(reform.recentVoucherPercent, 2)}% · ${number(reform.recentDays)}/7日` : "暂无支付窗口"}</strong></div>
-        <div class="row"><span class="label">窗口实际支付</span><strong class="value">${number(reform.recentPaidValueVoucher, 2)}小麦等值</strong></div>
-        <div class="row"><span class="label">小麦补付 / 缺券未付</span><strong class="value">${number(reform.recentFallbackWheatVoucher, 2)} / ${number(reform.voucherShortfall, 2)}小麦等值</strong></div>
-        <div class="subtle">完成条件：目标100%，连续7个游戏日有实际货币支付窗口且无小麦补付，并且没有因缺券形成的未付金额。</div>
-        ${finishConfirm ? `<div class="operation-preview"><strong>确认结束过渡期？</strong><div class="subtle">确认后固定为全粮券制度，之后新交易不再自动用小麦补付。</div><div class="business-sticky-actions"><button class="secondary" data-reform-finish-cancel>取消</button><button class="primary" data-reform-finish-confirm ${reform.eligibleToComplete ? "" : "disabled"}>确认结束</button></div></div>` : `<button class="primary wide" data-reform-finish-preview ${reform.eligibleToComplete ? "" : "disabled"}>结束过渡期</button>`}` : ""}`;
+      ${previewMarkup}`;
   return `<div class="status-strip"><span class="status-light working"></span><strong>${physical ? "银行" : "兼容银行入口"}</strong><span>${reform.stageName}</span></div>
     <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
     ${controls}`;
@@ -22266,7 +22065,6 @@ function closest(element, selector) {
   let sharePreviewCompanyId = null;
   let buybackPreview = null;
   let companyLevelPreview = null;
-  let reformFinishConfirm = false;
   let lastBuildPreviewPlotId = null;
   let latestView = null;
   let latestMapModel = null;
@@ -22374,7 +22172,6 @@ function closest(element, selector) {
       sharePreviewCompanyId,
       buybackPreview,
       companyLevelPreview,
-      reformFinishConfirm
     };
   }
 
@@ -22629,9 +22426,6 @@ function closest(element, selector) {
     } else if (kind === "employment-exchange") {
       result = simulation.setEmploymentExchangeQuota(state, parsed.value);
       successMessage = `在岗居民每日换券额度已设为${number(parsed.value, 2)}斤。`;
-    } else if (kind === "voucher-target") {
-      result = simulation.setVoucherPaymentTarget(state, parsed.value);
-      successMessage = `目标粮券支付比例已设为${number(parsed.value, 2)}%。`;
     } else if (kind === "shop-rent") {
       result = simulation.setShopRent(state, parsed.value);
       successMessage = `营业店铺日租已设为${number(parsed.value, 2)}小麦等值。`;
@@ -22766,7 +22560,7 @@ function closest(element, selector) {
     persistenceIssue = null;
     numericDrafts.clear();
     upgradePreviewId = null; demolitionPreviewId = null; rightSalePreviewId = null;
-    currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null; reformFinishConfirm = false;
+    currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null;
     lastBuildPreviewPlotId = null;
     startupError = null;
     saveWarning = entry.recovered ? "此局从自动备份读取；请保存以修复当前存档。" : null;
@@ -23077,7 +22871,7 @@ function closest(element, selector) {
             clock.pause();
             numericDrafts.clear();
             upgradePreviewId = null; demolitionPreviewId = null; rightSalePreviewId = null;
-            currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null; reformFinishConfirm = false;
+            currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null;
             navigation.resetView();
             navigation.openPanel("settings");
             managerOpen = true;
@@ -23283,35 +23077,15 @@ function closest(element, selector) {
     if (closest(target, "[data-reform-start]") && state) {
       const result = simulation.startCurrencyReform(state);
       if (!result.ok) { showToast(result.reason); return; }
-      reformFinishConfirm = false;
       changed(true);
       render(true);
-      showToast("货币改革已启动，进入过渡期；目标粮券比例初始为0%。", 4200);
+      showToast(`货币改革完成，已改用粮券结算；镇库印制${number((result.printedVoucherUnits || 0) / simulation.content.precision.currencyUnitsPerVoucher, 0)}粮券。`, 4200);
       return;
     }
     if (closest(target, "[data-bank-open]") && state) {
       const reform = buildView().monetaryReform;
       navigation.openSite(reform.bankBuildingId ? `building:${reform.bankBuildingId}` : "bank-compat");
       render(true);
-      return;
-    }
-    if (closest(target, "[data-reform-finish-preview]") && state) {
-      reformFinishConfirm = true;
-      render(true);
-      return;
-    }
-    if (closest(target, "[data-reform-finish-cancel]")) {
-      reformFinishConfirm = false;
-      render(true);
-      return;
-    }
-    if (closest(target, "[data-reform-finish-confirm]") && state) {
-      const result = simulation.finishCurrencyReform(state);
-      if (!result.ok) { showToast(result.reason); reformFinishConfirm = false; render(true); return; }
-      reformFinishConfirm = false;
-      changed(true);
-      render(true);
-      showToast("过渡期已结束，新产生的货币交易固定使用粮券。", 4200);
       return;
     }
     if (closest(target, "#manualAid") && state) {
@@ -23934,22 +23708,6 @@ function closest(element, selector) {
     const target = event.target;
     if (target.matches("[data-draft-key]") && shouldCommitNumericDraftOnChange(target.dataset.draftKind)) {
       commitNumericDraft(target.dataset.draftKey, target);
-      return;
-    }
-    if (target.matches("[data-reform-target-range]") && state) {
-      const result = simulation.setVoucherPaymentTarget(state, Number(target.value));
-      if (!result.ok) { showToast(result.reason); render(true); return; }
-      numericDrafts.delete("voucher-target");
-      changed(true);
-      render(true);
-      return;
-    }
-    if (target.matches("#residentExchangeEnabled") && state) {
-      const result = simulation.setResidentExchangeEnabled(state, target.checked);
-      if (!result.ok) { showToast(result.reason); render(true); return; }
-      changed(true);
-      render(true);
-      showToast(target.checked ? "居民粮食换券已开放。" : "居民粮食换券已关闭；已有粮券仍可兑回小麦。");
       return;
     }
     if (target.matches("#autoRelief") && state) {

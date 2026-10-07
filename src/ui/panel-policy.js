@@ -18,16 +18,15 @@ export function renderPolicy(view) {
   const neighborAid = view.neighborAid || {};
   const neighborAidDay = neighborAid.lastDay || {};
   const reform = view.monetaryReform;
-  const moneyUnit = reform.stage === "wheat" ? "斤小麦" : reform.stage === "voucher" ? "粮券" : `小麦等值（目标${number(reform.targetPercent, 2)}%粮券）`;
+  const moneyUnit = reform.stage === "wheat" ? "斤小麦" : "粮券";
   const reformAction = reform.stage === "wheat"
-    ? `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后进入过渡期，初始粮券支付比例为0%。" : "需先建成银行后才能启动。"}</div>`
+    ? `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`
     : `<button class="secondary wide" data-bank-open>进入银行管理</button>`;
   // 货币改革简化态（0.1.11 补回）：小麦阶段且无银行时只显示一行提示
   const reformCard = (reform.stage === "wheat" && !reform.hasBankAccess)
     ? `<div class="cardlet subtle">货币改革：建成银行后可启动。</div>`
     : `<details class="detail-block" data-detail-key="policy-reform"><summary>货币改革</summary><div class="detail-body">
       <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
-      ${reform.stage !== "wheat" ? `<div class="row"><span class="label">目标粮券支付比例</span><strong class="value">${number(reform.targetPercent, 2)}%</strong></div>` : ""}
       ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
       ${reformAction}
     </div></details>`;

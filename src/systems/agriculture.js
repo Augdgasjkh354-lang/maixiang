@@ -154,7 +154,7 @@ function payReclaimWages(state, wageRows, workers, workDays, dueVoucherUnits, co
     const result = settleMonetaryPayment(state, "town", "household:" + row.householdId,
       currentPaymentComposition(state, due), content,
       "land_reclamation_wage", "开荒工资：镇库承担，按投入人日结算",
-      { requireFull: false, trackUnpaid: true, shortfallKey: "town-reclaim-wage:" + row.householdId, transactionId });
+      { requireFull: false, transactionId });
     const paid = result.paidValueUnits || 0;
     paidVoucherUnits += paid;
     recordLedger(state, {

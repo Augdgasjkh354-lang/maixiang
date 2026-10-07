@@ -52,53 +52,6 @@ function makeTownWageDebt(seed, buildingId = `debt-mill-${seed}`) {
   return { state, buildingId, jobKey: `${buildingId}::millers`, householdId };
 }
 
-test("r02 历史镇营欠薪在岗位归零后仍先偿付原家庭，并准确减少改革缺券记录", () => {
-  const { state, jobKey, householdId } = makeTownWageDebt(17201);
-  assert.equal(simulation.setEmployment(state, jobKey, 0).ok, true);
-  assert.equal(simulation.issueGrainVouchers(state, "town", 100).ok, true);
-  const before = state.households.byId[householdId].voucherUnits;
-  const paid = payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
-  assert.equal(state.households.byId[householdId].voucherUnits - before, 10 * V);
-  assert.equal(state.payroll.creditorClaims[jobKey][householdId], 0);
-  assert.equal(state.payroll.arrearsVoucherUnits[jobKey], 0);
-  assert.equal(state.monetaryReform.voucherShortfallByKey[`town-wage:${jobKey}:${householdId}`], undefined);
-  assert.equal(paid.arrearsPaidVoucher, 10);
-  assert.equal(paid.currentPaidVoucher, 0);
-  assert.equal(paid.expectedVoucher, 0, "偿还旧债不能重复计提今日工资费用");
-});
-
-test("r02 历史欠薪覆盖部分偿还、退休释放岗位与建筑撤销后继续追偿", () => {
-  {
-    const { state, jobKey, householdId } = makeTownWageDebt(17202);
-    simulation.setEmployment(state, jobKey, 0);
-    assert.equal(simulation.issueGrainVouchers(state, "town", 4).ok, true);
-    payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
-    assert.equal(state.payroll.creditorClaims[jobKey][householdId], 6 * V);
-    assert.equal(state.monetaryReform.voucherShortfallByKey[`town-wage:${jobKey}:${householdId}`], 6 * V);
-    assert.equal(simulation.issueGrainVouchers(state, "town", 6).ok, true);
-    payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
-    assert.equal(state.payroll.creditorClaims[jobKey][householdId], 0);
-    assert.equal(state.monetaryReform.voucherShortfallByKey[`town-wage:${jobKey}:${householdId}`], undefined);
-  }
-  {
-    const { state, jobKey, householdId } = makeTownWageDebt(17203);
-    assert.equal(releaseJobFromHousehold(state, householdId, jobKey, 1), 1);
-    state.households.byId[householdId].ageBands.workers -= 1;
-    state.households.byId[householdId].ageBands.elders += 1;
-    assert.equal(simulation.issueGrainVouchers(state, "town", 10).ok, true);
-    payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
-    assert.equal(state.payroll.creditorClaims[jobKey][householdId], 0, "退休后旧债仍归原家庭并可偿清");
-  }
-  {
-    const { state, buildingId, jobKey, householdId } = makeTownWageDebt(17204);
-    releaseJobFromHousehold(state, householdId, jobKey, 1);
-    state.buildings = state.buildings.filter(row => row.id !== buildingId);
-    assert.equal(simulation.issueGrainVouchers(state, "town", 10).ok, true);
-    payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
-    assert.equal(state.payroll.creditorClaims[jobKey][householdId], 0, "建筑撤销后历史债权不能丢失偿付入口");
-  }
-});
-
 test("r02 股票认购与界面估值共用日历日实际利润窗口，停工日不会被排除", () => {
   const state = legacyVoucherState({ seed: 17205 });
   addBuilding(state, "saltworks", "calendar-stock", 1);

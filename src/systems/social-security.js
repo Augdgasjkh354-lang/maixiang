@@ -96,7 +96,7 @@ export function injectSocialSecurity(state, amountJin, content) {
   const amount = Math.min(requested, maximumPayableValueUnits(state, "town", content));
   if (amount <= 0) return { ok: false, reason: "镇库可用资金不足" };
   const result = settleMonetaryPayment(state, "town", SOCIAL_OWNER, currentPaymentComposition(state, amount), content,
-    "social_security_inject", "镇库向社保基金注资（计为基金负债）", { requireFull: false, countsForReform: false });
+    "social_security_inject", "镇库向社保基金注资（计为基金负债）", { requireFull: false });
   const paid = result.paidValueUnits || 0;
   if (paid <= 0) return { ok: false, reason: result.reason || "注资失败" };
   ss.totalInjectedUnits += paid;
@@ -115,7 +115,7 @@ export function repaySocialSecurityDebt(state, amountJin, content) {
   const amount = Math.min(requested, ss.debtToTownUnits, fundValueUnits(state, content));
   if (amount <= 0) return { ok: false, reason: "基金可用资金不足" };
   const result = settleMonetaryPayment(state, SOCIAL_OWNER, "town", currentPaymentComposition(state, amount), content,
-    "social_security_repay", "社保基金向镇库还款", { requireFull: false, countsForReform: false });
+    "social_security_repay", "社保基金向镇库还款", { requireFull: false });
   const paid = result.paidValueUnits || 0;
   if (paid <= 0) return { ok: false, reason: result.reason || "还款失败" };
   ss.debtToTownUnits = Math.max(0, ss.debtToTownUnits - paid);
@@ -227,7 +227,7 @@ export function fundBuyShares(state, companyId, shares, content) {
   const cost = count * price;
   if (cost > fundValueUnits(state, content)) return { ok: false, reason: "基金资金不足" };
   const result = settleMonetaryPayment(state, SOCIAL_OWNER, "town", currentPaymentComposition(state, cost), content,
-    "social_share_buy", `社保基金买入${company.name}${count}股`, { requireFull: true, countsForReform: false });
+    "social_share_buy", `社保基金买入${company.name}${count}股`, { requireFull: true });
   if (!result.ok) return { ok: false, reason: result.reason || "支付失败" };
   company.townShares -= count;
   company.fundShares += count;
@@ -247,7 +247,7 @@ export function fundSellShares(state, companyId, shares, content) {
   if (!(price > 0)) return { ok: false, reason: "暂无股价" };
   const proceeds = count * price;
   const result = settleMonetaryPayment(state, "town", SOCIAL_OWNER, currentPaymentComposition(state, proceeds), content,
-    "social_share_sell", `社保基金卖出${company.name}${count}股给镇库`, { requireFull: true, countsForReform: false });
+    "social_share_sell", `社保基金卖出${company.name}${count}股给镇库`, { requireFull: true });
   if (!result.ok) return { ok: false, reason: result.reason || "镇库资金不足，无法回购" };
   company.fundShares -= count;
   company.townShares += count;

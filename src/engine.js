@@ -18,7 +18,7 @@ import {
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
   setEmploymentExchangeQuota, setShopRent, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
   configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
-  startCurrencyReform, configureVoucherPaymentTarget, configureResidentExchange, finishCurrencyReform,
+  startCurrencyReform,
   reclaimFarmland
 } from "./core/commands.js";
 import { selectDemolitionPreview, selectUpgradePreview } from "./systems/building-development.js";
@@ -160,9 +160,6 @@ export function createSimulation(content) {
     retainExistingIndustryPrices: function (state) { return retainExistingIndustryPrices(state, definitions); },
     setEmploymentExchangeQuota: function (state, value) { return setEmploymentExchangeQuota(state, value, definitions); },
     startCurrencyReform: function (state) { return startCurrencyReform(state, definitions); },
-    setVoucherPaymentTarget: function (state, value) { return configureVoucherPaymentTarget(state, value); },
-    setResidentExchangeEnabled: function (state, enabled) { return configureResidentExchange(state, enabled); },
-    finishCurrencyReform: function (state) { return finishCurrencyReform(state, definitions); },
     setShopRent: function (state, value) { return setShopRent(state, value); },
     setShopProfitTax: function (state, value) { return setShopProfitTax(state, value, definitions); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },

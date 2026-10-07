@@ -131,13 +131,11 @@ function takeHouseholdWheatForExchange(state, household, wheatUnits, content, re
 }
 
 function currencyAccessCheck(state, owner) {
-  const reform = state.monetaryReform || { stage: "wheat", residentExchangeEnabled: false, legacyBankAccess: false };
+  void owner;
+  const reform = state.monetaryReform || { stage: "wheat", legacyBankAccess: false };
   const bank = Boolean(reform.legacyBankAccess || (state.buildings || []).some(row => row.typeId === "bank"));
   if (reform.stage === "wheat") return { ok: false, reason: "货币改革尚未启动" };
   if (!bank) return { ok: false, reason: "需要银行才能发行或换券" };
-  if ((owner === "residents" || owner?.startsWith("household:")) && !reform.residentExchangeEnabled) {
-    return { ok: false, reason: "居民粮食换券当前已关闭" };
-  }
   return { ok: true };
 }
 

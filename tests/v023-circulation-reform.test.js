@@ -291,29 +291,6 @@ test("0.2.3 动态加价不影响其他小店（保持固定加价）", () => {
 
 // ---------------------------------------------------------------- 守恒与存档
 
-test("旧档批发市场现金并回镇库：粮券守恒，旧欠薪缺券键改名", () => {
-  const state = legacyVoucherState({ seed: 2315 });
-  addBuilding(state, "wholesale_market", "wm-15");
-  assert.equal(simulation.issueGrainVouchers(state, "town", 1000).ok, true);
-  // 构造旧档：从镇库挪 500 券、200 斤小麦到市场现金，并留一条旧付款方命名的缺券记录
-  const townVouchers = voucherBalance(state, "town");
-  const townWheat = state.accounts.town.wheat;
-  state.currency.balances.town = townVouchers - 500 * V;
-  state.wholesaleMarket.cashVoucherUnits = 500 * V;
-  state.accounts.town.wheat = townWheat - 200 * I;
-  state.wholesaleMarket.cashWheatUnits = 200 * I;
-  state.monetaryReform.voucherShortfallByKey ||= {};
-  state.monetaryReform.voucherShortfallByKey["wholesale-wage:mill-x::millers:household-1"] = 7;
-  mergeWholesaleCashIntoTown(state);
-  assert.equal(voucherBalance(state, "town"), townVouchers);
-  assert.equal(state.accounts.town.wheat, townWheat);
-  assert.equal(state.wholesaleMarket.cashVoucherUnits, undefined);
-  assert.equal(state.wholesaleMarket.cashWheatUnits, undefined);
-  assert.equal(state.monetaryReform.voucherShortfallByKey["wholesale-wage:mill-x::millers:household-1"], undefined);
-  assert.equal(state.monetaryReform.voucherShortfallByKey["town-wage:mill-x::millers:household-1"], 7);
-  assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
-});
-
 test("0.2.3 存档兼容：新字段一律 ||= 初始化，SAVE_VERSION 保持 v15", () => {
   assert.equal(SAVE_VERSION, 15, "SAVE_VERSION 必须保持 v15");
   const state = legacyVoucherState({ seed: 2316 });
@@ -343,5 +320,22 @@ test("0.2.3 流通改革端到端：建市场+商店跑30天，状态与粮券�
   simulation.advanceDays(state, 30);
   const check = simulation.validateState(state);
   assert.equal(check.valid, true, check.errors.join("；"));
+  assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
+});
+
+test("旧档批发市场现金并回镇库，粮券守恒", () => {
+  const state = legacyVoucherState({ seed: 2315 });
+  addBuilding(state, "wholesale_market", "wm-15");
+  assert.equal(simulation.issueGrainVouchers(state, "town", 1000).ok, true);
+  const townVouchers = voucherBalance(state, "town");
+  const townWheat = state.accounts.town.wheat;
+  state.currency.balances.town = townVouchers - 500 * V;
+  state.wholesaleMarket.cashVoucherUnits = 500 * V;
+  state.accounts.town.wheat = townWheat - 200 * I;
+  state.wholesaleMarket.cashWheatUnits = 200 * I;
+  mergeWholesaleCashIntoTown(state);
+  assert.equal(voucherBalance(state, "town"), townVouchers);
+  assert.equal(state.accounts.town.wheat, townWheat);
+  assert.equal(state.wholesaleMarket.cashVoucherUnits, undefined);
   assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
 });

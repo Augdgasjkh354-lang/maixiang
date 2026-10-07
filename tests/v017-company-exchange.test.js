@@ -187,20 +187,6 @@ test("365日实际利润估值包含停工日，不只按有生产日期年化",
 });
 
 
-test("公司经营资金在过渡期复用统一混合支付层，不另写粮券专用路径", () => {
-  const state = legacyVoucherState();
-  const bakery = addBuilding(state, "bakery", "mixed-company", 1);
-  assert.equal(simulation.issueGrainVouchers(state, "town", 10000).ok, true);
-  state.monetaryReform.stage = "transition";
-  state.monetaryReform.targetVoucherBps = 3000;
-  const formed = simulation.createCompany(state, bakery.id, { levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
-  assert.equal(formed.ok, true, formed.reason);
-  const company = state.companies[formed.companyId];
-  assert.ok(company.cashVoucherUnits > 0);
-  assert.ok(company.cashWheatUnits > 0);
-  assert.equal(company.initialInvestment.cashVoucherPaidUnits + company.initialInvestment.cashWheatValueUnits, 1000 * V);
-});
-
 test("有上市公司时交易所禁止拆除", () => {
   const state = legacyVoucherState();
   addBuilding(state, "saltworks", "exchange-company", 1);

@@ -84,7 +84,6 @@ function bankManagementMarkup(view, physical = true) {
   const reform = view.monetaryReform;
   const c = view.currency;
   const preview = view.currencyPreview;
-  const finishConfirm = Boolean(view.reformFinishConfirm);
   const previewMarkup = preview ? `<div class="operation-preview">
     <strong>${preview.type === "issue" ? "印制发行确认" : "注销确认"}</strong>
     <div class="row"><span class="label">数量</span><strong class="value">${number(preview.amount, 2)}粮券</strong></div>
@@ -92,24 +91,13 @@ function bankManagementMarkup(view, physical = true) {
     <div class="business-sticky-actions"><button class="secondary" data-currency-preview-cancel>取消</button><button class="primary" data-currency-confirm="${preview.type}">确认${preview.type === "issue" ? "印制发行" : "注销"}</button></div>
   </div>` : "";
   const controls = reform.stage === "wheat"
-    ? `<div class="subtle">银行已具备粮券印制与换券能力。请在政策页启动货币改革；启动时不会自动转换任何家庭或镇库资产。</div><button class="secondary wide" data-go="policy">前往政策</button>`
-    : `<label class="toggle"><input id="residentExchangeEnabled" type="checkbox" ${reform.residentExchangeEnabled ? "checked" : ""}><span>允许居民以粮食换券</span></label>
-      <div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: 0, maximum: 10, className: "setting-editor" })}<b>斤</b></div></div>
-      ${reform.stage === "transition" ? `<div class="row"><span class="label">目标粮券支付比例</span><strong class="value">${number(reform.targetPercent, 2)}%</strong></div>
-        <input class="wide" type="range" min="0" max="100" step="1" value="${number(reform.targetPercent, 2)}" data-reform-target-range aria-label="粮券支付比例滑杆">
-        <div class="setting-input">${renderNumericInput(view, { key: "voucher-target", kind: "voucher-target", target: "reform", value: reform.targetPercent, label: "粮券支付比例", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div>` : `<div class="subtle">全粮券制度已固定为100%，新产生的货币交易不再自动回退小麦。</div>`}
-      <h3>粮券印制与换券</h3>
-      <div class="subtle">镇库先印制粮券。粮券进入镇库后可自由用于工资、采购、福利或换券；换券时对方交出的小麦直接进入镇库。</div>
+    ? `<div class="subtle">启动货币改革后立即改用粮券结算：镇库按小麦存量印制等额粮券，居民可随时以粮换券。</div><button class="secondary wide" data-go="policy">前往政策</button>`
+    : `<div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: 0, maximum: 10, className: "setting-editor" })}<b>斤</b></div></div>
+      <h3>粮券印制与注销</h3>
       <div class="row"><span class="label">镇库 / 居民粮券</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">流通粮券</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
       <div class="business-form-row"><label>数量${stagedBankInput(view, "currency-amount", "发行或兑付数量", 1000)}</label><div class="settings-actions"><button class="secondary" data-currency-preview="issue">印制粮券</button><button class="secondary" data-currency-preview="redeem">注销粮券</button></div></div>
-      ${previewMarkup}
-      ${reform.stage === "transition" ? `<h3>过渡进度</h3>
-        <div class="row"><span class="label">最近7日实际粮券占比</span><strong class="value">${reform.recentDays ? `${number(reform.recentVoucherPercent, 2)}% · ${number(reform.recentDays)}/7日` : "暂无支付窗口"}</strong></div>
-        <div class="row"><span class="label">窗口实际支付</span><strong class="value">${number(reform.recentPaidValueVoucher, 2)}小麦等值</strong></div>
-        <div class="row"><span class="label">小麦补付 / 缺券未付</span><strong class="value">${number(reform.recentFallbackWheatVoucher, 2)} / ${number(reform.voucherShortfall, 2)}小麦等值</strong></div>
-        <div class="subtle">完成条件：目标100%，连续7个游戏日有实际货币支付窗口且无小麦补付，并且没有因缺券形成的未付金额。</div>
-        ${finishConfirm ? `<div class="operation-preview"><strong>确认结束过渡期？</strong><div class="subtle">确认后固定为全粮券制度，之后新交易不再自动用小麦补付。</div><div class="business-sticky-actions"><button class="secondary" data-reform-finish-cancel>取消</button><button class="primary" data-reform-finish-confirm ${reform.eligibleToComplete ? "" : "disabled"}>确认结束</button></div></div>` : `<button class="primary wide" data-reform-finish-preview ${reform.eligibleToComplete ? "" : "disabled"}>结束过渡期</button>`}` : ""}`;
+      ${previewMarkup}`;
   return `<div class="status-strip"><span class="status-light working"></span><strong>${physical ? "银行" : "兼容银行入口"}</strong><span>${reform.stageName}</span></div>
     <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
     ${controls}`;

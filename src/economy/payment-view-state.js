@@ -6,15 +6,7 @@ import { householdEmploymentCount, householdList } from "../systems/households.j
 export function createPaymentViewState(state) {
   const preview = { ...state };
   if (state.monetaryReform) {
-    preview.monetaryReform = {
-      ...state.monetaryReform,
-      paymentHistory: Array.isArray(state.monetaryReform.paymentHistory)
-        ? state.monetaryReform.paymentHistory.slice()
-        : state.monetaryReform.paymentHistory,
-      voucherShortfallByKey: state.monetaryReform.voucherShortfallByKey
-        ? { ...state.monetaryReform.voucherShortfallByKey }
-        : state.monetaryReform.voucherShortfallByKey
-    };
+    preview.monetaryReform = { ...state.monetaryReform };
   }
   if (!state.households?.byId) return preview;
 

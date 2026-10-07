@@ -27,7 +27,6 @@ import { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, re
 import { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } from "./shops.js";
 import { refreshOperatingPlan, recordConsumerDay } from "../economy/operating-plan.js";
 import { archiveHouseholdLifeYear, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } from "./household-life.js";
-import { finalizeMonetaryPaymentDay } from "../economy/payment.js";
 import { settleBankDay } from "./bank.js";
 import { settleBondsDay } from "./bonds.js";
 import { settleStockMarketDay, settleHouseholdStockBuying } from "./stock-exchange.js";
@@ -150,7 +149,6 @@ export function settleOneDay(state, content) {
   // 12. Today's staffed farm labor accrues before the day advances.
   accumulateFarmDay(state, content);
   const endingYearToday = state.day + 1 >= content.rules.daysPerYear;
-  finalizeMonetaryPaymentDay(state, content);
   // 流动性日结算：刷新投资比例（五期算法），供银行/国债当日使用。
   settleLiquidityDay(state, content);
   // 银行日结算：存款计息/吸储、贷款计息/还款/核销、公司自动借款（金融扩展二期）。

@@ -85,20 +85,6 @@ test("0.1.9 二分搜索只复用搜索期间不变能力，最大可付整数�
   }
 });
 
-test("0.1.9 能力上下文不进入state，真实成交仍按成交时余额重新核对", () => {
-  const { state, household } = paymentState("voucher", 10000, 19201);
-  state.monetaryReform.residentExchangeEnabled = false;
-  const owner = `household:${household.id}`;
-  const before = JSON.stringify(state);
-  const context = createPaymentCapabilityContext(state, owner, CONTENT, { maxWheatUnits: 0 });
-  assert.equal(JSON.stringify(state), before);
-  assert.equal(quotePaymentValueUnitsWithContext(context, 20 * V).full, true);
-  assert.equal(transferVouchers(state, owner, "town", 25 * V, CONTENT, "test_drain", "测试抽走余额").ok, true);
-  const settled = settleMonetaryPayment(state, owner, "town", currentPaymentComposition(state, 20 * V), CONTENT,
-    "test_payment", "测试真实成交复核", { requireFull: true, maxWheatUnits: 0 });
-  assert.equal(settled.ok, false, "实际成交不得使用失效的旧上下文");
-});
-
 test("0.1.9 同一家庭在同一市场轮次先收款再付款时仍按最新状态报价", () => {
   // 基线清理：面包/面粉/盐只能经综合商店零售（consumer-market.js generalStoreOnly），住户不可直售；
   // 本测试验证的是"同轮次内报价跟随最新状态"，改用住户可直售的木材，定价逻辑不变。

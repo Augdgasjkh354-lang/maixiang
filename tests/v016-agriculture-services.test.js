@@ -192,19 +192,6 @@ async function servicePaymentCase(stage, targetBps) {
   return { voucherDelta: shop.cashVoucherUnits - before.voucher, wheatDelta: shop.cashWheatUnits - before.wheat, state };
 }
 
-test("服务交易完整复用小麦、30%混合、全粮券三阶段统一支付层", async () => {
-  const wheat = await servicePaymentCase("wheat", 0);
-  assert.equal(wheat.voucherDelta, 0);
-  assert.equal(wheat.wheatDelta, 4 * I);
-  const mixed = await servicePaymentCase("transition", 3000);
-  assert.equal(mixed.voucherDelta, Math.round(4 * V * 0.3));
-  assert.equal(mixed.wheatDelta, Math.round(4 * I * 0.7));
-  const voucher = await servicePaymentCase("voucher", 10000);
-  assert.equal(voucher.voucherDelta, 4 * V);
-  assert.equal(voucher.wheatDelta, 0);
-  assert.equal(simulation.validateCurrencyInvariant(voucher.state).valid, true);
-});
-
 test("服务成交、店员工资、店租与利润税均形成真实资金流", () => {
   const state = simulation.createInitialState({ seed: 161605 });
   const street = addStreet(state);

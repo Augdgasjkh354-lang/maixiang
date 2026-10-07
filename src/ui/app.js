@@ -80,7 +80,6 @@ export function mountGame(root) {
   let sharePreviewCompanyId = null;
   let buybackPreview = null;
   let companyLevelPreview = null;
-  let reformFinishConfirm = false;
   let lastBuildPreviewPlotId = null;
   let latestView = null;
   let latestMapModel = null;
@@ -188,7 +187,6 @@ export function mountGame(root) {
       sharePreviewCompanyId,
       buybackPreview,
       companyLevelPreview,
-      reformFinishConfirm
     };
   }
 
@@ -443,9 +441,6 @@ export function mountGame(root) {
     } else if (kind === "employment-exchange") {
       result = simulation.setEmploymentExchangeQuota(state, parsed.value);
       successMessage = `在岗居民每日换券额度已设为${number(parsed.value, 2)}斤。`;
-    } else if (kind === "voucher-target") {
-      result = simulation.setVoucherPaymentTarget(state, parsed.value);
-      successMessage = `目标粮券支付比例已设为${number(parsed.value, 2)}%。`;
     } else if (kind === "shop-rent") {
       result = simulation.setShopRent(state, parsed.value);
       successMessage = `营业店铺日租已设为${number(parsed.value, 2)}小麦等值。`;
@@ -580,7 +575,7 @@ export function mountGame(root) {
     persistenceIssue = null;
     numericDrafts.clear();
     upgradePreviewId = null; demolitionPreviewId = null; rightSalePreviewId = null;
-    currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null; reformFinishConfirm = false;
+    currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null;
     lastBuildPreviewPlotId = null;
     startupError = null;
     saveWarning = entry.recovered ? "此局从自动备份读取；请保存以修复当前存档。" : null;
@@ -891,7 +886,7 @@ export function mountGame(root) {
             clock.pause();
             numericDrafts.clear();
             upgradePreviewId = null; demolitionPreviewId = null; rightSalePreviewId = null;
-            currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null; reformFinishConfirm = false;
+            currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null;
             navigation.resetView();
             navigation.openPanel("settings");
             managerOpen = true;
@@ -1097,35 +1092,15 @@ export function mountGame(root) {
     if (closest(target, "[data-reform-start]") && state) {
       const result = simulation.startCurrencyReform(state);
       if (!result.ok) { showToast(result.reason); return; }
-      reformFinishConfirm = false;
       changed(true);
       render(true);
-      showToast("货币改革已启动，进入过渡期；目标粮券比例初始为0%。", 4200);
+      showToast(`货币改革完成，已改用粮券结算；镇库印制${number((result.printedVoucherUnits || 0) / simulation.content.precision.currencyUnitsPerVoucher, 0)}粮券。`, 4200);
       return;
     }
     if (closest(target, "[data-bank-open]") && state) {
       const reform = buildView().monetaryReform;
       navigation.openSite(reform.bankBuildingId ? `building:${reform.bankBuildingId}` : "bank-compat");
       render(true);
-      return;
-    }
-    if (closest(target, "[data-reform-finish-preview]") && state) {
-      reformFinishConfirm = true;
-      render(true);
-      return;
-    }
-    if (closest(target, "[data-reform-finish-cancel]")) {
-      reformFinishConfirm = false;
-      render(true);
-      return;
-    }
-    if (closest(target, "[data-reform-finish-confirm]") && state) {
-      const result = simulation.finishCurrencyReform(state);
-      if (!result.ok) { showToast(result.reason); reformFinishConfirm = false; render(true); return; }
-      reformFinishConfirm = false;
-      changed(true);
-      render(true);
-      showToast("过渡期已结束，新产生的货币交易固定使用粮券。", 4200);
       return;
     }
     if (closest(target, "#manualAid") && state) {
@@ -1748,22 +1723,6 @@ export function mountGame(root) {
     const target = event.target;
     if (target.matches("[data-draft-key]") && shouldCommitNumericDraftOnChange(target.dataset.draftKind)) {
       commitNumericDraft(target.dataset.draftKey, target);
-      return;
-    }
-    if (target.matches("[data-reform-target-range]") && state) {
-      const result = simulation.setVoucherPaymentTarget(state, Number(target.value));
-      if (!result.ok) { showToast(result.reason); render(true); return; }
-      numericDrafts.delete("voucher-target");
-      changed(true);
-      render(true);
-      return;
-    }
-    if (target.matches("#residentExchangeEnabled") && state) {
-      const result = simulation.setResidentExchangeEnabled(state, target.checked);
-      if (!result.ok) { showToast(result.reason); render(true); return; }
-      changed(true);
-      render(true);
-      showToast(target.checked ? "居民粮食换券已开放。" : "居民粮食换券已关闭；已有粮券仍可兑回小麦。");
       return;
     }
     if (target.matches("#autoRelief") && state) {

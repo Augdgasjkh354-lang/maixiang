@@ -137,10 +137,6 @@ export function payDailyWages(state, laborAtStart, content) {
     delete payroll.creditorPaymentClaims[payrollKey];
     delete payroll.legacyUnattributedArrearsVoucherUnits?.[payrollKey];
     delete payroll.legacyUnattributedPaymentClaims?.[payrollKey];
-    const prefix = `town-wage:${payrollKey}:`;
-    for (const key of Object.keys(state.monetaryReform?.voucherShortfallByKey || {})) {
-      if (key.startsWith(prefix)) delete state.monetaryReform.voucherShortfallByKey[key];
-    }
   }
 
   attributeLegacyTownWageClaims(state, payroll);
@@ -187,7 +183,7 @@ export function payDailyWages(state, laborAtStart, content) {
       const construction = payrollKey.startsWith("builders::");
       const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
         construction ? "construction_wage_arrears_payment" : "wage_arrears_payment", "偿付原债权家庭历史欠薪",
-        { requireFull: false, trackUnpaid: true, shortfallKey: `${payer}-wage:${payrollKey}:${householdId}` });
+        { requireFull: false });
       const paid = result.paidValueUnits || 0;
       claims[householdId] = Math.max(0, amount - paid);
       paymentClaims[householdId] = result.remainingComposition;
@@ -246,7 +242,7 @@ export function payDailyWages(state, laborAtStart, content) {
       const obligation = normalizePaymentObligation(paymentClaims[householdId] || amount, state);
       const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
         row.key === "builders" ? "construction_wage_payment" : "wage_payment", "支付具体债权家庭本日工资",
-        { requireFull: false, trackUnpaid: true, shortfallKey: `${payer}-wage:${row.payrollKey}:${householdId}` });
+        { requireFull: false });
       const paid = result.paidValueUnits || 0;
       paymentClaims[householdId] = result.remainingComposition;
       claims[householdId] = Math.max(0, amount - paid);
@@ -326,7 +322,7 @@ export function payUnemploymentBenefit(state, laborAtStart, content) {
       ? payFromFund(state, row.household.id, due, content, "unemployment_benefit", "社保基金发放失业金").paidValueUnits
       : (settleMonetaryPayment(state, "town", `household:${row.household.id}`, currentPaymentComposition(state, due), content,
         "unemployment_benefit", "劳动年龄待业者失业金；镇库不足时优先口粮与货币储备更少的家庭",
-        { requireFull: false, countsForReform: true }).paidValueUnits || 0);
+        { requireFull: false }).paidValueUnits || 0);
     paid += rowPaid;
     paidPeople += Math.min(row.idle, Math.floor(rowPaid / perPersonUnits));
   }

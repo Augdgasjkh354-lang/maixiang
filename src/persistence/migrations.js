@@ -5,6 +5,7 @@ import { syncShopEmployment } from "../systems/shops.js";
 import { summarizeLegacyAnnualReports } from "../systems/annual-reports.js";
 import { ensureWholesaleMarket, mergeWholesaleCashIntoTown } from "../systems/wholesale-market.js";
 import { migrateSocialSecurityWallet } from "../systems/social-security.js";
+import { migrateMonetaryReform } from "../economy/payment.js";
 import { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } from "../systems/households.js";
 import {
   defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor
@@ -194,19 +195,9 @@ function normalizeV12(raw, definitions, legacyCompleted = false) {
   const state = normalizeV11(raw, definitions);
   state.version = 12;
   state.schemaVersion = 12;
-  state.monetaryReform ||= legacyCompleted ? {
-    stage: "voucher", targetVoucherBps: 10000, residentExchangeEnabled: true, legacyBankAccess: true,
-    started: null, completed: { legacy: true }, paymentHistory: [], voucherShortfallByKey: {}
-  } : {
-    stage: "wheat", targetVoucherBps: 0, residentExchangeEnabled: false, legacyBankAccess: false,
-    started: null, completed: null, paymentHistory: [], voucherShortfallByKey: {}
-  };
-  if (!["wheat", "transition", "voucher"].includes(state.monetaryReform.stage)) state.monetaryReform.stage = legacyCompleted ? "voucher" : "wheat";
-  state.monetaryReform.targetVoucherBps = Math.max(0, Math.min(10000, Math.round(Number(state.monetaryReform.targetVoucherBps) || 0)));
-  state.monetaryReform.residentExchangeEnabled = Boolean(state.monetaryReform.residentExchangeEnabled);
+  state.monetaryReform ||= { stage: "wheat", legacyBankAccess: false, started: null, completed: null };
+  migrateMonetaryReform(state);
   state.monetaryReform.legacyBankAccess = Boolean(state.monetaryReform.legacyBankAccess || legacyCompleted);
-  state.monetaryReform.paymentHistory = Array.isArray(state.monetaryReform.paymentHistory) ? state.monetaryReform.paymentHistory : [];
-  state.monetaryReform.voucherShortfallByKey ||= {};
 
   state.payroll.creditorPaymentClaims ||= {};
   for (const [payrollKey, claims] of Object.entries(state.payroll.creditorClaims || {})) {
@@ -398,9 +389,6 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
       delete state.payroll.creditorClaims[key];
       delete state.payroll.creditorPaymentClaims[key];
       delete state.payroll.legacyUnattributedArrearsVoucherUnits[key];
-      for (const shortfallKey of Object.keys(state.monetaryReform?.voucherShortfallByKey || {})) {
-        if (shortfallKey.startsWith(`town-wage:${key}:`)) delete state.monetaryReform.voucherShortfallByKey[shortfallKey];
-      }
     }
   }
   state.payroll.arrearsWheatUnits = state.payroll.arrearsVoucherUnits;

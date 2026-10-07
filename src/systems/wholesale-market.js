@@ -114,16 +114,6 @@ export function mergeWholesaleCashIntoTown(state) {
     delete market.monopoly.wageSplit;
   }
   if (state.policy) delete state.policy.wholesaleDailyWheatJin;
-  // 欠薪缺券记录原按付款方命名；改由镇库发薪后旧键不会再被更新，必须改名，否则会永久卡住货币改革。
-  const shortfall = state.monetaryReform?.voucherShortfallByKey;
-  if (shortfall) {
-    for (const key of Object.keys(shortfall)) {
-      if (!key.startsWith("wholesale-wage:")) continue;
-      const townKey = "town-wage:" + key.slice("wholesale-wage:".length);
-      shortfall[townKey] = Math.max(shortfall[townKey] || 0, shortfall[key] || 0);
-      delete shortfall[key];
-    }
-  }
 }
 
 function emptyItemMap(value = 0) {

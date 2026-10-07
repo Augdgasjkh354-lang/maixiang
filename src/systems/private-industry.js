@@ -139,7 +139,7 @@ export function payPrivateIndustryWages(state, content) {
     }));
     const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
     const paidResult = payMonetaryWageClaimsFromPayers(state, payroll, payers, content, "private_wage_payment",
-      `${definition.name}民营业主偿付具体债权家庭工资`, { shortfallPrefix: `private-wage:${building.id}` });
+      `${definition.name}民营业主偿付具体债权家庭工资`);
     state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
     payroll.arrearsVoucherUnits = claimTotal(payroll) + (payroll.legacyUnattributedArrearsVoucherUnits || 0); payroll.cumulativePaidVoucherUnits += paidResult.paid;
     results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paidResult.paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });

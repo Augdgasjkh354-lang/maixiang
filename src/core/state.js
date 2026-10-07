@@ -258,16 +258,7 @@ export function createInitialState(options) {
       guidancePending: true,
       ledger: []
     },
-    monetaryReform: {
-      stage: "wheat",
-      targetVoucherBps: 0,
-      residentExchangeEnabled: false,
-      legacyBankAccess: false,
-      started: null,
-      completed: null,
-      paymentHistory: [],
-      voucherShortfallByKey: {}
-    },
+    monetaryReform: { stage: "wheat", legacyBankAccess: false, started: null, completed: null },
     companies: {},
     nextCompanyNumber: 1,
     stockExchange: { legacyAccess: false, rotation: 0 },

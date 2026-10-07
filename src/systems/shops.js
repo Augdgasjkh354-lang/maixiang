@@ -284,7 +284,7 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
   if (!assignment.ok) {
     const refund = settleMonetaryPayment(state, `shop:${shopId}`, `household:${household.id}`, {
       valueUnits: startupUnits, voucherValueUnits: payment.voucherPaidValueUnits || 0, wheatValueUnits: payment.wheatPaidValueUnits || 0
-    }, content, "shop_capital_refund", "开店失败退回资金", { requireFull: true, allowVoucherFallback: false, countsForReform: false });
+    }, content, "shop_capital_refund", "开店失败退回资金", { requireFull: true });
     // 退款失败：镇库先行垫付给家庭。店铺即将删除，其负债记录会一并消失，
     // 故不在店上记账，直接由镇库承担并记为家庭对镇库的应收（持久化，不随店删除）。
     if (!refund.ok) {
@@ -295,7 +295,7 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
       };
       const advance = settleMonetaryPayment(state, "town", `household:${household.id}`, due, content,
         "shop_capital_refund_advance", `${shop.name}开店失败镇库垫付启动资金`,
-        { requireFull: false, trackUnpaid: true, shortfallKey: `shop-refund:${shopId}:${household.id}` });
+        { requireFull: false });
       const paidAdvance = advance.paidValueUnits || 0;
       const remainingAdvance = Math.max(0, startupUnits - paidAdvance);
       if (remainingAdvance > 0) {
@@ -627,7 +627,7 @@ function payLiability(state, shop, key, destination, content, type, reason) {
   const paymentKey = key === "rentVoucherUnits" ? "rentPaymentClaim" : "taxPaymentClaim";
   const obligation = normalizePaymentObligation(shop.liabilities[paymentKey] || due, state);
   const result = settleMonetaryPayment(state, `shop:${shop.id}`, destination, obligation, content, type, reason,
-    { requireFull: false, trackUnpaid: true, shortfallKey: `${type}:${shop.id}` });
+    { requireFull: false });
   const paid = result.paidValueUnits || 0;
   shop.liabilities[key] = Math.max(0, due - paid);
   shop.liabilities[paymentKey] = result.remainingComposition;
@@ -639,7 +639,7 @@ function payDailyLiabilities(state, shop, content) {
   attributeLegacyShopWageClaims(state, shop);
   const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
   payMonetaryWageClaims(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment",
-    `${shop.name}偿付具体债权家庭员工工资`, { shortfallPrefix: `shop-wage:${shop.id}` });
+    `${shop.name}偿付具体债权家庭员工工资`);
   state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
   shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
   payLiability(state, shop, "rentVoucherUnits", "town", content, "shop_rent_payment", `${shop.name}支付店租`);
@@ -873,7 +873,7 @@ function settleTownOwesHouseholds(state, content) {
     const result = settleMonetaryPayment(state, "town", `household:${household.id}`,
       currentPaymentComposition(state, owed), content,
       "town_debt_repayment", "镇库偿付欠款",
-      { requireFull: false, trackUnpaid: true, shortfallKey: `town-owes:${household.id}` });
+      { requireFull: false });
     const paid = result.paidValueUnits || 0;
     household.townOwesVoucherUnits = Math.max(0, owed - paid);
     if (paid > 0) {
@@ -938,7 +938,7 @@ function finalizeShopLiquidation(state, shop, content) {
     const returned = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${owner.id}`,
       { valueUnits: wheatValue + voucherValue, wheatValueUnits: wheatValue, voucherValueUnits: voucherValue }, content,
       "shop_close_distribution", `${shop.name}清算完成后返还剩余资金`,
-      { requireFull: true, allowVoucherFallback: false, countsForReform: false });
+      { requireFull: true });
     if (!returned.ok) return false;
   }
   shop.status = "closed";

@@ -16,7 +16,7 @@ import { currentPriceMap, currentUnitPrice } from "../economy/prices.js";
 import { computeLaborMarket } from "../systems/labor-market.js";
 import { computeWealthStats } from "../systems/wealth-stats.js";
 import { currencyScale, validateCurrencyInvariant, voucherBalance } from "../economy/currency.js";
-import { hasBankAccess, monetaryReformProgress } from "../economy/payment.js";
+import { hasBankAccess } from "../economy/payment.js";
 import { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } from "../systems/households.js";
 import { bondOutstandingVoucherUnits } from "../systems/bonds.js";
 import { shopSummaries } from "../systems/shops.js";
@@ -585,22 +585,15 @@ export function selectDashboard(state, content, selection) {
       trade: saltPeriod.market || null
     } : needResidents ? { historyCoverage: saltCoverage.coverage, grace: saltCoverage.grace, daysObserved: saltCoverage.daysObserved } : {},
     monetaryReform: needMoney ? (function () {
-      const progress = monetaryReformProgress(state, content);
-      const stageName = progress.stage === "wheat" ? "粮食结算" : progress.stage === "transition" ? "过渡期" : "全粮券结算";
+      const stage = state.monetaryReform?.stage === "voucher" ? "voucher" : "wheat";
       const bankBuilding = runtime.firstBuildingByType.get("bank") || null;
       return {
-        ...progress,
-        stageName,
+        stage,
+        stageName: stage === "wheat" ? "粮食结算" : "粮券结算",
         hasBankAccess: hasBankAccess(state),
         hasPhysicalBank: Boolean(bankBuilding),
         bankBuildingId: bankBuilding?.id || null,
         legacyBankAccess: Boolean(state.monetaryReform?.legacyBankAccess),
-        residentExchangeEnabled: Boolean(state.monetaryReform?.residentExchangeEnabled),
-        targetPercent: progress.targetVoucherBps / 100,
-        recentVoucherPercent: progress.recentVoucherBps / 100,
-        recentPaidValueVoucher: progress.recentPaidValueUnits / voucherScale,
-        recentFallbackWheatVoucher: progress.recentFallbackWheatValueUnits / voucherScale,
-        voucherShortfall: progress.voucherShortfallValueUnits / voucherScale,
         employmentExchangeJin: state.policy?.employmentExchangeJin ?? 2
       };
     })() : null,

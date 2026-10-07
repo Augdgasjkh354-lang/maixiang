@@ -95,7 +95,7 @@ export function payMonetaryWageClaims(state, owner, payer, content, type, reason
     if (due <= 0) continue;
     const obligation = normalizePaymentObligation(paymentClaims[householdId] || due, state);
     const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content, type, reason,
-      { requireFull: false, trackUnpaid: true, shortfallKey: `${options.shortfallPrefix || type}:${householdId}` });
+      { requireFull: false });
     const actual = result.paidValueUnits || 0;
     claims[householdId] = Math.max(0, due - actual);
     paymentClaims[householdId] = result.remainingComposition;
@@ -120,17 +120,12 @@ export function payMonetaryWageClaimsFromPayers(state, owner, payers, content, t
       const payerId = typeof payer === "string" ? payer : payer.id;
       const maxWheatUnits = typeof payer === "string" ? undefined : payer.maxWheatUnits;
       const result = settleMonetaryPayment(state, payerId, `household:${householdId}`, obligation, content, type, reason,
-        { requireFull: false, maxWheatUnits, countsForReform: true });
+        { requireFull: false, maxWheatUnits });
       householdPaid += result.paidValueUnits || 0;
       obligation = result.remainingComposition;
     }
     claims[householdId] = Math.max(0, original - householdPaid);
     paymentClaims[householdId] = obligation;
-    const shortfallKey = `${options.shortfallPrefix || type}:${householdId}`;
-    state.monetaryReform ||= {};
-    state.monetaryReform.voucherShortfallByKey ||= {};
-    if (obligation.voucherValueUnits > 0) state.monetaryReform.voucherShortfallByKey[shortfallKey] = obligation.voucherValueUnits;
-    else delete state.monetaryReform.voucherShortfallByKey[shortfallKey];
     if (householdPaid > 0) rows.push({ householdId, units: householdPaid });
     paid += householdPaid;
   }
