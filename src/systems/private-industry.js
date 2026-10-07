@@ -1,5 +1,5 @@
 import { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } from "../economy/inventory.js";
-import { laborBatches } from "../economy/productivity.js";
+import { laborBatches, nextCarry } from "../economy/productivity.js";
 import { industryTypeIds, isIndustryType } from "../content/buildings.js";
 import { bookAdd, bookAddMap } from "../economy/books.js";
 import { recordEvent } from "../economy/ledger.js";
@@ -111,7 +111,8 @@ function ownerCapacity(state, building, content) {
   const definition = content.buildings[building.typeId];
   const job = definition.jobs[0];
   const workers = readJobCount(state, privateJobKeyForBuilding(building.id, job.id));
-  return { workers, batches: laborBatches(state, building.typeId, building.level, workers, content.recipes[definition.recipeId].batchesPerWorkerDay).batches };
+  const labor = laborBatches(state, building.typeId, building.level, workers, content.recipes[definition.recipeId].batchesPerWorkerDay, building.privateProductivityCarry);
+  return { workers, batches: labor.batches, exact: labor.exact };
 }
 
 export function payPrivateIndustryWages(state, content) {
@@ -140,7 +141,7 @@ export function payPrivateIndustryWages(state, content) {
 export function processPrivateBuilding(state, building, content) {
   const definition = content.buildings[building.typeId];
   const recipe = content.recipes[definition.recipeId];
-  const { workers, batches: capacity } = ownerCapacity(state, building, content);
+  const { workers, batches: capacity, exact: laborExact } = ownerCapacity(state, building, content);
   const target = targetBatches(state, building);
   const planned = Math.min(capacity, target == null ? capacity : target);
   if (workers <= 0 || planned <= 0) return { buildingId: building.id, status: workers <= 0 ? "no_workers" : "no_demand", batches: 0 };
@@ -211,6 +212,9 @@ export function processPrivateBuilding(state, building, content) {
     batchesLeft -= batches;
   }
   syncResidentAggregates(state, content);
+  // 满负荷生产才把零头留到明天。
+  building.privateProductivityCarry = nextCarry(laborExact, completed, completed >= capacity);
+  if (!building.privateProductivityCarry) delete building.privateProductivityCarry;
   if (completed <= 0) {
     const first = inputShortages[0];
     const itemName = first ? (content.items[first.itemId]?.name || first.itemId) : "原料";

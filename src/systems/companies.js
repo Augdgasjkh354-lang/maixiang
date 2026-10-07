@@ -1,5 +1,5 @@
 import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
-import { laborBatches } from "../economy/productivity.js";
+import { laborBatches, nextCarry } from "../economy/productivity.js";
 import { isIndustryType } from "../content/buildings.js";
 import { householdIdOf } from "../economy/accounts.js";
 import { putStock, sellCompanyGoods, takeStock } from "../economy/trade.js";
@@ -586,7 +586,8 @@ function companyCapacity(company, state, content) {
   if (!recipe || !job) return { workers: 0, capacity: 0, recipe, definition };
   const workers = readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id));
   const level = state.buildings.find(row => row.id === company.buildingId)?.level || 1;
-  return { workers, capacity: laborBatches(state, company.typeId, level, workers, recipe.batchesPerWorkerDay).batches, recipe, definition };
+  const labor = laborBatches(state, company.typeId, level, workers, recipe.batchesPerWorkerDay, company.productivityCarry);
+  return { workers, capacity: labor.batches, exact: labor.exact, recipe, definition };
 }
 
 function planTaxUnits(state, company, outputItemId, outputUnits, content) {
@@ -598,7 +599,7 @@ function planTaxUnits(state, company, outputItemId, outputUnits, content) {
 
 export function processListedCompany(state, company, content) {
   ensureCompanyBooks(company);
-  const { workers, capacity, recipe, definition } = companyCapacity(company, state, content);
+  const { workers, capacity, exact: laborExact, recipe, definition } = companyCapacity(company, state, content);
   if (workers <= 0 || capacity <= 0) {
     company.status = "缺工人";
     return { companyId: company.id, status: "no_workers", batches: 0 };
@@ -621,6 +622,8 @@ export function processListedCompany(state, company, content) {
     company.status = maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "缺资金/原料" : "缺原料";
     return { companyId: company.id, status: maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "no_cash_or_materials" : "no_materials", batches: 0 };
   }
+  company.productivityCarry = nextCarry(laborExact, batches, batches >= capacity);
+  if (!company.productivityCarry) delete company.productivityCarry;
   // 仅保留为运营统计/旧档兼容：只统计实际生产日；认购与估值不使用此字段。
   company.operatingDays += 1;
   let totalInputCost = 0;

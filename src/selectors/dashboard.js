@@ -1,5 +1,6 @@
 import { BUILDING_PRESENTATION } from "../content/world.js";
-import { isIndustryType } from "../content/buildings.js";
+import { industryTypeIds, isIndustryType } from "../content/buildings.js";
+import { experienceBonus, industryWorkerDays, levelBonus, productivityFactor } from "../economy/productivity.js";
 import { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } from "./labor.js";
 import { selectAccounts, selectFoodDays, selectTotalQeq } from "./economy.js";
 import { productionStatus } from "./production.js";
@@ -148,6 +149,32 @@ export function selectConstructionOptions(state, content, context = {}) {
   });
 }
 
+// 人均产出展示口径：熟练度上限 50%，百分比保留 1 位，系数保留 2 位。
+const PRODUCTIVITY_MAX_PERCENT = 50;
+
+function productivityView(state, typeId, level, content) {
+  if (!isIndustryType(content, typeId)) {
+    return { productivityFactor: null, levelBonusPercent: null, experienceBonusPercent: null };
+  }
+  return {
+    productivityFactor: Math.round(productivityFactor(state, typeId, level) * 100) / 100,
+    levelBonusPercent: Math.round((levelBonus(level) - 1) * 100),
+    experienceBonusPercent: Math.round((experienceBonus(state, typeId) - 1) * 1000) / 10
+  };
+}
+
+function industryProductivityRows(state, content) {
+  return industryTypeIds(content).map(function (typeId) {
+    return {
+      typeId,
+      name: content.buildings[typeId]?.name || typeId,
+      workerDays: Math.floor(industryWorkerDays(state, typeId)),
+      experiencePercent: Math.round((experienceBonus(state, typeId) - 1) * 1000) / 10,
+      maxPercent: PRODUCTIVITY_MAX_PERCENT
+    };
+  });
+}
+
 export function selectDashboard(state, content, selection) {
   const panel = selection?.panel || "all";
   const full = panel === "all";
@@ -280,7 +307,9 @@ export function selectDashboard(state, content, selection) {
       operatingRight: includeSiteDetails ? selectOperatingRightPreview(state, building.id, content) : null,
       // 用户 0.1.11：镇营目标日产量（斤，0 表示按人手满产）与主产出品。
       outputTargetJin: building.outputTargetJin || 0,
-      mainOutputItemId: definition?.recipeId ? content.recipes[definition.recipeId]?.outputs?.[0]?.itemId || null : null
+      mainOutputItemId: definition?.recipeId ? content.recipes[definition.recipeId]?.outputs?.[0]?.itemId || null : null,
+      // 人均产出（劳动生产率）：仅产业建筑有；等级加成与熟练度加成拆开展示。
+      ...productivityView(state, building.typeId, Math.max(1, Math.min(content.rules.buildingMaxLevel || 5, building.level || 1)), content)
     };
     return result;
   });
@@ -455,6 +484,7 @@ export function selectDashboard(state, content, selection) {
     autoRelief: state.autoRelief,
     relief: state.relief?.lastDay || null,
     buildings,
+    productivity: industryProductivityRows(state, content),
     constructionOptions: options,
     projects: projectViews,
     // 兼容旧调用方：单工程访问器仍然返回首个在建工程。

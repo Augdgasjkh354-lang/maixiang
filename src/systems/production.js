@@ -68,9 +68,7 @@ export function processBuilding(state, building, content) {
       }
     }
   }
-  // 满负荷才把不足一批的零头留到明天。
-  building.productivityCarry = nextCarry(labor.exact, allowedBatches, allowedBatches > 0 && allowedBatches >= labor.batches);
-  if (!building.productivityCarry) delete building.productivityCarry;
+  if (allowedBatches <= 0) delete building.productivityCarry;
   if (!definition || !definition.recipeId || capacity.status === "no_workers" || allowedBatches <= 0) {
     return { buildingId: building.id, status: capacity.status === "no_workers" ? "no_workers" : "no_materials", batches: 0 };
   }
@@ -93,6 +91,9 @@ export function processBuilding(state, building, content) {
     };
   }
   commitProductionAccounting(state, accounting);
+  // 生产成功且满负荷，才把不足一批的零头留到明天。
+  building.productivityCarry = nextCarry(labor.exact, allowedBatches, allowedBatches >= labor.batches);
+  if (!building.productivityCarry) delete building.productivityCarry;
   return {
     buildingId: building.id,
     status: allowedBatches >= targetCap
