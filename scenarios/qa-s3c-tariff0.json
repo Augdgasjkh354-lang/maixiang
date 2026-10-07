@@ -1,0 +1,71 @@
+{
+ "name": "qa-s3c-tariff0",
+ "seed": 42,
+ "years": 3,
+ "metrics": [
+  "year",
+  "trade_export_jin",
+  "trade_tariff_jin",
+  "town_balance_jin",
+  "satisfaction"
+ ],
+ "script": [
+  {
+   "action": "grantTownMaterial",
+   "args": {
+    "itemId": "wood",
+    "quantity": 1000
+   },
+   "year": 1
+  },
+  {
+   "action": "buildAt",
+   "args": {
+    "typeId": "foreign_trade_house",
+    "plotId": "auto"
+   },
+   "year": 1
+  },
+  {
+   "action": "setProjectWorkers",
+   "args": {
+    "projectId": "auto",
+    "workers": 12
+   },
+   "year": 1
+  },
+  {
+   "action": "grantTownMaterial",
+   "args": {
+    "itemId": "salt",
+    "quantity": 30000
+   },
+   "year": 1
+  },
+  {
+   "action": "setTradeTariffRate",
+   "args": {
+    "percent": 0
+   },
+   "year": 1
+  },
+  {
+   "action": "assignBuildingWorkers",
+   "args": {
+    "typeId": "foreign_trade_house",
+    "jobId": "trade_staff",
+    "count": 4
+   },
+   "year": 2
+  },
+  {
+   "action": "tradeOutside",
+   "args": {
+    "direction": "sell",
+    "itemId": "salt",
+    "quantityJin": 20000
+   },
+   "year": 2
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+{"name":"qa-s1-social-noinject","seed":7,"years":5,
+ "metrics":["year","population_total","population_elders","town_balance_jin","social_fund_jin","social_collected_jin","social_paid_jin","social_injected_jin","unemployment_paid_jin","satisfaction"],
+ "script":[
+  {"action":"setSocialSecurityPolicy","args":{"enabled":true,"dailyPerWorkerJin":1,"pensionPerElderJin":2},"year":1},
+  {"action":"setUnemploymentPolicy","args":{"enabled":true,"dailyPerWorkerJin":2},"year":1}
+ ]}

@@ -1,0 +1,100 @@
+{
+  "verifyCore": {
+    "ageGroups": {
+      "children": 200,
+      "working": 600,
+      "elders": 200,
+      "total": 1000
+    },
+    "fixedPopulationAnnualFood": 730000,
+    "fullYield": {
+      "total": 1600000,
+      "residents": 800000,
+      "town": 800000,
+      "actual": {
+        "total": 1600000,
+        "residentShare": 800000,
+        "townShare": 800000,
+        "proportion": 1
+      }
+    },
+    "transferPreservesTotal": true,
+    "eatingReducesTotalBy": 10000,
+    "jobsInvariant": true,
+    "newGameValid": true
+  },
+  "initial": {
+    "population": {
+      "children": 200,
+      "workers": 600,
+      "elders": 200,
+      "total": 1000,
+      "marriedCouples": 96,
+      "marriedWomen": 96
+    },
+    "jobs": {
+      "farmers": 400,
+      "builders": 0,
+      "millers": 0,
+      "bakers": 0,
+      "employed": 400
+    },
+    "resident": 730000,
+    "town": 730000
+  },
+  "afterHarvest": {
+    "year": 1,
+    "day": 274,
+    "resident": 982000,
+    "town": 1530000,
+    "harvest": {
+      "total": 1600000,
+      "residentShare": 800000,
+      "townShare": 800000,
+      "proportion": 1
+    }
+  },
+  "afterYear": {
+    "year": 2,
+    "day": 0,
+    "population": {
+      "children": 223,
+      "workers": 598,
+      "elders": 203,
+      "total": 1024,
+      "marriedCouples": 96,
+      "marriedWomen": 97
+    },
+    "totalEq": 2330000,
+    "residentEq": 800000,
+    "townEq": 1530000,
+    "seed": 3872957279
+  },
+  "build": {
+    "started": {
+      "ok": true,
+      "cost": 3600,
+      "assignedBuilders": 12
+    },
+    "year": 1,
+    "day": 40,
+    "buildings": [
+      {
+        "type": "mill",
+        "plotId": "east",
+        "x": 76.5,
+        "y": 58.5
+      }
+    ],
+    "jobs": {
+      "farmers": 400,
+      "builders": 0,
+      "millers": 0,
+      "bakers": 0
+    },
+    "project": null,
+    "residentEq": 653600,
+    "townEq": 726400
+  }
+}
+

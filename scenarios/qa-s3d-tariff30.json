@@ -1,0 +1,7 @@
+{"name":"qa-s3d-tariff30","seed":42,"years":3,
+ "metrics":["year","trade_export_jin","trade_tariff_jin","town_balance_jin","satisfaction"],
+ "script":[
+  {"action":"grantTownMaterial","args":{"itemId":"salt","quantity":30000},"year":1},
+  {"action":"setTradeTariffRate","args":{"percent":30},"year":1},
+  {"action":"tradeOutside","args":{"direction":"sell","itemId":"salt","quantityJin":20000},"year":2}
+ ]}

@@ -1,0 +1,9 @@
+{"name":"qa-s6-collect-check","seed":42,"years":3,
+ "metrics":["year","wage_paid_jin","social_fund_jin","social_collected_jin","social_paid_jin","town_balance_jin"],
+ "script":[
+  {"action":"grantTownMaterial","args":{"itemId":"wood","quantity":5000},"year":1},
+  {"action":"buildAt","args":{"plotId":"auto","typeId":"mill"},"year":1},
+  {"action":"setProjectWorkers","args":{"projectId":"auto","workers":12},"year":1},
+  {"action":"assignBuildingWorkers","args":{"typeId":"mill","jobId":"millers","count":12},"year":2},
+  {"action":"setSocialSecurityPolicy","args":{"enabled":true,"dailyPerWorkerJin":1,"pensionPerElderJin":2},"year":2}
+ ]}

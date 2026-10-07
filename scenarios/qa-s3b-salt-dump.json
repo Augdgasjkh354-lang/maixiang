@@ -1,0 +1,84 @@
+{
+ "name": "qa-s3b-salt-dump",
+ "seed": 42,
+ "years": 5,
+ "metrics": [
+  "year",
+  "town_balance_jin",
+  "outside_wheat_stock_jin",
+  "outside_buy_salt",
+  "outside_prosperity",
+  "trade_export_jin",
+  "trade_tariff_jin",
+  "trade_count",
+  "satisfaction"
+ ],
+ "script": [
+  {
+   "action": "grantTownMaterial",
+   "args": {
+    "itemId": "wood",
+    "quantity": 1000
+   },
+   "year": 1
+  },
+  {
+   "action": "buildAt",
+   "args": {
+    "typeId": "foreign_trade_house",
+    "plotId": "auto"
+   },
+   "year": 1
+  },
+  {
+   "action": "setProjectWorkers",
+   "args": {
+    "projectId": "auto",
+    "workers": 12
+   },
+   "year": 1
+  },
+  {
+   "action": "grantTownMaterial",
+   "args": {
+    "itemId": "salt",
+    "quantity": 120000
+   },
+   "year": 1
+  },
+  {
+   "action": "setTradeTariffRate",
+   "args": {
+    "percent": 5
+   },
+   "year": 1
+  },
+  {
+   "action": "assignBuildingWorkers",
+   "args": {
+    "typeId": "foreign_trade_house",
+    "jobId": "trade_staff",
+    "count": 4
+   },
+   "year": 2
+  },
+  {
+   "action": "tradeOutside",
+   "args": {
+    "direction": "sell",
+    "itemId": "salt",
+    "quantityJin": 50000
+   },
+   "year": 2
+  },
+  {
+   "action": "tradeOutside",
+   "args": {
+    "direction": "sell",
+    "itemId": "salt",
+    "quantityJin": 50000
+   },
+   "year": 3
+  }
+ ]
+}

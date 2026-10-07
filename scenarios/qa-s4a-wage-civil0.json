@@ -1,0 +1,5 @@
+{"name":"qa-s4a-wage-civil0","seed":42,"years":5,
+ "metrics":["year","population_total","town_balance_jin","wage_paid_jin","wage_arrears_jin","wage_control_civil","wage_control_industry","satisfaction"],
+ "script":[
+  {"action":"setWageControl","args":{"civil":0,"industry":1},"year":2}
+ ]}

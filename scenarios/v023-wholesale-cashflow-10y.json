@@ -1,0 +1,693 @@
+{
+  "name": "v023-wholesale-cashflow-10y",
+  "seed": 6023,
+  "years": 10,
+  "metrics": [
+    "year",
+    "monetary_stage",
+    "wholesale_cash_jin",
+    "wholesale_value_sales_jin",
+    "wholesale_value_purchases_jin",
+    "wholesale_value_wages_jin",
+    "wholesale_wages_market_jin",
+    "wholesale_wages_town_jin",
+    "wholesale_wage_self_pay_pct",
+    "wholesale_coverage_ratio",
+    "wholesale_year_net_jin",
+    "wholesale_injected_jin",
+    "town_balance_jin",
+    "town_wage_arrears_jin",
+    "wage_paid_jin",
+    "wage_arrears_keys",
+    "satisfaction",
+    "population_total",
+    "shop_bread_retail",
+    "shop_bread_margin_pct",
+    "shop_promotion_count",
+    "shop_avg_target_margin",
+    "shop_open_count",
+    "shop_year_revenue_jin"
+  ],
+  "script": [
+    {
+      "year": 1,
+      "action": "grantTownMaterial",
+      "args": {
+        "itemId": "wood",
+        "quantity": 60000
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "wholesale_market",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 14
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "commercial_street",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 16
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "commercial_street",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 16
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "commercial_street",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 16
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "mill",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 12
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "bakery",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 10
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "lumberyard",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 10
+      }
+    },
+    {
+      "year": 1,
+      "action": "buildAt",
+      "args": {
+        "typeId": "saltworks",
+        "plotId": "auto"
+      }
+    },
+    {
+      "year": 1,
+      "action": "setProjectWorkers",
+      "args": {
+        "projectId": "auto",
+        "workers": 10
+      }
+    },
+    {
+      "year": 2,
+      "action": "assignBuildingWorkers",
+      "args": {
+        "typeId": "mill",
+        "jobId": "millers",
+        "count": 10
+      }
+    },
+    {
+      "year": 2,
+      "action": "assignBuildingWorkers",
+      "args": {
+        "typeId": "bakery",
+        "jobId": "bakers",
+        "count": 10
+      }
+    },
+    {
+      "year": 2,
+      "action": "assignBuildingWorkers",
+      "args": {
+        "typeId": "lumberyard",
+        "jobId": "lumberjacks",
+        "count": 10
+      }
+    },
+    {
+      "year": 2,
+      "action": "assignBuildingWorkers",
+      "args": {
+        "typeId": "saltworks",
+        "jobId": "salt_workers",
+        "count": 10
+      }
+    },
+    {
+      "year": 2,
+      "action": "forceVoucherStage",
+      "args": {}
+    },
+    {
+      "year": 2,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 800000
+      }
+    },
+    {
+      "year": 2,
+      "action": "fundWholesaleMarket",
+      "args": {
+        "amountJin": 40000
+      }
+    },
+    {
+      "year": 2,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 300000
+      }
+    },
+    {
+      "year": 2,
+      "action": "fundShopOwners",
+      "args": {
+        "amountVoucherPerHousehold": 3000,
+        "count": 6
+      }
+    },
+    {
+      "year": 2,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 2,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 2,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 2,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 2,
+      "action": "openGeneralStore",
+      "args": {
+        "buildingId": "auto"
+      }
+    },
+    {
+      "year": 2,
+      "action": "openGeneralStore",
+      "args": {
+        "buildingId": "auto"
+      }
+    },
+    {
+      "year": 2,
+      "action": "openGeneralStore",
+      "args": {
+        "buildingId": "auto"
+      }
+    },
+    {
+      "year": 2,
+      "action": "openGeneralStore",
+      "args": {
+        "buildingId": "auto"
+      }
+    },
+    {
+      "year": 2,
+      "action": "openGeneralStore",
+      "args": {
+        "buildingId": "auto"
+      }
+    },
+    {
+      "year": 2,
+      "action": "openGeneralStore",
+      "args": {
+        "buildingId": "auto"
+      }
+    },
+    {
+      "year": 2,
+      "action": "hireShopClerks",
+      "args": {
+        "count": 3
+      }
+    },
+    {
+      "year": 3,
+      "action": "setShopTargetMargin",
+      "args": {
+        "percent": 20
+      }
+    },
+    {
+      "year": 5,
+      "action": "setShopTargetMargin",
+      "args": {
+        "percent": 30
+      }
+    },
+    {
+      "year": 3,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 3,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 3,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 3,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 3,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 3,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 4,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 4,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 4,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 4,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 4,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 4,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 5,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 5,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 5,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 5,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 5,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 5,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 6,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 6,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 6,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 6,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 6,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 6,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 7,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 7,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 7,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 7,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 7,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 7,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 8,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 8,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 8,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 8,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 8,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 8,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 9,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 9,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 9,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 9,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 9,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 9,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    },
+    {
+      "year": 10,
+      "action": "convertTownWheatToVouchers",
+      "args": {
+        "amountVoucher": 200000
+      }
+    },
+    {
+      "year": 10,
+      "action": "grantResidentVouchers",
+      "args": {
+        "amountVoucher": 150000
+      }
+    },
+    {
+      "year": 10,
+      "action": "trimHouseholdFood",
+      "args": {
+        "days": 3
+      }
+    },
+    {
+      "year": 10,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "bread",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 10,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "flour",
+        "quantityJin": 60000
+      }
+    },
+    {
+      "year": 10,
+      "action": "seedWholesaleStock",
+      "args": {
+        "itemId": "salt",
+        "quantityJin": 30000
+      }
+    }
+  ]
+}

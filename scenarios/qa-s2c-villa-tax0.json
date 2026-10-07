@@ -1,0 +1,8 @@
+{"name":"qa-s2c-villa-tax0","seed":11,"years":6,
+ "metrics":["year","villa_sold","villa_revenue_jin","villa_tax_jin","town_balance_jin","satisfaction"],
+ "script":[
+  {"action":"grantTownMaterial","args":{"itemId":"wood","quantity":2000},"year":1},
+  {"action":"buildAt","args":{"plotId":"auto","typeId":"villa_complex"},"year":1},
+  {"action":"setProjectWorkers","args":{"projectId":"auto","workers":24},"year":1},
+  {"action":"setVillaPolicy","args":{"priceWheatJin":10000,"taxRatePercent":0},"year":2}
+ ]}
