@@ -38,19 +38,52 @@ function staticSites(view) {
   ].join("");
 }
 
+function loggingShape() {
+  return '<g class="resource-pile">' +
+    '<ellipse class="resource-stump" cx="20" cy="16" rx="15" ry="8"/>' +
+    '<rect class="resource-log" x="-44" y="-6" width="84" height="22" rx="11"/>' +
+    '<rect class="resource-log" x="-30" y="-27" width="70" height="21" rx="10"/>' +
+    '<rect class="resource-log" x="-17" y="-46" width="42" height="19" rx="9"/>' +
+    '<ellipse class="resource-log-end" cx="-36" cy="5" rx="7" ry="11"/>' +
+    '<ellipse class="resource-log-end" cx="-22" cy="-16" rx="6" ry="10"/>' +
+    '<ellipse class="resource-log-end" cx="-11" cy="-36" rx="5" ry="9"/>' +
+    '<path class="resource-axe-handle" d="M22 12L44-34"/>' +
+    '<path class="resource-axe-head" d="M38-38Q56-52 60-34L52-30Q48-42 40-34Z"/>' +
+    "</g>";
+}
+
+function saltShape() {
+  return '<g class="resource-pile">' +
+    '<ellipse class="resource-ground" cx="0" cy="22" rx="60" ry="10"/>' +
+    '<path class="resource-rock" d="M-54 22Q-46-12-18-22Q2-30 20-20Q46-8 54 22Z"/>' +
+    '<path class="resource-rock-shade" d="M-4-24Q20-14 20 22H54Q46-8 20-20Q6-26-4-24Z"/>' +
+    '<path class="resource-crystal" d="M-26-6L-20-34L-12-8Z"/>' +
+    '<path class="resource-crystal" d="M-12-10L-2-50L8-12Z"/>' +
+    '<path class="resource-crystal" d="M6-10L16-40L24-8Z"/>' +
+    '<path class="resource-vein" d="M-2-58v8M-6-54h8M22-48v6M19-45h6"/>' +
+    "</g>";
+}
+
 function resourceSite(plot, selected) {
   const x = plot.x * 12;
   const y = plot.y * 10;
   const salt = plot.feature === "salt_mine";
-  const shape = salt
-    ? '<path class="resource-rock" d="M-20 8-12-10-2-15 10-9 20 8 11 15-14 15Z"/><path class="resource-vein" d="m-8 4 8-12 8 15m-14-1h12"/>'
-    : '<path class="resource-log" d="M-22-3h31l12 5v10H-10l-12-5Z"/><ellipse class="resource-log-end" cx="-22" cy="2" rx="5" ry="7"/><path class="resource-sapling" d="M14-2v-19m0 7-8-7m8 11 8-9"/>';
   const title = salt ? "盐矿资源点" : "伐木资源点";
+  const tag = salt ? "盐矿" : "伐木点";
+  const shape = salt ? saltShape() : loggingShape();
   return '<g class="map-site resource-site ' + (salt ? "salt" : "forest") +
     (selected ? " selected" : "") + '" data-site="resource:' + escapeHtml(plot.id) +
     '" role="button" tabindex="0" aria-label="查看' + title + '" transform="translate(' +
     x + " " + y + ')"><ellipse class="map-hit" cx="0" cy="2" rx="48" ry="38"/>' +
-    shape + (selected ? mapLabel(title) : "") + "</g>";
+    shape +
+    '<g class="resource-tag"><rect x="-40" y="30" width="80" height="21" rx="10.5"/><text x="0" y="45">' + tag + "</text></g>" +
+    (selected ? '<g transform="translate(0 -78)">' + mapLabel(title) + "</g>" : "") + "</g>";
+}
+
+function renderParcel(plot) {
+  const x = plot.x * 12;
+  const y = plot.y * 10;
+  return `<rect class="plot-parcel" x="${x - 48}" y="${y - 36}" width="96" height="72" rx="12" fill="#f3f1dc" fill-opacity=".5" stroke="#9fa687" stroke-opacity=".7" stroke-width="2" stroke-dasharray="10 7"/>`;
 }
 
 function walkingPeople() {
@@ -131,8 +164,11 @@ export function renderMap(view, nav) {
       (row.kind === "upgrade" && selectedSite === `building:${row.buildingId}`);
     return renderProject(row, plot, selected || !selectedSite);
   }).join("");
+  const parcels = !buildMode
+    ? view.plots.filter(plot => !plot.feature && !occupied.has(plot.id)).map(renderParcel).join("")
+    : "";
   return `<canvas id="mapTerrainCanvas" class="map-art-canvas" width="${MAP_WIDTH}" height="${MAP_HEIGHT}" aria-hidden="true"></canvas><svg class="world-map" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="麦乡俯视地图" data-season="${view.season.key}" data-paused="${view.paused}">
-    ${townLandscape()}<g class="static-sites">${staticSites(view)}${resources}</g><g class="walker-layer">${walkingPeople()}</g>
+    ${townLandscape([...occupied])}<g class="plot-parcels" pointer-events="none" aria-hidden="true">${parcels}</g><g class="static-sites">${staticSites(view)}${resources}</g><g class="walker-layer">${walkingPeople()}</g>
     <g class="buildings-layer">${project}${buildingMarkup}</g><g class="build-sites" style="display:${buildMode ? "" : "none"}">${plots}</g>
     <g class="north-mark" transform="translate(1130 95)"><path d="M0 22V-12m0 0-8 13 8-4 8 4Z"/><text y="39">北</text></g>
   </svg>`;

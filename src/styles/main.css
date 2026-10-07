@@ -584,3 +584,16 @@ button.wide { width: 100%; }
 .enterprise-section + .enterprise-section, .enterprise-section + .panel-section { margin-top: 20px; }
 .enterprise-section + .panel-section { padding-top: 0; border-top: 0; }
 .staged-input { width: 92px; min-height: 40px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: white; font: inherit; font-weight: 700; color: var(--deep-green); text-align: right; }
+
+/* 舆图景观：资源点图标与名牌（追加） */
+.resource-site .resource-stump { fill: #b98a55; stroke: #5d442d; stroke-width: 2; }
+.resource-site .resource-axe-handle { fill: none; stroke: #7a5632; stroke-width: 5; stroke-linecap: round; }
+.resource-site .resource-axe-head { fill: #b4babb; stroke: #4e4a40; stroke-width: 2; stroke-linejoin: round; }
+.resource-site .resource-rock { fill: #e9ece6; stroke: #7d8179; stroke-width: 2.5; }
+.resource-site .resource-rock-shade { fill: #c3c8c0; }
+.resource-site .resource-ground { fill: #c9cbb4; opacity: .6; }
+.resource-site .resource-crystal { fill: #fbfcf4; stroke: #7f8a86; stroke-width: 1.8; stroke-linejoin: round; }
+.resource-site .resource-vein { stroke: #9aa39c; stroke-width: 2; stroke-linecap: round; }
+.resource-tag { pointer-events: none; }
+.resource-tag rect { fill: #28392dcc; stroke: #eedb9a; stroke-width: 1.2; }
+.resource-tag text { fill: #fff8de; font: 700 12px sans-serif; text-anchor: middle; }
