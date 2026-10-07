@@ -162,6 +162,8 @@ export const BUILDINGS = Object.freeze({
     description: "高档住宅区 · 每座含20栋别墅，富裕家庭可购买",
     maxInstances: 12,
     villaCapacity: 20,
+    // 别墅群没有岗位；显式给空数组，否则建成后 selectDashboard 遍历 jobs 会崩溃导致界面卡死。
+    jobs: Object.freeze([]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1500 }]),
     construction: Object.freeze({
       workDays: 1000, recommendedWorkers: 20

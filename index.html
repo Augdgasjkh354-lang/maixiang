@@ -759,6 +759,8 @@ const BUILDINGS = Object.freeze({
     description: "高档住宅区 · 每座含20栋别墅，富裕家庭可购买",
     maxInstances: 12,
     villaCapacity: 20,
+    // 别墅群没有岗位；显式给空数组，否则建成后 selectDashboard 遍历 jobs 会崩溃导致界面卡死。
+    jobs: Object.freeze([]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1500 }]),
     construction: Object.freeze({
       workDays: 1000, recommendedWorkers: 20
@@ -1914,7 +1916,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod12 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-f5c18f7";
+       const BUILD_ID = "0203-18a0c92";
 return { APP_VERSION, BUILD_ID };
 })();
 
