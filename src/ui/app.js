@@ -1334,15 +1334,6 @@ export function mountGame(root) {
       changed(true); render(true);
       return;
     }
-    const shopClerk = closest(target, "[data-shop-clerk][data-step]");
-    if (shopClerk && state) {
-      const shop = buildView().shops.find(row => row.id === shopClerk.dataset.shopClerk);
-      if (!shop) return;
-      const result = simulation.configureShopClerks(state, shop.id, shop.clerks + Number(shopClerk.dataset.step));
-      if (!result.ok) { showToast(result.reason); return; }
-      changed(true); render(true);
-      return;
-    }
     const shopClose = closest(target, "[data-shop-close]");
     if (shopClose && state) {
       const result = simulation.closeResidentShop(state, shopClose.dataset.shopClose);
