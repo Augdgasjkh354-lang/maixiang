@@ -1,4 +1,5 @@
 import { BUILDING_PRESENTATION } from "../content/world.js";
+import { isIndustryType } from "../content/buildings.js";
 import { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } from "./labor.js";
 import { selectAccounts, selectFoodDays, selectTotalQeq } from "./economy.js";
 import { productionStatus } from "./production.js";
@@ -615,7 +616,7 @@ export function selectDashboard(state, content, selection) {
       legacyAccess: Boolean(state.stockExchange?.legacyAccess),
       reformComplete: state.monetaryReform?.stage === "voucher"
     } : null,
-    listableBuildings: needBusiness ? buildings.filter(building => ["mill", "bakery", "lumberyard", "saltworks"].includes(building.typeId) && building.ownership.townLevels > 0 && !building.companyId) : [],
+    listableBuildings: needBusiness ? buildings.filter(building => isIndustryType(content, building.typeId) && building.ownership.townLevels > 0 && !building.companyId) : [],
     shareConfig: needBusiness ? {
       sharesPerListedLevel: content.rules.sharesPerListedLevel || 1000,
       foodReserveDays: content.rules.shareFoodReserveDays || 90,

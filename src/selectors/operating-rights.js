@@ -1,4 +1,5 @@
 import { privateJobKeyForBuilding, listedJobKeyForBuilding, populationStats, readJobCount, selectJobRows } from "./labor.js";
+import { isIndustryType } from "../content/buildings.js";
 import { accountQeqUnits } from "../economy/inventory.js";
 import { voucherBalance } from "../economy/currency.js";
 import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment } from "../economy/payment.js";
@@ -8,7 +9,6 @@ import { selectPublicProcurementDemand } from "../systems/public-procurement.js"
 import { companyActualProfitValuation } from "../systems/companies.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
 
-const SELLABLE_TYPES = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
 
 function outputCompetitionStock(state, itemId) {
   const town = state.accounts.town[itemId] || 0;
@@ -107,14 +107,19 @@ function demandForType(state, typeId, content) {
   if (typeId === "saltworks") return saltDemand(state, content);
   if (typeId === "mill") return millDemand(state, content);
   if (typeId === "lumberyard") return woodDemand(state, content);
-  return { demandUnits: 0, competitionUnits: 0, opportunityUnits: 0, reason: "暂无需求" };
+  // 其他产业：按经营计划算出的需求（含下游原料需求）。
+  const itemId = content.recipes[content.buildings[typeId]?.recipeId]?.outputs?.[0]?.itemId;
+  const demandUnits = Math.max(0, state.market?.operatingPlan?.demand?.[typeId]?.demandUnits || 0);
+  const competitionUnits = itemId ? outputCompetitionStock(state, itemId) : 0;
+  const opportunityUnits = Math.max(0, demandUnits - competitionUnits);
+  return { demandUnits, competitionUnits, opportunityUnits, reason: demandUnits <= 0 ? "暂无需求" : opportunityUnits <= 0 ? "现有库存已覆盖需求" : "存在未满足需求" };
 }
 
 export function selectOperatingRightPreview(state, buildingId, content, requestedPrice) {
   const paymentState = createPaymentViewState(state);
   const building = state.buildings.find(row => row.id === buildingId);
   if (!building) return { available: false, reason: "建筑不存在" };
-  if (!SELLABLE_TYPES.has(building.typeId)) return { available: false, reason: "该建筑不开放经营权出售" };
+  if (!isIndustryType(content, building.typeId)) return { available: false, reason: "该建筑不开放经营权出售" };
   if ((state.projects || []).some(project => project.buildingId === buildingId || project.plotId === building.plotId)) {
     return { available: false, reason: "施工或升级期间不能出售经营权" };
   }

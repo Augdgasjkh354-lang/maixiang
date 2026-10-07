@@ -23,16 +23,16 @@ import { makeTransactionId, recordLedger } from "../economy/ledger.js";
 import { setCurrentUnitPrice, currentUnitPrice } from "../economy/prices.js";
 import { householdConvertibleWheatUnits, syncResidentAggregates } from "./households.js";
 
-export const WHOLESALE_ITEM_IDS = Object.freeze(["wheat", "flour", "bread", "wood", "salt"]);
+export const WHOLESALE_ITEM_IDS = Object.freeze(["wheat", "flour", "bread", "wood", "salt", "wine", "cotton", "cloth"]);
 
 // 镇营统购统销的商品（不含小麦——小麦继续归镇库直管）。
 // 同时也是做市商可挂牌买卖的商品清单：小麦不在批发市场买卖，
 // 只走镇库调拨（磨坊免费领用）与单次调运。
-export const WHOLESALE_MONOPOLY_ITEM_IDS = Object.freeze(["flour", "bread", "wood", "salt"]);
+export const WHOLESALE_MONOPOLY_ITEM_IDS = Object.freeze(["flour", "bread", "wood", "salt", "wine", "cotton", "cloth"]);
 
 // 默认做市价（小麦斤等价/单位）：收购 1.4 / 售出 1.8 等，用户拍板。
-export const DEFAULT_PURCHASE_PRICES = Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8 });
-export const DEFAULT_SALE_PRICES = Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12 });
+export const DEFAULT_PURCHASE_PRICES = Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16 });
+export const DEFAULT_SALE_PRICES = Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20 });
 
 // 库存价格反馈：以「参考库存（斤）」为基准，库存达到参考库存的 feedbackScale 倍时
 // 收购价按 1/(1+elasticity*ratio) 衰减，ratio = max(0, 库存/参考库存 − 1)。

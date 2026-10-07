@@ -1,4 +1,5 @@
 import { populationStats, selectJobRows } from "../selectors/labor.js";
+import { industryTypeIds, isIndustryType } from "../content/buildings.js";
 import { PERIODS } from "../economy/books.js";
 import { householdList, householdPopulation, householdWorkingAge, householdEmploymentCount, totalHouseholdAgeBands, jobCount, isActiveHousehold } from "../systems/households.js";
 import { validateContent } from "../content/validate.js";
@@ -150,7 +151,7 @@ export function validateState(state, content) {
     if (!Number.isFinite(price) || price <= 0) errors.push("统一商品价格无效：" + itemId);
   }
   if (!Number.isFinite(state.policy?.agricultureTaxPercent) || state.policy.agricultureTaxPercent < 0 || state.policy.agricultureTaxPercent > 80) errors.push("农业税率无效");
-  for (const typeId of ["mill", "bakery", "lumberyard", "saltworks"]) {
+  for (const typeId of industryTypeIds(content)) {
     const rate = state.policy?.privateProductionTaxPercent?.[typeId];
     if (!Number.isFinite(rate) || rate < 0 || rate > 80) errors.push("民营生产税率无效：" + typeId);
   }
@@ -233,7 +234,7 @@ export function validateState(state, content) {
     const companyBuildings = new Set();
     for (const [companyId, company] of Object.entries(state.companies)) {
       const building = state.buildings.find(row => row.id === company.buildingId);
-      if (!building || !["mill", "bakery", "lumberyard", "saltworks"].includes(company.typeId) || building.typeId !== company.typeId) {
+      if (!building || !isIndustryType(content, company.typeId) || building.typeId !== company.typeId) {
         errors.push("企业引用了无效建筑：" + companyId);
         continue;
       }

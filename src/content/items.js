@@ -22,5 +22,18 @@ export const ITEMS = Object.freeze({
   salt: Object.freeze({
     id: "salt", name: "食盐", unit: "斤", category: "household",
     edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  // 酒：享受品，不算口粮。棉花：织布原料。布：日用必需品（按匹）。
+  wine: Object.freeze({
+    id: "wine", name: "酒", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  cotton: Object.freeze({
+    id: "cotton", name: "棉花", unit: "斤", category: "material",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  cloth: Object.freeze({
+    id: "cloth", name: "布", unit: "匹", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
   })
 });

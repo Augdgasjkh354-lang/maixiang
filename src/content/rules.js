@@ -144,7 +144,7 @@ export const RULES = Object.freeze({
   shopClerkUtilizationHireThreshold: 0.85,
   shopClerkUtilizationReleaseThreshold: 0.45,
   shopTypes: Object.freeze({
-    general: Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood"]) }),
+    general: Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
@@ -156,11 +156,11 @@ export const RULES = Object.freeze({
     salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8 })
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16 })
 });
 
 export const AGRICULTURE = Object.freeze({

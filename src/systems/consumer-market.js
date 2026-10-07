@@ -38,7 +38,7 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
   // 用户 0.1.11（-5）：库存超过当日剩余接待能力的店铺，溢出部分记 capped，
   // 未满足的需求按比例折算成各店的拒客数（registerCappedRejection）。
   const capped = options.capped && Array.isArray(options.capped) ? options.capped : null;
-  const generalStoreOnly = new Set(["flour", "bread", "salt"]).has(itemId);
+  const generalStoreOnly = new Set(["flour", "bread", "salt", "wine", "cloth"]).has(itemId);
   const townStock = state.accounts.town[itemId] || 0;
   // 镇库木材属于建设储备，居民修缮需求不向镇库购买，避免挤占施工用材。
   const townSellable = !generalStoreOnly && options.excludeTownSellers !== true;

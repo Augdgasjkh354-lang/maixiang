@@ -1,4 +1,5 @@
 import { assignWorkers } from "../systems/employment.js";
+import { isIndustryType } from "../content/buildings.js";
 import { startConstruction, setProjectWorkers as setProjectWorkersSystem } from "../systems/construction.js";
 import { setAutomaticRelief } from "../systems/finance.js";
 import { demolishBuilding, startBuildingUpgrade } from "../systems/building-development.js";
@@ -131,7 +132,7 @@ export function setAutosaveMonths(state, months) {
 }
 
 export function setPrivateProductionTax(state, typeId, percent, content) {
-  if (!["mill", "bakery", "lumberyard", "saltworks"].includes(typeId) || !content.buildings[typeId]) {
+  if (!isIndustryType(content, typeId)) {
     return { ok: false, reason: "该产业不开放民营生产税设置" };
   }
   const value = Number(percent);

@@ -2,6 +2,7 @@ export const BUILDINGS = Object.freeze({
   mill: Object.freeze({
     id: "mill", name: "磨坊", icon: "⚙️",
     description: "小麦磨面",
+    industryTier: 1,
     maxInstances: 12,
     recipeId: "mill_flour",
     productionRoleId: "millers",
@@ -18,6 +19,7 @@ export const BUILDINGS = Object.freeze({
   bakery: Object.freeze({
     id: "bakery", name: "面包房", icon: "🥖",
     description: "面粉烤面包 · 需已有面粉",
+    industryTier: 2,
     maxInstances: 12,
     recipeId: "bakery_bread",
     productionRoleId: "bakers",
@@ -34,6 +36,7 @@ export const BUILDINGS = Object.freeze({
   lumberyard: Object.freeze({
     id: "lumberyard", name: "伐木场", icon: "🪵",
     description: "南林伐木 · 木材持续可用",
+    industryTier: 0,
     maxInstances: 12,
     recipeId: "lumber_gathering",
     productionRoleId: "lumberjacks",
@@ -51,6 +54,7 @@ export const BUILDINGS = Object.freeze({
   saltworks: Object.freeze({
     id: "saltworks", name: "盐场", icon: "🧂",
     description: "盐矿采掘并精制食盐 · 原料持续可用",
+    industryTier: 0,
     maxInstances: 12,
     recipeId: "salt_gathering",
     productionRoleId: "salt_workers",
@@ -65,6 +69,55 @@ export const BUILDINGS = Object.freeze({
       workDays: 300, recommendedWorkers: 10
     }),
     upgrade: Object.freeze({ maxLevel: 5, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+  }),
+
+  winery: Object.freeze({
+    id: "winery", name: "酒坊", icon: "🍶",
+    description: "小麦酿酒 · 用镇库小麦",
+    industryTier: 1,
+    maxInstances: 12,
+    recipeId: "winery_wine",
+    productionRoleId: "brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "brewers", name: "酿酒工", slots: 8, wagePerWorkerDay: 5,
+      note: "每人每日用30斤麦酿12斤酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+  }),
+  cotton_field: Object.freeze({
+    id: "cotton_field", name: "棉田", icon: "☁️",
+    description: "种植棉花 · 原料持续可用",
+    industryTier: 0,
+    maxInstances: 12,
+    recipeId: "cotton_growing",
+    productionRoleId: "cotton_farmers",
+    accountingSector: "textile",
+    jobs: Object.freeze([Object.freeze({
+      id: "cotton_farmers", name: "棉农", slots: 20, wagePerWorkerDay: 5,
+      note: "每人每日产3斤棉花", releasePriority: 30
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 200 }]),
+    construction: Object.freeze({ workDays: 200, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 200 }]) })
+  }),
+  weaving_mill: Object.freeze({
+    id: "weaving_mill", name: "织坊", icon: "🧵",
+    description: "棉花织布 · 需已有棉花",
+    industryTier: 1,
+    maxInstances: 12,
+    recipeId: "weaving_cloth",
+    productionRoleId: "weavers",
+    accountingSector: "textile",
+    jobs: Object.freeze([Object.freeze({
+      id: "weavers", name: "织工", slots: 12, wagePerWorkerDay: 5,
+      note: "每人每日用4斤棉花织1匹布", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
   }),
 
   wholesale_market: Object.freeze({
@@ -170,3 +223,16 @@ export const BUILDINGS = Object.freeze({
     })
   })
 });
+
+// 生产型产业：有 industryTier 的建筑（0 原料 → 1 加工 → 2 成品）。按层级从上游到下游排序。
+export function industryTypeIds(content) {
+  return Object.values(content.buildings)
+    .filter(def => Number.isInteger(def.industryTier) && def.recipeId)
+    .sort((a, b) => a.industryTier - b.industryTier || a.id.localeCompare(b.id))
+    .map(def => def.id);
+}
+
+export function isIndustryType(content, typeId) {
+  const def = content.buildings[typeId];
+  return Boolean(def && Number.isInteger(def.industryTier) && def.recipeId);
+}

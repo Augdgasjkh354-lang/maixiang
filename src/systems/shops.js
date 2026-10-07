@@ -105,6 +105,12 @@ export function shopDefinition(content, typeId) {
   return raw.aliasOf ? content.rules.shopTypes?.[raw.aliasOf] || null : raw;
 }
 
+// 店里当前实际经营的商品：后加的商品（optionalRetail，如酒、布）镇上有货或店里有存货才算。
+function activeRetailItemIds(state, shop, content) {
+  return shopRetailItemIds(shop, content).filter(itemId => !content.items[itemId]?.optionalRetail
+    || (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (state.accounts?.town?.[itemId] || 0) > 0 || (shop.inventory?.[itemId] || 0) > 0);
+}
+
 export function shopRetailItemIds(shop, content) {
   const def = shopDefinition(content, shop?.typeId);
   return def?.kind === "retail" ? [...(def.itemIds || [])] : [];
@@ -412,7 +418,7 @@ function shopWorkingCapitalReserve(state, shop, content) {
     // 与零售店口径一致：全额日销能力×单价×天数（之前无故打25折）。
     return Math.round(serviceShopCapacityUses(state, shop, content) * (service?.priceVoucher || 0) * days * currencyScale(content));
   }
-  const itemIds = shopRetailItemIds(shop, content);
+  const itemIds = activeRetailItemIds(state, shop, content);
   if (!itemIds.length) return 0;
   const wholesalePrices = itemIds.map(itemId => shopTradePrices(state, shop.typeId, content, itemId)?.wholesaleVoucherPerUnit || 0).filter(p => p > 0);
   // 排除0价，避免无批发价商品拉低均值（之前简单平均含0）。
@@ -517,7 +523,7 @@ export function procureShopInventory(state, shop, content) {
   const def = shopDefinition(content, shop.typeId);
   let itemTargets = [];
   if (def?.kind === "retail") {
-    const itemIds = shopRetailItemIds(shop, content);
+    const itemIds = activeRetailItemIds(state, shop, content);
     const capacity = shopSalesCapacityUnits(state, shop, content);
     const history = shop.history || [];
     const targetDays = Math.max(1, content.rules.shopInventoryTargetDays || 2);
@@ -708,7 +714,7 @@ function averageWholesalePriceJin(state, shop, content, history) {
     }
   }
   if (units > 0) return value / units;
-  const prices = shopRetailItemIds(shop, content)
+  const prices = activeRetailItemIds(state, shop, content)
     .map(itemId => currentUnitPrice(state, itemId, content))
     .filter(price => price > 0);
   return prices.length ? prices.reduce((sum, price) => sum + price, 0) / prices.length : 0;

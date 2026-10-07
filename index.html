@@ -620,6 +620,7 @@ const BUILDINGS = Object.freeze({
   mill: Object.freeze({
     id: "mill", name: "磨坊", icon: "⚙️",
     description: "小麦磨面",
+    industryTier: 1,
     maxInstances: 12,
     recipeId: "mill_flour",
     productionRoleId: "millers",
@@ -636,6 +637,7 @@ const BUILDINGS = Object.freeze({
   bakery: Object.freeze({
     id: "bakery", name: "面包房", icon: "🥖",
     description: "面粉烤面包 · 需已有面粉",
+    industryTier: 2,
     maxInstances: 12,
     recipeId: "bakery_bread",
     productionRoleId: "bakers",
@@ -652,6 +654,7 @@ const BUILDINGS = Object.freeze({
   lumberyard: Object.freeze({
     id: "lumberyard", name: "伐木场", icon: "🪵",
     description: "南林伐木 · 木材持续可用",
+    industryTier: 0,
     maxInstances: 12,
     recipeId: "lumber_gathering",
     productionRoleId: "lumberjacks",
@@ -669,6 +672,7 @@ const BUILDINGS = Object.freeze({
   saltworks: Object.freeze({
     id: "saltworks", name: "盐场", icon: "🧂",
     description: "盐矿采掘并精制食盐 · 原料持续可用",
+    industryTier: 0,
     maxInstances: 12,
     recipeId: "salt_gathering",
     productionRoleId: "salt_workers",
@@ -683,6 +687,55 @@ const BUILDINGS = Object.freeze({
       workDays: 300, recommendedWorkers: 10
     }),
     upgrade: Object.freeze({ maxLevel: 5, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+  }),
+
+  winery: Object.freeze({
+    id: "winery", name: "酒坊", icon: "🍶",
+    description: "小麦酿酒 · 用镇库小麦",
+    industryTier: 1,
+    maxInstances: 12,
+    recipeId: "winery_wine",
+    productionRoleId: "brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "brewers", name: "酿酒工", slots: 8, wagePerWorkerDay: 5,
+      note: "每人每日用30斤麦酿12斤酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+  }),
+  cotton_field: Object.freeze({
+    id: "cotton_field", name: "棉田", icon: "☁️",
+    description: "种植棉花 · 原料持续可用",
+    industryTier: 0,
+    maxInstances: 12,
+    recipeId: "cotton_growing",
+    productionRoleId: "cotton_farmers",
+    accountingSector: "textile",
+    jobs: Object.freeze([Object.freeze({
+      id: "cotton_farmers", name: "棉农", slots: 20, wagePerWorkerDay: 5,
+      note: "每人每日产3斤棉花", releasePriority: 30
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 200 }]),
+    construction: Object.freeze({ workDays: 200, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 200 }]) })
+  }),
+  weaving_mill: Object.freeze({
+    id: "weaving_mill", name: "织坊", icon: "🧵",
+    description: "棉花织布 · 需已有棉花",
+    industryTier: 1,
+    maxInstances: 12,
+    recipeId: "weaving_cloth",
+    productionRoleId: "weavers",
+    accountingSector: "textile",
+    jobs: Object.freeze([Object.freeze({
+      id: "weavers", name: "织工", slots: 12, wagePerWorkerDay: 5,
+      note: "每人每日用4斤棉花织1匹布", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
   }),
 
   wholesale_market: Object.freeze({
@@ -788,7 +841,20 @@ const BUILDINGS = Object.freeze({
     })
   })
 });
-return { BUILDINGS };
+
+// 生产型产业：有 industryTier 的建筑（0 原料 → 1 加工 → 2 成品）。按层级从上游到下游排序。
+       function industryTypeIds(content) {
+  return Object.values(content.buildings)
+    .filter(def => Number.isInteger(def.industryTier) && def.recipeId)
+    .sort((a, b) => a.industryTier - b.industryTier || a.id.localeCompare(b.id))
+    .map(def => def.id);
+}
+
+       function isIndustryType(content, typeId) {
+  const def = content.buildings[typeId];
+  return Boolean(def && Number.isInteger(def.industryTier) && def.recipeId);
+}
+return { BUILDINGS, industryTypeIds, isIndustryType };
 })();
 
 // ===== content/rules.js =====
@@ -939,7 +1005,7 @@ const SAVE_VERSION = 17;
   shopClerkUtilizationHireThreshold: 0.85,
   shopClerkUtilizationReleaseThreshold: 0.45,
   shopTypes: Object.freeze({
-    general: Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood"]) }),
+    general: Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
@@ -951,11 +1017,11 @@ const SAVE_VERSION = 17;
     salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8 })
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16 })
 });
 
        const AGRICULTURE = Object.freeze({
@@ -1018,6 +1084,19 @@ const ITEMS = Object.freeze({
   salt: Object.freeze({
     id: "salt", name: "食盐", unit: "斤", category: "household",
     edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  // 酒：享受品，不算口粮。棉花：织布原料。布：日用必需品（按匹）。
+  wine: Object.freeze({
+    id: "wine", name: "酒", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  cotton: Object.freeze({
+    id: "cotton", name: "棉花", unit: "斤", category: "material",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  cloth: Object.freeze({
+    id: "cloth", name: "布", unit: "匹", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
   })
 });
 return { ITEMS };
@@ -1067,6 +1146,27 @@ const RECIPES = Object.freeze({
     id: "salt_gathering", name: "采盐与加工",
     kind: "gather", inputs: Object.freeze([]),
     outputs: Object.freeze([{ itemId: "salt", quantity: 5 }]),
+    losses: Object.freeze([]),
+    batchesPerWorkerDay: 1
+  }),
+  winery_wine: Object.freeze({
+    id: "winery_wine", name: "酿酒",
+    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
+    outputs: Object.freeze([{ itemId: "wine", quantity: 4 }]),
+    losses: Object.freeze([{ itemId: "wheat", quantity: 6 }]),
+    batchesPerWorkerDay: 3
+  }),
+  cotton_growing: Object.freeze({
+    id: "cotton_growing", name: "种棉",
+    kind: "gather", inputs: Object.freeze([]),
+    outputs: Object.freeze([{ itemId: "cotton", quantity: 3 }]),
+    losses: Object.freeze([]),
+    batchesPerWorkerDay: 1
+  }),
+  weaving_cloth: Object.freeze({
+    id: "weaving_cloth", name: "织布",
+    inputs: Object.freeze([{ itemId: "cotton", quantity: 4 }]),
+    outputs: Object.freeze([{ itemId: "cloth", quantity: 1 }]),
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
   })
@@ -2057,7 +2157,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod14 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-b1e9704";
+       const BUILD_ID = "0203-dfa30c0";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -4234,16 +4334,16 @@ const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod18;
 const { makeTransactionId, recordLedger } = __mxmod10;
 const { setCurrentUnitPrice, currentUnitPrice } = __mxmod25;
 const { householdConvertibleWheatUnits, syncResidentAggregates } = __mxmod16;
-const WHOLESALE_ITEM_IDS = Object.freeze(["wheat", "flour", "bread", "wood", "salt"]);
+const WHOLESALE_ITEM_IDS = Object.freeze(["wheat", "flour", "bread", "wood", "salt", "wine", "cotton", "cloth"]);
 
 // 镇营统购统销的商品（不含小麦——小麦继续归镇库直管）。
 // 同时也是做市商可挂牌买卖的商品清单：小麦不在批发市场买卖，
 // 只走镇库调拨（磨坊免费领用）与单次调运。
-       const WHOLESALE_MONOPOLY_ITEM_IDS = Object.freeze(["flour", "bread", "wood", "salt"]);
+       const WHOLESALE_MONOPOLY_ITEM_IDS = Object.freeze(["flour", "bread", "wood", "salt", "wine", "cotton", "cloth"]);
 
 // 默认做市价（小麦斤等价/单位）：收购 1.4 / 售出 1.8 等，用户拍板。
-       const DEFAULT_PURCHASE_PRICES = Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8 });
-       const DEFAULT_SALE_PRICES = Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12 });
+       const DEFAULT_PURCHASE_PRICES = Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16 });
+       const DEFAULT_SALE_PRICES = Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20 });
 
 // 库存价格反馈：以「参考库存（斤）」为基准，库存达到参考库存的 feedbackScale 倍时
 // 收购价按 1/(1+elasticity*ratio) 衰减，ratio = max(0, 库存/参考库存 − 1)。
@@ -5503,7 +5603,7 @@ function emptyIndustryPeriod() {
 }
 
        function emptyIndustryState() {
-  return Object.fromEntries(["forestry", "salt"].map(function (sector) {
+  return Object.fromEntries(["forestry", "salt", "brewing", "textile"].map(function (sector) {
     return [sector, {
       day: emptyIndustryPeriod(),
       year: emptyIndustryPeriod(),
@@ -8010,8 +8110,7 @@ const { voucherBalance } = __mxmod22;
 const { maximumFullyPayableValueUnits, maximumPayableValueUnits } = __mxmod23;
 const { populationStats, readJobCount, privateJobKeyForBuilding, listedJobKeyForBuilding } = __mxmod34;
 const { householdConvertibleWheatUnits, householdList, isActiveHousehold } = __mxmod16;
-const INDUSTRY_ORDER = ["bakery", "saltworks", "mill", "lumberyard"];
-
+const { industryTypeIds } = __mxmod0;
 function daySerial(state, content) {
   return (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
 }
@@ -8116,31 +8215,31 @@ function saltDailyDemandUnits(state, content) {
   return Math.min(shortage, residentAffordableUnits(state, "salt", price, content));
 }
 
-function demandForOutput(state, typeId, content) {
-  const itemId = outputItemForType(typeId, content);
-  if (!itemId) return { itemId, demandUnits: 0, basis: "无产品" };
-  if (typeId === "bakery") {
-    const intrinsic = breadDailyDemandUnits(state, content);
-    const recent = recentConsumerSalesUnits(state, "bread", content);
-    return { itemId, demandUnits: Math.max(intrinsic, recent), basis: "家庭可支付面包需求与近期实销" };
-  }
-  if (typeId === "saltworks") {
-    const intrinsic = saltDailyDemandUnits(state, content);
-    const recent = recentConsumerSalesUnits(state, "salt", content);
-    return { itemId, demandUnits: Math.max(intrinsic, recent), basis: "家庭可支付食盐需求与近期实销" };
-  }
-  if (typeId === "lumberyard") {
-    const demand = state.market?.publicProcurementDemand?.wood || null;
-    const required = Math.max(0, Math.floor(demand?.requiredUnits ?? demand?.wantedUnits ?? 0));
-    const townStock = Math.max(0, state.accounts?.town?.wood || 0);
-    const outstanding = Math.max(0, required - townStock);
-    const price = currentUnitPrice(state, "wood", content);
-    const budget = maximumFullyPayableValueUnits(state, "town", maximumPayableValueUnits(state, "town", content), content);
-    const affordable = price > 0 ? Math.max(0, Math.floor(budget * content.precision.inventoryUnitsPerJin / (price * content.precision.currencyUnitsPerVoucher))) : 0;
-    const funded = Math.min(outstanding, affordable);
-    return { itemId, demandUnits: funded, outstandingUnits: outstanding, basis: !demand ? "暂无有预算的建设订单" : outstanding <= 0 ? "建设订单已由镇库库存覆盖" : funded <= 0 ? "建设采购预算不足" : funded < outstanding ? "建设采购仅部分有预算" : "有预算的实际建设采购" };
-  }
-  return { itemId, demandUnits: 0, basis: "由下游生产计划决定" };
+// 酒、布等日用品：当日家庭需求由 goods-demand 系统写入 state.goodsDemand.todayDemandUnits。
+function goodsDailyDemandUnits(state, itemId, content) {
+  const demand = Math.max(0, state.goodsDemand?.todayDemandUnits?.[itemId] || 0);
+  const shortage = Math.max(0, demand - (state.accounts?.residents?.[itemId] || 0));
+  const price = currentUnitPrice(state, itemId, content) * (1 + Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100);
+  return Math.min(shortage, residentAffordableUnits(state, itemId, price, content));
+}
+
+function consumerDemandUnits(state, itemId, content) {
+  if (itemId === "bread") return breadDailyDemandUnits(state, content);
+  if (itemId === "salt") return saltDailyDemandUnits(state, content);
+  if (state.goodsDemand?.todayDemandUnits?.[itemId] !== undefined) return goodsDailyDemandUnits(state, itemId, content);
+  return 0;
+}
+
+function woodProcurementDemand(state, content) {
+  const demand = state.market?.publicProcurementDemand?.wood || null;
+  const required = Math.max(0, Math.floor(demand?.requiredUnits ?? demand?.wantedUnits ?? 0));
+  const townStock = Math.max(0, state.accounts?.town?.wood || 0);
+  const outstanding = Math.max(0, required - townStock);
+  const price = currentUnitPrice(state, "wood", content);
+  const budget = maximumFullyPayableValueUnits(state, "town", maximumPayableValueUnits(state, "town", content), content);
+  const affordable = price > 0 ? Math.max(0, Math.floor(budget * content.precision.inventoryUnitsPerJin / (price * content.precision.currencyUnitsPerVoucher))) : 0;
+  const funded = Math.min(outstanding, affordable);
+  return { itemId: "wood", demandUnits: funded, outstandingUnits: outstanding, basis: !demand ? "暂无有预算的建设订单" : outstanding <= 0 ? "建设订单已由镇库库存覆盖" : funded <= 0 ? "建设采购预算不足" : funded < outstanding ? "建设采购仅部分有预算" : "有预算的实际建设采购" };
 }
 
 function producerRows(state, typeId, content) {
@@ -8217,25 +8316,25 @@ function desiredWorkers(row, batches, state, content) {
   return Math.max(0, Math.min(row.maxWorkers, desired));
 }
 
-function productionTargetForType(state, typeId, content, downstreamBreadBatches = 0) {
-  const scale = content.precision.inventoryUnitsPerJin;
-  if (typeId === "mill") {
-    const flourInput = content.recipes.bakery_bread.inputs.find(row => row.itemId === "flour")?.quantity || 0;
-    const demandUnits = Math.round(downstreamBreadBatches * flourInput * scale);
-    const stock = producerMarketStock(state, "flour");
-    return { itemId: "flour", demandUnits, targetUnits: Math.max(0, demandUnits - stock), basis: "按可执行面包生产计划形成面粉需求" };
-  }
-  const row = demandForOutput(state, typeId, content);
-  const stock = typeId === "lumberyard"
-    ? publicProcurementDeliverableStock(state, row.itemId)
-    : producerMarketStock(state, row.itemId);
-  if (typeId === "lumberyard") {
-    // 木材对应一次性公共建设订单：镇库现货先减订单，市场现货再减生产缺口，不设置多日备货。
+// 某产业的生产目标：居民当日需求（含近期实销）+ 下游产业计划要用的原料 + 备货天数 − 市场现货。
+// 木材例外：对应一次性公共建设订单，不备货。
+function productionTargetForType(state, typeId, content, downstreamUnits) {
+  const itemId = outputItemForType(typeId, content);
+  if (!itemId) return { itemId, demandUnits: 0, targetUnits: 0, basis: "无产品" };
+  if (itemId === "wood") {
+    const row = woodProcurementDemand(state, content);
+    const stock = publicProcurementDeliverableStock(state, "wood");
     return { ...row, stockUnits: stock, targetUnits: Math.max(0, row.demandUnits - stock) };
   }
+  const consumer = Math.max(consumerDemandUnits(state, itemId, content), recentConsumerSalesUnits(state, itemId, content));
+  const downstream = Math.max(0, downstreamUnits[itemId] || 0);
+  const stock = producerMarketStock(state, itemId);
   const targetDays = content.rules.producerInventoryTargetDays || 2;
-  const targetStock = Math.round(row.demandUnits * targetDays);
-  return { ...row, stockUnits: stock, targetUnits: Math.max(0, row.demandUnits + targetStock - stock) };
+  const demandUnits = consumer + downstream;
+  const basis = consumer > 0 && downstream > 0 ? "居民需求与下游生产计划"
+    : consumer > 0 ? "家庭可支付需求与近期实销"
+    : downstream > 0 ? "按下游生产计划形成原料需求" : "暂无需求";
+  return { itemId, demandUnits, stockUnits: stock, targetUnits: Math.max(0, demandUnits + Math.round(consumer * targetDays) - stock), basis };
 }
 
        function ensureOperatingPlanState(state) {
@@ -8259,9 +8358,10 @@ function productionTargetForType(state, typeId, content, downstreamBreadBatches 
   plan.updatedSerial = serial;
   plan.rows = {};
   plan.demand = {};
-  let breadBatches = 0;
-  for (const typeId of INDUSTRY_ORDER) {
-    const target = productionTargetForType(state, typeId, content, breadBatches);
+  // 从下游往上游排：先定面包、酒、布的产量，再按它们要用的原料推出面粉、棉花的产量。
+  const downstreamUnits = {};
+  for (const typeId of industryTypeIds(content).reverse()) {
+    const target = productionTargetForType(state, typeId, content, downstreamUnits);
     const perBatch = outputPerBatch(typeId, content);
     let totalBatches = perBatch > 0 ? Math.ceil(target.targetUnits / perBatch) : 0;
     const producers = producerRows(state, typeId, content);
@@ -8283,7 +8383,10 @@ function productionTargetForType(state, typeId, content, downstreamBreadBatches 
       }
     }
     plan.demand[typeId] = target;
-    if (typeId === "bakery") breadBatches = Object.values(batches).reduce((sum, value) => sum + value, 0);
+    const plannedBatches = Object.values(batches).reduce((sum, value) => sum + value, 0);
+    for (const input of content.recipes[content.buildings[typeId]?.recipeId]?.inputs || []) {
+      downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(plannedBatches * input.quantity * content.precision.inventoryUnitsPerJin);
+    }
   }
   return plan;
 }
@@ -8303,7 +8406,8 @@ function productionTargetForType(state, typeId, content, downstreamBreadBatches 
   const limit = Math.max(14, (content.rules.operatingObservationDays || 7) * 4);
   const bread = Math.round((state.market?.lastDay?.purchasedBreadJin || 0) * content.precision.inventoryUnitsPerJin);
   const salt = Math.max(0, state.salt?.todaySatisfiedUnits || state.salt?.day?.purchasedUnits || 0);
-  for (const [itemId, soldUnits] of [["bread", bread], ["salt", salt]]) {
+  const goods = Object.entries(state.goodsDemand?.day?.purchasedUnits || {});
+  for (const [itemId, soldUnits] of [["bread", bread], ["salt", salt], ...goods]) {
     const rows = state.market.consumerHistory[itemId] ||= [];
     rows.push({ year: state.year, day: state.day + 1, soldUnits });
     if (rows.length > limit) rows.splice(0, rows.length - limit);
@@ -8319,6 +8423,7 @@ return { shopTradePrices, ensureOperatingPlanState, refreshOperatingPlan, planne
 // ===== systems/companies.js =====
 const __mxmod43 = (() => {
 const { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } = __mxmod34;
+const { isIndustryType } = __mxmod0;
 const { householdIdOf } = __mxmod8;
 const { putStock, sellCompanyGoods, takeStock } = __mxmod24;
 const { PERIODS, bookAdd, bookAddMap, ensureBook } = __mxmod17;
@@ -8334,8 +8439,6 @@ const { householdConvertibleWheatUnits, householdList, householdPopulation, isAc
 const { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } = __mxmod42;
 const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod30;
 const { buyWholesaleForOwner, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } = __mxmod26;
-const LISTABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
-
 function blankPeriod() {
   return {
     revenueVoucherUnits: 0,
@@ -8439,7 +8542,7 @@ function voucherCost(quantityUnits, pricePerJinOrUnit, content) {
   ensureCompanies(state, content);
   const building = state.buildings.find(row => row.id === buildingId);
   if (!building) return { ok: false, reason: "建筑不存在" };
-  if (!LISTABLE.has(building.typeId)) return { ok: false, reason: "此建筑暂不支持成立独立公司" };
+  if (!isIndustryType(content, building.typeId)) return { ok: false, reason: "此建筑暂不支持成立独立公司" };
   if (Object.values(state.companies).some(company => company.buildingId === buildingId)) {
     return { ok: false, reason: "同一建筑最多对应一家公司" };
   }
@@ -9267,6 +9370,7 @@ return { ensureCompanies, buyInputForCompany, createIndependentCompany, createLi
 // ===== selectors/operating-rights.js =====
 const __mxmod44 = (() => {
 const { privateJobKeyForBuilding, listedJobKeyForBuilding, populationStats, readJobCount, selectJobRows } = __mxmod34;
+const { isIndustryType } = __mxmod0;
 const { accountQeqUnits } = __mxmod12;
 const { voucherBalance } = __mxmod22;
 const { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment } = __mxmod23;
@@ -9275,8 +9379,6 @@ const { currentUnitPrice, theoreticalFullSaleProfitPerWorker } = __mxmod25;
 const { selectPublicProcurementDemand } = __mxmod36;
 const { companyActualProfitValuation } = __mxmod43;
 const { createPaymentViewState } = __mxmod41;
-const SELLABLE_TYPES = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
-
 function outputCompetitionStock(state, itemId) {
   const town = state.accounts.town[itemId] || 0;
   const companies = Object.values(state.companies || {}).reduce((sum, company) => sum + (company.inventory?.[itemId] || 0), 0);
@@ -9374,14 +9476,19 @@ function demandForType(state, typeId, content) {
   if (typeId === "saltworks") return saltDemand(state, content);
   if (typeId === "mill") return millDemand(state, content);
   if (typeId === "lumberyard") return woodDemand(state, content);
-  return { demandUnits: 0, competitionUnits: 0, opportunityUnits: 0, reason: "暂无需求" };
+  // 其他产业：按经营计划算出的需求（含下游原料需求）。
+  const itemId = content.recipes[content.buildings[typeId]?.recipeId]?.outputs?.[0]?.itemId;
+  const demandUnits = Math.max(0, state.market?.operatingPlan?.demand?.[typeId]?.demandUnits || 0);
+  const competitionUnits = itemId ? outputCompetitionStock(state, itemId) : 0;
+  const opportunityUnits = Math.max(0, demandUnits - competitionUnits);
+  return { demandUnits, competitionUnits, opportunityUnits, reason: demandUnits <= 0 ? "暂无需求" : opportunityUnits <= 0 ? "现有库存已覆盖需求" : "存在未满足需求" };
 }
 
        function selectOperatingRightPreview(state, buildingId, content, requestedPrice) {
   const paymentState = createPaymentViewState(state);
   const building = state.buildings.find(row => row.id === buildingId);
   if (!building) return { available: false, reason: "建筑不存在" };
-  if (!SELLABLE_TYPES.has(building.typeId)) return { available: false, reason: "该建筑不开放经营权出售" };
+  if (!isIndustryType(content, building.typeId)) return { available: false, reason: "该建筑不开放经营权出售" };
   if ((state.projects || []).some(project => project.buildingId === buildingId || project.plotId === building.plotId)) {
     return { available: false, reason: "施工或升级期间不能出售经营权" };
   }
@@ -10610,6 +10717,12 @@ function applyProfit(shop, delta) {
   return raw.aliasOf ? content.rules.shopTypes?.[raw.aliasOf] || null : raw;
 }
 
+// 店里当前实际经营的商品：后加的商品（optionalRetail，如酒、布）镇上有货或店里有存货才算。
+function activeRetailItemIds(state, shop, content) {
+  return shopRetailItemIds(shop, content).filter(itemId => !content.items[itemId]?.optionalRetail
+    || (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (state.accounts?.town?.[itemId] || 0) > 0 || (shop.inventory?.[itemId] || 0) > 0);
+}
+
        function shopRetailItemIds(shop, content) {
   const def = shopDefinition(content, shop?.typeId);
   return def?.kind === "retail" ? [...(def.itemIds || [])] : [];
@@ -10917,7 +11030,7 @@ function shopWorkingCapitalReserve(state, shop, content) {
     // 与零售店口径一致：全额日销能力×单价×天数（之前无故打25折）。
     return Math.round(serviceShopCapacityUses(state, shop, content) * (service?.priceVoucher || 0) * days * currencyScale(content));
   }
-  const itemIds = shopRetailItemIds(shop, content);
+  const itemIds = activeRetailItemIds(state, shop, content);
   if (!itemIds.length) return 0;
   const wholesalePrices = itemIds.map(itemId => shopTradePrices(state, shop.typeId, content, itemId)?.wholesaleVoucherPerUnit || 0).filter(p => p > 0);
   // 排除0价，避免无批发价商品拉低均值（之前简单平均含0）。
@@ -11022,7 +11135,7 @@ function removeShopInventoryCost(shop, itemId, units) {
   const def = shopDefinition(content, shop.typeId);
   let itemTargets = [];
   if (def?.kind === "retail") {
-    const itemIds = shopRetailItemIds(shop, content);
+    const itemIds = activeRetailItemIds(state, shop, content);
     const capacity = shopSalesCapacityUnits(state, shop, content);
     const history = shop.history || [];
     const targetDays = Math.max(1, content.rules.shopInventoryTargetDays || 2);
@@ -11213,7 +11326,7 @@ function averageWholesalePriceJin(state, shop, content, history) {
     }
   }
   if (units > 0) return value / units;
-  const prices = shopRetailItemIds(shop, content)
+  const prices = activeRetailItemIds(state, shop, content)
     .map(itemId => currentUnitPrice(state, itemId, content))
     .filter(price => price > 0);
   return prices.length ? prices.reduce((sum, price) => sum + price, 0) / prices.length : 0;
@@ -13098,6 +13211,7 @@ return { AGREEMENT_MIN_YEARS, AGREEMENT_MAX_YEARS, AGREEMENT_BREACH_PENALTY_RATE
 // ===== core/commands.js =====
 const __mxmod59 = (() => {
 const { assignWorkers } = __mxmod35;
+const { isIndustryType } = __mxmod0;
 const { startConstruction, setProjectWorkers: setProjectWorkersSystem } = __mxmod37;
 const { setAutomaticRelief } = __mxmod38;
 const { demolishBuilding, startBuildingUpgrade } = __mxmod40;
@@ -13225,7 +13339,7 @@ function setWageRate(state, roleId, dailyJin, content) {
 }
 
        function setPrivateProductionTax(state, typeId, percent, content) {
-  if (!["mill", "bakery", "lumberyard", "saltworks"].includes(typeId) || !content.buildings[typeId]) {
+  if (!isIndustryType(content, typeId)) {
     return { ok: false, reason: "该产业不开放民营生产税设置" };
   }
   const value = Number(percent);
@@ -13447,6 +13561,7 @@ return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setB
 // ===== core/validation.js =====
 const __mxmod60 = (() => {
 const { populationStats, selectJobRows } = __mxmod34;
+const { industryTypeIds, isIndustryType } = __mxmod0;
 const { PERIODS } = __mxmod17;
 const { householdList, householdPopulation, householdWorkingAge, householdEmploymentCount, totalHouseholdAgeBands, jobCount, isActiveHousehold } = __mxmod16;
 const { validateContent } = __mxmod13;
@@ -13597,7 +13712,7 @@ function validateState(state, content) {
     if (!Number.isFinite(price) || price <= 0) errors.push("统一商品价格无效：" + itemId);
   }
   if (!Number.isFinite(state.policy?.agricultureTaxPercent) || state.policy.agricultureTaxPercent < 0 || state.policy.agricultureTaxPercent > 80) errors.push("农业税率无效");
-  for (const typeId of ["mill", "bakery", "lumberyard", "saltworks"]) {
+  for (const typeId of industryTypeIds(content)) {
     const rate = state.policy?.privateProductionTaxPercent?.[typeId];
     if (!Number.isFinite(rate) || rate < 0 || rate > 80) errors.push("民营生产税率无效：" + typeId);
   }
@@ -13680,7 +13795,7 @@ function validateState(state, content) {
     const companyBuildings = new Set();
     for (const [companyId, company] of Object.entries(state.companies)) {
       const building = state.buildings.find(row => row.id === company.buildingId);
-      if (!building || !["mill", "bakery", "lumberyard", "saltworks"].includes(company.typeId) || building.typeId !== company.typeId) {
+      if (!building || !isIndustryType(content, company.typeId) || building.typeId !== company.typeId) {
         errors.push("企业引用了无效建筑：" + companyId);
         continue;
       }
@@ -13882,7 +13997,7 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
   // 用户 0.1.11（-5）：库存超过当日剩余接待能力的店铺，溢出部分记 capped，
   // 未满足的需求按比例折算成各店的拒客数（registerCappedRejection）。
   const capped = options.capped && Array.isArray(options.capped) ? options.capped : null;
-  const generalStoreOnly = new Set(["flour", "bread", "salt"]).has(itemId);
+  const generalStoreOnly = new Set(["flour", "bread", "salt", "wine", "cloth"]).has(itemId);
   const townStock = state.accounts.town[itemId] || 0;
   // 镇库木材属于建设储备，居民修缮需求不向镇库购买，避免挤占施工用材。
   const townSellable = !generalStoreOnly && options.excludeTownSellers !== true;
@@ -14827,6 +14942,7 @@ return { accrueSaltNeed, buySaltForResidents, consumeDailySalt, selectSaltCovera
 // ===== systems/private-industry.js =====
 const __mxmod68 = (() => {
 const { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } = __mxmod12;
+const { industryTypeIds, isIndustryType } = __mxmod0;
 const { bookAdd, bookAddMap } = __mxmod17;
 const { recordEvent } = __mxmod10;
 const { privateJobKeyForBuilding, readJobCount, selectJobRows } = __mxmod34;
@@ -14838,8 +14954,6 @@ const { currentUnitPrice } = __mxmod25;
 const { buyWholesaleForOwner } = __mxmod26;
 const { householdConvertibleWheatUnits, householdFoodQeqUnits, householdList, householdReserveQeqUnits, syncResidentAggregates, jobAssignments, isActiveHousehold, creditHouseholdInventory } = __mxmod16;
 const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod30;
-const SELLABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
-
 function targetBatches(state, building) {
   return plannedBatchesForProducer(state, `private:${building.id}`);
 }
@@ -14898,10 +15012,12 @@ function buyMissingPrivateInputs(state, household, definition, recipe, batches, 
 
 
        function arrangePrivateWorkers(state, content) {
+  // 下游先招工：经营计划按下游需求倒推上游。
+  const downstreamFirst = industryTypeIds(content).reverse();
   const rows = selectJobRows(state, content);
   let idle = rows.idle;
-  const buildings = state.buildings.filter(row => SELLABLE.has(row.typeId) && (row.ownership?.privateLevels || 0) > 0)
-    .sort((a, b) => ["bakery", "saltworks", "mill", "lumberyard"].indexOf(a.typeId) - ["bakery", "saltworks", "mill", "lumberyard"].indexOf(b.typeId) || a.id.localeCompare(b.id));
+  const buildings = state.buildings.filter(row => isIndustryType(content, row.typeId) && (row.ownership?.privateLevels || 0) > 0)
+    .sort((a, b) => downstreamFirst.indexOf(a.typeId) - downstreamFirst.indexOf(b.typeId) || a.id.localeCompare(b.id));
   for (const building of buildings) {
     const definition = content.buildings[building.typeId];
     const role = definition.jobs[0];
@@ -14941,7 +15057,7 @@ function ownerCapacity(state, building, content) {
        function payPrivateIndustryWages(state, content) {
   state.privateEconomy ||= {}; state.privateEconomy.payrollByBuilding ||= {};
   const results = []; const scale = currencyScale(content);
-  for (const building of state.buildings.filter(row => SELLABLE.has(row.typeId) && (row.ownership?.privateLevels || 0) > 0)) {
+  for (const building of state.buildings.filter(row => isIndustryType(content, row.typeId) && (row.ownership?.privateLevels || 0) > 0)) {
     const definition = content.buildings[building.typeId]; const job = definition?.jobs?.[0]; if (!job) continue;
     const key = privateJobKeyForBuilding(building.id, job.id); const workers = readJobCount(state, key);
     const rate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5; const due = Math.round(workers * rate * scale);
@@ -15052,9 +15168,11 @@ function ownerCapacity(state, building, content) {
 
        function processPrivateIndustries(state, content) {
   const rows = [];
-  const ordered = state.buildings.slice().sort((a, b) => ["mill", "bakery", "saltworks", "lumberyard"].indexOf(a.typeId) - ["mill", "bakery", "saltworks", "lumberyard"].indexOf(b.typeId));
+  // 上游先生产，下游才买得到原料。
+  const order = industryTypeIds(content);
+  const ordered = state.buildings.slice().sort((a, b) => order.indexOf(a.typeId) - order.indexOf(b.typeId));
   for (const building of ordered) {
-    if (!SELLABLE.has(building.typeId) || !(building.ownership?.privateLevels || 0)) continue;
+    if (!isIndustryType(content, building.typeId) || !(building.ownership?.privateLevels || 0)) continue;
     rows.push(processPrivateBuilding(state, building, content));
   }
   state.privateEconomy.lastDay = rows;
@@ -15665,6 +15783,7 @@ return { createDashboardRuntime, employmentExchangeRemainingUnits };
 // ===== selectors/dashboard.js =====
 const __mxmod75 = (() => {
 const { BUILDING_PRESENTATION } = __mxmod5;
+const { isIndustryType } = __mxmod0;
 const { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } = __mxmod34;
 const { selectAccounts, selectFoodDays, selectTotalQeq } = __mxmod72;
 const { productionStatus } = __mxmod52;
@@ -16280,7 +16399,7 @@ function companyActualReferencePlaceholder(company, content) {
       legacyAccess: Boolean(state.stockExchange?.legacyAccess),
       reformComplete: state.monetaryReform?.stage === "voucher"
     } : null,
-    listableBuildings: needBusiness ? buildings.filter(building => ["mill", "bakery", "lumberyard", "saltworks"].includes(building.typeId) && building.ownership.townLevels > 0 && !building.companyId) : [],
+    listableBuildings: needBusiness ? buildings.filter(building => isIndustryType(content, building.typeId) && building.ownership.townLevels > 0 && !building.companyId) : [],
     shareConfig: needBusiness ? {
       sharesPerListedLevel: content.rules.sharesPerListedLevel || 1000,
       foodReserveDays: content.rules.shareFoodReserveDays || 90,
@@ -18954,10 +19073,12 @@ return { parseNumericDraft, shouldDeferNumericPanelRender, shouldCommitNumericDr
 // ===== ui/panel-build.js =====
 const __mxmod96 = (() => {
 const { buildingSymbol } = __mxmod83;
+const { CONTENT } = __mxmod7;
+const { industryTypeIds } = __mxmod0;
 const { escapeHtml, number, percent, moneyUnit } = __mxmod84;
 const { renderNumericInput } = __mxmod95;
 const BUILD_CATEGORIES = [
-  { id: "production", name: "生产", types: ["mill", "bakery", "lumberyard", "saltworks"] },
+  { id: "production", name: "生产", types: industryTypeIds(CONTENT) },
   { id: "commercial", name: "商业", types: ["wholesale_market", "commercial_street", "bank", "stock_exchange", "foreign_trade_house"] },
   { id: "government", name: "政务", types: ["town_hall", "police_station", "social_security_office"] },
   { id: "housing", name: "住宅", types: ["public_housing", "villa_complex"] }
@@ -19952,12 +20073,14 @@ return { macroPanelSummary, renderMacroPanel };
 // ===== ui/panel-policy.js =====
 const __mxmod110 = (() => {
 const { number } = __mxmod84;
+const { CONTENT } = __mxmod7;
+const { industryTypeIds } = __mxmod0;
 const { renderNumericInput } = __mxmod95;
 function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
   const last = view.policy.lastDay || {};
   const agriculture = view.agriculturePolicy;
-  const industries = [["mill", "磨坊"], ["bakery", "面包房"], ["lumberyard", "伐木场"], ["saltworks", "盐场"]];
+  const industries = industryTypeIds(CONTENT).map(id => [id, CONTENT.buildings[id].name]);
   const privateTaxes = industries.map(([id, name]) => `<div class="row"><span class="label">${name}</span><div class="setting-input">${renderNumericInput(view, { key: `private-tax:${id}`, kind: "private-tax-rate", target: id, value: view.policy.privateProductionTaxPercent?.[id] ?? 10, label: `${name}民营生产税率`, minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>`).join("");
   // 建筑门控（0.1.11 补回）：无相关建筑时不渲染对应卡片
   const buildingTypeIds = new Set((view.buildings || []).map(b => b.typeId));
@@ -20090,6 +20213,8 @@ return { renderShopPricing };
 // ===== ui/panel-site.js =====
 const __mxmod112 = (() => {
 const { escapeHtml, number, numberMax, moneyUnit, effectiveTownWage } = __mxmod84;
+const { CONTENT } = __mxmod7;
+const { isIndustryType } = __mxmod0;
 const { renderNumericInput } = __mxmod95;
 const { renderShopPricing } = __mxmod111;
 function humanizePlotLabel(view, building) {
@@ -20363,7 +20488,7 @@ function reclaimSection(view) {
         ? right.buyerGroup.map(m => escapeHtml(m.householdName)).join("、")
         : `${right.buyerGroup.slice(0, 3).map(m => escapeHtml(m.householdName)).join("、")}等${right.buyerGroup.length}户`)
       : "暂无";
-    const saleCard = ["mill", "bakery", "lumberyard", "saltworks"].includes(building.typeId) && building.ownership.townLevels > 0
+    const saleCard = isIndustryType(CONTENT, building.typeId) && building.ownership.townLevels > 0
       ? view.rightSalePreviewId === building.id
         ? `<div class="cardlet"><h3>出售一级经营权</h3><div class="row"><span class="label">售价 / 参考上限</span><strong class="value">${number(right.priceWheatJin, 2)} / ${number(right.maximumPriceWheatJin, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">预计参考收益</span><strong class="value">${number(right.estimatedAnnualReferenceReturn, 2)}${escapeHtml(unit)}${right.typeId === "lumberyard" ? "" : "/年"}</strong></div><div class="row"><span class="label">预计买家（合资）</span><strong class="value">${buyerGroupText}</strong></div><div class="row"><span class="label">转入民营</span><strong class="value">${number(right.transferableWorkers)}人</strong></div>${right.reason ? `<div class="shortage-banner visible">${escapeHtml(right.reason)}</div>` : ""}<details class="detail-block" data-detail-key="right-detail:${escapeHtml(building.id)}"><summary>估值详情</summary><div class="detail-body"><div class="row"><span class="label">产品价 / 税率 / 工资</span><strong class="value">${number(right.itemPriceVoucher, 3)}${escapeHtml(unit)}/${escapeHtml(view.itemUnits[right.outputItemId] || "单位")} · ${number(right.taxPercent, 2)}% · ${number(right.wageRateVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">需求 / 库存 / 缺口</span><strong class="value">${number(right.dailyDemandJin, 2)} / ${number(right.competitionStockJin, 2)} / ${number(right.unmetDemandJin, 2)}${escapeHtml(view.itemUnits[right.outputItemId] || "单位")}</strong></div><div class="row"><span class="label">预计满产满销人均日利润</span><strong class="value">${number(right.theoreticalFullSaleProfitPerWorkerVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">岗位容量</span><strong class="value">镇营${number(right.townCapacityBefore)}→${number(right.townCapacityAfter)} · 民营${number(right.privateCapacityBefore)}→${number(right.privateCapacityAfter)}</strong></div>${right.demandBasis ? `<div class="subtle">${escapeHtml(right.demandBasis)}</div>` : ""}<div class="subtle">成交后居民需保留90天基本口粮。</div></div></details><div class="business-sticky-actions"><button class="secondary" data-right-cancel>取消</button><button class="primary" data-right-confirm="${escapeHtml(building.id)}" ${right.available ? "" : "disabled"}>确认成交</button></div></div>`
         : `<div class="cardlet"><h3>经营权</h3><div class="row"><span class="label">一级售价</span><strong class="value">${number(right.priceWheatJin, 2)}${escapeHtml(unit)}</strong></div>${renderNumericInput(view, { key: `right-price:${building.id}`, kind: "operating-right-price", target: building.id, value: right.priceWheatJin, label: "单级经营权售价", minimum: 0.01, maximum: 1000000000, positive: true, className: "setting-editor" })}<button class="secondary wide" data-right-preview="${escapeHtml(building.id)}">预览出售</button></div>`

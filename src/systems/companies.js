@@ -1,4 +1,5 @@
 import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
+import { isIndustryType } from "../content/buildings.js";
 import { householdIdOf } from "../economy/accounts.js";
 import { putStock, sellCompanyGoods, takeStock } from "../economy/trade.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
@@ -15,7 +16,6 @@ import { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } f
 
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
 import { buyWholesaleForOwner, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } from "./wholesale-market.js";
-const LISTABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
 
 function blankPeriod() {
   return {
@@ -120,7 +120,7 @@ export function createIndependentCompany(state, buildingId, options, content) {
   ensureCompanies(state, content);
   const building = state.buildings.find(row => row.id === buildingId);
   if (!building) return { ok: false, reason: "建筑不存在" };
-  if (!LISTABLE.has(building.typeId)) return { ok: false, reason: "此建筑暂不支持成立独立公司" };
+  if (!isIndustryType(content, building.typeId)) return { ok: false, reason: "此建筑暂不支持成立独立公司" };
   if (Object.values(state.companies).some(company => company.buildingId === buildingId)) {
     return { ok: false, reason: "同一建筑最多对应一家公司" };
   }

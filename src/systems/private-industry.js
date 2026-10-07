@@ -1,4 +1,5 @@
 import { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } from "../economy/inventory.js";
+import { industryTypeIds, isIndustryType } from "../content/buildings.js";
 import { bookAdd, bookAddMap } from "../economy/books.js";
 import { recordEvent } from "../economy/ledger.js";
 import { privateJobKeyForBuilding, readJobCount, selectJobRows } from "../selectors/labor.js";
@@ -11,7 +12,6 @@ import { buyWholesaleForOwner } from "./wholesale-market.js";
 import { householdConvertibleWheatUnits, householdFoodQeqUnits, householdList, householdReserveQeqUnits, syncResidentAggregates, jobAssignments, isActiveHousehold, creditHouseholdInventory } from "./households.js";
 
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
-const SELLABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
 
 function targetBatches(state, building) {
   return plannedBatchesForProducer(state, `private:${building.id}`);
@@ -71,10 +71,12 @@ function buyMissingPrivateInputs(state, household, definition, recipe, batches, 
 
 
 export function arrangePrivateWorkers(state, content) {
+  // 下游先招工：经营计划按下游需求倒推上游。
+  const downstreamFirst = industryTypeIds(content).reverse();
   const rows = selectJobRows(state, content);
   let idle = rows.idle;
-  const buildings = state.buildings.filter(row => SELLABLE.has(row.typeId) && (row.ownership?.privateLevels || 0) > 0)
-    .sort((a, b) => ["bakery", "saltworks", "mill", "lumberyard"].indexOf(a.typeId) - ["bakery", "saltworks", "mill", "lumberyard"].indexOf(b.typeId) || a.id.localeCompare(b.id));
+  const buildings = state.buildings.filter(row => isIndustryType(content, row.typeId) && (row.ownership?.privateLevels || 0) > 0)
+    .sort((a, b) => downstreamFirst.indexOf(a.typeId) - downstreamFirst.indexOf(b.typeId) || a.id.localeCompare(b.id));
   for (const building of buildings) {
     const definition = content.buildings[building.typeId];
     const role = definition.jobs[0];
@@ -114,7 +116,7 @@ function ownerCapacity(state, building, content) {
 export function payPrivateIndustryWages(state, content) {
   state.privateEconomy ||= {}; state.privateEconomy.payrollByBuilding ||= {};
   const results = []; const scale = currencyScale(content);
-  for (const building of state.buildings.filter(row => SELLABLE.has(row.typeId) && (row.ownership?.privateLevels || 0) > 0)) {
+  for (const building of state.buildings.filter(row => isIndustryType(content, row.typeId) && (row.ownership?.privateLevels || 0) > 0)) {
     const definition = content.buildings[building.typeId]; const job = definition?.jobs?.[0]; if (!job) continue;
     const key = privateJobKeyForBuilding(building.id, job.id); const workers = readJobCount(state, key);
     const rate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5; const due = Math.round(workers * rate * scale);
@@ -225,9 +227,11 @@ export function processPrivateBuilding(state, building, content) {
 
 export function processPrivateIndustries(state, content) {
   const rows = [];
-  const ordered = state.buildings.slice().sort((a, b) => ["mill", "bakery", "saltworks", "lumberyard"].indexOf(a.typeId) - ["mill", "bakery", "saltworks", "lumberyard"].indexOf(b.typeId));
+  // 上游先生产，下游才买得到原料。
+  const order = industryTypeIds(content);
+  const ordered = state.buildings.slice().sort((a, b) => order.indexOf(a.typeId) - order.indexOf(b.typeId));
   for (const building of ordered) {
-    if (!SELLABLE.has(building.typeId) || !(building.ownership?.privateLevels || 0)) continue;
+    if (!isIndustryType(content, building.typeId) || !(building.ownership?.privateLevels || 0)) continue;
     rows.push(processPrivateBuilding(state, building, content));
   }
   state.privateEconomy.lastDay = rows;

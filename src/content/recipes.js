@@ -27,5 +27,26 @@ export const RECIPES = Object.freeze({
     outputs: Object.freeze([{ itemId: "salt", quantity: 5 }]),
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
+  }),
+  winery_wine: Object.freeze({
+    id: "winery_wine", name: "酿酒",
+    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
+    outputs: Object.freeze([{ itemId: "wine", quantity: 4 }]),
+    losses: Object.freeze([{ itemId: "wheat", quantity: 6 }]),
+    batchesPerWorkerDay: 3
+  }),
+  cotton_growing: Object.freeze({
+    id: "cotton_growing", name: "种棉",
+    kind: "gather", inputs: Object.freeze([]),
+    outputs: Object.freeze([{ itemId: "cotton", quantity: 3 }]),
+    losses: Object.freeze([]),
+    batchesPerWorkerDay: 1
+  }),
+  weaving_cloth: Object.freeze({
+    id: "weaving_cloth", name: "织布",
+    inputs: Object.freeze([{ itemId: "cotton", quantity: 4 }]),
+    outputs: Object.freeze([{ itemId: "cloth", quantity: 1 }]),
+    losses: Object.freeze([]),
+    batchesPerWorkerDay: 1
   })
 });

@@ -152,7 +152,7 @@ function emptyIndustryPeriod() {
 }
 
 export function emptyIndustryState() {
-  return Object.fromEntries(["forestry", "salt"].map(function (sector) {
+  return Object.fromEntries(["forestry", "salt", "brewing", "textile"].map(function (sector) {
     return [sector, {
       day: emptyIndustryPeriod(),
       year: emptyIndustryPeriod(),

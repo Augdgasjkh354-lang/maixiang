@@ -1,11 +1,13 @@
 import { number } from "./format.js";
+import { CONTENT } from "../content/index.js";
+import { industryTypeIds } from "../content/buildings.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 
 export function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
   const last = view.policy.lastDay || {};
   const agriculture = view.agriculturePolicy;
-  const industries = [["mill", "磨坊"], ["bakery", "面包房"], ["lumberyard", "伐木场"], ["saltworks", "盐场"]];
+  const industries = industryTypeIds(CONTENT).map(id => [id, CONTENT.buildings[id].name]);
   const privateTaxes = industries.map(([id, name]) => `<div class="row"><span class="label">${name}</span><div class="setting-input">${renderNumericInput(view, { key: `private-tax:${id}`, kind: "private-tax-rate", target: id, value: view.policy.privateProductionTaxPercent?.[id] ?? 10, label: `${name}民营生产税率`, minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>`).join("");
   // 建筑门控（0.1.11 补回）：无相关建筑时不渲染对应卡片
   const buildingTypeIds = new Set((view.buildings || []).map(b => b.typeId));

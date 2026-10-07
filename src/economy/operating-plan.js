@@ -3,8 +3,8 @@ import { voucherBalance } from "./currency.js";
 import { maximumFullyPayableValueUnits, maximumPayableValueUnits } from "./payment.js";
 import { populationStats, readJobCount, privateJobKeyForBuilding, listedJobKeyForBuilding } from "../selectors/labor.js";
 import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from "../systems/households.js";
+import { industryTypeIds } from "../content/buildings.js";
 
-const INDUSTRY_ORDER = ["bakery", "saltworks", "mill", "lumberyard"];
 
 function daySerial(state, content) {
   return (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
@@ -110,31 +110,31 @@ function saltDailyDemandUnits(state, content) {
   return Math.min(shortage, residentAffordableUnits(state, "salt", price, content));
 }
 
-function demandForOutput(state, typeId, content) {
-  const itemId = outputItemForType(typeId, content);
-  if (!itemId) return { itemId, demandUnits: 0, basis: "无产品" };
-  if (typeId === "bakery") {
-    const intrinsic = breadDailyDemandUnits(state, content);
-    const recent = recentConsumerSalesUnits(state, "bread", content);
-    return { itemId, demandUnits: Math.max(intrinsic, recent), basis: "家庭可支付面包需求与近期实销" };
-  }
-  if (typeId === "saltworks") {
-    const intrinsic = saltDailyDemandUnits(state, content);
-    const recent = recentConsumerSalesUnits(state, "salt", content);
-    return { itemId, demandUnits: Math.max(intrinsic, recent), basis: "家庭可支付食盐需求与近期实销" };
-  }
-  if (typeId === "lumberyard") {
-    const demand = state.market?.publicProcurementDemand?.wood || null;
-    const required = Math.max(0, Math.floor(demand?.requiredUnits ?? demand?.wantedUnits ?? 0));
-    const townStock = Math.max(0, state.accounts?.town?.wood || 0);
-    const outstanding = Math.max(0, required - townStock);
-    const price = currentUnitPrice(state, "wood", content);
-    const budget = maximumFullyPayableValueUnits(state, "town", maximumPayableValueUnits(state, "town", content), content);
-    const affordable = price > 0 ? Math.max(0, Math.floor(budget * content.precision.inventoryUnitsPerJin / (price * content.precision.currencyUnitsPerVoucher))) : 0;
-    const funded = Math.min(outstanding, affordable);
-    return { itemId, demandUnits: funded, outstandingUnits: outstanding, basis: !demand ? "暂无有预算的建设订单" : outstanding <= 0 ? "建设订单已由镇库库存覆盖" : funded <= 0 ? "建设采购预算不足" : funded < outstanding ? "建设采购仅部分有预算" : "有预算的实际建设采购" };
-  }
-  return { itemId, demandUnits: 0, basis: "由下游生产计划决定" };
+// 酒、布等日用品：当日家庭需求由 goods-demand 系统写入 state.goodsDemand.todayDemandUnits。
+function goodsDailyDemandUnits(state, itemId, content) {
+  const demand = Math.max(0, state.goodsDemand?.todayDemandUnits?.[itemId] || 0);
+  const shortage = Math.max(0, demand - (state.accounts?.residents?.[itemId] || 0));
+  const price = currentUnitPrice(state, itemId, content) * (1 + Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100);
+  return Math.min(shortage, residentAffordableUnits(state, itemId, price, content));
+}
+
+function consumerDemandUnits(state, itemId, content) {
+  if (itemId === "bread") return breadDailyDemandUnits(state, content);
+  if (itemId === "salt") return saltDailyDemandUnits(state, content);
+  if (state.goodsDemand?.todayDemandUnits?.[itemId] !== undefined) return goodsDailyDemandUnits(state, itemId, content);
+  return 0;
+}
+
+function woodProcurementDemand(state, content) {
+  const demand = state.market?.publicProcurementDemand?.wood || null;
+  const required = Math.max(0, Math.floor(demand?.requiredUnits ?? demand?.wantedUnits ?? 0));
+  const townStock = Math.max(0, state.accounts?.town?.wood || 0);
+  const outstanding = Math.max(0, required - townStock);
+  const price = currentUnitPrice(state, "wood", content);
+  const budget = maximumFullyPayableValueUnits(state, "town", maximumPayableValueUnits(state, "town", content), content);
+  const affordable = price > 0 ? Math.max(0, Math.floor(budget * content.precision.inventoryUnitsPerJin / (price * content.precision.currencyUnitsPerVoucher))) : 0;
+  const funded = Math.min(outstanding, affordable);
+  return { itemId: "wood", demandUnits: funded, outstandingUnits: outstanding, basis: !demand ? "暂无有预算的建设订单" : outstanding <= 0 ? "建设订单已由镇库库存覆盖" : funded <= 0 ? "建设采购预算不足" : funded < outstanding ? "建设采购仅部分有预算" : "有预算的实际建设采购" };
 }
 
 function producerRows(state, typeId, content) {
@@ -211,25 +211,25 @@ function desiredWorkers(row, batches, state, content) {
   return Math.max(0, Math.min(row.maxWorkers, desired));
 }
 
-function productionTargetForType(state, typeId, content, downstreamBreadBatches = 0) {
-  const scale = content.precision.inventoryUnitsPerJin;
-  if (typeId === "mill") {
-    const flourInput = content.recipes.bakery_bread.inputs.find(row => row.itemId === "flour")?.quantity || 0;
-    const demandUnits = Math.round(downstreamBreadBatches * flourInput * scale);
-    const stock = producerMarketStock(state, "flour");
-    return { itemId: "flour", demandUnits, targetUnits: Math.max(0, demandUnits - stock), basis: "按可执行面包生产计划形成面粉需求" };
-  }
-  const row = demandForOutput(state, typeId, content);
-  const stock = typeId === "lumberyard"
-    ? publicProcurementDeliverableStock(state, row.itemId)
-    : producerMarketStock(state, row.itemId);
-  if (typeId === "lumberyard") {
-    // 木材对应一次性公共建设订单：镇库现货先减订单，市场现货再减生产缺口，不设置多日备货。
+// 某产业的生产目标：居民当日需求（含近期实销）+ 下游产业计划要用的原料 + 备货天数 − 市场现货。
+// 木材例外：对应一次性公共建设订单，不备货。
+function productionTargetForType(state, typeId, content, downstreamUnits) {
+  const itemId = outputItemForType(typeId, content);
+  if (!itemId) return { itemId, demandUnits: 0, targetUnits: 0, basis: "无产品" };
+  if (itemId === "wood") {
+    const row = woodProcurementDemand(state, content);
+    const stock = publicProcurementDeliverableStock(state, "wood");
     return { ...row, stockUnits: stock, targetUnits: Math.max(0, row.demandUnits - stock) };
   }
+  const consumer = Math.max(consumerDemandUnits(state, itemId, content), recentConsumerSalesUnits(state, itemId, content));
+  const downstream = Math.max(0, downstreamUnits[itemId] || 0);
+  const stock = producerMarketStock(state, itemId);
   const targetDays = content.rules.producerInventoryTargetDays || 2;
-  const targetStock = Math.round(row.demandUnits * targetDays);
-  return { ...row, stockUnits: stock, targetUnits: Math.max(0, row.demandUnits + targetStock - stock) };
+  const demandUnits = consumer + downstream;
+  const basis = consumer > 0 && downstream > 0 ? "居民需求与下游生产计划"
+    : consumer > 0 ? "家庭可支付需求与近期实销"
+    : downstream > 0 ? "按下游生产计划形成原料需求" : "暂无需求";
+  return { itemId, demandUnits, stockUnits: stock, targetUnits: Math.max(0, demandUnits + Math.round(consumer * targetDays) - stock), basis };
 }
 
 export function ensureOperatingPlanState(state) {
@@ -253,9 +253,10 @@ export function refreshOperatingPlan(state, content, force = false) {
   plan.updatedSerial = serial;
   plan.rows = {};
   plan.demand = {};
-  let breadBatches = 0;
-  for (const typeId of INDUSTRY_ORDER) {
-    const target = productionTargetForType(state, typeId, content, breadBatches);
+  // 从下游往上游排：先定面包、酒、布的产量，再按它们要用的原料推出面粉、棉花的产量。
+  const downstreamUnits = {};
+  for (const typeId of industryTypeIds(content).reverse()) {
+    const target = productionTargetForType(state, typeId, content, downstreamUnits);
     const perBatch = outputPerBatch(typeId, content);
     let totalBatches = perBatch > 0 ? Math.ceil(target.targetUnits / perBatch) : 0;
     const producers = producerRows(state, typeId, content);
@@ -277,7 +278,10 @@ export function refreshOperatingPlan(state, content, force = false) {
       }
     }
     plan.demand[typeId] = target;
-    if (typeId === "bakery") breadBatches = Object.values(batches).reduce((sum, value) => sum + value, 0);
+    const plannedBatches = Object.values(batches).reduce((sum, value) => sum + value, 0);
+    for (const input of content.recipes[content.buildings[typeId]?.recipeId]?.inputs || []) {
+      downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(plannedBatches * input.quantity * content.precision.inventoryUnitsPerJin);
+    }
   }
   return plan;
 }
@@ -297,7 +301,8 @@ export function recordConsumerDay(state, content) {
   const limit = Math.max(14, (content.rules.operatingObservationDays || 7) * 4);
   const bread = Math.round((state.market?.lastDay?.purchasedBreadJin || 0) * content.precision.inventoryUnitsPerJin);
   const salt = Math.max(0, state.salt?.todaySatisfiedUnits || state.salt?.day?.purchasedUnits || 0);
-  for (const [itemId, soldUnits] of [["bread", bread], ["salt", salt]]) {
+  const goods = Object.entries(state.goodsDemand?.day?.purchasedUnits || {});
+  for (const [itemId, soldUnits] of [["bread", bread], ["salt", salt], ...goods]) {
     const rows = state.market.consumerHistory[itemId] ||= [];
     rows.push({ year: state.year, day: state.day + 1, soldUnits });
     if (rows.length > limit) rows.splice(0, rows.length - limit);

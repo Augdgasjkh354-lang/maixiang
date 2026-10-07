@@ -41,7 +41,8 @@ test("新版默认价下四行业满产满销人均日利润符合校验值", ()
   // 四行业人均日利润校验值随之上调（小麦/面粉价不变）。
   // 默认日薪 10→5 斤（8cf03ae）：四个岗位成本各降 5 斤/工日 → 人均日利润各 +5。
   const expected = { mill: 18.68, bakery: 75.64, lumberyard: 9.4, saltworks: 49 };
-  assert.deepEqual(state.market.pricesVoucherPerUnit, { wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10 });
+  assert.deepEqual(state.market.pricesVoucherPerUnit, { ...CONTENT.rules.marketPricesVoucherPerUnit });
+  for (const [itemId, price] of Object.entries({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10 })) assert.equal(state.market.pricesVoucherPerUnit[itemId], price);
   for (const [typeId, profit] of Object.entries(expected)) {
     const row = theoreticalFullSaleProfitPerWorker(state, typeId, CONTENT);
     assert.ok(row);
