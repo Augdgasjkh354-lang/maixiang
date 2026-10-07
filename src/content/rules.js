@@ -125,6 +125,11 @@ export const RULES = Object.freeze({
   serviceDemandMaximumCycles: 2,
   serviceBudgetSharePercent: 35,
   serviceComfortDailyMaximum: 3,
+  // 日用品：每人每年用量；人均现金达到门槛的家庭才买；用够当日份额得满额舒心值加成。
+  householdGoods: Object.freeze({
+    cloth: Object.freeze({ annualPerPerson: 1, minCashVoucherPerCapita: 10, comfortMaximum: 3 }),
+    wine: Object.freeze({ annualPerPerson: 6, minCashVoucherPerCapita: 30, comfortMaximum: 2 })
+  }),
   serviceTypes: Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", basis: "person", cycleDays: 20, priceVoucher: 4, merchantCapacity: 24, clerkCapacity: 30, consumables: Object.freeze([]), comfort: 0.8, incomeSensitivity: 0.8 }),
     repair: Object.freeze({ id: "repair", name: "修补铺", basis: "household", cycleDays: 30, priceVoucher: 8, merchantCapacity: 14, clerkCapacity: 18, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 0.7 }),

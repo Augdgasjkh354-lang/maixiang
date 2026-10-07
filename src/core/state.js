@@ -299,6 +299,7 @@ export function createInitialState(options) {
     // 长期贸易协定：外贸房签约，每月从批发市场交货。
     tradeAgreements: [],
     laborCompetition: { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] },
+    goodsDemand: { carry: {}, todayDemandUnits: {}, day: {}, year: {} },
     salt: {
       demandCarry: 0,
       graceDaysElapsed: 0,

@@ -33,6 +33,7 @@ import { settleStockMarketDay, settleHouseholdStockBuying } from "./stock-exchan
 import { settleLiquidityDay } from "./liquidity.js";
 import { maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
+import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
 import { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
 
@@ -105,6 +106,7 @@ export const DAILY_STEPS = [
   // ── 开日：清当日账，做快照
   { id: "openDay", run: (state, content, day) => {
     day.saltDemandUnits = accrueSaltNeed(state, day.peopleAtStart.total, content);
+    accrueGoodsDemand(state, day.peopleAtStart.total, content);
     resetDayBooks(state, content);
   } },
   // 新年首日：先结上一年公司利润（居民到账进入新一年账本），再收别墅房产税。
@@ -151,18 +153,20 @@ export const DAILY_STEPS = [
   { id: "companyProduction", run: processListedCompanies },
   { id: "wholesaleCompanyIntake", run: sellCompanyOutputsToWholesale },
 
-  // ── 商业与居民购买：店铺计提并补货 → 房租 → 别墅 → 盐 → 主食 → 修缮木材 → 服务
+  // ── 商业与居民购买：店铺计提并补货 → 房租 → 别墅 → 盐 → 主食 → 修缮木材 → 酒与布 → 服务
   { id: "shopPreparation", run: prepareShopsForDay },
   { id: "rent", run: (state, content, day) => settleHousingRent(state, day.housingAtStart, content) },
   { id: "villaSales", run: settleVillaPurchases },
   { id: "saltTrade", run: buySaltForResidents },
   { id: "trade", run: (state, content, day) => buyStaplesForResidents(state, day.peopleAtStart.total, content) },
   { id: "repairWood", run: buyRepairWoodForResidents },
+  { id: "goodsTrade", run: buyGoodsForResidents },
   { id: "services", run: processServiceDemand },
 
   // ── 生活：吃饭、吃盐、舒心值、家庭日账
   { id: "meal", run: (state, content, day) => consumeDailyRations(state, day.peopleAtStart.total, content) },
   { id: "saltMeal", run: consumeDailySalt },
+  { id: "goodsUsed", run: consumeGoods },
   { id: "satisfaction", run: (state, content, day) => {
     const comfortQeq = day.meal.moves.reduce((sum, move) => sum + move.qeqUnits * (content.items[move.itemId]?.satisfactionPerQeq || 0), 0);
     const interval = content.rules.satisfactionUpdateIntervalDays || 1;
