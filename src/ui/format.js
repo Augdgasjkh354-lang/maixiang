@@ -53,3 +53,10 @@ export function moneyMixHint(view) {
   if (reform.stage === "voucher") return "新交易以粮券结算";
   return `新交易目标${number(reform.targetPercent, 2)}%粮券，其余小麦；缺券部分可由付款人自有小麦补付`;
 }
+
+// 镇营岗位实际日薪（基础日薪 × 公务员类/产业类系数）。
+export function effectiveTownWage(view, roleId, baseWage) {
+  const control = view.wageControl || { civil: 1, industry: 1, civilRoleIds: [] };
+  const factor = (control.civilRoleIds || []).includes(roleId) ? control.civil : control.industry;
+  return (Number(baseWage) || 0) * (Number.isFinite(Number(factor)) ? Number(factor) : 1);
+}

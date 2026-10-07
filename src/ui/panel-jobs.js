@@ -1,4 +1,4 @@
-import { escapeHtml, number, moneyUnit, moneyMixHint } from "./format.js";
+import { escapeHtml, number, moneyUnit, moneyMixHint, effectiveTownWage } from "./format.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 
 // 就业分组（纯展示层，减少长滚动；分组展开状态由 details[data-detail-key] 自动记住）。
@@ -30,7 +30,9 @@ function jobRow(view, row, idle) {
   });
   const wageControl = row.roleId === "farmers"
     ? `<span class="badge">秋收分粮</span>`
-    : `<div class="wage-setting"><span>薪</span>${renderNumericInput(view, {
+    : row.wageKind !== "company-wage"
+      ? `<span class="badge">日薪 ${number(effectiveTownWage(view, row.roleId, row.wagePerWorkerDay), 2)}${escapeHtml(unit)}</span>`
+      : `<div class="wage-setting"><span>薪</span>${renderNumericInput(view, {
         key: row.wageKind === "company-wage" ? `company:${row.wageTarget}:wage` : `wage:${row.roleId}`,
         kind: row.wageKind || "wage",
         target: row.wageTarget || row.roleId,

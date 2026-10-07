@@ -17,6 +17,7 @@ import { computeLaborMarket } from "../systems/labor-market.js";
 import { computeWealthStats } from "../systems/wealth-stats.js";
 import { currencyScale, validateCurrencyInvariant, voucherBalance } from "../economy/currency.js";
 import { hasBankAccess } from "../economy/payment.js";
+import { WAGE_CONTROL_CIVIL_ROLE_IDS } from "../systems/payroll.js";
 import { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } from "../systems/households.js";
 import { bondOutstandingVoucherUnits } from "../systems/bonds.js";
 import { shopSummaries } from "../systems/shops.js";
@@ -483,6 +484,8 @@ export function selectDashboard(state, content, selection) {
     } : null,
     outsideTown: needBusiness ? selectOutsideTownView(state, content) : null,
     tradeAgreements: needBusiness ? selectTradeAgreementView(state, content) : null,
+    // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
+    wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,
     policy: needPolicy ? {
       ...(state.policy || { unemploymentBenefit: { enabled: false, dailyPerWorkerJin: 1 } }),

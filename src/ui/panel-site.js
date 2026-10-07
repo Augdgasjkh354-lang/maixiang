@@ -1,4 +1,4 @@
-import { escapeHtml, number, numberMax, moneyUnit } from "./format.js";
+import { escapeHtml, number, numberMax, moneyUnit, effectiveTownWage } from "./format.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 import { renderShopPricing } from "./panel-shop-pricing.js";
 
@@ -29,7 +29,7 @@ function buildingStaffingMarkup(view, building) {
   if (!jobs.length) return "";
   const controls = jobs.map(job => workerControl(view, job, view.labor.idle)).join("");
   const wage = jobs[0];
-  return `<h3>人员</h3>${controls}<div class="site-wage-edit"><span>日薪</span>${renderNumericInput(view, { key: `wage:${wage.id}`, kind: "wage", target: wage.id, value: wage.wagePerWorkerDay, label: `${wage.name}日薪`, minimum: 0, maximum: 100000, confirmLabel: "✓", className: "wage-editor" })}<span>${escapeHtml(moneyUnit(view))}</span></div>`;
+  return `<h3>人员</h3>${controls}<div class="row"><span class="label">日薪（政策页系数调节）</span><strong class="value">${number(effectiveTownWage(view, wage.id, wage.wagePerWorkerDay), 2)}${escapeHtml(moneyUnit(view))}</strong></div>`;
 }
 
 // 用户 0.1.11：镇营目标日产量。仅有主产出品且镇营仍占级数的建筑显示；

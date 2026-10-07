@@ -11,8 +11,6 @@ export function renderPolicy(view) {
   const buildingTypeIds = new Set((view.buildings || []).map(b => b.typeId));
   const hasCommerce = buildingTypeIds.has("commercial_street") || buildingTypeIds.has("public_housing") || (view.shops || []).length > 0;
   const hasIndustry = industries.some(([id]) => buildingTypeIds.has(id));
-  const workshopWage = view.wageRates.millers ?? view.wageRates.bakers ?? 5;
-  const builderWage = view.wageRates.builders ?? 5;
   const shopTax = (view.shops || []).reduce((sum, row) => sum + (row.lastTaxVoucher || 0), 0);
   const relief = view.relief || {};
   const neighborAid = view.neighborAid || {};
@@ -40,7 +38,6 @@ export function renderPolicy(view) {
       
     ${hasCommerce ? "</div></details>" : "</div>"}
     <details class="detail-block" data-detail-key="policy-welfare"><summary>工资与福利</summary><div class="detail-body">
-      <div class="row"><span class="label">作坊 / 建筑日薪</span><strong class="value">${number(workshopWage)} / ${number(builderWage)}${moneyUnit}</strong></div>
       <label class="toggle"><input id="benefitEnabled" type="checkbox" ${policy.enabled ? "checked" : ""}><span>失业金</span></label>
       <div class="row"><span class="label">每名待业者每日</span><div class="setting-input">${renderNumericInput(view, { key: "unemployment-rate", kind: "unemployment-rate", target: "unemployment", value: policy.dailyPerWorkerJin, label: "每名待业者每日失业金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       <div class="row"><span class="label">符合 / 已覆盖 / 未覆盖</span><strong class="value">${number(last.eligible ?? view.policy.unemployed)} / ${number(last.paidPeople||0)} / ${number(last.uncoveredPeople||0)}人</strong></div>
@@ -48,10 +45,10 @@ export function renderPolicy(view) {
       ${policy.enabled && (last.shortWheatJin || 0) > 0 ? `<div class="shortage-banner visible">今日少发 ${number(last.shortWheatJin)}${moneyUnit}</div>` : ""}
     </div></details>
     <details class="detail-block" data-detail-key="policy-wage"><summary>工资调控</summary><div class="detail-body">
-      <div class="row"><span class="label">公务员类系数（政务/警察/银行/交易所）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-civil", kind: "wage-control-civil", target: "wageControl", value: view.policy.wageControl?.civil ?? 1, label: "公务员类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
+      <div class="row"><span class="label">公务员类系数（政务/警察/银行/交易所/社保）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-civil", kind: "wage-control-civil", target: "wageControl", value: view.policy.wageControl?.civil ?? 1, label: "公务员类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">镇营产业类系数（其余镇营岗位）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-industry", kind: "wage-control-industry", target: "wageControl", value: view.policy.wageControl?.industry ?? 1, label: "镇营产业类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">今日镇营工资应发</span><strong class="value">${number(view.policy.wageLastDay?.expectedVoucher || 0, 1)}${moneyUnit}</strong></div>
-      <div class="subtle">系数1为基准，不影响上市公司。</div>
+      <div class="subtle">岗位日薪 = 基础日薪 × 系数；不影响公司自定工资。</div>
     </div></details>
     <details class="detail-block" data-detail-key="policy-villa"><summary>别墅</summary><div class="detail-body">
       <div class="row"><span class="label">别墅定价</span><div class="setting-input">${renderNumericInput(view, { key: "villa-price", kind: "villa-price", target: "villa", value: view.policy.villa?.priceWheatJin ?? 10000, label: "别墅定价", minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>小麦等值</b></div></div>

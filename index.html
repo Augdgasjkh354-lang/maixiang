@@ -1925,7 +1925,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod12 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-180297b";
+       const BUILD_ID = "0203-fa7b0ca";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -16332,6 +16332,7 @@ const { computeLaborMarket } = __mxmod25;
 const { computeWealthStats } = __mxmod40;
 const { currencyScale, validateCurrencyInvariant, voucherBalance } = __mxmod19;
 const { hasBankAccess } = __mxmod20;
+const { WAGE_CONTROL_CIVIL_ROLE_IDS } = __mxmod24;
 const { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } = __mxmod14;
 const { bondOutstandingVoucherUnits } = __mxmod52;
 const { shopSummaries } = __mxmod46;
@@ -16797,6 +16798,8 @@ function companyActualReferencePlaceholder(company, content) {
     } : null,
     outsideTown: needBusiness ? selectOutsideTownView(state, content) : null,
     tradeAgreements: needBusiness ? selectTradeAgreementView(state, content) : null,
+    // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
+    wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,
     policy: needPolicy ? {
       ...(state.policy || { unemploymentBenefit: { enabled: false, dailyPerWorkerJin: 1 } }),
@@ -19098,7 +19101,14 @@ function escapeHtml(value) {
   if (reform.stage === "voucher") return "新交易以粮券结算";
   return `新交易目标${number(reform.targetPercent, 2)}%粮券，其余小麦；缺券部分可由付款人自有小麦补付`;
 }
-return { escapeHtml, number, numberMax, shortageJin, compact, percent, accountLines, moneyUnit, moneyMixHint };
+
+// 镇营岗位实际日薪（基础日薪 × 公务员类/产业类系数）。
+       function effectiveTownWage(view, roleId, baseWage) {
+  const control = view.wageControl || { civil: 1, industry: 1, civilRoleIds: [] };
+  const factor = (control.civilRoleIds || []).includes(roleId) ? control.civil : control.industry;
+  return (Number(baseWage) || 0) * (Number.isFinite(Number(factor)) ? Number(factor) : 1);
+}
+return { escapeHtml, number, numberMax, shortageJin, compact, percent, accountLines, moneyUnit, moneyMixHint, effectiveTownWage };
 })();
 
 // ===== ui/building-art.js =====
@@ -20308,7 +20318,7 @@ const NUMBER_PATTERN = /^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/;
 }
 
        function shouldCommitNumericDraftOnChange(kind) {
-  return kind === "wage" || kind === "company-wage";
+  return kind === "company-wage";
 }
 
        function renderNumericInput(view, options) {
@@ -20481,7 +20491,7 @@ return { setBuildCategory, renderBuild };
 
 // ===== ui/panel-jobs.js =====
 const __mxmod94 = (() => {
-const { escapeHtml, number, moneyUnit, moneyMixHint } = __mxmod81;
+const { escapeHtml, number, moneyUnit, moneyMixHint, effectiveTownWage } = __mxmod81;
 const { renderNumericInput } = __mxmod92;
 const JOB_GROUPS = [
   { id: "industry", name: "镇营产业", match: row => row.scope === "building" && row.globalDemandKind !== "public_service" },
@@ -20511,7 +20521,9 @@ function jobRow(view, row, idle) {
   });
   const wageControl = row.roleId === "farmers"
     ? `<span class="badge">秋收分粮</span>`
-    : `<div class="wage-setting"><span>薪</span>${renderNumericInput(view, {
+    : row.wageKind !== "company-wage"
+      ? `<span class="badge">日薪 ${number(effectiveTownWage(view, row.roleId, row.wagePerWorkerDay), 2)}${escapeHtml(unit)}</span>`
+      : `<div class="wage-setting"><span>薪</span>${renderNumericInput(view, {
         key: row.wageKind === "company-wage" ? `company:${row.wageTarget}:wage` : `wage:${row.roleId}`,
         kind: row.wageKind || "wage",
         target: row.wageTarget || row.roleId,
@@ -21369,8 +21381,6 @@ function renderPolicy(view) {
   const buildingTypeIds = new Set((view.buildings || []).map(b => b.typeId));
   const hasCommerce = buildingTypeIds.has("commercial_street") || buildingTypeIds.has("public_housing") || (view.shops || []).length > 0;
   const hasIndustry = industries.some(([id]) => buildingTypeIds.has(id));
-  const workshopWage = view.wageRates.millers ?? view.wageRates.bakers ?? 5;
-  const builderWage = view.wageRates.builders ?? 5;
   const shopTax = (view.shops || []).reduce((sum, row) => sum + (row.lastTaxVoucher || 0), 0);
   const relief = view.relief || {};
   const neighborAid = view.neighborAid || {};
@@ -21398,7 +21408,6 @@ function renderPolicy(view) {
       
     ${hasCommerce ? "</div></details>" : "</div>"}
     <details class="detail-block" data-detail-key="policy-welfare"><summary>工资与福利</summary><div class="detail-body">
-      <div class="row"><span class="label">作坊 / 建筑日薪</span><strong class="value">${number(workshopWage)} / ${number(builderWage)}${moneyUnit}</strong></div>
       <label class="toggle"><input id="benefitEnabled" type="checkbox" ${policy.enabled ? "checked" : ""}><span>失业金</span></label>
       <div class="row"><span class="label">每名待业者每日</span><div class="setting-input">${renderNumericInput(view, { key: "unemployment-rate", kind: "unemployment-rate", target: "unemployment", value: policy.dailyPerWorkerJin, label: "每名待业者每日失业金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       <div class="row"><span class="label">符合 / 已覆盖 / 未覆盖</span><strong class="value">${number(last.eligible ?? view.policy.unemployed)} / ${number(last.paidPeople||0)} / ${number(last.uncoveredPeople||0)}人</strong></div>
@@ -21406,10 +21415,10 @@ function renderPolicy(view) {
       ${policy.enabled && (last.shortWheatJin || 0) > 0 ? `<div class="shortage-banner visible">今日少发 ${number(last.shortWheatJin)}${moneyUnit}</div>` : ""}
     </div></details>
     <details class="detail-block" data-detail-key="policy-wage"><summary>工资调控</summary><div class="detail-body">
-      <div class="row"><span class="label">公务员类系数（政务/警察/银行/交易所）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-civil", kind: "wage-control-civil", target: "wageControl", value: view.policy.wageControl?.civil ?? 1, label: "公务员类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
+      <div class="row"><span class="label">公务员类系数（政务/警察/银行/交易所/社保）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-civil", kind: "wage-control-civil", target: "wageControl", value: view.policy.wageControl?.civil ?? 1, label: "公务员类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">镇营产业类系数（其余镇营岗位）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-industry", kind: "wage-control-industry", target: "wageControl", value: view.policy.wageControl?.industry ?? 1, label: "镇营产业类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">今日镇营工资应发</span><strong class="value">${number(view.policy.wageLastDay?.expectedVoucher || 0, 1)}${moneyUnit}</strong></div>
-      <div class="subtle">系数1为基准，不影响上市公司。</div>
+      <div class="subtle">岗位日薪 = 基础日薪 × 系数；不影响公司自定工资。</div>
     </div></details>
     <details class="detail-block" data-detail-key="policy-villa"><summary>别墅</summary><div class="detail-body">
       <div class="row"><span class="label">别墅定价</span><div class="setting-input">${renderNumericInput(view, { key: "villa-price", kind: "villa-price", target: "villa", value: view.policy.villa?.priceWheatJin ?? 10000, label: "别墅定价", minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>小麦等值</b></div></div>
@@ -21501,7 +21510,7 @@ return { renderShopPricing };
 
 // ===== ui/panel-site.js =====
 const __mxmod109 = (() => {
-const { escapeHtml, number, numberMax, moneyUnit } = __mxmod81;
+const { escapeHtml, number, numberMax, moneyUnit, effectiveTownWage } = __mxmod81;
 const { renderNumericInput } = __mxmod92;
 const { renderShopPricing } = __mxmod108;
 function humanizePlotLabel(view, building) {
@@ -21530,7 +21539,7 @@ function buildingStaffingMarkup(view, building) {
   if (!jobs.length) return "";
   const controls = jobs.map(job => workerControl(view, job, view.labor.idle)).join("");
   const wage = jobs[0];
-  return `<h3>人员</h3>${controls}<div class="site-wage-edit"><span>日薪</span>${renderNumericInput(view, { key: `wage:${wage.id}`, kind: "wage", target: wage.id, value: wage.wagePerWorkerDay, label: `${wage.name}日薪`, minimum: 0, maximum: 100000, confirmLabel: "✓", className: "wage-editor" })}<span>${escapeHtml(moneyUnit(view))}</span></div>`;
+  return `<h3>人员</h3>${controls}<div class="row"><span class="label">日薪（政策页系数调节）</span><strong class="value">${number(effectiveTownWage(view, wage.id, wage.wagePerWorkerDay), 2)}${escapeHtml(moneyUnit(view))}</strong></div>`;
 }
 
 // 用户 0.1.11：镇营目标日产量。仅有主产出品且镇营仍占级数的建筑显示；
@@ -22360,9 +22369,6 @@ function closest(element, selector) {
       successMessage = `已将工程投入建筑工调整为${number(result.assigned)}人。`;
       renderedMapSignature = "";
       latestMapModel = null;
-    } else if (kind === "wage") {
-      result = simulation.setWageRate(state, input.dataset.draftTarget, parsed.value);
-      successMessage = `日薪已设为${number(parsed.value, 2)}小麦等值。`;
     } else if (kind === "company-wage") {
       result = simulation.configureCompanyWage(state, input.dataset.draftTarget, parsed.value);
       successMessage = `公司日薪已设为${number(parsed.value, 2)}小麦等值。`;

@@ -168,7 +168,6 @@ test("0.1.10-r03 银行、交易所和公租房岗位容量与实际工资一致
 test("0.1.10-r05 工资输入在手机 change/失焦时直接提交，构建号可识别", () => {
   // 基线清理：构建号跟随版本演进，不再硬编码旧值；只断言其为可识别的非空字符串。
   assert.ok(typeof BUILD_ID === "string" && BUILD_ID.length > 0, "构建号应为非空字符串");
-  assert.equal(shouldCommitNumericDraftOnChange("wage"), true);
   assert.equal(shouldCommitNumericDraftOnChange("company-wage"), true);
   assert.equal(shouldCommitNumericDraftOnChange("workers"), false);
   assert.equal(shouldCommitNumericDraftOnChange("bread-price"), false);

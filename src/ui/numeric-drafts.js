@@ -29,7 +29,7 @@ export function shouldDeferNumericPanelRender(panel, activeElement) {
 }
 
 export function shouldCommitNumericDraftOnChange(kind) {
-  return kind === "wage" || kind === "company-wage";
+  return kind === "company-wage";
 }
 
 export function renderNumericInput(view, options) {

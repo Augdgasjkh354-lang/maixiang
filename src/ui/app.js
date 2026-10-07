@@ -375,9 +375,6 @@ export function mountGame(root) {
       successMessage = `已将工程投入建筑工调整为${number(result.assigned)}人。`;
       renderedMapSignature = "";
       latestMapModel = null;
-    } else if (kind === "wage") {
-      result = simulation.setWageRate(state, input.dataset.draftTarget, parsed.value);
-      successMessage = `日薪已设为${number(parsed.value, 2)}小麦等值。`;
     } else if (kind === "company-wage") {
       result = simulation.configureCompanyWage(state, input.dataset.draftTarget, parsed.value);
       successMessage = `公司日薪已设为${number(parsed.value, 2)}小麦等值。`;
