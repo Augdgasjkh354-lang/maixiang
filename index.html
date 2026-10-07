@@ -2204,7 +2204,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod14 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-1b46471";
+       const BUILD_ID = "0203-0f24158";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -15982,6 +15982,7 @@ const { bondOutstandingVoucherUnits } = __mxmod57;
 const { shopSummaries } = __mxmod51;
 const { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO, DEFAULT_SALE_PRICES } = __mxmod26;
 const { selectOutsideTownView } = __mxmod27;
+const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod6;
 const { selectTradeAgreementView } = __mxmod58;
 const { householdRecentTotalsReadonly, householdFoodDays } = __mxmod19;
 const { createDashboardRuntime, employmentExchangeRemainingUnits } = __mxmod75;
@@ -16125,6 +16126,10 @@ function companyActualReferencePlaceholder(company, content) {
   const housing = needHousing ? selectHousing(state, content) : { capacity: 0, shortage: 0, rentals: [], householdHousing: [] };
   const housingRentalByBuilding = new Map((housing.rentals || []).map(row => [row.buildingId, row]));
   const selectedBuildingId = selection?.site?.startsWith("building:") ? selection.site.slice("building:".length) : null;
+  // 外镇选择：界面传入 selection.outsideTownId；未知或缺省时用默认外镇。
+  const outsideTownIds = Object.keys(content.outsideTowns || {});
+  const outsideTownId = outsideTownIds.includes(selection?.outsideTownId) ? selection.outsideTownId : DEFAULT_OUTSIDE_TOWN_ID;
+  const outsideTownViews = needBusiness ? outsideTownIds.map(id => selectOutsideTownView(state, content, id)).filter(Boolean) : [];
   const buildings = state.buildings.map(function (building) {
     const definition = content.buildings[building.typeId];
     const ownership = building.ownership || { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
@@ -16439,8 +16444,11 @@ function companyActualReferencePlaceholder(company, content) {
       trade: state.market?.lastDay || null,
       business: state.business
     } : null,
-    outsideTown: needBusiness ? selectOutsideTownView(state, content) : null,
-    tradeAgreements: needBusiness ? selectTradeAgreementView(state, content) : null,
+    // 外镇：outsideTowns 是全部外镇的视图（界面切换用）；outsideTown / tradeAgreements 是当前选中的那一个。
+    outsideTowns: needBusiness ? outsideTownViews : null,
+    outsideTownId: outsideTownId,
+    outsideTown: needBusiness ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
+    tradeAgreements: needBusiness ? selectTradeAgreementView(state, content, outsideTownId) : null,
     // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
     wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,
@@ -19627,9 +19635,15 @@ function stockBadge(good) {
   return "";
 }
 
-function goodCard(view, good) {
+// 草稿键带上外镇 id，免得两个外镇的输入框互相串值。
+function draftKey(townId, name, itemId) {
+  return itemId === undefined ? `${name}:${townId}` : `${name}:${townId}:${itemId}`;
+}
+
+function goodCard(view, townId, good) {
   const unit = escapeHtml(good.unit);
   const name = escapeHtml(good.name);
+  const id = escapeHtml(townId);
   const days = good.stockDays == null ? "—" : `${number(good.stockDays)}天`;
   const buyText = good.buyPrice == null ? "—" : number(good.buyPrice, 2);
   const canBuy = good.sellsToUs;
@@ -19642,9 +19656,9 @@ function goodCard(view, good) {
         <strong class="value">收购${number(good.sellPrice, 2)} · 出售${buyText} <span class="subtle">小麦斤/${unit}</span></strong></div>
       <div class="row"><span class="label">我镇库存</span>
         <strong class="value">${number(good.ourStock, 1)}${unit}${canBuy ? ` <span class="subtle">可外卖${number(good.sellable, 1)}${unit}</span>` : ""}</strong></div>
-      <div class="row"><span class="label">数量</span><div class="setting-input">${renderNumericInput(view, { key: `outside-qty:${good.itemId}`, kind: "outside-trade-qty", target: good.itemId, value: "", label: `${name}交易数量`, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${unit}</b>
-        <button class="secondary" data-outside-sell="${escapeHtml(good.itemId)}">卖出</button>
-        ${canBuy ? `<button class="secondary" data-outside-buy="${escapeHtml(good.itemId)}">买入</button>` : ""}</div></div>
+      <div class="row"><span class="label">数量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "outside-qty", good.itemId), kind: "outside-trade-qty", target: good.itemId, value: "", label: `${name}交易数量`, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${unit}</b>
+        <button class="secondary" data-outside-sell="${escapeHtml(good.itemId)}" data-town="${id}">卖出</button>
+        ${canBuy ? `<button class="secondary" data-outside-buy="${escapeHtml(good.itemId)}" data-town="${id}">买入</button>` : ""}</div></div>
     </div>`;
 }
 
@@ -19660,8 +19674,9 @@ function agreementRow(agreement) {
     : agreement.status === "expired" ? "已到期"
     : agreement.status === "terminated" ? "已解约" : agreement.status;
   const breachText = agreement.breachCount > 0 ? ` · 违约${agreement.breachCount}次` : "";
+  // 长协自带 townId，解约只需要协定 id；data-town 仅作一致性标记。
   const terminateButton = agreement.status === "active"
-    ? `<button class="secondary" data-agreement-terminate="${escapeHtml(agreement.id)}">解约</button>` : "";
+    ? `<button class="secondary" data-agreement-terminate="${escapeHtml(agreement.id)}" data-town="${escapeHtml(agreement.townId || "")}">解约</button>` : "";
   return `<div class="row"><span class="label">${escapeHtml(agreement.itemName || agreement.itemId)}</span>
     <strong class="value">年${number(agreement.annualJin)}${escapeHtml(agreement.unit || "斤")} · 月${number(agreement.monthlyJin)} · 单价${number(agreement.pricePerUnit, 2)} · 余${agreement.yearsLeft}/${agreement.yearsTotal}年 · ${statusText}${breachText}</strong>${terminateButton}</div>`;
 }
@@ -19672,9 +19687,21 @@ function populationText(ot) {
   return `${number(ot.population)}人 <span class="subtle">（去年${sign}${number(change)}）</span>`;
 }
 
+// 顶部切换条：每个外镇一个按钮，显示名称与人口 · 繁荣度 · 关系分。
+function townSwitch(view, selectedId) {
+  const towns = view.outsideTowns || [];
+  if (towns.length < 2) return "";
+  return `<div class="build-tabs outside-town-switch" role="group" aria-label="选择外镇">${towns.map(town => {
+    const active = town.id === selectedId;
+    return `<button type="button" class="build-tab${active ? " selected" : ""}" data-outside-town="${escapeHtml(town.id)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(town.name)}<br><small>人口${number(town.population)} · 繁荣${number(town.prosperity)} · 关系${number(town.relations)}</small></button>`;
+  }).join("")}</div>`;
+}
+
        function renderOutsideTown(view) {
   const ot = view.outsideTown;
   if (!ot) return `<div class="subtle">外贸数据不可用。</div>`;
+  const townId = ot.id;
+  const id = escapeHtml(townId);
   const ta = view.tradeAgreements || { agreements: [], activeCount: 0, capacity: 0, relations: ot.relations ?? 60, trusted: false, distrusted: false, staff: 0 };
   const goods = ot.goods || [];
   const eventText = ot.event ? `${escapeHtml(ot.event.type)}（${number(ot.event.year)}年）` : "无";
@@ -19698,15 +19725,15 @@ function populationText(ot) {
     : `<div class="subtle">暂无长期协定。外贸房有人值守即可签约。</div>`;
   const signDisabled = !ot.foreignTradeOperational ? "disabled" : "";
   const agreementItems = goods.map(good => `<option value="${escapeHtml(good.itemId)}">${escapeHtml(good.name)}（${escapeHtml(good.unit)}）</option>`).join("");
-  const foodLine = ot.wheatDays == null ? "" : `约${number(ot.wheatDays)}天口粮`;
 
-  return `<h2>外贸 · ${escapeHtml(ot.name)}</h2>
+  return `${townSwitch(view, townId)}
+    <h2>外贸 · ${escapeHtml(ot.name)}</h2>
     <div class="cardlet">
       <div class="row"><span class="label">执政</span><strong class="value">${ot.rulers.map(escapeHtml).join("、")}</strong></div>
       <div class="row"><span class="label">人口</span><strong class="value">${populationText(ot)}</strong></div>
       <div class="row"><span class="label">耕地</span><strong class="value">${number(ot.landMu)}亩 <span class="subtle">（+${number(ot.landGrowthMuPerYear)}亩/年）</span></strong></div>
       <div class="row"><span class="label">繁荣度</span><strong class="value">${number(ot.prosperity, 1)} / 100</strong></div>
-      <div class="row"><span class="label">小麦库存</span><strong class="value">${number(ot.wheatStockJin)}斤 ${foodLine ? `<span class="subtle">· ${foodLine}</span>` : ""} · 口粮供应${number(ot.foodSupply)}%</strong></div>
+      <div class="row"><span class="label">小麦库存</span><strong class="value">${number(ot.wheatStockJin)}斤 ${ot.wheatDays == null ? "" : `<span class="subtle">· 约${number(ot.wheatDays)}天口粮</span>`} · 口粮供应${number(ot.foodSupply)}%</strong></div>
       <div class="row"><span class="label">可用于贸易的余粮</span><strong class="value">${number(ot.payableWheatJin)}斤 <span class="subtle">（超出90天口粮储备的部分）</span></strong></div>
       <div class="row"><span class="label">去年收成</span><strong class="value">${number(ot.lastYear?.harvestJin)}斤</strong></div>
       <div class="row"><span class="label">今年大事</span><strong class="value">${eventText}</strong></div>
@@ -19716,7 +19743,7 @@ function populationText(ot) {
     <div class="cardlet"><h3>商品行情</h3>
       <div class="subtle">价格随对方库存变化；大单越卖越便宜。</div>
     </div>
-    ${goods.map(good => goodCard(view, good)).join("")}
+    ${goods.map(good => goodCard(view, townId, good)).join("")}
     <div class="cardlet"><h3>对外关系</h3>
       <div class="row"><span class="label">关系分</span><strong class="value">${number(relations, 1)} / 100 · ${relationsNote(relations)}</strong></div>
       <div class="row"><span class="label">价差</span><strong class="value">${number(ot.spreadPercent, 1)}%</strong></div>
@@ -19728,21 +19755,21 @@ function populationText(ot) {
       ${signHint}
       ${agreementRows}
       <div class="row"><span class="label">品类</span><div class="setting-input">
-        <select data-draft-key="trade-agreement-item" data-draft-kind="trade-agreement-item" data-draft-target="tradeAgreement" data-draft-label="长协品类" class="setting-editor">
+        <select data-draft-key="${draftKey(townId, "trade-agreement-item")}" data-draft-kind="trade-agreement-item" data-draft-target="tradeAgreement" data-draft-label="长协品类" class="setting-editor">
           ${agreementItems}
         </select></div></div>
-      <div class="row"><span class="label">年供货量</span><div class="setting-input">${renderNumericInput(view, { key: "trade-agreement-annual", kind: "trade-agreement-annual", target: "tradeAgreement", value: "", label: "长协年供货量", minimum: 0, maximum: 5000000, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>单位</b></div></div>
-      <div class="row"><span class="label">年限</span><div class="setting-input">${renderNumericInput(view, { key: "trade-agreement-years", kind: "trade-agreement-years", target: "tradeAgreement", value: "", label: "长协年限", minimum: 1, maximum: 5, integer: true, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>年</b>
-        <button class="secondary" data-agreement-sign="1" ${signDisabled}>签约</button></div></div>
+      <div class="row"><span class="label">年供货量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-annual"), kind: "trade-agreement-annual", target: "tradeAgreement", value: "", label: "长协年供货量", minimum: 0, maximum: 5000000, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>单位</b></div></div>
+      <div class="row"><span class="label">年限</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-years"), kind: "trade-agreement-years", target: "tradeAgreement", value: "", label: "长协年限", minimum: 1, maximum: 5, integer: true, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>年</b>
+        <button class="secondary" data-agreement-sign="1" data-town="${id}" ${signDisabled}>签约</button></div></div>
       <div class="subtle">签约按当前收购价锁定单价（关系融洽时×1.05）；每月交付1/12，从批发市场扣货；货不足即我方违约，赔年货值10%并扣关系分（融洽时减半），连续3次对方解约。</div>
     </div>
     <div class="cardlet"><h3>小麦贷款</h3>
       <div class="subtle">天灾欠收时可放贷解急。每年年结计息，${escapeHtml(ot.name)}用结余小麦先息后本偿还。</div>
       ${loanRows}
       <div class="row"><span class="label">累计放贷 / 收息</span><strong class="value">${number(ot.loanStats?.totalIssuedJin || 0)} / ${number(ot.loanStats?.totalInterestJin || 0, 1)}斤</strong></div>
-      <div class="row"><span class="label">放贷斤数</span><div class="setting-input">${renderNumericInput(view, { key: "wheat-loan-principal", kind: "wheat-loan-principal", target: "wheatLoan", value: "", label: "小麦贷款斤数", minimum: 0, maximum: 1000000, className: "setting-editor" })}<b>斤</b></div></div>
-      <div class="row"><span class="label">年利率</span><div class="setting-input">${renderNumericInput(view, { key: "wheat-loan-rate", kind: "wheat-loan-rate", target: "wheatLoan", value: "", label: "小麦贷款年利率", minimum: 0, maximum: 50, className: "setting-editor" })}<b>%</b>
-      <button class="secondary" data-wheat-loan-issue="1">发放贷款</button></div></div>
+      <div class="row"><span class="label">放贷斤数</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-principal"), kind: "wheat-loan-principal", target: "wheatLoan", value: "", label: "小麦贷款斤数", minimum: 0, maximum: 1000000, className: "setting-editor" })}<b>斤</b></div></div>
+      <div class="row"><span class="label">年利率</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-rate"), kind: "wheat-loan-rate", target: "wheatLoan", value: "", label: "小麦贷款年利率", minimum: 0, maximum: 50, className: "setting-editor" })}<b>%</b>
+      <button class="secondary" data-wheat-loan-issue="1" data-town="${id}">发放贷款</button></div></div>
     </div>`;
 }
 return { renderOutsideTown };
@@ -20184,7 +20211,7 @@ function detail(key, title, body) {
       ${view.shortageQeq > 0 ? `<div class="shortage-banner visible">口粮短缺 ${shortageJin(view.shortageQeq, view.qeqUnitsPerJin)}，时光已暂停。</div>` : ""}
       <div class="cardlet"><div class="row"><span class="label">居民可吃</span><strong class="value">${numberMax(view.residentFoodDays, 1)}天</strong></div><div class="row"><span class="label">每日需要</span><strong class="value">${view.dailyNeed.toLocaleString("zh-CN")}斤</strong></div></div></section>
     ${detail("bread-trade", "居民主粮购买", renderTrade(view))}
-    ${detail("outside-town", "外贸 · 民镇", renderOutsideTown(view))}
+    ${detail("outside-town", `外贸 · ${view.outsideTown?.name || "外镇"}`, renderOutsideTown(view))}
     ${detail("industry-accounts", "林业、盐业与住房", renderIndustryAccounts(view))}
     ${detail("workshop-accounts", "镇营作坊账", renderBusiness(view))}
     ${detail("ledger", "账目与历史交易", renderLedger(view))}
@@ -20937,6 +20964,7 @@ const { compact, escapeHtml, number, numberMax, moneyUnit } = __mxmod85;
 const { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumericPanelRender } = __mxmod96;
 const { createDashboardViewCache } = __mxmod115;
 const { APP_VERSION, BUILD_ID } = __mxmod14;
+const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod6;
 function closest(element, selector) {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
 }
@@ -20965,6 +20993,8 @@ function closest(element, selector) {
   let saveNotice = "尚未保存";
   let saveWarning = null;
   const numericDrafts = new Map();
+  // 外贸面板当前查看的外镇（UI 状态，不进存档）。
+  let selectedOutsideTownId = DEFAULT_OUTSIDE_TOWN_ID;
   let startupError = null;
   let dirty = false;
   let stateRevision = 0;
@@ -21074,6 +21104,7 @@ function closest(element, selector) {
       site: nav.selectedSite,
       build: nav.activePanel === "build" ? nav.buildType : null,
       plotId: nav.activePanel === "build" ? nav.previewPlotId : null,
+      outsideTownId: selectedOutsideTownId,
       paused: clock.paused,
       speed: clock.speed
     };
@@ -22464,11 +22495,22 @@ function closest(element, selector) {
       render(true);
       return;
     }
+    const outsideTownTab = closest(target, "[data-outside-town]");
+    if (outsideTownTab && state) {
+      const townId = outsideTownTab.dataset.outsideTown;
+      if (townId !== selectedOutsideTownId && simulation.content.outsideTowns?.[townId]) {
+        selectedOutsideTownId = townId;
+        invalidateStateView();
+        render(true);
+      }
+      return;
+    }
     const outsideTradeButton = closest(target, "[data-outside-sell],[data-outside-buy]");
     if (outsideTradeButton && state) {
+      const townId = outsideTradeButton.dataset.town || selectedOutsideTownId;
       const itemId = outsideTradeButton.dataset.outsideSell || outsideTradeButton.dataset.outsideBuy;
       const direction = outsideTradeButton.dataset.outsideSell ? "sell" : "buy";
-      const key = `outside-qty:${itemId}`;
+      const key = `outside-qty:${townId}:${itemId}`;
       const input = numericInputFor(key);
       const rawValue = numericDrafts.has(key) ? numericDrafts.get(key).value : input?.value;
       const parsed = parseNumericDraft(rawValue, { label: "交易数量", minimum: 0, maximum: 100000 });
@@ -22477,10 +22519,10 @@ function closest(element, selector) {
         return;
       }
       // 提示语里的城镇名与品名取交易前的视图，免得交易后视图变化。
-      const outsideView = buildView()?.outsideTown;
-      const outsideTownName = outsideView?.name || "外镇";
+      const outsideView = buildView()?.outsideTowns?.find(row => row.id === townId);
+      const outsideTownName = outsideView?.name || simulation.content.outsideTowns?.[townId]?.name || "外镇";
       const outsideGood = outsideView?.goods?.find(good => good.itemId === itemId);
-      const result = simulation.tradeWithOutsideTown(state, direction, itemId, parsed.value);
+      const result = simulation.tradeWithOutsideTown(state, direction, itemId, parsed.value, townId);
       if (!result?.ok) {
         setDraftError(key, result?.reason || "交易失败", input);
         return;
@@ -22497,8 +22539,10 @@ function closest(element, selector) {
     }
     const wheatLoanButton = closest(target, "[data-wheat-loan-issue]");
     if (wheatLoanButton && state) {
-      const principalKey = "wheat-loan-principal";
-      const rateKey = "wheat-loan-rate";
+      const townId = wheatLoanButton.dataset.town || selectedOutsideTownId;
+      const townName = simulation.content.outsideTowns?.[townId]?.name || "外镇";
+      const principalKey = `wheat-loan-principal:${townId}`;
+      const rateKey = `wheat-loan-rate:${townId}`;
       const principalInput = numericInputFor(principalKey);
       const rateInput = numericInputFor(rateKey);
       const principalRaw = numericDrafts.has(principalKey) ? numericDrafts.get(principalKey).value : principalInput?.value;
@@ -22513,7 +22557,7 @@ function closest(element, selector) {
         setDraftError(rateKey, rateParsed.reason, rateInput);
         return;
       }
-      const result = simulation.issueWheatLoan(state, principalParsed.value, rateParsed.value);
+      const result = simulation.issueWheatLoan(state, principalParsed.value, rateParsed.value, townId);
       if (!result?.ok) {
         setDraftError(principalKey, result?.reason || "放贷失败", principalInput);
         return;
@@ -22522,16 +22566,18 @@ function closest(element, selector) {
       numericDrafts.delete(rateKey);
       changed(true);
       render(true);
-      showToast(`已向民镇发放小麦贷款${number(result.loan.principalJin)}斤，年利率${number(result.loan.annualRatePercent, 1)}%。`);
+      showToast(`已向${townName}发放小麦贷款${number(result.loan.principalJin)}斤，年利率${number(result.loan.annualRatePercent, 1)}%。`);
       return;
     }
-    // 长期贸易协定（民镇）：签约与解约。
+    // 长期贸易协定：签约与解约（按外镇分草稿）。
     const agreementSignButton = closest(target, "[data-agreement-sign]");
     if (agreementSignButton && state) {
-      const itemKey = "trade-agreement-item";
-      const annualKey = "trade-agreement-annual";
-      const yearsKey = "trade-agreement-years";
-      const itemSelect = document.querySelector(`[data-draft-key="${itemKey}"]`);
+      const townId = agreementSignButton.dataset.town || selectedOutsideTownId;
+      const townName = simulation.content.outsideTowns?.[townId]?.name || "外镇";
+      const itemKey = `trade-agreement-item:${townId}`;
+      const annualKey = `trade-agreement-annual:${townId}`;
+      const yearsKey = `trade-agreement-years:${townId}`;
+      const itemSelect = root.querySelector(`[data-draft-key="${itemKey}"]`);
       const annualInput = numericInputFor(annualKey);
       const yearsInput = numericInputFor(yearsKey);
       const annualRaw = numericDrafts.has(annualKey) ? numericDrafts.get(annualKey).value : annualInput?.value;
@@ -22547,7 +22593,7 @@ function closest(element, selector) {
         return;
       }
       const itemId = itemSelect?.value || "salt";
-      const result = simulation.signTradeAgreement(state, { itemId, annualJin: annualParsed.value, years: yearsParsed.value });
+      const result = simulation.signTradeAgreement(state, { itemId, annualJin: annualParsed.value, years: yearsParsed.value, townId });
       if (!result?.ok) {
         setDraftError(annualKey, result?.reason || "签约失败", annualInput);
         return;
@@ -22556,7 +22602,7 @@ function closest(element, selector) {
       numericDrafts.delete(yearsKey);
       changed(true);
       render(true);
-      showToast(`已签署长期协定：年供${number(result.agreement.annualJin)}，锁定单价${number(result.agreement.pricePerUnit, 2)}，为期${result.agreement.yearsTotal}年。`);
+      showToast(`已与${townName}签署长期协定：年供${number(result.agreement.annualJin)}，锁定单价${number(result.agreement.pricePerUnit, 2)}，为期${result.agreement.yearsTotal}年。`);
       return;
     }
     const agreementTerminateButton = closest(target, "[data-agreement-terminate]");

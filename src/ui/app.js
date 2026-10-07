@@ -25,6 +25,7 @@ import { compact, escapeHtml, number, numberMax, moneyUnit } from "./format.js";
 import { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumericPanelRender } from "./numeric-drafts.js";
 import { createDashboardViewCache } from "./dashboard-view-cache.js";
 import { APP_VERSION, BUILD_ID } from "../content/version.js";
+import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 
 function closest(element, selector) {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
@@ -54,6 +55,8 @@ export function mountGame(root) {
   let saveNotice = "尚未保存";
   let saveWarning = null;
   const numericDrafts = new Map();
+  // 外贸面板当前查看的外镇（UI 状态，不进存档）。
+  let selectedOutsideTownId = DEFAULT_OUTSIDE_TOWN_ID;
   let startupError = null;
   let dirty = false;
   let stateRevision = 0;
@@ -163,6 +166,7 @@ export function mountGame(root) {
       site: nav.selectedSite,
       build: nav.activePanel === "build" ? nav.buildType : null,
       plotId: nav.activePanel === "build" ? nav.previewPlotId : null,
+      outsideTownId: selectedOutsideTownId,
       paused: clock.paused,
       speed: clock.speed
     };
@@ -1553,11 +1557,22 @@ export function mountGame(root) {
       render(true);
       return;
     }
+    const outsideTownTab = closest(target, "[data-outside-town]");
+    if (outsideTownTab && state) {
+      const townId = outsideTownTab.dataset.outsideTown;
+      if (townId !== selectedOutsideTownId && simulation.content.outsideTowns?.[townId]) {
+        selectedOutsideTownId = townId;
+        invalidateStateView();
+        render(true);
+      }
+      return;
+    }
     const outsideTradeButton = closest(target, "[data-outside-sell],[data-outside-buy]");
     if (outsideTradeButton && state) {
+      const townId = outsideTradeButton.dataset.town || selectedOutsideTownId;
       const itemId = outsideTradeButton.dataset.outsideSell || outsideTradeButton.dataset.outsideBuy;
       const direction = outsideTradeButton.dataset.outsideSell ? "sell" : "buy";
-      const key = `outside-qty:${itemId}`;
+      const key = `outside-qty:${townId}:${itemId}`;
       const input = numericInputFor(key);
       const rawValue = numericDrafts.has(key) ? numericDrafts.get(key).value : input?.value;
       const parsed = parseNumericDraft(rawValue, { label: "交易数量", minimum: 0, maximum: 100000 });
@@ -1566,10 +1581,10 @@ export function mountGame(root) {
         return;
       }
       // 提示语里的城镇名与品名取交易前的视图，免得交易后视图变化。
-      const outsideView = buildView()?.outsideTown;
-      const outsideTownName = outsideView?.name || "外镇";
+      const outsideView = buildView()?.outsideTowns?.find(row => row.id === townId);
+      const outsideTownName = outsideView?.name || simulation.content.outsideTowns?.[townId]?.name || "外镇";
       const outsideGood = outsideView?.goods?.find(good => good.itemId === itemId);
-      const result = simulation.tradeWithOutsideTown(state, direction, itemId, parsed.value);
+      const result = simulation.tradeWithOutsideTown(state, direction, itemId, parsed.value, townId);
       if (!result?.ok) {
         setDraftError(key, result?.reason || "交易失败", input);
         return;
@@ -1586,8 +1601,10 @@ export function mountGame(root) {
     }
     const wheatLoanButton = closest(target, "[data-wheat-loan-issue]");
     if (wheatLoanButton && state) {
-      const principalKey = "wheat-loan-principal";
-      const rateKey = "wheat-loan-rate";
+      const townId = wheatLoanButton.dataset.town || selectedOutsideTownId;
+      const townName = simulation.content.outsideTowns?.[townId]?.name || "外镇";
+      const principalKey = `wheat-loan-principal:${townId}`;
+      const rateKey = `wheat-loan-rate:${townId}`;
       const principalInput = numericInputFor(principalKey);
       const rateInput = numericInputFor(rateKey);
       const principalRaw = numericDrafts.has(principalKey) ? numericDrafts.get(principalKey).value : principalInput?.value;
@@ -1602,7 +1619,7 @@ export function mountGame(root) {
         setDraftError(rateKey, rateParsed.reason, rateInput);
         return;
       }
-      const result = simulation.issueWheatLoan(state, principalParsed.value, rateParsed.value);
+      const result = simulation.issueWheatLoan(state, principalParsed.value, rateParsed.value, townId);
       if (!result?.ok) {
         setDraftError(principalKey, result?.reason || "放贷失败", principalInput);
         return;
@@ -1611,16 +1628,18 @@ export function mountGame(root) {
       numericDrafts.delete(rateKey);
       changed(true);
       render(true);
-      showToast(`已向民镇发放小麦贷款${number(result.loan.principalJin)}斤，年利率${number(result.loan.annualRatePercent, 1)}%。`);
+      showToast(`已向${townName}发放小麦贷款${number(result.loan.principalJin)}斤，年利率${number(result.loan.annualRatePercent, 1)}%。`);
       return;
     }
-    // 长期贸易协定（民镇）：签约与解约。
+    // 长期贸易协定：签约与解约（按外镇分草稿）。
     const agreementSignButton = closest(target, "[data-agreement-sign]");
     if (agreementSignButton && state) {
-      const itemKey = "trade-agreement-item";
-      const annualKey = "trade-agreement-annual";
-      const yearsKey = "trade-agreement-years";
-      const itemSelect = document.querySelector(`[data-draft-key="${itemKey}"]`);
+      const townId = agreementSignButton.dataset.town || selectedOutsideTownId;
+      const townName = simulation.content.outsideTowns?.[townId]?.name || "外镇";
+      const itemKey = `trade-agreement-item:${townId}`;
+      const annualKey = `trade-agreement-annual:${townId}`;
+      const yearsKey = `trade-agreement-years:${townId}`;
+      const itemSelect = root.querySelector(`[data-draft-key="${itemKey}"]`);
       const annualInput = numericInputFor(annualKey);
       const yearsInput = numericInputFor(yearsKey);
       const annualRaw = numericDrafts.has(annualKey) ? numericDrafts.get(annualKey).value : annualInput?.value;
@@ -1636,7 +1655,7 @@ export function mountGame(root) {
         return;
       }
       const itemId = itemSelect?.value || "salt";
-      const result = simulation.signTradeAgreement(state, { itemId, annualJin: annualParsed.value, years: yearsParsed.value });
+      const result = simulation.signTradeAgreement(state, { itemId, annualJin: annualParsed.value, years: yearsParsed.value, townId });
       if (!result?.ok) {
         setDraftError(annualKey, result?.reason || "签约失败", annualInput);
         return;
@@ -1645,7 +1664,7 @@ export function mountGame(root) {
       numericDrafts.delete(yearsKey);
       changed(true);
       render(true);
-      showToast(`已签署长期协定：年供${number(result.agreement.annualJin)}，锁定单价${number(result.agreement.pricePerUnit, 2)}，为期${result.agreement.yearsTotal}年。`);
+      showToast(`已与${townName}签署长期协定：年供${number(result.agreement.annualJin)}，锁定单价${number(result.agreement.pricePerUnit, 2)}，为期${result.agreement.yearsTotal}年。`);
       return;
     }
     const agreementTerminateButton = closest(target, "[data-agreement-terminate]");

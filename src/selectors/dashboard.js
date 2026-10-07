@@ -24,6 +24,7 @@ import { bondOutstandingVoucherUnits } from "../systems/bonds.js";
 import { shopSummaries } from "../systems/shops.js";
 import { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO, DEFAULT_SALE_PRICES } from "../systems/wholesale-market.js";
 import { selectOutsideTownView } from "../systems/outside-town.js";
+import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { selectTradeAgreementView } from "../systems/trade-agreements.js";
 import { householdRecentTotalsReadonly, householdFoodDays } from "../systems/household-life.js";
 import { createDashboardRuntime, employmentExchangeRemainingUnits } from "./dashboard-runtime.js";
@@ -168,6 +169,10 @@ export function selectDashboard(state, content, selection) {
   const housing = needHousing ? selectHousing(state, content) : { capacity: 0, shortage: 0, rentals: [], householdHousing: [] };
   const housingRentalByBuilding = new Map((housing.rentals || []).map(row => [row.buildingId, row]));
   const selectedBuildingId = selection?.site?.startsWith("building:") ? selection.site.slice("building:".length) : null;
+  // 外镇选择：界面传入 selection.outsideTownId；未知或缺省时用默认外镇。
+  const outsideTownIds = Object.keys(content.outsideTowns || {});
+  const outsideTownId = outsideTownIds.includes(selection?.outsideTownId) ? selection.outsideTownId : DEFAULT_OUTSIDE_TOWN_ID;
+  const outsideTownViews = needBusiness ? outsideTownIds.map(id => selectOutsideTownView(state, content, id)).filter(Boolean) : [];
   const buildings = state.buildings.map(function (building) {
     const definition = content.buildings[building.typeId];
     const ownership = building.ownership || { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
@@ -482,8 +487,11 @@ export function selectDashboard(state, content, selection) {
       trade: state.market?.lastDay || null,
       business: state.business
     } : null,
-    outsideTown: needBusiness ? selectOutsideTownView(state, content) : null,
-    tradeAgreements: needBusiness ? selectTradeAgreementView(state, content) : null,
+    // 外镇：outsideTowns 是全部外镇的视图（界面切换用）；outsideTown / tradeAgreements 是当前选中的那一个。
+    outsideTowns: needBusiness ? outsideTownViews : null,
+    outsideTownId: outsideTownId,
+    outsideTown: needBusiness ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
+    tradeAgreements: needBusiness ? selectTradeAgreementView(state, content, outsideTownId) : null,
     // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
     wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,
