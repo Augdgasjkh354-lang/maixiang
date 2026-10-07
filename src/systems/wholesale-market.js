@@ -1,4 +1,5 @@
 // 批发市场（0.2.3 流通改革）：从"镇库的转运站"升级为独立的做市商。
+import { householdIdOf } from "../economy/accounts.js";
 //
 // 三条主线：
 // 1. 做市商双价：对每个商品设「收购价」（向公司/民营收购）与「售价」（卖给综合商店/生产者）。
@@ -503,7 +504,7 @@ function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, conten
 
   // 2) 镇库不足时，从其他住户购买（不含买方自己；小麦保留对方口粮储备）
   if (totalBought < wanted) {
-    const buyerHouseholdId = buyerOwner.startsWith("household:") ? buyerOwner.slice(10) : null;
+    const buyerHouseholdId = householdIdOf(buyerOwner);
     const isStaple = !!content.items[itemId]?.edible;
     for (const household of Object.values(state.households?.byId || {})) {
       if (totalBought >= wanted) break;
@@ -572,7 +573,7 @@ export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, 
   units = Math.min(units, Math.max(0, maxUnitsByCash));
   if (units <= 0) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "采购方资金不足" };
   const value = priceValueUnits(itemId, units, state, content);
-  const householdId = buyerOwner.startsWith("household:") ? buyerOwner.slice(10) : null;
+  const householdId = householdIdOf(buyerOwner);
   const household = householdId ? state.households?.byId?.[householdId] : null;
   const maxWheatUnits = household ? householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) : undefined;
   // 货款进入镇库。

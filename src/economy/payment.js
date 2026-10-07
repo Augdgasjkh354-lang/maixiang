@@ -1,4 +1,5 @@
 import { issueTownVouchers, issueVouchersFromWheat, transferVouchers, voucherBalance } from "./currency.js";
+import { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot } from "./accounts.js";
 import { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } from "./business.js";
 import { makeTransactionId, recordLedger } from "./ledger.js";
 import { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits } from "./money-units.js";
@@ -64,8 +65,8 @@ function autoExchangeableWheatUnits(state, owner, content, options = {}) {
   const reform = ensureMonetaryReform(state);
   if (reform.stage === MONETARY_STAGE_WHEAT) return 0;
   let units = 0;
-  if (owner?.startsWith("household:")) {
-    const household = state.households?.byId?.[owner.slice(10)];
+  if (isHouseholdOwner(owner)) {
+    const household = state.households?.byId?.[householdIdOf(owner)];
     if (!household) return 0;
     units = Math.min(
       householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30),
@@ -76,7 +77,7 @@ function autoExchangeableWheatUnits(state, owner, content, options = {}) {
       householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30),
       householdExchangeAllowanceUnits(state, household.id, content)
     ), 0);
-  } else if (owner?.startsWith("company:") || owner?.startsWith("shop:")) {
+  } else if (["company", "shop"].includes(parseOwner(owner).kind)) {
     units = paymentWheatBalanceUnits(state, owner);
   }
   if (Number.isSafeInteger(options.maxWheatUnits)) units = Math.min(units, Math.max(0, options.maxWheatUnits));
@@ -84,7 +85,7 @@ function autoExchangeableWheatUnits(state, owner, content, options = {}) {
 }
 
 function autoExchangeForPayment(state, owner, voucherNeedUnits, dueWheatValueUnits, content, options = {}) {
-  if (voucherNeedUnits <= 0 || !(owner === "residents" || owner?.startsWith("household:") || owner?.startsWith("company:") || owner?.startsWith("shop:"))) return { wheatUnits: 0, voucherUnits: 0 };
+  if (voucherNeedUnits <= 0 || !["residents", "household", "company", "shop"].includes(parseOwner(owner).kind)) return { wheatUnits: 0, voucherUnits: 0 };
   const actualWheat = paymentWheatBalanceUnits(state, owner);
   const paymentWheatLimit = Math.min(actualWheat, Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheat);
   const wheatNeededForOriginalWheat = wheatUnitsForVoucherUnits(Math.max(0, dueWheatValueUnits), content, "ceil");
@@ -98,13 +99,7 @@ function autoExchangeForPayment(state, owner, voucherNeedUnits, dueWheatValueUni
 }
 
 export function paymentWheatBalanceUnits(state, owner) {
-  if (owner === "town") return state.accounts?.town?.wheat || 0;
-  if (owner === "residents") return state.accounts?.residents?.wheat || 0;
-  if (owner?.startsWith("household:")) return state.households?.byId?.[owner.slice(10)]?.inventory?.wheat || 0;
-  if (owner?.startsWith("company:")) return state.companies?.[owner.slice(8)]?.cashWheatUnits || 0;
-  if (owner?.startsWith("shop:")) return state.shops?.[owner.slice(5)]?.cashWheatUnits || 0;
-  if (owner === "social") return state.socialSecurity?.cashWheatUnits || 0;
-  return 0;
+  return readSlot(paymentWheatSlot(state, owner));
 }
 
 function canCreditWheat(state, owner, wheatUnits) {
@@ -115,24 +110,11 @@ function canCreditWheat(state, owner, wheatUnits) {
 
 function setSimpleWheatBalance(state, owner, value, content) {
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError("支付小麦余额无效");
-  if (owner === "town") state.accounts.town.wheat = value;
-  else if (owner?.startsWith("household:")) {
-    const household = state.households?.byId?.[owner.slice(10)];
-    if (!household) throw new Error("家庭不存在");
-    household.inventory.wheat = value;
-    syncResidentAggregates(state, content);
-  } else if (owner?.startsWith("company:")) {
-    const company = state.companies?.[owner.slice(8)];
-    if (!company) throw new Error("企业不存在");
-    company.cashWheatUnits = value;
-  } else if (owner?.startsWith("shop:")) {
-    const shop = state.shops?.[owner.slice(5)];
-    if (!shop) throw new Error("店铺不存在");
-    shop.cashWheatUnits = value;
-  } else if (owner === "social") {
-    state.socialSecurity ||= {};
-    state.socialSecurity.cashWheatUnits = value;
-  } else throw new Error("未知小麦支付账户：" + owner);
+  // 居民汇总的小麦要落到具体家庭，由 transferPaymentWheat 单独处理。
+  const slot = owner === "residents" ? null : paymentWheatSlot(state, owner);
+  if (!slot) throw new Error("未知小麦支付账户：" + owner);
+  slot.holder[slot.key] = value;
+  if (isHouseholdOwner(owner)) syncResidentAggregates(state, content);
 }
 
 function transferPaymentWheat(state, from, to, wheatUnits, valueUnits, content, type, reason, transactionId) {

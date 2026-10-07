@@ -1,4 +1,11 @@
 import { makeTransactionId, recordLedger } from "./ledger.js";
+import { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot, voucherSlot } from "./accounts.js";
+
+// 公司与店铺持有独立的现金小麦，可在银行与粮券互换。
+function holdsCashWheat(owner) {
+  const kind = parseOwner(owner).kind;
+  return kind === "company" || kind === "shop";
+}
 import { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } from "./business.js";
 import {
   hasHouseholds, householdList, residentVoucherUnits, syncResidentAggregates,
@@ -41,48 +48,20 @@ export function ensureCurrencyState(state) {
 }
 
 export function voucherBalance(state, owner) {
-  const currency = ensureCurrencyState(state);
-  if (owner === "town") return currency.balances.town || 0;
-  if (owner === "residents") return hasHouseholds(state) ? residentVoucherUnits(state) : (currency.balances.residents || 0);
-  if (owner?.startsWith("household:")) return state.households?.byId?.[owner.slice(10)]?.voucherUnits || 0;
-  if (owner?.startsWith("company:")) return state.companies?.[owner.slice(8)]?.cashVoucherUnits || 0;
-  if (owner?.startsWith("shop:")) return state.shops?.[owner.slice(5)]?.cashVoucherUnits || 0;
-  // 社保基金独立钱包。
-  if (owner === "social") return state.socialSecurity?.cashVoucherUnits || 0;
-  throw new Error("未知粮券账户：" + owner);
+  ensureCurrencyState(state);
+  if (owner === "residents" && hasHouseholds(state)) return residentVoucherUnits(state);
+  if (!parseOwner(owner).kind) throw new Error("未知粮券账户：" + owner);
+  return readSlot(voucherSlot(state, owner));
 }
 
 function setVoucherBalance(state, owner, value, content = null) {
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError("粮券余额无效");
-  const currency = ensureCurrencyState(state);
-  if (owner === "town") { currency.balances.town = value; return; }
-  if (owner === "residents") {
-    if (hasHouseholds(state)) throw new Error("居民汇总粮券账户为只读；应落到具体家庭");
-    currency.balances.residents = value;
-    return;
-  }
-  if (owner?.startsWith("household:")) {
-    const household = state.households?.byId?.[owner.slice(10)];
-    if (!household) throw new Error("家庭不存在：" + owner.slice(10));
-    household.voucherUnits = value;
-    if (content) syncResidentAggregates(state, content);
-    return;
-  }
-  if (owner?.startsWith("company:")) {
-    const company = state.companies?.[owner.slice(8)];
-    if (!company) throw new Error("企业不存在：" + owner.slice(8));
-    company.cashVoucherUnits = value; return;
-  }
-  if (owner?.startsWith("shop:")) {
-    const shop = state.shops?.[owner.slice(5)];
-    if (!shop) throw new Error("店铺不存在：" + owner.slice(5));
-    shop.cashVoucherUnits = value; return;
-  }
-  if (owner === "social") {
-    state.socialSecurity ||= {};
-    state.socialSecurity.cashVoucherUnits = value; return;
-  }
-  throw new Error("未知粮券账户：" + owner);
+  ensureCurrencyState(state);
+  if (owner === "residents" && hasHouseholds(state)) throw new Error("居民汇总粮券账户为只读；应落到具体家庭");
+  const slot = voucherSlot(state, owner);
+  if (!slot) throw new Error("粮券账户不存在：" + owner);
+  slot.holder[slot.key] = value;
+  if (isHouseholdOwner(owner) && content) syncResidentAggregates(state, content);
 }
 
 function currencyLedger(state, row, content) {
@@ -198,19 +177,18 @@ export function issueVouchersFromWheat(state, owner, wheatUnits, content, reason
     }
     for (const row of householdRows) state.households.byId[row.householdId].voucherUnits = (state.households.byId[row.householdId].voucherUnits || 0) + row.units;
     syncResidentAggregates(state, content);
-  } else if (owner?.startsWith("household:")) {
-    const household = state.households?.byId?.[owner.slice(10)];
+  } else if (isHouseholdOwner(owner)) {
+    const household = state.households?.byId?.[householdIdOf(owner)];
     if (!household) return { ok: false, reason: "家庭不存在" };
     const result = takeHouseholdWheatForExchange(state, household, wheatUnits, content, reason, true);
     if (!result.ok) return result;
     household.voucherUnits = (household.voucherUnits || 0) + voucherUnits;
     householdRows = [{ householdId: household.id, wheatUnits, units: voucherUnits }];
     syncResidentAggregates(state, content);
-  } else if (owner?.startsWith("company:") || owner?.startsWith("shop:")) {
-    const available = owner.startsWith("company:") ? (state.companies?.[owner.slice(8)]?.cashWheatUnits || 0) : (state.shops?.[owner.slice(5)]?.cashWheatUnits || 0);
-    if (available < wheatUnits) return { ok: false, reason: "可用小麦不足" };
-    if (owner.startsWith("company:")) state.companies[owner.slice(8)].cashWheatUnits -= wheatUnits;
-    else state.shops[owner.slice(5)].cashWheatUnits -= wheatUnits;
+  } else if (holdsCashWheat(owner)) {
+    const slot = paymentWheatSlot(state, owner);
+    if (readSlot(slot) < wheatUnits) return { ok: false, reason: "可用小麦不足" };
+    slot.holder[slot.key] -= wheatUnits;
     setVoucherBalance(state, owner, voucherBalance(state, owner) + voucherUnits, content);
   } else {
     return { ok: false, reason: "该账户不能通过银行换券" };
@@ -235,7 +213,7 @@ export function issueVouchersFromWheat(state, owner, wheatUnits, content, reason
 
 export function redeemVouchersForWheat(state, owner, voucherUnits, content, reason = "注销粮券兑回小麦") {
   if (!Number.isSafeInteger(voucherUnits) || voucherUnits <= 0) return { ok: false, reason: "兑换数量必须大于0" };
-  const supportedOwner = owner === "town" || owner === "residents" || owner?.startsWith("household:") || owner?.startsWith("company:") || owner?.startsWith("shop:");
+  const supportedOwner = ["town", "residents", "household"].includes(parseOwner(owner).kind) || holdsCashWheat(owner);
   if (!supportedOwner) return { ok: false, reason: "该账户不能直接兑回小麦" };
   const currency = ensureCurrencyState(state);
   const wheatUnits = wheatUnitsForVoucherUnits(voucherUnits, content, "floor");
@@ -252,8 +230,8 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
     householdRows = taken.rows.map(row => ({ ...row, wheatUnits: wheatUnitsForVoucherUnits(row.units, content, "floor") }));
     for (const row of householdRows) state.households.byId[row.householdId].inventory.wheat += row.wheatUnits;
     syncResidentAggregates(state, content);
-  } else if (owner?.startsWith("household:")) {
-    const household = state.households?.byId?.[owner.slice(10)];
+  } else if (isHouseholdOwner(owner)) {
+    const household = state.households?.byId?.[householdIdOf(owner)];
     if (!household || (household.voucherUnits || 0) < voucherUnits) return { ok: false, reason: "粮券余额不足" };
     household.voucherUnits -= voucherUnits;
     household.inventory.wheat = (household.inventory.wheat || 0) + wheatUnits;
@@ -261,10 +239,10 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
     syncResidentAggregates(state, content);
   } else if (owner === "town") {
     setVoucherBalance(state, owner, voucherBalance(state, owner) - voucherUnits, content);
-  } else if (owner?.startsWith("company:") || owner?.startsWith("shop:")) {
+  } else if (holdsCashWheat(owner)) {
     setVoucherBalance(state, owner, voucherBalance(state, owner) - voucherUnits, content);
-    if (owner.startsWith("company:")) state.companies[owner.slice(8)].cashWheatUnits = (state.companies[owner.slice(8)].cashWheatUnits || 0) + wheatUnits;
-    else state.shops[owner.slice(5)].cashWheatUnits = (state.shops[owner.slice(5)].cashWheatUnits || 0) + wheatUnits;
+    const slot = paymentWheatSlot(state, owner);
+    slot.holder[slot.key] = readSlot(slot) + wheatUnits;
   }
   // 扣券成功后才扣镇库小麦（之前先扣麦，若扣券失败麦会凭空消失）。
   if (owner !== "town") {

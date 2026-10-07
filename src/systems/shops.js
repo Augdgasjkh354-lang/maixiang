@@ -1,4 +1,5 @@
 import { currencyScale, voucherBalance } from "../economy/currency.js";
+import { householdIdOf } from "../economy/accounts.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
@@ -445,7 +446,7 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
   const remainingGoodsCapacity = Math.max(0, shopSalesCapacityUnits(state, shop, content) - soldToday);
   const actual = Math.min(quantity, remainingGoodsCapacity);
   if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * prices.retailVoucherPerUnit * currencyScale(content));
-  const buyerHouseholdId = typeof buyerOwner === "string" && buyerOwner.startsWith("household:") ? buyerOwner.slice(10) : null;
+  const buyerHouseholdId = householdIdOf(buyerOwner);
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
   const maxWheatUnits = buyerHousehold ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30) : undefined;
   const payment = settleMonetaryPayment(state, buyerOwner, `shop:${shopId}`, currentPaymentComposition(state, paymentUnits), content,

@@ -1,4 +1,5 @@
 import { currencyScale } from "../economy/currency.js";
+import { parseOwner } from "../economy/accounts.js";
 import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
 import { addTownCostBasis } from "../economy/business.js";
 import { currentUnitPrice } from "../economy/prices.js";
@@ -158,8 +159,8 @@ export function previewTownMaterialProcurement(state, itemId, wantedUnits, conte
   const wanted = Math.max(0, Math.floor(Number(wantedUnits) || 0));
   const price = currentUnitPrice(state, itemId, content);
   const sellers = sellersForTownMaterial(state, itemId);
-  const residentAvailableUnits = sellers.filter(row => row.id.startsWith("household:")).reduce((sum, row) => sum + row.stockUnits, 0);
-  const companyAvailableUnits = sellers.filter(row => row.id.startsWith("company:")).reduce((sum, row) => sum + row.stockUnits, 0);
+  const residentAvailableUnits = sellers.filter(row => parseOwner(row.id).kind === "household").reduce((sum, row) => sum + row.stockUnits, 0);
+  const companyAvailableUnits = sellers.filter(row => parseOwner(row.id).kind === "company").reduce((sum, row) => sum + row.stockUnits, 0);
   const paidAvailableUnits = residentAvailableUnits + companyAvailableUnits;
   // 批发市场与镇库同属镇里，市场库存内部无偿领用。
   const wholesaleAvailableUnits = wholesaleStockUnits(state, itemId);
@@ -216,7 +217,7 @@ export function procureTownMaterial(state, itemId, wantedUnits, content) {
       const units = allocations.get(seller.id) || 0;
       if (units <= 0) continue;
       const cost = paymentValueForQuantity(units, preview.priceVoucherPerUnit, content);
-      if (seller.id.startsWith("household:")) {
+      if (parseOwner(seller.id).kind === "household") {
         const household = state.households.byId[seller.householdId];
         const payment = settleMonetaryPayment(state, "town", seller.id, currentPaymentComposition(state, cost), content,
           "public_material_purchase", `镇库向${household.name}采购${content.items[itemId]?.name || itemId}`, { requireFull: true });

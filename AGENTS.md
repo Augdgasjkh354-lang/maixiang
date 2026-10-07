@@ -29,7 +29,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 | `src/content/` | 静态定义：物品、建筑、岗位、规则参数。版本号在 `version.js`，存档版本 `SAVE_VERSION` 在 `rules.js` |
 | `src/core/` | 初始状态 `state.js`、所有玩家操作 `commands.js`、状态校验 `validation.js` |
 | `src/systems/` | 日结各系统；入口 `daily.js` 的 `settleOneDay` |
-| `src/economy/` | 货币、支付、库存、价格、账本 |
+| `src/economy/` | 货币、支付、库存、价格、账本。`accounts.js` 统一回答"某账户的粮券/小麦/库存存在哪"，`books.js` 统一当日/本年/累计三段记账 |
 | `src/selectors/` | 只读派生数据；界面数据总入口 `dashboard.js` 的 `selectDashboard` |
 | `src/persistence/` | 存档读写与旧档迁移（`migrations.js`） |
 | `src/ui/` | 界面：`shell.js` 骨架、`app.js` 渲染与事件、`panel-*.js` 各面板、`map*.js` 地图 |
@@ -67,6 +67,8 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 ## 常见坑（都真出过 bug）
 
 **钱与货**
+- 新增经济主体（要收付钱的）：在 `economy/accounts.js` 登记账户名和存放位置即可，不要在货币、支付、库存里再写 `owner.startsWith(...)` 分支。
+- 三段记账一律用 `economy/books.js` 的 `bookAdd` / `bookAddMap`，不要手写 day/year/cumulative 循环。
 - 付钱就要真到账：采购必须真实入库到买方账户。
 - 镇里内部（镇库 ↔ 批发市场 ↔ 镇营建筑）之间只搬货不付钱；自己付钱给自己是 bug 温床，0.2.3 早期就因此出过三个 bug。
 - 多阶段支付：每阶段以上一阶段返回的 `remainingComposition` 为准，不能拿付款前的总额，否则重复支付。

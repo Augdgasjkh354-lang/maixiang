@@ -1,4 +1,5 @@
 import { PRECISION } from "../content/rules.js";
+import { accountInventory, isHouseholdOwner } from "./accounts.js";
 import { makeTransactionId, recordLedger } from "./ledger.js";
 import { allocateIntegerByWeight } from "../core/allocation.js";
 
@@ -52,14 +53,7 @@ function syncResidentInventoryMirror(state, content) {
   }
 }
 
-function accountObject(state, owner) {
-  if (owner === "town") return state.accounts?.town || null;
-  if (owner === "residents") return state.accounts?.residents || null;
-  if (owner?.startsWith("household:")) return state.households?.byId?.[owner.slice(10)]?.inventory || null;
-  if (owner?.startsWith("company:")) return state.companies?.[owner.slice(8)]?.inventory || null;
-  if (owner?.startsWith("shop:")) return state.shops?.[owner.slice(5)]?.inventory || null;
-  return null;
-}
+const accountObject = accountInventory;
 
 export function accountQeqUnits(state, owner, content) {
   if (owner === "residents" && hasHouseholdAccounts(state)) syncResidentInventoryMirror(state, content);
@@ -132,15 +126,12 @@ function setBalance(state, owner, itemId, next, content) {
   }
   const account = accountObject(state, owner);
   account[itemId] = next;
-  if (owner?.startsWith("household:")) syncResidentInventoryMirror(state, content);
+  if (isHouseholdOwner(owner)) syncResidentInventoryMirror(state, content);
 }
 
+// 有库存的账户才能做实物转移（社保基金只有钱、没有库存）。
 function ownerExists(state, owner) {
-  if (owner === "town" || owner === "residents") return Boolean(state.accounts?.[owner]);
-  if (owner?.startsWith("household:")) return Boolean(state.households?.byId?.[owner.slice(10)]);
-  if (owner?.startsWith("company:")) return Boolean(state.companies?.[owner.slice(8)]);
-  if (owner?.startsWith("shop:")) return Boolean(state.shops?.[owner.slice(5)]);
-  return false;
+  return Boolean(accountInventory(state, owner));
 }
 
 function moveTownBookValue(state, from, to, itemId, quantityUnits, townBalanceBefore, content) {

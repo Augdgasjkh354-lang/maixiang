@@ -1,4 +1,5 @@
 import { purchaseItemForResidents } from "./consumer-market.js";
+import { parseOwner } from "../economy/accounts.js";
 import { bookAddAll } from "../economy/books.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
@@ -47,7 +48,7 @@ export function buySaltForResidents(state, content) {
   const price = currentUnitPrice(state, "salt", content);
   const result = purchaseItemForResidents(state, "salt", desiredUnits, price, content, "家庭购买当日所需食盐", { householdNeedsUnits });
   // 盐经综合商店零售（generalStoreOnly），镇库不直售；按商店卖家统计销量（之前只统计镇库，恒为0）。
-  const shopRows = result.sellerRows.filter(row => row.seller?.startsWith("shop:"));
+  const shopRows = result.sellerRows.filter(row => parseOwner(row.seller).kind === "shop");
   const shopSold = shopRows.reduce((sum, row) => sum + row.quantityUnits, 0);
   const shopRevenue = shopRows.reduce((sum, row) => sum + row.paidVoucherUnits, 0);
   if (shopSold > 0) {

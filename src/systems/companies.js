@@ -1,4 +1,5 @@
 import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
+import { householdIdOf } from "../economy/accounts.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { recordFundDividend } from "./social-security.js";
 import { currencyScale, voucherBalance } from "../economy/currency.js";
@@ -711,7 +712,7 @@ export function sellCompanyProduct(state, companyId, buyer, itemId, quantityUnit
   if (units <= 0) return { ok: false, reason: "企业库存不足" };
   const price = Number(unitPrice);
   const costUnits = voucherCost(units, price, content);
-  const buyerHouseholdId = typeof buyer === "string" && buyer.startsWith("household:") ? buyer.slice(10) : null;
+  const buyerHouseholdId = householdIdOf(buyer);
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
   const maxWheatUnits = buyerHousehold
     ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30)

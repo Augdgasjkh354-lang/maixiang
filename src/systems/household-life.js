@@ -1,4 +1,5 @@
 import { bookAdd, ensureBook } from "../economy/books.js";
+import { householdIdOf } from "../economy/accounts.js";
 import { householdFoodQeqUnits, householdList, householdPopulation } from "./households.js";
 
 const PERIOD_FIELDS = [
@@ -38,7 +39,7 @@ function add(household, key, units, content) {
   bookAdd(life, key, units);
 }
 
-function householdIdFromOwner(owner) { return typeof owner === "string" && owner.startsWith("household:") ? owner.slice(10) : null; }
+const householdIdFromOwner = householdIdOf;
 
 const INCOME_TYPES = new Set([
   "wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment",
