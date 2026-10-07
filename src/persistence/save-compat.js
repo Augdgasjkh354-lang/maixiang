@@ -16,6 +16,8 @@ export const RENAMES = Object.freeze([
 ]);
 
 const ENTITY_MAPS = new Set(["households.byId"]);
+// 存档里出现这些键一律丢弃，防止原型污染。
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const FROM_CONTENT = new Set(["plots"]);
 // 校验失败时不允许单独重置的顶层键：它们和整体进度/货币恒等式绑在一起，重置反而会破坏一致性。
 const NEVER_RESET = new Set(["version", "schemaVersion", "year", "day", "accounts", "currency", "households", "cohorts", "buildings", "plots", "rng"]);
@@ -73,6 +75,7 @@ export function mergeOntoBase(base, saved, path = "", report = null) {
   if (!isPlainObject(base) || ENTITY_MAPS.has(path)) return saved;
   const result = { ...base };
   for (const [key, value] of Object.entries(saved)) {
+    if (UNSAFE_KEYS.has(key)) continue;
     const childPath = path ? `${path}.${key}` : key;
     result[key] = key in base ? mergeOntoBase(base[key], value, childPath, report) : value;
   }
@@ -95,22 +98,34 @@ export function sanitizeNumbers(node, report, path = "") {
   }
 }
 
-// 校验不过时，逐个尝试把顶层子系统换回新开局状态；能减少错误的才保留。
+// 校验不过时尽量少动：先逐个把子系统里的单个字段换回默认值，不够再整个子系统换回新开局状态。
+// 只保留能减少错误的替换。
+function tryReplace(holder, key, replacement, validate, errors) {
+  const previous = holder[key];
+  holder[key] = structuredClone(replacement);
+  const next = validate();
+  if (next.length < errors.length) return next;
+  holder[key] = previous;
+  return null;
+}
+
 export function resetFailingSubsystems(state, base, validate, report) {
   let errors = validate(state);
   if (!errors.length) return errors;
   for (const key of Object.keys(base)) {
     if (!errors.length) break;
     if (NEVER_RESET.has(key) || !(key in state)) continue;
-    const previous = state[key];
-    state[key] = structuredClone(base[key]);
-    const next = validate(state);
-    if (next.length < errors.length) {
-      errors = next;
-      report.reset.push(key);
-    } else {
-      state[key] = previous;
+    if (isPlainObject(state[key]) && isPlainObject(base[key])) {
+      for (const child of Object.keys(base[key])) {
+        if (!errors.length) break;
+        if (!(child in state[key])) continue;
+        const next = tryReplace(state[key], child, base[key][child], () => validate(state), errors);
+        if (next) { errors = next; report.reset.push(`${key}.${child}`); }
+      }
     }
+    if (!errors.length) break;
+    const next = tryReplace(state, key, base[key], () => validate(state), errors);
+    if (next) { errors = next; report.reset.push(key); }
   }
   return errors;
 }
