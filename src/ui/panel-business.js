@@ -1,4 +1,4 @@
-import { escapeHtml, number, moneyUnit, moneyMixHint } from "./format.js";
+import { escapeHtml, number, moneyUnit } from "./format.js";
 
 // 地块标签人性化（0.1.11 _2() 补回）："空地 3" → "3号地"
 function humanizePlotLabel(view, building) {
@@ -56,6 +56,6 @@ export function renderBusiness(view) {
       <div class="row"><span class="label">本年收入 / 利润</span><strong class="value">${number(year.revenue)} / ${number(year.profit, 1)}${unit}</strong></div>
       <div class="row"><span class="label">累计利润 - 建设工资</span><strong class="value">${number(recovery, 1)}${unit}</strong></div>
       <div class="row"><span class="label">面粉 / 面包库存成本</span><strong class="value">${number(jin(business.inventoryCostWheatUnits.town.flour, scale))} / ${number(jin(business.inventoryCostWheatUnits.town.bread, scale))}${unit}</strong></div>
-      <div class="subtle">经营收入、成本与利润一律按小麦等值核算，支付媒介不产生利润。${moneyMixHint(view)}。</div>
+      
     </div></details>`;
 }

@@ -140,7 +140,7 @@ export function renderMap(view, nav) {
 
 // 舆图小地图：可折叠，交给 app.js 挂载到地图区域。
 export function renderMiniMap() {
-  return `<details class="town-minimap" open><summary>舆图 <span>⌃</span></summary>${miniMap()}</details>`;
+  return `<details class="town-minimap"><summary>舆图 <span>⌃</span></summary>${miniMap()}</details>`;
 }
 
 export function mapSignature(view, nav) {

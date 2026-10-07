@@ -25,8 +25,8 @@ function moodNote(mood) {
 }
 
 export function econMiniSummary() {
-  // 失业率已在宏观面板摘要常显，这里只做走势入口，避免两处重复。
-  return "经济走势";
+  // 并入宏观面板后作为小节标题；失业率已在宏观摘要常显。
+  return "劳动力与走势";
 }
 
 export function renderEconMini(view) {
@@ -38,14 +38,12 @@ export function renderEconMini(view) {
   const poach = economy.poachYear > 0 && economy.recentPoach?.[0]
     ? `<div class="econ-note">今年跳槽${number(economy.poachYear)}人（最近：${escapeHtml(economy.recentPoach[0].from || "")}→${escapeHtml(economy.recentPoach[0].to || "")}）</div>`
     : "";
-  return `<div class="econ-row"><span>失业率</span><strong>${number(market.unemploymentRate * 100, 1)}%</strong></div>
-    <div class="econ-note">${moodNote(market.mood)} · 待业${number(market.idle)}人</div>
+  // 失业率、小麦价、镇库小麦已在宏观部分列出，这里只留走势与宏观里没有的项。
+  return `<div class="econ-note">${moodNote(market.mood)} · 待业${number(market.idle)}人</div>
     ${sparkline(history, "unemploymentPercent", "失业率%", 1)}
     <div class="econ-row"><span>公职 / 店员均薪</span><strong>${number(market.referenceWage, 1)} / ${last.shopWage == null ? "—" : number(last.shopWage, 1)}</strong></div>
     ${sparkline(history, "shopWage", "店员均薪", 1)}
-    <div class="econ-row"><span>小麦批发价</span><strong>${last.wheatPrice == null ? "—" : number(last.wheatPrice, 2)}</strong></div>
     ${sparkline(history, "wheatPrice", "小麦价", 2)}
-    <div class="econ-row"><span>镇库小麦</span><strong>${last.townWheatJin == null ? "—" : `${number(last.townWheatJin)}斤`}</strong></div>
     ${sparkline(history, "townWheatJin", "镇库小麦", 0)}
     <div class="econ-row"><span>居民口粮</span><strong>${last.residentFoodDays == null ? "—" : `${number(last.residentFoodDays, 0)}天`}</strong></div>
     ${poach}`;

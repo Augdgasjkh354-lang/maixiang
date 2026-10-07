@@ -26,13 +26,11 @@ export const SHELL_HTML = `<main class="shell">
       <div class="map-world" id="mapWorld"></div>
       ${renderMiniMap()}
       <div class="map-topline">
-        <span class="season-ribbon" id="fieldSign"><span class="season-dot"></span><b>春 · 麦苗返青</b></span>
         <span class="map-ribbon">秋收预估 <b id="forecastMap">1,600,000斤</b><i></i> 口粮可吃 <b id="daysMap">365天</b></span>
       </div>
-      <div class="map-hint" id="mapHint">点田地、粮仓或作坊查看</div>
+      <div class="map-hint" id="mapHint" hidden></div>
       <div class="map-side">
-        <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div></details>
-        <details class="econ-mini" id="econMini"><summary id="econSummary">经济走势</summary><div class="econ-body" id="econBody"></div></details>
+        <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div><div class="econ-title" id="econSummary">劳动力与走势</div><div class="econ-body" id="econBody"></div></details>
       </div>
       <div class="map-zoom" role="group" aria-label="地图缩放">
         <button data-map-zoom="1" aria-label="放大地图">＋</button><button data-map-reset aria-label="复位地图">${uiIcon("reset")}</button><button data-map-zoom="-1" aria-label="缩小地图">−</button>

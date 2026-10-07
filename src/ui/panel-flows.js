@@ -1,4 +1,4 @@
-import { number, moneyMixHint } from "./format.js";
+import { number } from "./format.js";
 
 function items(map, names, units, scale) {
   return Object.entries(map || {}).filter(([, value]) => value > 0)
@@ -27,6 +27,6 @@ export function renderAnnualFlows(view) {
       <div class="row"><span class="label">失业金</span><strong class="value">${number(town.unemploymentWheatUnits / scale)}小麦等值</strong></div>
       <div class="row"><span class="label">建设投入 / 拆除返还</span><strong class="value">${items(town.constructionMaterials, view.itemNames, view.itemUnits, scale)} / ${items(town.constructionMaterialsReturned, view.itemNames, view.itemUnits, scale)}</strong></div>
       <div class="row"><span class="label">民营人工折算</span><strong class="value">${number((view.privateEconomy?.year?.internalLaborCostWheatUnits || 0) / scale)}小麦等值</strong></div>
-          <div class="subtle">货币收支按小麦等值汇总，实际小麦与粮券支付可在账目中逐笔查看。${moneyMixHint(view)}。</div>
+          
     </div></section>`;
 }

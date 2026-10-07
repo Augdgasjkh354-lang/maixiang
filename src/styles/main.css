@@ -513,3 +513,66 @@ button.wide { width: 100%; }
   .business-form-row > button { width: 100%; }
   .business-inline-input { max-width: 100%; grid-template-columns: minmax(82px, 1fr) auto auto; }
 }
+
+/* ===== 0.2.3 UI 精修：减少边框与重复标题，统一层级与留白 ===== */
+/* 面板标题：原小字 kicker 升为真正标题，正文里不再重复一遍 */
+.panel-heading { min-height: 50px; padding: 4px 10px 6px 18px; }
+.panel-kicker { color: var(--deep-green); font: 750 18px/1.3 "Noto Serif SC", "Songti SC", serif; letter-spacing: .02em; }
+.panel-close { width: 38px; height: 38px; background: #f3efe3; }
+.panel-close:hover { background: #ebe5d4; }
+.panel { padding: 2px 18px max(18px, env(safe-area-inset-bottom)); }
+.panel h2 { margin: 4px 0 10px; font-size: 16px; }
+.panel h3 { margin: 16px 0 8px; color: #8a7c5c; font: 700 12px/1.3 "Noto Sans SC", system-ui, sans-serif; letter-spacing: .08em; }
+.panel-section + .panel-section { margin-top: 22px; padding-top: 18px; border-top-color: #efe9db; }
+.panel-detail > .detail-body > h2:first-child,
+.panel-detail > .detail-body > .panel-section:first-child > h2:first-child { display: none; }
+.panel-detail > .detail-body > .panel-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
+/* 卡片：更轻的边、更舒展的行距 */
+.cardlet { padding: 12px 13px; border-color: #ece5d4; border-radius: 14px; background: #fffef9; box-shadow: 0 1px 0 #f1ebdc; }
+.cardlet + .cardlet { margin-top: 9px; }
+.row { min-height: 22px; }
+.row + .row { margin-top: 7px; }
+.label { font-size: 13px; }
+.value { font-size: 14px; font-variant-numeric: tabular-nums; }
+.subtle { margin-top: 7px; color: #8b846f; font-size: 11.5px; line-height: 1.5; }
+
+/* 折叠块：自定义箭头替代浏览器三角，像列表项而不是输入框 */
+.detail-block { margin-top: 9px; border-color: #ece5d4; border-radius: 13px; background: #fffef9; }
+.detail-block > summary { min-height: 46px; padding: 0 14px; list-style: none; justify-content: space-between; color: #4d4535; font-size: 14px; font-weight: 650; }
+.detail-block > summary::-webkit-details-marker { display: none; }
+.detail-block > summary::after { content: ""; width: 7px; height: 7px; margin-left: 10px; flex: none; border-right: 1.6px solid #a69a7c; border-bottom: 1.6px solid #a69a7c; transform: rotate(-45deg); transition: transform .18s ease; }
+.detail-block[open] > summary::after { transform: rotate(45deg); }
+.detail-block > summary:hover { background: #faf6ea; }
+.detail-block[open] > summary { border-bottom-color: #f0eadc; }
+.detail-body { padding: 12px 14px 14px; }
+.detail-body .cardlet { box-shadow: none; }
+
+/* 家庭分类：小标签换行排列 */
+.mini-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.mini-stat { display: inline-flex; align-items: baseline; gap: 4px; padding: 5px 9px; border-radius: 9px; color: #6b6450; background: #f4f0e4; font-size: 12px; }
+.mini-stat b { color: var(--deep-green); font-weight: 750; }
+.mini-stat i { margin-left: 2px; color: #9a917a; font-style: normal; font-size: 11px; }
+
+/* 宏观面板内的劳动力小节 */
+.econ-title { padding: 8px 10px 0; border-top: 1px solid #f5e9c733; color: #d9cfa9; font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.macro-panel:not([open]) .econ-title { display: none; }
+.econ-mini { display: none; }
+
+/* 地图浮层：更小更轻 */
+.map-ribbon { min-height: 32px; border-radius: 10px; }
+.map-zoom { gap: 6px; }
+.map-zoom button { width: 40px; height: 40px; border-radius: 12px; }
+.town-minimap:not([open]) { width: auto; }
+.town-minimap summary { padding: 7px 11px; }
+.event-float { border-radius: 12px; }
+
+@media (min-width: 760px) {
+  .map-side { top: 10px; }
+  .map-topline { right: auto; }
+  .panel-surface { width: min(420px, 38vw); }
+}
+.policy-commerce { margin: 9px 0 3px; }
+.enterprise-section { margin-bottom: 0; }
+.enterprise-section + .enterprise-section, .enterprise-section + .panel-section { margin-top: 20px; }
+.enterprise-section + .panel-section { padding-top: 0; border-top: 0; }

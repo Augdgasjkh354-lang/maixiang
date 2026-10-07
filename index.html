@@ -525,6 +525,69 @@ button.wide { width: 100%; }
   .business-form-row > button { width: 100%; }
   .business-inline-input { max-width: 100%; grid-template-columns: minmax(82px, 1fr) auto auto; }
 }
+
+/* ===== 0.2.3 UI 精修：减少边框与重复标题，统一层级与留白 ===== */
+/* 面板标题：原小字 kicker 升为真正标题，正文里不再重复一遍 */
+.panel-heading { min-height: 50px; padding: 4px 10px 6px 18px; }
+.panel-kicker { color: var(--deep-green); font: 750 18px/1.3 "Noto Serif SC", "Songti SC", serif; letter-spacing: .02em; }
+.panel-close { width: 38px; height: 38px; background: #f3efe3; }
+.panel-close:hover { background: #ebe5d4; }
+.panel { padding: 2px 18px max(18px, env(safe-area-inset-bottom)); }
+.panel h2 { margin: 4px 0 10px; font-size: 16px; }
+.panel h3 { margin: 16px 0 8px; color: #8a7c5c; font: 700 12px/1.3 "Noto Sans SC", system-ui, sans-serif; letter-spacing: .08em; }
+.panel-section + .panel-section { margin-top: 22px; padding-top: 18px; border-top-color: #efe9db; }
+.panel-detail > .detail-body > h2:first-child,
+.panel-detail > .detail-body > .panel-section:first-child > h2:first-child { display: none; }
+.panel-detail > .detail-body > .panel-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
+/* 卡片：更轻的边、更舒展的行距 */
+.cardlet { padding: 12px 13px; border-color: #ece5d4; border-radius: 14px; background: #fffef9; box-shadow: 0 1px 0 #f1ebdc; }
+.cardlet + .cardlet { margin-top: 9px; }
+.row { min-height: 22px; }
+.row + .row { margin-top: 7px; }
+.label { font-size: 13px; }
+.value { font-size: 14px; font-variant-numeric: tabular-nums; }
+.subtle { margin-top: 7px; color: #8b846f; font-size: 11.5px; line-height: 1.5; }
+
+/* 折叠块：自定义箭头替代浏览器三角，像列表项而不是输入框 */
+.detail-block { margin-top: 9px; border-color: #ece5d4; border-radius: 13px; background: #fffef9; }
+.detail-block > summary { min-height: 46px; padding: 0 14px; list-style: none; justify-content: space-between; color: #4d4535; font-size: 14px; font-weight: 650; }
+.detail-block > summary::-webkit-details-marker { display: none; }
+.detail-block > summary::after { content: ""; width: 7px; height: 7px; margin-left: 10px; flex: none; border-right: 1.6px solid #a69a7c; border-bottom: 1.6px solid #a69a7c; transform: rotate(-45deg); transition: transform .18s ease; }
+.detail-block[open] > summary::after { transform: rotate(45deg); }
+.detail-block > summary:hover { background: #faf6ea; }
+.detail-block[open] > summary { border-bottom-color: #f0eadc; }
+.detail-body { padding: 12px 14px 14px; }
+.detail-body .cardlet { box-shadow: none; }
+
+/* 家庭分类：小标签换行排列 */
+.mini-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.mini-stat { display: inline-flex; align-items: baseline; gap: 4px; padding: 5px 9px; border-radius: 9px; color: #6b6450; background: #f4f0e4; font-size: 12px; }
+.mini-stat b { color: var(--deep-green); font-weight: 750; }
+.mini-stat i { margin-left: 2px; color: #9a917a; font-style: normal; font-size: 11px; }
+
+/* 宏观面板内的劳动力小节 */
+.econ-title { padding: 8px 10px 0; border-top: 1px solid #f5e9c733; color: #d9cfa9; font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.macro-panel:not([open]) .econ-title { display: none; }
+.econ-mini { display: none; }
+
+/* 地图浮层：更小更轻 */
+.map-ribbon { min-height: 32px; border-radius: 10px; }
+.map-zoom { gap: 6px; }
+.map-zoom button { width: 40px; height: 40px; border-radius: 12px; }
+.town-minimap:not([open]) { width: auto; }
+.town-minimap summary { padding: 7px 11px; }
+.event-float { border-radius: 12px; }
+
+@media (min-width: 760px) {
+  .map-side { top: 10px; }
+  .map-topline { right: auto; }
+  .panel-surface { width: min(420px, 38vw); }
+}
+.policy-commerce { margin: 9px 0 3px; }
+.enterprise-section { margin-bottom: 0; }
+.enterprise-section + .enterprise-section, .enterprise-section + .panel-section { margin-top: 20px; }
+.enterprise-section + .panel-section { padding-top: 0; border-top: 0; }
   </style>
 </head>
 <body>
@@ -1851,7 +1914,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod12 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-b4e1bb1";
+       const BUILD_ID = "0203-f5c18f7";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -20544,7 +20607,7 @@ function renderPlot(plot, preview) {
 
 // 舆图小地图：可折叠，交给 app.js 挂载到地图区域。
        function renderMiniMap() {
-  return `<details class="town-minimap" open><summary>舆图 <span>⌃</span></summary>${miniMap()}</details>`;
+  return `<details class="town-minimap"><summary>舆图 <span>⌃</span></summary>${miniMap()}</details>`;
 }
 
        function mapSignature(view, nav) {
@@ -20629,13 +20692,11 @@ const SHELL_HTML = `<main class="shell">
       <div class="map-world" id="mapWorld"></div>
       ${renderMiniMap()}
       <div class="map-topline">
-        <span class="season-ribbon" id="fieldSign"><span class="season-dot"></span><b>春 · 麦苗返青</b></span>
         <span class="map-ribbon">秋收预估 <b id="forecastMap">1,600,000斤</b><i></i> 口粮可吃 <b id="daysMap">365天</b></span>
       </div>
-      <div class="map-hint" id="mapHint">点田地、粮仓或作坊查看</div>
+      <div class="map-hint" id="mapHint" hidden></div>
       <div class="map-side">
-        <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div></details>
-        <details class="econ-mini" id="econMini"><summary id="econSummary">经济走势</summary><div class="econ-body" id="econBody"></div></details>
+        <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div><div class="econ-title" id="econSummary">劳动力与走势</div><div class="econ-body" id="econBody"></div></details>
       </div>
       <div class="map-zoom" role="group" aria-label="地图缩放">
         <button data-map-zoom="1" aria-label="放大地图">＋</button><button data-map-reset aria-label="复位地图">${uiIcon("reset")}</button><button data-map-zoom="-1" aria-label="缩小地图">−</button>
@@ -21638,7 +21699,7 @@ function buildCard(option, selectedBuild, wageRates, unit) {
     : "";
   const existing = view.buildings.map(building => `<button class="secondary" data-open-building="${escapeHtml(building.id)}">${escapeHtml(building.name)} · ${number(building.level || 1)}级</button>`).join("");
   const projectList = (view.projects || []).length
-    ? `<div class="cardlet"><div class="setting-title">在建工程 · ${number(view.projects.length)}处</div><div class="subtle">可同时推进多个工程；每个工程各自投入建筑工，工人不足的工程原地等待。</div>${view.projects.map(project => projectCard(project, view, unit)).join("")}</div>`
+    ? `<div class="cardlet"><div class="setting-title">在建工程 · ${number(view.projects.length)}处</div>${view.projects.map(project => projectCard(project, view, unit)).join("")}</div>`
     : "";
   const activeCategory = BUILD_CATEGORIES.find(category => category.id === activeBuildCategory) || BUILD_CATEGORIES[0];
   const allCategoryTypes = new Set(BUILD_CATEGORIES.flatMap(category => category.types));
@@ -21647,8 +21708,7 @@ function buildCard(option, selectedBuild, wageRates, unit) {
   const tabs = `<div class="build-tabs" role="tablist" aria-label="建筑分类">${BUILD_CATEGORIES.map(category =>
     `<button class="build-tab${category.id === activeCategory.id ? " selected" : ""}" role="tab" aria-selected="${category.id === activeCategory.id}" data-build-category="${category.id}">${category.name}</button>`
   ).join("")}</div>`;
-  return `<h2>建设</h2>
-    ${existing ? `<div class="cardlet"><div class="setting-title">已有建筑</div><div class="site-actions">${existing}</div></div>` : ""}
+  return `    ${existing ? `<div class="cardlet"><div class="setting-title">已有建筑</div><div class="site-actions">${existing}</div></div>` : ""}
     ${projectList}
     ${previewCard}
     ${tabs}
@@ -21761,7 +21821,7 @@ function wealthCardlet(view) {
   const history = (view.annualReports || []).filter(r => r.wealth).slice(-5);
   if (!now && !history.length) return "";
   const past = history.map(r => `<div class="row"><span class="label">第${number(r.year)}年 穷10% / 中位 / 富10% 人均家底</span><strong class="value">${number(r.wealth.poorWealthPerCapita, 0)} / ${number(r.wealth.medianWealthPerCapita, 0)} / ${number(r.wealth.richWealthPerCapita, 0)}</strong></div>`).join("");
-  return `<div class="cardlet" style="margin-top:10px"><div class="setting-title">贫富分布</div>${wealthRows(now, "今年")}<p class="subtle">家底 = 粮券 + 存粮存货按批发价折粮券；收入含秋收分粮。按人口排，"穷10%"是最穷的一成人。</p>${past ? `<details class="detail-block" data-detail-key="wealth-history"><summary>历年对比</summary><div class="detail-body">${past}</div></details>` : ""}</div>`;
+  return `<div class="cardlet" style="margin-top:10px"><div class="setting-title">贫富分布</div>${wealthRows(now, "今年")}${past ? `<details class="detail-block" data-detail-key="wealth-history"><summary>历年对比</summary><div class="detail-body">${past}</div></details>` : ""}</div>`;
 }
 
        function renderPeople(view) {
@@ -21780,7 +21840,7 @@ function wealthCardlet(view) {
       <div class="age-line"><span>劳动年龄</span><div class="meter"><span style="width:${p.workers / sum * 100}%;background:linear-gradient(90deg,#557d50,#73975b)"></span></div><strong>${number(p.workers)}人</strong></div>
       <div class="age-line"><span>老人</span><div class="meter"><span style="width:${p.elders / sum * 100}%;background:linear-gradient(90deg,#ad8d51,#d0b66b)"></span></div><strong>${number(p.elders)}人</strong></div>
     </div>
-    ${market ? `<div class="cardlet" style="margin-top:10px"><div class="row"><span class="label">失业率</span><strong class="value">${number(market.unemploymentRate * 100, 1)}% · ${laborMoodText(market.mood)}</strong></div><div class="row"><span class="label">待业 / 劳动年龄</span><strong class="value">${number(market.idle)} / ${number(market.workers)}人</strong></div><div class="row"><span class="label">公职平均日薪 / 商店目标日薪</span><strong class="value">${number(market.referenceWage, 1)} / ${number(market.targetShopWage, 1)}</strong></div><p class="subtle">失业率高于${highPct}%时商店老板压低工资，低于${lowPct}%时愿意多给；参照你定的公职岗位工资。</p></div>` : ""}
+    ${market ? `<div class="cardlet" style="margin-top:10px"><div class="row"><span class="label">失业率</span><strong class="value">${number(market.unemploymentRate * 100, 1)}% · ${laborMoodText(market.mood)}</strong></div><div class="row"><span class="label">待业 / 劳动年龄</span><strong class="value">${number(market.idle)} / ${number(market.workers)}人</strong></div><div class="row"><span class="label">公职平均日薪 / 商店目标日薪</span><strong class="value">${number(market.referenceWage, 1)} / ${number(market.targetShopWage, 1)}</strong></div><p class="subtle">失业率高于${highPct}%商店压薪，低于${lowPct}%加薪。</p></div>` : ""}
     <div class="cardlet" style="margin-top:10px"><div class="row"><span class="label">人口 / 住房</span><strong class="value">${number(p.total)} / ${number(view.housingCapacity)}人</strong></div><div class="meter"><span style="width:${housing}%"></span></div><div class="row"><span class="label">住房缺口</span><strong class="value">${number(view.housing.shortage)}人</strong></div><div class="row"><span class="label">食盐保障</span><strong class="value">${number(view.salt.historyCoverage * 100, 1)}%</strong></div><div class="row"><span class="label">舒心值</span><strong class="value">${number(view.satisfaction)} / 100</strong></div></div>
     <details class="detail-block" data-detail-key="population-history"><summary>上年人口变化</summary><div class="detail-body"><div class="row"><span class="label">出生 / 死亡</span><strong class="value">${number(last.births)} / ${number(last.deaths)}人</strong></div><div class="row"><span class="label">新结夫妇</span><strong class="value">${number(last.marriages)}对</strong></div>${labor ? `<div class="row"><span class="label">年初 / 年末劳动力</span><strong class="value">${number(labor.openingWorkers)} / ${number(labor.closingWorkers)}人</strong></div><div class="row"><span class="label">成年 / 退休</span><strong class="value">${number(labor.adults)} / ${number(labor.retirees)}人</strong></div>` : `<div class="subtle">完成本年度后显示劳动力变化。</div>`}</div></details>
     ${wealthCardlet(view)}`;
@@ -21796,7 +21856,7 @@ const { number, escapeHtml } = __mxmod81;
 function renderResidents(view) {
   const living = view.households?.living?.counts || { 困难: 0, 温饱: 0, 富裕: 0 };
   const issues = view.households?.issueCounts || {};
-  const categories = (view.households?.categories || []).map(row => `<span class="mini-stat">${escapeHtml(row.name)} <b>${number(row.households)}户</b>${row.satisfaction == null ? "" : ` · ${number(row.satisfaction,1)}`}</span>`).join("");
+  const categories = (view.households?.categories || []).map(row => `<span class="mini-stat">${escapeHtml(row.name.replace(/家庭$/, ""))} <b>${number(row.households)}户</b>${row.satisfaction == null ? "" : `<i>舒心${number(row.satisfaction,1)}</i>`}</span>`).join("");
   const urgent = (view.households?.details || []).filter(row => row.issues?.length).sort((a,b)=>a.satisfaction-b.satisfaction).slice(0,8);
   const householdCards = urgent.map(row => `<div class="cardlet"><div class="row"><span class="label">${escapeHtml(row.name)} · ${number(row.people)}人</span><strong class="value">舒心 ${number(row.satisfaction,1)}</strong></div><div class="subtle">${row.issues.map(escapeHtml).join(" · ")}</div><div class="row"><span class="label">口粮 / 粮券</span><strong class="value">${number(row.foodDays,1)}日 / ${number(row.voucher,1)}券</strong></div><details class="detail-block" data-detail-key="family-${escapeHtml(row.id)}"><summary>近期收支</summary><div class="detail-body"><div class="row"><span class="label">实际到账 / 生活支出</span><strong class="value">${number(row.recent.incomeVoucher,1)} / ${number(row.recent.lifeExpenseVoucher,1)}小麦等值</strong></div><div class="row"><span class="label">实物收入 / 吃掉口粮</span><strong class="value">${number(row.recent.inKindIncomeJin,1)} / ${number(row.recent.foodConsumedJin,1)}斤</strong></div><div class="row"><span class="label">应付工资 / 实发</span><strong class="value">${number(row.recent.wageDueVoucher,1)} / ${number(row.recent.wagePaidVoucher,1)}小麦等值</strong></div><div class="row"><span class="label">投资</span><strong class="value">${number(row.recent.investmentVoucher,1)}小麦等值</strong></div><div class="row"><span class="label">年收入预期</span><strong class="value">${number(row.incomeExpectationJin)}斤/年</strong></div>${row.depositPropensity == null ? "" : `<div class="row"><span class="label">存款 / 股票倾向</span><strong class="value">${number(row.depositPropensity * 100, 0)}% / ${number(row.stockPropensity * 100, 0)}%</strong></div>`}</div></details></div>`).join("");
   return `<section class="panel-section"><h2>家庭生活</h2>
@@ -21804,8 +21864,8 @@ function renderResidents(view) {
       <div class="row"><span class="label">缺粮 / 缺盐 / 住房不足 / 欠薪</span><strong class="value">${number(issues.food||0)} / ${number(issues.salt||0)} / ${number(issues.housing||0)} / ${number(issues.wage||0)}户</strong></div>
       <div class="row"><span class="label">生活状况</span><strong class="value">困难${number(living.困难)} · 温饱${number(living.温饱)} · 富裕${number(living.富裕)}</strong></div>
       <div class="row"><span class="label">今日剩余换券额度</span><strong class="value">${number(view.households?.exchangeRemainingJin || 0, 2)}斤</strong></div>
-      <div class="mini-stats">${categories}</div><div class="subtle">职业相关家庭允许重叠；这里按户观察，不把分类人数相加当作全镇人口。</div>
-    </div>${householdCards || '<div class="cardlet"><div class="subtle">当前没有突出的家庭生活问题。</div></div>'}</section>
+      <div class="mini-stats">${categories}</div>
+    </div>${householdCards ? `<details class="detail-block" data-detail-key="urgent-households"><summary>需关注家庭 · ${number(urgent.length)}户</summary><div class="detail-body">${householdCards}</div></details>` : ""}</section>
     <section class="panel-section">${renderJobs(view)}</section>
     <section class="panel-section">${renderPeople(view)}</section>`;
 }
@@ -21981,7 +22041,7 @@ return { renderOutsideTown };
 
 // ===== ui/panel-business.js =====
 const __mxmod99 = (() => {
-const { escapeHtml, number, moneyUnit, moneyMixHint } = __mxmod81;
+const { escapeHtml, number, moneyUnit } = __mxmod81;
 function humanizePlotLabel(view, building) {
   const label = view.plots?.find(p => p.id === building.plotId)?.label;
   if (!label) return building.id;
@@ -22037,7 +22097,7 @@ function accounts(group, view) {
       <div class="row"><span class="label">本年收入 / 利润</span><strong class="value">${number(year.revenue)} / ${number(year.profit, 1)}${unit}</strong></div>
       <div class="row"><span class="label">累计利润 - 建设工资</span><strong class="value">${number(recovery, 1)}${unit}</strong></div>
       <div class="row"><span class="label">面粉 / 面包库存成本</span><strong class="value">${number(jin(business.inventoryCostWheatUnits.town.flour, scale))} / ${number(jin(business.inventoryCostWheatUnits.town.bread, scale))}${unit}</strong></div>
-      <div class="subtle">经营收入、成本与利润一律按小麦等值核算，支付媒介不产生利润。${moneyMixHint(view)}。</div>
+      
     </div></details>`;
 }
 return { renderBusiness };
@@ -22165,7 +22225,7 @@ return { renderIndustryAccounts };
 
 // ===== ui/panel-flows.js =====
 const __mxmod102 = (() => {
-const { number, moneyMixHint } = __mxmod81;
+const { number } = __mxmod81;
 function items(map, names, units, scale) {
   return Object.entries(map || {}).filter(([, value]) => value > 0)
     .map(([id, value]) => `${names[id] || id} ${number(value / scale)}${units[id] || "单位"}`).join(" · ") || "无";
@@ -22193,7 +22253,7 @@ function items(map, names, units, scale) {
       <div class="row"><span class="label">失业金</span><strong class="value">${number(town.unemploymentWheatUnits / scale)}小麦等值</strong></div>
       <div class="row"><span class="label">建设投入 / 拆除返还</span><strong class="value">${items(town.constructionMaterials, view.itemNames, view.itemUnits, scale)} / ${items(town.constructionMaterialsReturned, view.itemNames, view.itemUnits, scale)}</strong></div>
       <div class="row"><span class="label">民营人工折算</span><strong class="value">${number((view.privateEconomy?.year?.internalLaborCostWheatUnits || 0) / scale)}小麦等值</strong></div>
-          <div class="subtle">货币收支按小麦等值汇总，实际小麦与粮券支付可在账目中逐笔查看。${moneyMixHint(view)}。</div>
+          
     </div></section>`;
 }
 return { renderAnnualFlows };
@@ -22201,7 +22261,7 @@ return { renderAnnualFlows };
 
 // ===== ui/panel-enterprises.js =====
 const __mxmod103 = (() => {
-const { escapeHtml, number, moneyUnit, moneyMixHint } = __mxmod81;
+const { escapeHtml, number, moneyUnit } = __mxmod81;
 function draftValue(view, key, fallback) {
   return escapeHtml(view.numericDrafts?.[key]?.value ?? String(fallback ?? ""));
 }
@@ -22226,12 +22286,12 @@ function itemRowsText(rows, empty = "暂无") {
 function renderPrices(view) {
   const unit = moneyUnit(view);
   const prices = view.market.intermediatePricesVoucherPerUnit || {};
-  return `<section class="enterprise-section"><h3>价格</h3><div class="cardlet">
+  return `<section class="enterprise-section"><h2>价格</h2><div class="cardlet">
     <div class="row"><span class="label">小麦 / 食盐</span><strong class="value">${number(view.market.pricesVoucherPerUnit?.wheat ?? 1, 3)} / ${number(view.market.pricesVoucherPerUnit?.salt ?? 10, 3)}${escapeHtml(unit)}/斤</strong></div>
     <div class="row"><span class="label">面粉</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:flour", label: "面粉价格", value: prices.flour ?? 1.8, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="flour">设置</button></div></div>
     <div class="row"><span class="label">面包</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:bread", label: "面包价格", value: view.market.pricesVoucherPerUnit?.bread ?? 2, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="bread">设置</button></div></div>
     <div class="row"><span class="label">木材</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:wood", label: "木材价格", value: prices.wood ?? 15, positive: true })}<b>${escapeHtml(unit)}/单位</b><button class="secondary" data-intermediate-price="wood">设置</button></div></div>
-    <div class="subtle">以上均为批发价；综合商店零售价为批发价×1.2。</div>
+    <div class="subtle">均为批发价，商店零售另加价。</div>
   </div></section>`;
 }
 
@@ -22252,7 +22312,7 @@ function renderCompanyCandidate(view, building) {
     ${preview ? `<div class="operation-preview"><strong>成立确认</strong>
       <div class="row"><span class="label">公司 / 划入等级</span><strong class="value">${escapeHtml(preview.name)} · ${number(preview.levels)}级</strong></div>
       <div class="row"><span class="label">镇库投入</span><strong class="value">${number(preview.capital, 2)}${escapeHtml(unit)} · ${number(preview.material, 2)}斤主要原料</strong></div>
-      <div class="subtle">成立后由镇库100%持有，但不会生成股票，也不要求先建交易所。</div>
+      <div class="subtle">镇库全资持有，无需交易所。</div>
       <div class="business-sticky-actions"><button class="secondary" data-company-preview-cancel>取消</button><button class="primary" data-company-create="${escapeHtml(building.id)}">确认成立</button></div>
     </div>` : ""}
   </div>`;
@@ -22385,12 +22445,12 @@ function renderCompany(view, company) {
   const exchangeState = view.stockExchange?.available
     ? (view.stockExchange.physical ? "交易所已建成" : "旧档兼容交易所入口")
     : "尚未建成交易所";
-  return `<div class="subtle">${escapeHtml(moneyMixHint(view))}；公司经营收入、成本与利润按小麦等值核算，支付媒介不产生利润。</div>${renderPrices(view)}
+  return `${renderPrices(view)}
     <section class="enterprise-section"><h2>独立公司</h2>
       ${companies.length ? companies.map(company => renderCompany(view, company)).join("") : `<div class="cardlet subtle">暂无独立公司。</div>`}
       <details class="detail-block" data-detail-key="company-formation"><summary>从镇营等级成立公司${candidates.length ? ` · ${number(candidates.length)}处可选` : ""}</summary><div class="detail-body">${formation}</div></details>
     </section>
-    <section class="enterprise-section"><h3>交易所</h3><div class="cardlet"><div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div><div class="row"><span class="label">新上市条件</span><strong class="value">${view.stockExchange?.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div><div class="subtle">交易所只负责挂牌、认购、回购与股权信息；公司成立和经营不依赖交易所。</div></div></section>`;
+    <section class="enterprise-section"><h2>交易所</h2><div class="cardlet"><div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div><div class="row"><span class="label">新上市条件</span><strong class="value">${view.stockExchange?.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div></div></section>`;
 }
 return { renderEnterpriseFinance };
 })();
@@ -22452,8 +22512,8 @@ function moodNote(mood) {
 }
 
        function econMiniSummary() {
-  // 失业率已在宏观面板摘要常显，这里只做走势入口，避免两处重复。
-  return "经济走势";
+  // 并入宏观面板后作为小节标题；失业率已在宏观摘要常显。
+  return "劳动力与走势";
 }
 
        function renderEconMini(view) {
@@ -22465,14 +22525,12 @@ function moodNote(mood) {
   const poach = economy.poachYear > 0 && economy.recentPoach?.[0]
     ? `<div class="econ-note">今年跳槽${number(economy.poachYear)}人（最近：${escapeHtml(economy.recentPoach[0].from || "")}→${escapeHtml(economy.recentPoach[0].to || "")}）</div>`
     : "";
-  return `<div class="econ-row"><span>失业率</span><strong>${number(market.unemploymentRate * 100, 1)}%</strong></div>
-    <div class="econ-note">${moodNote(market.mood)} · 待业${number(market.idle)}人</div>
+  // 失业率、小麦价、镇库小麦已在宏观部分列出，这里只留走势与宏观里没有的项。
+  return `<div class="econ-note">${moodNote(market.mood)} · 待业${number(market.idle)}人</div>
     ${sparkline(history, "unemploymentPercent", "失业率%", 1)}
     <div class="econ-row"><span>公职 / 店员均薪</span><strong>${number(market.referenceWage, 1)} / ${last.shopWage == null ? "—" : number(last.shopWage, 1)}</strong></div>
     ${sparkline(history, "shopWage", "店员均薪", 1)}
-    <div class="econ-row"><span>小麦批发价</span><strong>${last.wheatPrice == null ? "—" : number(last.wheatPrice, 2)}</strong></div>
     ${sparkline(history, "wheatPrice", "小麦价", 2)}
-    <div class="econ-row"><span>镇库小麦</span><strong>${last.townWheatJin == null ? "—" : `${number(last.townWheatJin)}斤`}</strong></div>
     ${sparkline(history, "townWheatJin", "镇库小麦", 0)}
     <div class="econ-row"><span>居民口粮</span><strong>${last.residentFoodDays == null ? "—" : `${number(last.residentFoodDays, 0)}天`}</strong></div>
     ${poach}`;
@@ -22571,17 +22629,16 @@ function renderPolicy(view) {
       ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
       ${reformAction}
     </div></details>`;
-  return `<h2>政策</h2>
-    ${reformCard}
-    ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : ""}
+  return `${reformCard}
+    ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
       <div class="row"><span class="label">营业店铺日租</span><div class="setting-input">${renderNumericInput(view, { key: "shop-rent", kind: "shop-rent", target: "shops", value: view.policy.shopRentVoucher ?? 1, label: "每间营业店铺每日租金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       <div class="row"><span class="label">商业利润税</span><div class="setting-input">${renderNumericInput(view, { key: "shop-tax", kind: "shop-profit-tax", target: "shops", value: view.policy.shopProfitTaxPercent ?? 10, label: "商业利润税", minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">批发市场每日小麦补贴</span><div class="setting-input">${renderNumericInput(view, { key: "wholesale-wheat", kind: "wholesale-daily-wheat", target: "wholesale", value: view.policy.wholesaleDailyWheatJin ?? 1000, label: "批发市场每日小麦补贴", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>斤</b></div></div>
-      <div class="subtle">前期批发市场不盈利，镇库默认每天补贴1000斤小麦做运营资金；设为0关闭。</div>
+      
       <div class="row"><span class="label">今日住宅实收租金</span><strong class="value">${number(view.housing.lastRentDay?.collectedVoucher || 0,1)}${moneyUnit}</strong></div>
       <div class="row"><span class="label">最近店铺利润税</span><strong class="value">${number(shopTax,1)}${moneyUnit}</strong></div>
-      <div class="subtle">商业金额按小麦等值核算；实际支付媒介由当前货币制度决定。</div>
-    ${hasCommerce ? "</div></details>" : ""}
+      
+    ${hasCommerce ? "</div></details>" : "</div>"}
     <details class="detail-block" data-detail-key="policy-welfare"><summary>工资与福利</summary><div class="detail-body">
       <div class="row"><span class="label">作坊 / 建筑日薪</span><strong class="value">${number(workshopWage)} / ${number(builderWage)}${moneyUnit}</strong></div>
       <label class="toggle"><input id="benefitEnabled" type="checkbox" ${policy.enabled ? "checked" : ""}><span>失业金</span></label>
@@ -22594,7 +22651,7 @@ function renderPolicy(view) {
       <div class="row"><span class="label">公务员类系数（政务/警察/银行/交易所）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-civil", kind: "wage-control-civil", target: "wageControl", value: view.policy.wageControl?.civil ?? 1, label: "公务员类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">镇营产业类系数（其余镇营岗位）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-industry", kind: "wage-control-industry", target: "wageControl", value: view.policy.wageControl?.industry ?? 1, label: "镇营产业类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">今日镇营工资应发</span><strong class="value">${number(view.policy.wageLastDay?.expectedVoucher || 0, 1)}${moneyUnit}</strong></div>
-      <div class="subtle">仅调控镇库发放的镇营工资；上市公司工资不受影响。系数1为基准。</div>
+      <div class="subtle">系数1为基准，不影响上市公司。</div>
     </div></details>
     <details class="detail-block" data-detail-key="policy-social"><summary>社保基金</summary><div class="detail-body">
       <label class="toggle"><input id="socialSecurityEnabled" type="checkbox" ${view.policy.socialSecurity?.enabled ? "checked" : ""}><span>开启社保基金</span></label>
@@ -22603,7 +22660,7 @@ function renderPolicy(view) {
       <div class="row"><span class="label">手动注资（镇库→基金）</span><div class="setting-input">${renderNumericInput(view, { key: "social-inject", kind: "social-inject", target: "socialSecurity", value: 10000, label: "社保基金注资金额", minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>斤</b><button class="secondary" data-social-inject>注资</button></div></div>
       <div class="row"><span class="label">基金余额</span><strong class="value">${number(view.policy.socialSecurity?.balanceJin || 0, 1)}斤</strong></div>
       <div class="row"><span class="label">累计注资 / 收缴 / 支出</span><strong class="value">${number(view.policy.socialSecurity?.totalInjectedJin || 0, 1)} / ${number(view.policy.socialSecurity?.totalCollectedJin || 0, 1)} / ${number(view.policy.socialSecurity?.totalPaidJin || 0, 1)}斤</strong></div>
-      <div class="subtle">开启后从工资代扣缴费；失业金与养老金从基金支出，基金不足时镇库兜底。</div>
+      <div class="subtle">工资代扣；基金不足时镇库兜底。</div>
     </div></details>
     <details class="detail-block" data-detail-key="policy-villa"><summary>别墅</summary><div class="detail-body">
       <div class="row"><span class="label">别墅定价</span><div class="setting-input">${renderNumericInput(view, { key: "villa-price", kind: "villa-price", target: "villa", value: view.policy.villa?.priceWheatJin ?? 10000, label: "别墅定价", minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>小麦等值</b></div></div>
@@ -22611,7 +22668,7 @@ function renderPolicy(view) {
       <div class="row"><span class="label">别墅群 / 已售 / 空置</span><strong class="value">${number(view.policy.villaStats?.complexes || 0)}座 / ${number(view.policy.villaStats?.sold || 0)}栋 / ${number(view.policy.villaStats?.vacant || 0)}栋</strong></div>
       <div class="row"><span class="label">累计购房款（已入镇库）</span><strong class="value">${number(view.policy.villaStats?.revenueWheatJin || 0, 1)}小麦等值</strong></div>
       <div class="row"><span class="label">累计房产税 / 欠税</span><strong class="value">${number(view.policy.villaStats?.taxCollectedWheatJin || 0, 1)} / ${number(view.policy.villaStats?.taxArrearsWheatJin || 0, 1)}小麦等值</strong></div>
-      <div class="subtle">富裕家庭按流动资产从高到低依次购房，一户一栋；购房款全额进入镇库。</div>
+      
     </div></details>
     ${reform.hasBankAccess ? `<details class="detail-block" data-detail-key="policy-bank"><summary>银行</summary><div class="detail-body">
       <div class="row"><span class="label">存款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-deposit-rate", kind: "bank-deposit-rate", target: "bank", value: view.policy.bankStats?.depositRateAnnualPercent ?? 2, label: "银行存款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
@@ -22620,7 +22677,7 @@ function renderPolicy(view) {
       <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(view.policy.bankStats?.totalDepositsVoucher || 0, 1)} / ${number(view.policy.bankStats?.outstandingLoansVoucher || 0, 1)}券</strong></div>
       <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(view.policy.bankStats?.loanableVoucher || 0, 1)} / ${number(view.policy.bankStats?.badDebtVoucher || 0, 1)}券</strong></div>
       <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(view.policy.bankStats?.interestEarnedVoucher || 0, 1)} / ${number(view.policy.bankStats?.interestPaidVoucher || 0, 1)}券</strong></div>
-      <div class="subtle">只存粮券不存粮食，按日计息；上市公司现金不足周转金时自动借款（90天期）；逾期30天核销坏账。存贷利差为银行利润（镇营，归镇库）。</div>
+      <div class="subtle">按日计息；逾期30天核销坏账。</div>
     </div></details>` : ""}
     ${reform.stage === "voucher" ? `<details class="detail-block" data-detail-key="policy-bonds"><summary>国债</summary><div class="detail-body">
       <div class="row"><span class="label">发行总额</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-total", kind: "bond-issue-total", target: "bonds", value: 100000, label: "国债发行总额", minimum: 1, maximum: 1000000000, className: "setting-editor" })}<b>券</b></div></div>
@@ -22628,14 +22685,14 @@ function renderPolicy(view) {
       <div class="row"><span class="label">起拍票面年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-rate", kind: "bond-issue-rate", target: "bonds", value: 3, label: "国债起拍票面年利率", minimum: 0, maximum: 20, className: "setting-editor" })}<b>%</b></div></div>
       ${(view.policy.bondStats?.issues || []).map(issue => `<div class="row"><span class="label">${issue.id} · ${issue.statusLabel}</span><strong class="value">${number(issue.totalVoucher)}券 · 票面${number(issue.couponRateAnnualPercent, 2)}% · ${issue.termYears}年</strong></div>`).join("")}
       ${(view.policy.bondStats?.creditPenaltyBps || 0) > 0 ? `<div class="shortage-banner visible">镇库信用受损，发债利率上浮${number(view.policy.bondStats.creditPenaltyBps / 100, 2)}%</div>` : ""}
-      <div class="subtle">认购期7天，拍卖定价：抢手下调、不足上浮、不足3成流拍退款；每年付息，到期还本；还不上先展期（最多2次）再违约。</div>
+      <div class="subtle">认购7天，不足3成流拍；每年付息，到期还本。</div>
     </div></details>` : ""}
     <details class="detail-block" data-detail-key="policy-agritax"><summary>农业税</summary><div class="detail-body">
       <div class="row"><span class="label">当前税率</span><div class="setting-input">${renderNumericInput(view, { key: "agriculture-tax", kind: "agriculture-tax", target: "agriculture", value: agriculture.currentPercent, label: "农业税率", minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">预计秋收分粮</span><strong class="value">镇库${number(agriculture.townShareJin)} / 居民${number(agriculture.residentShareJin)}斤</strong></div>
       <div class="subtle">${agriculture.lastHarvest ? `上次秋收实际：镇库${number(agriculture.lastHarvest.townJin)} / 居民${number(agriculture.lastHarvest.residentJin)}斤` : "尚未到秋收结算；税率按农事日累计。"}</div>
     </div></details>
-    <details class="detail-block" data-detail-key="policy-relief"><summary>救济</summary><div class="detail-body"><div class="row"><span class="label">需救济 / 已拨家庭</span><strong class="value">${number(relief.eligibleHouseholds||0)} / ${number(relief.servedHouseholds||0)}户</strong></div><div class="row"><span class="label">今日正常兑付 / 救济</span><strong class="value">${number((relief.redeemedWheatUnits||0)/view.inventoryUnitsPerJin,1)} / ${number((relief.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div>${(relief.missingQeqUnits||0)>0?`<div class="shortage-banner visible">镇库不足，尚缺 ${number(relief.missingQeqUnits/view.qeqUnitsPerJin,1)}斤口粮</div>`:""}<div class="row"><span class="label">今日邻里互助</span><strong class="value">${number(neighborAidDay.donorHouseholds||0)}户接济${number(neighborAidDay.helpedHouseholds||0)}户 · ${number((neighborAidDay.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div><div class="row"><span class="label">本年邻里接济</span><strong class="value">${number((neighborAid.year?.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div><div class="subtle">口粮不足3天、又没有粮券可兑的人家，会先得到存粮充裕人家的接济，镇库救济再兜底。</div></div></details>
+    <details class="detail-block" data-detail-key="policy-relief"><summary>救济</summary><div class="detail-body"><div class="row"><span class="label">需救济 / 已拨家庭</span><strong class="value">${number(relief.eligibleHouseholds||0)} / ${number(relief.servedHouseholds||0)}户</strong></div><div class="row"><span class="label">今日正常兑付 / 救济</span><strong class="value">${number((relief.redeemedWheatUnits||0)/view.inventoryUnitsPerJin,1)} / ${number((relief.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div>${(relief.missingQeqUnits||0)>0?`<div class="shortage-banner visible">镇库不足，尚缺 ${number(relief.missingQeqUnits/view.qeqUnitsPerJin,1)}斤口粮</div>`:""}<div class="row"><span class="label">今日邻里互助</span><strong class="value">${number(neighborAidDay.donorHouseholds||0)}户接济${number(neighborAidDay.helpedHouseholds||0)}户 · ${number((neighborAidDay.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div><div class="row"><span class="label">本年邻里接济</span><strong class="value">${number((neighborAid.year?.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div></div></details>
     ${hasIndustry ? `<details class="detail-block" data-detail-key="policy-privatetax"><summary>民营生产税</summary><div class="detail-body">${privateTaxes}</div></details>` : ""}
     <details class="detail-block" data-detail-key="policy-detail"><summary>政策详情</summary><div class="detail-body">
       <div class="row"><span class="label">本季农业税平均</span><strong class="value">${number(agriculture.accumulatedAveragePercent, 2)}%</strong></div>
@@ -22685,7 +22742,7 @@ function itemRow(view, shop, row) {
       <div class="row"><span class="label">当前生效目标</span><strong class="value">${number(pricing.targetMarginPercent, 1)}%${pricing.promotion ? "（促销中）" : ""}</strong></div>
       <div class="row"><span class="label">近7天总收入 / 总进货 / 总店员工资</span><strong class="value">${number(totals.revenue, 1)} / ${number(totals.cogs, 1)} / ${number(totals.wage, 1)}</strong></div>
       <div class="row"><span class="label">整体利润率</span><strong class="value">${escapeHtml(marginText(totals.overallMarginPercent))}</strong></div>
-      <div class="subtle">售价 = 进货价 ×（1 + 目标利润率）。利润率口径为（销售收入 − 进货成本 − 店员工资）÷ 销售收入，按商品核算。售价相对过去30天均价每贵10%，购买量降5%。</div>
+      <div class="subtle">售价 = 进货价 ×（1 + 目标利润率）；比30天均价每贵10%，销量降5%。</div>
     </div>
     ${promotion}
     ${(pricing.rows || []).map(row => itemRow(view, shop, row)).join("")}`;
@@ -22815,7 +22872,7 @@ function reclaimSection(view) {
 
   if (site === "field") {
     const farmers = view.labor.rows.find(row => row.roleId === "farmers");
-    body = `<div class="row"><span class="label">耕地</span><strong class="value">${number(view.farmAcres)}亩</strong></div><div class="row"><span class="label">已开荒 / 上限</span><strong class="value">${number(view.farmAcres)} / ${number(view.farmAcresMaximum)}亩</strong></div><div class="row"><span class="label">农人在岗 / 目标</span><strong class="value">${number(farmers?.count || 0)} / ${number(farmers?.targetCount ?? farmers?.count ?? 0)}人</strong></div><div class="row"><span class="label">可耕种人数上限</span><strong class="value">${number(view.farmCapacity)}人</strong></div>${(farmers?.targetShortage || 0) > 0 ? `<div class="shortage-banner visible">农业缺员 ${number(farmers.targetShortage)}人</div>` : ""}<div class="row"><span class="label">今年农事</span><strong class="value">${number(view.farmWorkDays)} / ${number(view.growingDays)}农人日</strong></div><div class="meter"><span style="width:${number(view.farmWorkPercent, 1)}%"></span></div><div class="row"><span class="label">预计净收成</span><strong class="value">${number(view.forecast)}斤</strong></div>${reclaimSection(view)}`;
+    body = `<div class="row"><span class="label">耕地</span><strong class="value">${number(view.farmAcres)}亩</strong></div><div class="row"><span class="label">农人在岗 / 目标</span><strong class="value">${number(farmers?.count || 0)} / ${number(farmers?.targetCount ?? farmers?.count ?? 0)}人</strong></div><div class="row"><span class="label">可耕种人数上限</span><strong class="value">${number(view.farmCapacity)}人</strong></div>${(farmers?.targetShortage || 0) > 0 ? `<div class="shortage-banner visible">农业缺员 ${number(farmers.targetShortage)}人</div>` : ""}<div class="row"><span class="label">今年农事</span><strong class="value">${number(view.farmWorkDays)} / ${number(view.growingDays)}农人日</strong></div><div class="meter"><span style="width:${number(view.farmWorkPercent, 1)}%"></span></div><div class="row"><span class="label">预计净收成</span><strong class="value">${number(view.forecast)}斤</strong></div>${reclaimSection(view)}`;
     actions = `<button class="secondary" data-go="residents">安排农人</button>`;
     title = "麦田";
   } else if (site === "granary") {
@@ -23368,16 +23425,14 @@ function closest(element, selector) {
 
   function renderHeader(view) {
     const season = view.season;
-    const seasonText = `${season.name} · ${season.field}`;
     $("#dateLabel").textContent = `第${number(view.year)}年 · ${season.name} · 第${number(season.index)}天`;
-    $("#timeLabel").textContent = view.paused ? "时光暂停" : `时光流转 · ${view.speed}×`;
+    $("#timeLabel").textContent = `${season.field} · ${view.paused ? "暂停" : `${view.speed}×`}`;
     $("#populationStat").textContent = number(view.people.total);
     $("#idleStat").textContent = number(view.labor.idle);
     $("#residentStat").textContent = compact(view.accounts.residents.qeq);
     $("#townStat").textContent = compact(view.accounts.town.qeq);
     $("#forecastMap").textContent = `${number(view.forecast)}斤`;
     $("#daysMap").textContent = `${numberMax(view.residentFoodDays, 1)}天`;
-    $("#fieldSign").innerHTML = `<span class="season-dot"></span><b>${escapeHtml(seasonText)}</b>`;
     $("#mapStage").dataset.season = season.key;
     // 经济迷你面板（用户 0.1.11）：摘要常显失业率，展开看走势。
     const econSummary = $("#econSummary");
@@ -23414,9 +23469,11 @@ function closest(element, selector) {
       ? nav.previewPlotId
         ? materialShortage ? `地块已选；${materialShortage}` : "地块已选；可确认开工"
         : "点一处虚线空地选址；再次点“建设”可取消"
-      : nav.activePanel === "site" ? "点关闭或返回，可继续查看镇图"
-        : "点建筑查看详情 · 拖动地图可巡视镇子";
-    $("#mapHint").textContent = instruction;
+      : "";
+    // 默认操作提示不再常驻地图，只在选址等需要指引时出现。
+    const hint = $("#mapHint");
+    hint.textContent = instruction;
+    hint.hidden = !instruction;
   }
 
   function renderEvents(view) {
@@ -23694,6 +23751,12 @@ function closest(element, selector) {
     const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
     panel.innerHTML = panelMarkup(view);
     panel.dataset.renderedPanel = panelName || "";
+    // 地方详情：用地名做面板标题，正文里不再重复一行大标题。
+    const siteTitle = panelName === "site" ? panel.querySelector(":scope > h2") : null;
+    if (siteTitle) {
+      $("#panelKicker").textContent = siteTitle.textContent;
+      siteTitle.hidden = true;
+    }
     if (openDetails.size) {
       for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
         if (openDetails.has(detail.dataset.detailKey)) detail.open = true;

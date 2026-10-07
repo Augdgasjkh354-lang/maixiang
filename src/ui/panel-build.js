@@ -112,7 +112,7 @@ export function renderBuild(view) {
     : "";
   const existing = view.buildings.map(building => `<button class="secondary" data-open-building="${escapeHtml(building.id)}">${escapeHtml(building.name)} · ${number(building.level || 1)}级</button>`).join("");
   const projectList = (view.projects || []).length
-    ? `<div class="cardlet"><div class="setting-title">在建工程 · ${number(view.projects.length)}处</div><div class="subtle">可同时推进多个工程；每个工程各自投入建筑工，工人不足的工程原地等待。</div>${view.projects.map(project => projectCard(project, view, unit)).join("")}</div>`
+    ? `<div class="cardlet"><div class="setting-title">在建工程 · ${number(view.projects.length)}处</div>${view.projects.map(project => projectCard(project, view, unit)).join("")}</div>`
     : "";
   const activeCategory = BUILD_CATEGORIES.find(category => category.id === activeBuildCategory) || BUILD_CATEGORIES[0];
   const allCategoryTypes = new Set(BUILD_CATEGORIES.flatMap(category => category.types));
@@ -121,8 +121,7 @@ export function renderBuild(view) {
   const tabs = `<div class="build-tabs" role="tablist" aria-label="建筑分类">${BUILD_CATEGORIES.map(category =>
     `<button class="build-tab${category.id === activeCategory.id ? " selected" : ""}" role="tab" aria-selected="${category.id === activeCategory.id}" data-build-category="${category.id}">${category.name}</button>`
   ).join("")}</div>`;
-  return `<h2>建设</h2>
-    ${existing ? `<div class="cardlet"><div class="setting-title">已有建筑</div><div class="site-actions">${existing}</div></div>` : ""}
+  return `    ${existing ? `<div class="cardlet"><div class="setting-title">已有建筑</div><div class="site-actions">${existing}</div></div>` : ""}
     ${projectList}
     ${previewCard}
     ${tabs}

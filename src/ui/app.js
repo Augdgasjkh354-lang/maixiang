@@ -194,16 +194,14 @@ export function mountGame(root) {
 
   function renderHeader(view) {
     const season = view.season;
-    const seasonText = `${season.name} · ${season.field}`;
     $("#dateLabel").textContent = `第${number(view.year)}年 · ${season.name} · 第${number(season.index)}天`;
-    $("#timeLabel").textContent = view.paused ? "时光暂停" : `时光流转 · ${view.speed}×`;
+    $("#timeLabel").textContent = `${season.field} · ${view.paused ? "暂停" : `${view.speed}×`}`;
     $("#populationStat").textContent = number(view.people.total);
     $("#idleStat").textContent = number(view.labor.idle);
     $("#residentStat").textContent = compact(view.accounts.residents.qeq);
     $("#townStat").textContent = compact(view.accounts.town.qeq);
     $("#forecastMap").textContent = `${number(view.forecast)}斤`;
     $("#daysMap").textContent = `${numberMax(view.residentFoodDays, 1)}天`;
-    $("#fieldSign").innerHTML = `<span class="season-dot"></span><b>${escapeHtml(seasonText)}</b>`;
     $("#mapStage").dataset.season = season.key;
     // 经济迷你面板（用户 0.1.11）：摘要常显失业率，展开看走势。
     const econSummary = $("#econSummary");
@@ -240,9 +238,11 @@ export function mountGame(root) {
       ? nav.previewPlotId
         ? materialShortage ? `地块已选；${materialShortage}` : "地块已选；可确认开工"
         : "点一处虚线空地选址；再次点“建设”可取消"
-      : nav.activePanel === "site" ? "点关闭或返回，可继续查看镇图"
-        : "点建筑查看详情 · 拖动地图可巡视镇子";
-    $("#mapHint").textContent = instruction;
+      : "";
+    // 默认操作提示不再常驻地图，只在选址等需要指引时出现。
+    const hint = $("#mapHint");
+    hint.textContent = instruction;
+    hint.hidden = !instruction;
   }
 
   function renderEvents(view) {
@@ -520,6 +520,12 @@ export function mountGame(root) {
     const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
     panel.innerHTML = panelMarkup(view);
     panel.dataset.renderedPanel = panelName || "";
+    // 地方详情：用地名做面板标题，正文里不再重复一行大标题。
+    const siteTitle = panelName === "site" ? panel.querySelector(":scope > h2") : null;
+    if (siteTitle) {
+      $("#panelKicker").textContent = siteTitle.textContent;
+      siteTitle.hidden = true;
+    }
     if (openDetails.size) {
       for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
         if (openDetails.has(detail.dataset.detailKey)) detail.open = true;

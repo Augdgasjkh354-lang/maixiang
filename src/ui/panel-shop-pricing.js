@@ -38,7 +38,7 @@ export function renderShopPricing(view, shop) {
       <div class="row"><span class="label">当前生效目标</span><strong class="value">${number(pricing.targetMarginPercent, 1)}%${pricing.promotion ? "（促销中）" : ""}</strong></div>
       <div class="row"><span class="label">近7天总收入 / 总进货 / 总店员工资</span><strong class="value">${number(totals.revenue, 1)} / ${number(totals.cogs, 1)} / ${number(totals.wage, 1)}</strong></div>
       <div class="row"><span class="label">整体利润率</span><strong class="value">${escapeHtml(marginText(totals.overallMarginPercent))}</strong></div>
-      <div class="subtle">售价 = 进货价 ×（1 + 目标利润率）。利润率口径为（销售收入 − 进货成本 − 店员工资）÷ 销售收入，按商品核算。售价相对过去30天均价每贵10%，购买量降5%。</div>
+      <div class="subtle">售价 = 进货价 ×（1 + 目标利润率）；比30天均价每贵10%，销量降5%。</div>
     </div>
     ${promotion}
     ${(pricing.rows || []).map(row => itemRow(view, shop, row)).join("")}`;

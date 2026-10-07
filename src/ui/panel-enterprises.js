@@ -1,4 +1,4 @@
-import { escapeHtml, number, moneyUnit, moneyMixHint } from "./format.js";
+import { escapeHtml, number, moneyUnit } from "./format.js";
 
 function draftValue(view, key, fallback) {
   return escapeHtml(view.numericDrafts?.[key]?.value ?? String(fallback ?? ""));
@@ -24,12 +24,12 @@ function itemRowsText(rows, empty = "暂无") {
 function renderPrices(view) {
   const unit = moneyUnit(view);
   const prices = view.market.intermediatePricesVoucherPerUnit || {};
-  return `<section class="enterprise-section"><h3>价格</h3><div class="cardlet">
+  return `<section class="enterprise-section"><h2>价格</h2><div class="cardlet">
     <div class="row"><span class="label">小麦 / 食盐</span><strong class="value">${number(view.market.pricesVoucherPerUnit?.wheat ?? 1, 3)} / ${number(view.market.pricesVoucherPerUnit?.salt ?? 10, 3)}${escapeHtml(unit)}/斤</strong></div>
     <div class="row"><span class="label">面粉</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:flour", label: "面粉价格", value: prices.flour ?? 1.8, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="flour">设置</button></div></div>
     <div class="row"><span class="label">面包</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:bread", label: "面包价格", value: view.market.pricesVoucherPerUnit?.bread ?? 2, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="bread">设置</button></div></div>
     <div class="row"><span class="label">木材</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:wood", label: "木材价格", value: prices.wood ?? 15, positive: true })}<b>${escapeHtml(unit)}/单位</b><button class="secondary" data-intermediate-price="wood">设置</button></div></div>
-    <div class="subtle">以上均为批发价；综合商店零售价为批发价×1.2。</div>
+    <div class="subtle">均为批发价，商店零售另加价。</div>
   </div></section>`;
 }
 
@@ -50,7 +50,7 @@ function renderCompanyCandidate(view, building) {
     ${preview ? `<div class="operation-preview"><strong>成立确认</strong>
       <div class="row"><span class="label">公司 / 划入等级</span><strong class="value">${escapeHtml(preview.name)} · ${number(preview.levels)}级</strong></div>
       <div class="row"><span class="label">镇库投入</span><strong class="value">${number(preview.capital, 2)}${escapeHtml(unit)} · ${number(preview.material, 2)}斤主要原料</strong></div>
-      <div class="subtle">成立后由镇库100%持有，但不会生成股票，也不要求先建交易所。</div>
+      <div class="subtle">镇库全资持有，无需交易所。</div>
       <div class="business-sticky-actions"><button class="secondary" data-company-preview-cancel>取消</button><button class="primary" data-company-create="${escapeHtml(building.id)}">确认成立</button></div>
     </div>` : ""}
   </div>`;
@@ -183,10 +183,10 @@ export function renderEnterpriseFinance(view) {
   const exchangeState = view.stockExchange?.available
     ? (view.stockExchange.physical ? "交易所已建成" : "旧档兼容交易所入口")
     : "尚未建成交易所";
-  return `<div class="subtle">${escapeHtml(moneyMixHint(view))}；公司经营收入、成本与利润按小麦等值核算，支付媒介不产生利润。</div>${renderPrices(view)}
+  return `${renderPrices(view)}
     <section class="enterprise-section"><h2>独立公司</h2>
       ${companies.length ? companies.map(company => renderCompany(view, company)).join("") : `<div class="cardlet subtle">暂无独立公司。</div>`}
       <details class="detail-block" data-detail-key="company-formation"><summary>从镇营等级成立公司${candidates.length ? ` · ${number(candidates.length)}处可选` : ""}</summary><div class="detail-body">${formation}</div></details>
     </section>
-    <section class="enterprise-section"><h3>交易所</h3><div class="cardlet"><div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div><div class="row"><span class="label">新上市条件</span><strong class="value">${view.stockExchange?.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div><div class="subtle">交易所只负责挂牌、认购、回购与股权信息；公司成立和经营不依赖交易所。</div></div></section>`;
+    <section class="enterprise-section"><h2>交易所</h2><div class="cardlet"><div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div><div class="row"><span class="label">新上市条件</span><strong class="value">${view.stockExchange?.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div></div></section>`;
 }
