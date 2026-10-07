@@ -1,4 +1,5 @@
 import { currentUnitPrice } from "./prices.js";
+import { productivityFactor } from "./productivity.js";
 import { voucherBalance } from "./currency.js";
 import { maximumFullyPayableValueUnits, maximumPayableValueUnits } from "./payment.js";
 import { populationStats, readJobCount, privateJobKeyForBuilding, listedJobKeyForBuilding } from "../selectors/labor.js";
@@ -148,7 +149,7 @@ function producerRows(state, typeId, content) {
     const privateLevels = Math.max(0, building.ownership?.privateLevels || 0);
     if (privateLevels > 0) rows.push({
       key: `private:${building.id}`, kind: "private", buildingId: building.id, typeId,
-      maxWorkers: job.slots * privateLevels, batchesPerWorkerDay: recipe.batchesPerWorkerDay || 0,
+      maxWorkers: job.slots * privateLevels, batchesPerWorkerDay: (recipe.batchesPerWorkerDay || 0) * productivityFactor(state, typeId, building.level),
       currentWorkers: readJobCount(state, privateJobKeyForBuilding(building.id, job.id)), ageDays: state.privateEconomy?.plans?.[building.id]?.ageDays || 0
     });
   }
@@ -160,7 +161,7 @@ function producerRows(state, typeId, content) {
     if (!recipe || !job) continue;
     rows.push({
       key: `company:${company.id}`, kind: "company", companyId: company.id, buildingId: company.buildingId, typeId,
-      maxWorkers: job.slots * company.listedLevels, batchesPerWorkerDay: recipe.batchesPerWorkerDay || 0,
+      maxWorkers: job.slots * company.listedLevels, batchesPerWorkerDay: (recipe.batchesPerWorkerDay || 0) * productivityFactor(state, typeId, state.buildings.find(row => row.id === company.buildingId)?.level || 1),
       currentWorkers: readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id)), ageDays: company.plan?.ageDays || 0
     });
   }

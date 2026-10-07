@@ -1,3 +1,4 @@
+import { experienceBonus } from "./productivity.js";
 export function currentUnitPrice(state, itemId, content) {  const defaults = content.rules.marketPricesVoucherPerUnit || {};
   const wholesale = state.wholesaleMarket?.pricesVoucherPerUnit || {};
   if (Number.isFinite(wholesale[itemId]) && wholesale[itemId] > 0) return Number(wholesale[itemId]);
@@ -98,7 +99,8 @@ export function theoreticalFullSaleProfitPerWorker(state, typeId, content) {
   const recipe = definition?.recipeId ? content.recipes[definition.recipeId] : null;
   const job = definition?.jobs?.[0];
   if (!recipe || !job) return null;
-  const batches = recipe.batchesPerWorkerDay || 0;
+  // 估值按全镇当前熟练度折算人均产出（不含具体建筑的等级加成）。
+  const batches = (recipe.batchesPerWorkerDay || 0) * experienceBonus(state, typeId);
   const taxPercent = state.policy?.privateProductionTaxPercent?.[typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
   const grossRevenue = (recipe.outputs || []).reduce((sum, row) =>
     sum + row.quantity * batches * currentUnitPrice(state, row.itemId, content) * (1 - taxPercent / 100), 0);

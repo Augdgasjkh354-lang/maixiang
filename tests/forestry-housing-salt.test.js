@@ -121,8 +121,9 @@ test("年度盐需求精确；六名盐工连续生产365日的物理产能按�
   // 基线清理：年度报告经 annualPeriod() 展平（src/systems/annual-reports.js），
   // industries.salt 直接就是年度累计，不再有 .cumulative 层。
   const saltYear = state.annualReports[0].industries.salt;
-  // 产出仍是 6 名盐工 × 5 斤/日 × 365 = 10950 斤；需求随人口涨到 33000 斤。
-  assert.equal(saltYear.producedUnits.salt / SCALE, 10950);
+  // 基准 6 名盐工 × 5 斤/日 × 365 = 10950 斤；一年 2190 工日的熟练度让人均产出逐日略升（年末约 +5%）。
+  const produced = saltYear.producedUnits.salt / SCALE;
+  assert.ok(produced > 10950 && produced < 10950 * 1.06, `盐产量应略高于基准，实际${produced}`);
   assert.equal(state.annualReports[0].salt.demandUnits / SCALE, 33000);
   // 默认日薪 10→5 斤（8cf03ae）：6 名盐工年工资 21900→10950 斤。
   assert.equal(saltYear.operatingWagesWheatUnits / SCALE, 10950);
@@ -131,7 +132,7 @@ test("年度盐需求精确；六名盐工连续生产365日的物理产能按�
   assert.equal(saltYear.soldUnits / SCALE, 0);
   assert.equal(saltYear.revenueWheatUnits / SCALE, 0);
   assert.equal(state.annualReports[0].salt.satisfiedUnits / SCALE, 0);
-  assert.equal(state.accounts.town.salt / SCALE, 10950);
+  assert.equal(state.accounts.town.salt / SCALE, produced);
   assert.equal(state.accounts.residents.salt, 0);
 });
 

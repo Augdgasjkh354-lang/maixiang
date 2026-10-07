@@ -34,6 +34,7 @@ import { settleLiquidityDay } from "./liquidity.js";
 import { maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
 import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
+import { accrueIndustryExperience } from "./productivity.js";
 import { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
 
@@ -152,6 +153,8 @@ export const DAILY_STEPS = [
   { id: "wholesalePrivateIntake", run: (state, content, day) => runWholesaleIntake(state, [], day.privateProduction, content, { includeTownAllocation: false }) },
   { id: "companyProduction", run: processListedCompanies },
   { id: "wholesaleCompanyIntake", run: sellCompanyOutputsToWholesale },
+  // 今天在岗的生产工人累计成熟练度（工日），明天起生效。
+  { id: "industryExperience", run: accrueIndustryExperience },
 
   // ── 商业与居民购买：店铺计提并补货 → 房租 → 别墅 → 盐 → 主食 → 修缮木材 → 酒与布 → 服务
   { id: "shopPreparation", run: prepareShopsForDay },

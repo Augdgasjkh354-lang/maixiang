@@ -1,4 +1,5 @@
 import { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } from "../economy/inventory.js";
+import { laborBatches } from "../economy/productivity.js";
 import { industryTypeIds, isIndustryType } from "../content/buildings.js";
 import { bookAdd, bookAddMap } from "../economy/books.js";
 import { recordEvent } from "../economy/ledger.js";
@@ -110,7 +111,7 @@ function ownerCapacity(state, building, content) {
   const definition = content.buildings[building.typeId];
   const job = definition.jobs[0];
   const workers = readJobCount(state, privateJobKeyForBuilding(building.id, job.id));
-  return { workers, batches: workers * content.recipes[definition.recipeId].batchesPerWorkerDay };
+  return { workers, batches: laborBatches(state, building.typeId, building.level, workers, content.recipes[definition.recipeId].batchesPerWorkerDay).batches };
 }
 
 export function payPrivateIndustryWages(state, content) {

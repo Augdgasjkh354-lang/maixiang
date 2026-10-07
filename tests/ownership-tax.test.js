@@ -172,7 +172,8 @@ test("同一盐场部分镇营、部分民营共享居民需求池且不重复�
 
   const townProduced = (state.industries.salt.cumulative.producedUnits.salt || 0) - townProducedBefore;
   const privateProduced = (state.privateEconomy.cumulative.producedUnits.salt || 0) - privateProducedBefore;
-  assert.equal(townProduced / scale, 150, "镇营一级应连续按自己的工人生产");
+  // 盐场为 2 级：等级加成 +10%（熟练度一个月内几乎不变），1 名镇营盐工 30 天约产 165 斤。
+  assert.ok(townProduced / scale >= 160 && townProduced / scale <= 170, `镇营应连续按自己的工人生产，实际${townProduced / scale}`);
   assert.ok(privateProduced > 0, "民营部分应持续生产并参与市场");
   assert.ok(privateBatches > 0);
   assert.ok(residentPurchased > 0, "镇营与民营产出的盐都进入同一份居民需求池，由综合商店统一零售");

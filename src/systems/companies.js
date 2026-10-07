@@ -1,4 +1,5 @@
 import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
+import { laborBatches } from "../economy/productivity.js";
 import { isIndustryType } from "../content/buildings.js";
 import { householdIdOf } from "../economy/accounts.js";
 import { putStock, sellCompanyGoods, takeStock } from "../economy/trade.js";
@@ -584,7 +585,8 @@ function companyCapacity(company, state, content) {
   const job = definition?.jobs?.[0];
   if (!recipe || !job) return { workers: 0, capacity: 0, recipe, definition };
   const workers = readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id));
-  return { workers, capacity: workers * recipe.batchesPerWorkerDay, recipe, definition };
+  const level = state.buildings.find(row => row.id === company.buildingId)?.level || 1;
+  return { workers, capacity: laborBatches(state, company.typeId, level, workers, recipe.batchesPerWorkerDay).batches, recipe, definition };
 }
 
 function planTaxUnits(state, company, outputItemId, outputUnits, content) {

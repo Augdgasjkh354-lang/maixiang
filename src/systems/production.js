@@ -3,6 +3,7 @@ import { commitProductionAccounting, planProductionAccounting } from "../economy
 import { recipeCapacity } from "../selectors/production.js";
 import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
 import { procureTownInputFromWholesale, transferTownToWholesale } from "./wholesale-market.js";
+import { laborBatches, nextCarry } from "../economy/productivity.js";
 
 function recipeDeltas(recipe, batches, content) {
   const inputs = [];
@@ -35,10 +36,11 @@ export function processBuilding(state, building, content) {
   // 用户 0.1.11：镇营目标日产量（outputTargetJin，斤）。>0 时按"目标斤数/每批产量"向上取整
   // 封顶每日批次数；用不上的人手仍照常领工资。用 0 表示取消（按人手满产）。
   const targetCap = targetBatchCap(building, recipeDef);
+  const labor = laborBatches(state, building.typeId, building.level, workers, recipeDef?.batchesPerWorkerDay, building.productivityCarry);
   let wholesaleBatchCap = Number.POSITIVE_INFINITY;
   const procuredInputs = [];
   if (recipeDef && workers > 0 && (recipeDef.inputs || []).length) {
-    const wantedBatches = Math.min(workers * (recipeDef.batchesPerWorkerDay || 0), targetCap);
+    const wantedBatches = Math.min(labor.batches, targetCap);
     wholesaleBatchCap = wantedBatches;
     for (const input of recipeDef.inputs || []) {
       const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);
@@ -66,6 +68,9 @@ export function processBuilding(state, building, content) {
       }
     }
   }
+  // 满负荷才把不足一批的零头留到明天。
+  building.productivityCarry = nextCarry(labor.exact, allowedBatches, allowedBatches > 0 && allowedBatches >= labor.batches);
+  if (!building.productivityCarry) delete building.productivityCarry;
   if (!definition || !definition.recipeId || capacity.status === "no_workers" || allowedBatches <= 0) {
     return { buildingId: building.id, status: capacity.status === "no_workers" ? "no_workers" : "no_materials", batches: 0 };
   }

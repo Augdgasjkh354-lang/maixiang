@@ -300,6 +300,7 @@ export function createInitialState(options) {
     tradeAgreements: [],
     laborCompetition: { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] },
     goodsDemand: { carry: {}, todayDemandUnits: {}, day: {}, year: {} },
+    industryExperience: {},
     salt: {
       demandCarry: 0,
       graceDaysElapsed: 0,

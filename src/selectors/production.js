@@ -1,16 +1,17 @@
 import { jobKeyForBuilding, readJobCount } from "./labor.js";
 import { itemQeqUnitsPerInventoryUnit } from "../economy/inventory.js";
 import { hasWholesaleMarket } from "../systems/wholesale-market.js";
+import { laborBatches } from "../economy/productivity.js";
 
 // 与 processBuilding 同口径的纯函数预估：镇营生产经批发市场采购原料，
 // 镇库余粮不能绕过批发市场直接投产（"镇营生产原料必须经过批发市场"）。
 // 注意 processBuilding 会真实扣减，此处只读 state、不产生副作用。
-function wholesaleBatches(state, recipe, workers, content) {
+function wholesaleBatches(state, recipe, workers, content, building) {
   const market = state.wholesaleMarket;
   if (!hasWholesaleMarket(state) || !market) {
     return { batches: 0, reason: "尚未建成批发市场" };
   }
-  const wanted = workers * (recipe.batchesPerWorkerDay || 0);
+  const wanted = laborBatches(state, building.typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry).batches;
   let batches = wanted;
   let shortestName = null;
   for (const input of recipe.inputs || []) {
@@ -41,7 +42,7 @@ export function recipeCapacity(state, building, content) {
   });
   const workers = role ? readJobCount(state, jobKeyForBuilding(building.id, role.id)) : 0;
   if (workers <= 0) return { status: "no_workers", batches: 0, workers, recipe };
-  const capacity = workers * recipe.batchesPerWorkerDay;
+  const capacity = laborBatches(state, building.typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry).batches;
   let available = capacity;
   for (const input of recipe.inputs) {
     const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);
@@ -69,7 +70,7 @@ export function productionStatus(state, building, content) {
   if (result.status === "no_workers") return { ...result, label: "缺人停工" };
   // 镇营生产的实际投产量以批发市场可领用量为准（processBuilding 同口径），
   // 镇库有粮不等于能开工：避免显示"正在加工"、实际却零产出误导玩家。
-  const wholesale = wholesaleBatches(state, result.recipe, result.workers, content);
+  const wholesale = wholesaleBatches(state, result.recipe, result.workers, content, building);
   if (wholesale.batches <= 0) {
     return {
       ...result,
