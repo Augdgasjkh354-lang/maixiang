@@ -92,16 +92,18 @@ test("0.1.1多家企业共享同一需求，过剩库存后按周期缩减计划
   assert.ok(rows.reduce((sum, row) => sum + row.plannedBatches, 0) <= maxBatches,
     "全镇需求只能分一次，不能每家复制一份");
   a.plan.ageDays = b.plan.ageDays = CONTENT.rules.newBusinessTrialDays + 1;
-  // 人口 1100→3300（8cf03ae）后面包需求放大到约 968 斤/日，"过剩库存"须同步放大：
-  // 目标 = 3×需求 − 市场现货，每户 2000 斤（合计 4000 斤）足以压过 3×968≈2904 斤的目标。
-  a.inventory.bread = 2000 * I;
-  b.inventory.bread = 2000 * I;
   setJobCount(state, `${a.buildingId}::bakers::listed`, 5, CONTENT);
   setJobCount(state, `${b.buildingId}::bakers::listed`, 5, CONTENT);
   refreshOperatingPlan(state, CONTENT, true);
+  const plannedWithoutStock = [a, b].reduce((sum, c) => sum + state.market.operatingPlan.rows[`company:${c.id}`].plannedBatches, 0);
+  // 市面积压大量面包：备货缺口分几天消化，计划减产而不是一刀切停工；用工每个周期最多减 1 人。
+  a.inventory.bread = 2000 * I;
+  b.inventory.bread = 2000 * I;
+  refreshOperatingPlan(state, CONTENT, true);
   const after = [a, b].map(c => state.market.operatingPlan.rows[`company:${c.id}`]);
-  assert.equal(after.reduce((sum, row) => sum + row.plannedBatches, 0), 0);
-  assert.ok(after.every(row => row.desiredWorkers === 3), "每个周期最多缩减2人，避免每日开停工抖动");
+  const plannedWithStock = after.reduce((sum, row) => sum + row.plannedBatches, 0);
+  assert.ok(plannedWithStock < plannedWithoutStock, `积压时应减产：${plannedWithStock} vs ${plannedWithoutStock}`);
+  assert.ok(after.every(row => row.desiredWorkers === 4), "裁人每个周期最多 1 人，避免开停工抖动");
 });
 
 test("0.1.1高工资、高生产税和原料涨价都会压低利润，经营反馈能指出主要成本问题", () => {

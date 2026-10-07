@@ -62,8 +62,13 @@ function outputPerBatch(typeId, content) {
   return Math.round((recipe?.outputs?.[0]?.quantity || 0) * content.precision.inventoryUnitsPerJin);
 }
 
+// 市面上能卖给下家的现货：批发市场库存（民营产出都卖进这里）+ 公司库存 + 营业中店铺库存。
+// 镇库存货（如民营实物税）不在市面上流通，没有批发市场时才算镇库。
 function producerMarketStock(state, itemId) {
-  let units = state.accounts?.town?.[itemId] || 0;
+  const market = state.wholesaleMarket;
+  let units = market?.inventory && (state.buildings || []).some(row => row.typeId === "wholesale_market")
+    ? (market.inventory[itemId] || 0)
+    : (state.accounts?.town?.[itemId] || 0);
   for (const company of Object.values(state.companies || {})) units += company.inventory?.[itemId] || 0;
   for (const shop of Object.values(state.shops || {})) if (shop.status === "open") units += shop.inventory?.[itemId] || 0;
   return units;
@@ -206,9 +211,12 @@ function desiredWorkers(row, batches, state, content) {
     const cashWorkers = wage > 0 ? Math.floor(maximumPayableValueUnits(state, `company:${company?.id}`, content) / (wage * scale)) : row.maxWorkers;
     desired = Math.min(desired, Math.max(0, cashWorkers));
   }
+  // 招人快、裁人慢；差一两个人（10% 以内）不折腾。
   const step = content.rules.operatingWorkerAdjustMaxPerCycle || 2;
+  const deadband = Math.max(0, Math.floor(row.currentWorkers * 0.1));
+  if (Math.abs(desired - row.currentWorkers) <= deadband) desired = row.currentWorkers;
   if (desired > row.currentWorkers) desired = Math.min(desired, row.currentWorkers + step);
-  if (desired < row.currentWorkers) desired = Math.max(desired, row.currentWorkers - step);
+  if (desired < row.currentWorkers) desired = Math.max(desired, row.currentWorkers - 1);
   return Math.max(0, Math.min(row.maxWorkers, desired));
 }
 
@@ -226,11 +234,14 @@ function productionTargetForType(state, typeId, content, downstreamUnits) {
   const downstream = Math.max(0, downstreamUnits[itemId] || 0);
   const stock = producerMarketStock(state, itemId);
   const targetDays = content.rules.producerInventoryTargetDays || 2;
+  // 备货缺口分几天补齐，不一次补完：避免一个计划期内多产一倍、下个计划期又停工的来回摆动。
+  const correctionDays = Math.max(1, content.rules.operatingStockCorrectionDays || 5);
   const demandUnits = consumer + downstream;
   const basis = consumer > 0 && downstream > 0 ? "居民需求与下游生产计划"
     : consumer > 0 ? "家庭可支付需求与近期实销"
     : downstream > 0 ? "按下游生产计划形成原料需求" : "暂无需求";
-  return { itemId, demandUnits, stockUnits: stock, targetUnits: Math.max(0, demandUnits + Math.round(consumer * targetDays) - stock), basis };
+  const stockGap = Math.round(consumer * targetDays) - stock;
+  return { itemId, demandUnits, stockUnits: stock, targetUnits: Math.max(0, demandUnits + Math.round(stockGap / correctionDays)), basis };
 }
 
 export function ensureOperatingPlanState(state) {

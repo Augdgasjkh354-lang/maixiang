@@ -126,6 +126,7 @@ export const RULES = Object.freeze({
   serviceBudgetSharePercent: 35,
   serviceComfortDailyMaximum: 3,
   // 日用品：每人每年用量；人均现金达到门槛的家庭才买；用够当日份额得满额舒心值加成。
+  operatingStockCorrectionDays: 5,
   householdGoods: Object.freeze({
     cloth: Object.freeze({ annualPerPerson: 1, minCashVoucherPerCapita: 10, comfortMaximum: 3 }),
     wine: Object.freeze({ annualPerPerson: 6, minCashVoucherPerCapita: 30, comfortMaximum: 2 })
