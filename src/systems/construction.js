@@ -128,7 +128,6 @@ export function startConstruction(state, typeId, plotId, content, options = {}) 
     workRequired: construction.workDays,
     recommendedWorkers: construction.recommendedWorkers,
     workers: 0,
-    prepaidWageCreditUnits: 0,
     materialsConsumed: materialLines.map(line => ({ itemId: line.itemId, quantityUnits: line.quantityUnits, sourceOwner: line.sourceOwner, transactionId: materialTransactionId })),
     started: (() => {
       // 年末最后一天开工，年份进位（之前只封顶天数，年份没进位）。
@@ -208,11 +207,10 @@ function finishProject(state, project, content, results) {
       });
     }
     const name = content.buildings[project.typeId]?.name || project.typeId;
-    const unusedCredit = project.prepaidWageCreditUnits || 0;
     releaseProjectWorkers(state, project, content);
     recordEvent(state, `${name}原地扩建完成，现为${upgraded.level}级；新增岗位保持空缺。`, content, { day: state.day + 1 });
-    results.push({ instanceId: project.instanceId, status: "completed", completed: true, upgraded: true, building: upgraded, unusedCredit, workers: 0 });
-    return { instanceId: project.instanceId, result: { status: "completed", completed: true, building: upgraded, upgraded: true, unusedCredit } };
+    results.push({ instanceId: project.instanceId, status: "completed", completed: true, upgraded: true, building: upgraded, workers: 0 });
+    return { instanceId: project.instanceId, result: { status: "completed", completed: true, building: upgraded, upgraded: true } };
   }
   const plot = state.plots.find(function (item) { return item.id === project.plotId; });
   const definition = content.buildings[project.typeId];
@@ -235,26 +233,8 @@ function finishProject(state, project, content, results) {
   state.buildings.push(building);
   initializeBuildingJobs(state, building, content);
   const name = definition ? definition.name : project.typeId;
-  const unusedCredit = project.prepaidWageCreditUnits || 0;
-  if (unusedCredit > 0) {
-    if (!state.payroll) state.payroll = { arrearsWheatUnits: {}, totals: {} };
-    if (!state.payroll.closedProjectCredits) state.payroll.closedProjectCredits = {};
-    state.payroll.closedProjectCredits[project.instanceId] = unusedCredit;
-    recordLedger(state, {
-      type: "construction_prepaid_remainder",
-      transactionId: makeTransactionId(state),
-      source: project.instanceId,
-      destination: "construction_investment",
-      itemId: "wheat",
-      quantityUnits: unusedCredit,
-      qeqUnits: unusedCredit * content.precision.qeqUnitsPerJin /
-        content.precision.inventoryUnitsPerJin,
-      reason: "工程完工时尚未抵扣的旧预付施工粮酬，保留为已付建设投入"
-    }, content);
-  }
   releaseProjectWorkers(state, project, content);
-  recordEvent(state, name + "落成，可以安排工人开工了。" +
-    (unusedCredit > 0 ? "剩余旧预付款仍记作已付建设投入。" : ""), content,
+  recordEvent(state, name + "落成，可以安排工人开工了。", content,
     { day: state.day + 1 });
   results.push({ instanceId: project.instanceId, status: "completed", completed: true, building, workers: 0 });
   return { instanceId: project.instanceId, result: { status: "completed", completed: true, building } };

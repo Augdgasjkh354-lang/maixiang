@@ -9,7 +9,6 @@ import { payListedCompanyWages } from "../src/systems/companies.js";
 import { renderJobs } from "../src/ui/panel-jobs.js";
 import { renderSettings } from "../src/ui/panel-settings.js";
 import { createIndexedSaveManager } from "../src/persistence/indexed-save-manager.js";
-import { SAVE_KEY, exportState } from "../src/persistence/storage.js";
 
 const SCALE = CONTENT.precision.currencyUnitsPerVoucher;
 
@@ -20,17 +19,6 @@ function addBuilding(state, typeId, id, level = 1) {
   const building = { id, typeId, level, ownership: { townLevels: level, privateLevels: 0, listedLevels: 0 }, plotId: plot.id, x: plot.x, y: plot.y, materialInvestments: [], completed: { year: state.year, day: 1 } };
   state.buildings.push(building);
   return building;
-}
-
-function memoryStorage(initial = {}) {
-  const data = new Map(Object.entries(initial));
-  return {
-    get length() { return data.size; },
-    key(index) { return [...data.keys()][index] ?? null; },
-    getItem(key) { return data.get(key) ?? null; },
-    setItem(key, value) { data.set(key, String(value)); },
-    removeItem(key) { data.delete(key); }
-  };
 }
 
 function createFakeIndexedDb() {
@@ -171,41 +159,11 @@ test("0.1.10-r02 设置页显示唯一构建号和当前页面地址", () => {
   assert.match(html, /https:\/\/example\.test\/maixiang\//);
   assert.match(html, /真实写入探测/);
   assert.doesNotMatch(html, />重试本机存储</);
-
-  const unverified = renderSettings(null, null, { managerOpen: true, slots: [], legacyArtifacts: [{ key: "legacy-a", label: "旧单存档", bytes: 100, verified: false, readable: true, stillInLocalStorage: true }] });
-  assert.match(unverified, /归档未完成校验；原数据保留/);
-  assert.doesNotMatch(unverified, /data-clean-legacy=/);
-  assert.doesNotMatch(unverified, /data-export-legacy=/);
-});
-
-test("0.1.10-r02 遗留归档失败不阻断现有IndexedDB读取或新建，原localStorage保留", async () => {
-  const factory = createFakeIndexedDb();
-  const legacyStorage = memoryStorage();
-  const first = await createIndexedSaveManager({ indexedDB: factory, legacyStorage, content: CONTENT });
-  const existing = await first.createNew("已有进度");
-  first.close();
-
-  const legacyRaw = exportState(simulation.createInitialState({ seed: 110202 }));
-  legacyStorage.setItem(SAVE_KEY, legacyRaw);
-  factory.controller.failStore = "legacy";
-
-  const recovered = await createIndexedSaveManager({ indexedDB: factory, legacyStorage, content: CONTENT });
-  const initialized = recovered.initialize();
-  assert.equal(initialized.activeId, existing.id);
-  assert.ok(initialized.state, "现有IndexedDB进度仍应可读");
-  assert.match(initialized.warning || "", /遗留 localStorage 迁移未完成/);
-  assert.equal(legacyStorage.getItem(SAVE_KEY), legacyRaw, "迁移故障不得删除或覆盖原localStorage");
-
-  const created = await recovered.createNew("迁移故障下的新局");
-  assert.ok(created.id);
-  assert.equal(recovered.list().activeId, created.id);
 });
 
 test("0.1.10-r02 IndexedDB自身不可写时真实写入探测仍失败，不假报恢复", async () => {
   const factory = createFakeIndexedDb();
-  const legacyStorage = memoryStorage({ [SAVE_KEY]: exportState(simulation.createInitialState({ seed: 110203 })) });
+  const manager = await createIndexedSaveManager({ indexedDB: factory, content: CONTENT });
   factory.controller.failAllWrites = true;
-  const manager = await createIndexedSaveManager({ indexedDB: factory, legacyStorage, content: CONTENT });
-  assert.match(manager.list().warning || "", /迁移未完成/);
   await assert.rejects(() => manager.probePersistentStorage(), /forced meta write failure|写入|空间|存储/i);
 });

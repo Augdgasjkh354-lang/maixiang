@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
-import { migrateMonetaryReform } from "../src/economy/payment.js";
 
 function stateWithBank(seed) {
   const state = simulation.createInitialState({ seed });
@@ -31,11 +30,3 @@ test("没有银行不能启动货币改革", () => {
   assert.equal(state.monetaryReform.stage, "wheat");
 });
 
-test("旧档过渡期载入后视为已完成改革", () => {
-  const state = stateWithBank(9103);
-  Object.assign(state.monetaryReform, { stage: "transition", targetVoucherBps: 3000, residentExchangeEnabled: true, paymentHistory: [], voucherShortfallByKey: { x: 1 } });
-  migrateMonetaryReform(state);
-  assert.equal(state.monetaryReform.stage, "voucher");
-  assert.equal(state.monetaryReform.targetVoucherBps, undefined);
-  assert.equal(state.monetaryReform.voucherShortfallByKey, undefined);
-});

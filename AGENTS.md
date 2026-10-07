@@ -31,7 +31,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 | `src/systems/` | 日结各系统。一天的执行顺序就是 `daily.js` 里的 `DAILY_STEPS` 表（开日 → 用工 → 发钱 → 生产 → 购买 → 生活 → 金融 → 翻日/年终 → 外镇）；加系统就在表里插一行 |
 | `src/economy/` | 货币、支付、库存、价格、账本。`accounts.js` 统一回答"某账户的粮券/小麦/库存存在哪"，`books.js` 统一当日/本年/累计三段记账，`trade.js` 统一买卖（带成本库存 `putStock`/`takeStock`、卖家列表 `directSellers`、直接采购 `buyDirect`） |
 | `src/selectors/` | 只读派生数据；界面数据总入口 `dashboard.js` 的 `selectDashboard` |
-| `src/persistence/` | 存档读写与旧档迁移（`migrations.js`） |
+| `src/persistence/` | 存档：IndexedDB 多存档位（`indexed-save-manager.js`）、带校验和的存档容器（`save-container.js`）、读档校验（`migrations.js` 的 `migrateSave`，只认当前版本） |
 | `src/ui/` | 界面：`shell.js` 骨架、`app.js` 渲染与事件、`panel-*.js` 各面板、`map*.js` 地图 |
 | `src/styles/main.css` | 全部样式 |
 | `src/engine.js` | 对外门面：`createSimulation()` 返回状态工厂 + 全部命令 + 校验，测试和脚本都用它 |
@@ -58,7 +58,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 
 ## 铁律
 
-1. **存档兼容**：只支持 v15 存档；新字段一律 `||=` 初始化；`SAVE_VERSION` 保持 15；旧档迁移（`normalizeV15`）优先保留存档值，别被新默认值覆盖。
+1. **不做旧档兼容**：只读当前 `SAVE_VERSION`（现为 16）的存档，旧版本直接拒绝、提示开新游戏。新字段在 `createInitialState` 给默认值、运行时用 `||=` 兜底；不兼容的结构改动就把 `SAVE_VERSION` 加一，不写迁移代码。
 2. **测试全绿**：`node --test` 零失败，新功能和修 bug 都要加测试。设计变了，验证旧行为的测试直接删掉，不必改写。
 3. **selector 只读**：`src/selectors/` 和 `selectDashboard` 里绝不写 state。
 4. **状态合法**：`validateState` 必须通过，禁止 NaN / Infinity / 负钱负粮。

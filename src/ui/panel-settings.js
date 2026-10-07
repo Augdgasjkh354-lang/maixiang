@@ -31,12 +31,10 @@ function slotCard(slot) {
 function diagnosticsMarkup(issue, stats) {
   if (!issue && !stats) return "";
   const idb = issue?.storageUsage?.indexedDB || stats?.indexedDB;
-  const local = issue?.storageUsage?.localStorage || stats?.localStorage;
   const rows = [];
   if (issue?.step) rows.push(`失败步骤：${escapeHtml(issue.step)}`);
   if (Number.isFinite(issue?.pendingBytes)) rows.push(`待写入：${bytes(issue.pendingBytes)}`);
-  if (idb) rows.push(`IndexedDB：主档 ${bytes(idb.primaryBytes)}；轮换备份 ${bytes(idb.backupBytes)}；遗留归档 ${bytes(idb.archiveBytes)}；合计 ${bytes(idb.totalBytes)}`);
-  if (local) rows.push(`遗留 localStorage：r01 主档 ${bytes(local.slotPrimaryBytes)}；旧单存档 ${bytes(local.oldSingleBytes)}；历史/自动备份 ${bytes(local.backupBytes)}；目录 ${bytes(local.catalogBytes)}；合计 ${bytes(local.totalBytes)}`);
+  if (idb) rows.push(`IndexedDB：主档 ${bytes(idb.primaryBytes)}；轮换备份 ${bytes(idb.backupBytes)}；合计 ${bytes(idb.totalBytes)}`);
   if (issue?.originalName) rows.push(`原始异常：${escapeHtml(issue.originalName)}${issue.originalMessage ? `：${escapeHtml(issue.originalMessage)}` : ""}`);
   return rows.length ? `<details class="cardlet" data-detail-key="storage-diagnostics"><summary>${issue ? "存储故障详情" : "存储详情"}</summary><p class="subtle">${rows.join("<br>")}</p><p class="subtle">这里只记录步骤与字节占用，不显示存档正文。</p></details>` : "";
 }
@@ -57,22 +55,6 @@ function recoveryMarkup(view, ui) {
     </div>
   </div>`;
 }
-
-function legacyMarkup(artifacts) {
-  if (!artifacts?.length) return "";
-  return `<div class="cardlet"><div class="setting-title">遗留 localStorage 数据</div>
-    <p class="subtle">原数据不会自动删除。只有已写入 IndexedDB 并完成逐字节读回校验的项目，才允许导出归档或清理对应 localStorage。</p>
-    <div class="save-list">${artifacts.map((row, index) => {
-      const key = escapeHtml(row.key);
-      const storageState = row.stillInLocalStorage ? "仍占用 localStorage" : "localStorage 已清理；IndexedDB 归档仍保留";
-      const verifyState = row.verified ? "归档已校验" : "归档未完成校验；原数据保留";
-      return `<div class="save-slot"><div class="save-slot-heading"><strong>${escapeHtml(row.label)}</strong></div>
-        <p class="subtle">${bytes(row.bytes)} · ${escapeHtml(storageState)} · ${escapeHtml(verifyState)}${row.readable ? "" : ` · 无法作为当前版本存档读取${row.readError ? `：${escapeHtml(row.readError)}` : ""}`}</p>
-        <div class="save-slot-actions">${row.verified ? `<button class="secondary" data-export-legacy="${key}">导出遗留数据</button>` : ""}${row.verified && row.stillInLocalStorage ? `<button class="danger-button" data-clean-legacy="${key}" data-legacy-index="${index}">清理此项 localStorage</button>` : ""}</div>
-      </div>`;
-    }).join("")}</div></div>`;
-}
-
 
 function buildIdentityMarkup(ui) {
   return `<div class="cardlet build-identity"><div class="setting-title">当前运行版本</div><p class="subtle">麦乡 ${escapeHtml(ui.appVersion || APP_VERSION)} · 构建 ${escapeHtml(ui.buildId || BUILD_ID)}<br>页面：${escapeHtml(ui.pageAddress || "未知")}</p></div>`;
@@ -97,7 +79,6 @@ export function renderSettings(view, error = null, ui = {}) {
         ${ui.transientMode ? "" : `<div class="save-input-row"><input id="saveAsName" maxlength="36" placeholder="新存档名称" aria-label="另存为名称"><button class="secondary" data-save-as ${ui.persistenceBusy ? "disabled" : ""}>另存为新存档</button></div>`}` : ""}
       <div class="settings-actions"><button class="primary" data-new-game ${ui.persistenceBusy ? "disabled" : ""}>新游戏</button><button class="secondary" data-import-save ${ui.persistenceIssue || ui.persistenceBusy ? "disabled" : ""}>导入存档文件</button><input id="saveImportFile" type="file" accept="application/json,.json" hidden></div>
       <h3>IndexedDB 本机存档</h3><div class="save-list">${slots.length ? slots.map(slotCard).join("") : `<p class="subtle">暂无可读取的持久存档。</p>`}</div>
-      ${legacyMarkup(ui.legacyArtifacts)}
     </div>` : `<div class="cardlet"><div class="setting-title">新游戏</div><p class="subtle">当前进度将保存，新局使用独立存档。</p><button class="primary" data-new-game ${ui.persistenceBusy ? "disabled" : ""}>新游戏</button></div>
       <div class="cardlet"><div class="setting-title">存档管理</div><p class="subtle" id="saveStatus" role="status">${escapeHtml(status)}</p><button class="secondary" data-open-save-manager>打开存档管理</button></div>
       <div class="cardlet"><div class="setting-title">音效</div><button class="secondary" id="soundToggle" aria-pressed="${Boolean(ui.soundMuted)}">${ui.soundMuted ? "开启音效" : "关闭音效"}</button></div>

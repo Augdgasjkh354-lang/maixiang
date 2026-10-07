@@ -95,9 +95,6 @@ export function payDailyWages(state, laborAtStart, content) {
       count: Math.max(0, Math.floor(project.workers || 0))
     }));
   });
-  const builderCreditFor = row => row.projectInstanceId
-    ? ((state.projects || []).find(project => project.instanceId === row.projectInstanceId)?.prepaidWageCreditUnits || 0)
-    : 0;
   const workerPay = [];
   const oldClaimTotals = {};
   const arrearsPaidByKey = {};
@@ -123,12 +120,10 @@ export function payDailyWages(state, laborAtStart, content) {
     const due = Math.round(Math.max(0, row.count * rate) * scale);
     if (!due) continue;
     const isConstruction = row.key === "builders";
-    const builderCredit = isConstruction ? builderCreditFor(row) : 0;
-    const credit = isConstruction ? Math.min(due, builderCredit) : 0;
     const project = isConstruction && row.projectInstanceId
       ? (state.projects || []).find(item => item.instanceId === row.projectInstanceId) : null;
-    if (credit && project) project.prepaidWageCreditUnits -= credit;
-    const payable = due - credit;
+    const credit = 0;
+    const payable = due;
     const payrollKey = isConstruction && project ? "builders::" + project.instanceId : row.key;
     oldClaimTotals[payrollKey] ??= 0;
     arrearsPaidByKey[payrollKey] ||= 0;
@@ -136,7 +131,6 @@ export function payDailyWages(state, laborAtStart, content) {
     currentDue[payrollKey] = (currentDue[payrollKey] || 0) + payable;
     arrears[payrollKey] = (arrears[payrollKey] || 0) + payable;
     recordWageExpense(state, row, payable, isConstruction ? "construction" : "operating", content);
-    if (credit > 0) recordLedger(state, { type: "wage_prepaid_credit", transactionId: makeTransactionId(state), source: project.instanceId, destination: "construction_payroll", itemId: "legacy_prepaid_wage", quantityUnits: credit, qeqUnits: 0, reason: "旧版工程已预付工资抵扣本日应付；不再次支付" }, content);
     workerPay.push({ key: row.key, payrollKey, scope: row.scope, roleId: row.roleId, buildingId: row.buildingId || (isConstruction ? project?.instanceId : null), buildingName: row.buildingName || (isConstruction ? "施工工程" : null), name: row.name, count: row.count, rate, due, credit, payable });
   }
 

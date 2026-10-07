@@ -10,7 +10,6 @@ import { householdIdOf } from "../economy/accounts.js";
 //    磨坊小麦、面包店面fen等原料由批发市场内部无偿调拨保障。小麦仍归镇库直管。
 // 3. 钱归镇库：批发市场是镇营机构，没有独立现金账户。收购付款、销售回款都直接走镇库
 //    （支付账户 "town"）；小麦一直在镇库，市场只管面粉/面包/木材/盐的库存与挂价。
-//    旧档里的市场现金与小麦在载入时并回镇库（mergeWholesaleCashIntoTown）。
 //
 // 兼容性：`pricesVoucherPerUnit` 继续表示「售价」，沿用 0.1.x 的字段名与语义，
 // 旧档与旧测试不受影响；收购价放在新字段 `purchasePricesVoucherPerUnit`（||= 初始化）。
@@ -89,35 +88,6 @@ export function ensureWholesaleMarket(state, content) {
   return market;
 }
 
-// 旧档兼容：0.2.3 早期批发市场有独立现金（粮券与小麦），载入时并回镇库并删除字段。
-// 粮券是账户间转移，不改变发行量；小麦按 1 斤 = 1 斤小麦等值补回镇库成本基础。
-export function mergeWholesaleCashIntoTown(state) {
-  const market = state.wholesaleMarket;
-  if (!market) return;
-  const voucherUnits = Number.isSafeInteger(market.cashVoucherUnits) && market.cashVoucherUnits > 0 ? market.cashVoucherUnits : 0;
-  const wheatUnits = Number.isSafeInteger(market.cashWheatUnits) && market.cashWheatUnits > 0 ? market.cashWheatUnits : 0;
-  if (voucherUnits > 0) {
-    const currency = ensureCurrencyState(state);
-    currency.balances.town = (currency.balances.town || 0) + voucherUnits;
-  }
-  if (wheatUnits > 0) {
-    state.accounts ||= {};
-    state.accounts.town ||= {};
-    state.accounts.town.wheat = (state.accounts.town.wheat || 0) + wheatUnits;
-    addTownCostBasis(state, "wheat", wheatUnits);
-  }
-  delete market.cashVoucherUnits;
-  delete market.cashWheatUnits;
-  delete market.monopolyWages;
-  if (market.monopoly) {
-    delete market.monopoly.wagesPaidVoucherUnits;
-    delete market.monopoly.injectedVoucherUnits;
-    delete market.monopoly.retainedVoucherUnits;
-    delete market.monopoly.subsidizedWheatUnits;
-    delete market.monopoly.wageSplit;
-  }
-  if (state.policy) delete state.policy.wholesaleDailyWheatJin;
-}
 
 function emptyItemMap(value = 0) {
   return Object.fromEntries(WHOLESALE_ITEM_IDS.map(itemId => [itemId, value]));

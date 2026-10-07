@@ -773,7 +773,7 @@ return { BUILDINGS };
 
 // ===== content/rules.js =====
 const __mxmod1 = (() => {
-const SAVE_VERSION = 15;
+const SAVE_VERSION = 16;
 
        const RULES = Object.freeze({
   saveVersion: SAVE_VERSION,
@@ -1990,7 +1990,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod13 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-405cac5";
+       const BUILD_ID = "0203-08a4872";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -3768,19 +3768,6 @@ const MONETARY_STAGE_WHEAT = "wheat";
   return reform;
 }
 
-// 旧档兼容：过渡期存档直接视为已完成改革；删除过渡期专用字段。
-       function migrateMonetaryReform(state) {
-  const reform = state.monetaryReform;
-  if (!reform) return;
-  if (reform.stage === "transition") {
-    reform.stage = MONETARY_STAGE_VOUCHER;
-    reform.completed ||= { year: state.year, day: state.day + 1, fromTransition: true };
-  }
-  delete reform.targetVoucherBps;
-  delete reform.residentExchangeEnabled;
-  delete reform.paymentHistory;
-  delete reform.voucherShortfallByKey;
-}
 
        function hasCompletedBank(state) {
   return (state.buildings || []).some(row => row.typeId === "bank");
@@ -4156,7 +4143,7 @@ function maximumPayableValueUnitsFromContext(context) {
   reform.completed = { year: state.year, day };
   return { ok: true, stage: reform.stage, printedVoucherUnits: printUnits };
 }
-return { MONETARY_STAGE_WHEAT, MONETARY_STAGE_VOUCHER, ensureMonetaryReform, migrateMonetaryReform, hasCompletedBank, hasBankAccess, paymentWheatBalanceUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, startMonetaryReform };
+return { MONETARY_STAGE_WHEAT, MONETARY_STAGE_VOUCHER, ensureMonetaryReform, hasCompletedBank, hasBankAccess, paymentWheatBalanceUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, startMonetaryReform };
 })();
 
 // ===== systems/agriculture.js =====
@@ -4477,83 +4464,6 @@ function wageBook(holder) {
   return { paid, rows };
 }
 
-// ---------------------------------------------------------------- 旧档欠薪
-
-// 把只有总额的旧欠薪分给家庭：优先按岗位在岗户，岗位已撤销时按各户人口分配。
-function attributeUnits(state, book, units, assignments) {
-  const total = Math.max(0, Math.round(Number(units) || 0));
-  if (total <= 0) return;
-  const byId = state.households?.byId || {};
-  const weights = {};
-  for (const row of assignments || []) {
-    if (row?.householdId && byId[row.householdId] && row.count > 0) weights[row.householdId] = (weights[row.householdId] || 0) + row.count;
-  }
-  let households = Object.keys(weights).map(id => byId[id]);
-  if (!households.length) {
-    for (const household of Object.values(byId)) {
-      const bands = household?.ageBands || {};
-      const people = (bands.children || 0) + (bands.workers || 0) + (bands.elders || 0);
-      if (people > 0) { households.push(household); weights[household.id] = people; }
-    }
-  }
-  const allocation = allocateIntegerByWeight(total, households, household => weights[household.id] || 0);
-  if (!allocation.ok) return;
-  wageBook(book);
-  for (const { recipient: household, units: share } of allocation.rows) {
-    if (share <= 0) continue;
-    book.claimsVoucherUnits[household.id] = (book.claimsVoucherUnits[household.id] || 0) + share;
-    book.claimsPayment[household.id] = addPaymentObligation(book.claimsPayment[household.id],
-      { valueUnits: share, wheatValueUnits: 0, voucherValueUnits: share });
-  }
-}
-
-function absorbBook(state, book, recordedTotal, assignments) {
-  wageBook(book);
-  attributeUnits(state, book, Math.max(0, Math.round(Number(recordedTotal) || 0)) - wageArrears(book), assignments);
-}
-
-// 读档时调用一次：各雇主记录的欠薪总额与家庭债权之差分配到家庭，并清掉旧字段。
-       function absorbLegacyWageArrears(state, content) {
-  const payroll = state.payroll;
-  if (payroll) {
-    payroll.creditorClaims ||= {};
-    payroll.creditorPaymentClaims ||= {};
-    payroll.arrearsVoucherUnits ||= {};
-    for (const key of Object.keys(payroll.arrearsVoucherUnits).sort()) {
-      if (key.endsWith("::merchants") || key.endsWith("::shop_clerks")) {
-        delete payroll.arrearsVoucherUnits[key]; delete payroll.creditorClaims[key]; delete payroll.creditorPaymentClaims[key];
-        continue;
-      }
-      const book = { claimsVoucherUnits: payroll.creditorClaims[key] ||= {}, claimsPayment: payroll.creditorPaymentClaims[key] ||= {} };
-      absorbBook(state, book, payroll.arrearsVoucherUnits[key], jobAssignments(state, key.startsWith("builders::") ? "builders" : key));
-      payroll.arrearsVoucherUnits[key] = wageArrears(book);
-    }
-    delete payroll.legacyUnattributedArrearsVoucherUnits;
-    delete payroll.legacyUnattributedPaymentClaims;
-  }
-  for (const [buildingId, book] of Object.entries(state.privateEconomy?.payrollByBuilding || {})) {
-    const building = (state.buildings || []).find(row => row.id === buildingId);
-    const job = building && content.buildings[building.typeId]?.jobs?.[0];
-    absorbBook(state, book, book.arrearsVoucherUnits, job ? jobAssignments(state, `${buildingId}::${job.id}::private`) : []);
-    book.arrearsVoucherUnits = wageArrears(book);
-    delete book.legacyUnattributedArrearsVoucherUnits; delete book.legacyUnattributedPaymentClaim;
-  }
-  for (const company of Object.values(state.companies || {})) {
-    if (!company.payroll) continue;
-    const job = content.buildings[company.typeId]?.jobs?.[0];
-    absorbBook(state, company.payroll, company.payroll.arrearsVoucherUnits, job ? jobAssignments(state, `${company.buildingId}::${job.id}::listed`) : []);
-    company.payroll.arrearsVoucherUnits = wageArrears(company.payroll);
-    delete company.payroll.legacyUnattributedArrearsVoucherUnits; delete company.payroll.legacyUnattributedPaymentClaim;
-  }
-  for (const shop of Object.values(state.shops || {})) {
-    if (!shop.liabilities) continue;
-    const assignments = jobAssignments(state, `shop:${shop.id}:merchant`).concat(jobAssignments(state, `shop:${shop.id}:clerk`));
-    absorbBook(state, shop.liabilities, shop.liabilities.wageVoucherUnits, assignments);
-    shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
-    delete shop.liabilities.legacyUnattributedWageVoucherUnits; delete shop.liabilities.legacyUnattributedWagePaymentClaim;
-  }
-}
-
 // ---------------------------------------------------------------- 生产共用
 
 // 行业生产税（实物）：按税率从产出里扣，零头记在 carry[carryKey] 里下次累计。
@@ -4570,7 +4480,7 @@ function absorbBook(state, book, recordedTotal, assignments) {
   setCount(Math.min(desired, current + idle));
   return idle - (readCount() - current);
 }
-return { wageBook, wageArrears, accrueWages, payWages, absorbLegacyWageArrears, productionTaxUnits, hireToward };
+return { wageBook, wageArrears, accrueWages, payWages, productionTaxUnits, hireToward };
 })();
 
 // ===== systems/social-security.js =====
@@ -4609,28 +4519,6 @@ function requireOffice(state) {
   return hasSocialSecurityOffice(state) ? null : { ok: false, reason: "需先建成社保局" };
 }
 
-// 旧档兼容：早期基金只是镇库里的记账标签（balanceUnits），钱实际在镇库。
-// 载入时按标签余额把钱从镇库划入基金钱包（镇库不足时有多少划多少），历史注资计为负债。
-       function migrateSocialSecurityWallet(state) {
-  const ss = ensureSocialSecurity(state);
-  if (ss.balanceUnits === undefined) return;
-  const label = Math.max(0, Math.floor(Number(ss.balanceUnits) || 0));
-  delete ss.balanceUnits;
-  const currency = state.currency;
-  const townVouchers = Math.max(0, currency?.balances?.town || 0);
-  const fromVouchers = Math.min(label, townVouchers);
-  if (fromVouchers > 0) {
-    currency.balances.town = townVouchers - fromVouchers;
-    ss.cashVoucherUnits += fromVouchers;
-  }
-  const townWheat = Math.max(0, state.accounts?.town?.wheat || 0);
-  const fromWheat = Math.min(label - fromVouchers, townWheat);
-  if (fromWheat > 0) {
-    state.accounts.town.wheat = townWheat - fromWheat;
-    ss.cashWheatUnits += fromWheat;
-  }
-  ss.debtToTownUnits = Math.max(ss.debtToTownUnits || 0, ss.totalInjectedUnits || 0);
-}
 
        function fundValueUnits(state, content) {
   return maximumPayableValueUnits(state, SOCIAL_OWNER, content);
@@ -4875,7 +4763,7 @@ function listedCompany(state, companyId) {
     totalDividendJin: jin(ss.totalDividendUnits)
   };
 }
-return { SOCIAL_OWNER, DEFAULT_SS_DAILY_JIN, DEFAULT_SS_PENSION_JIN, ensureSocialSecurity, hasSocialSecurityOffice, migrateSocialSecurityWallet, fundValueUnits, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, payFromFund, chargeFundForRelief, collectSocialContributions, payPensions, fundBuyShares, fundSellShares, recordFundDividend, selectSocialSecurityStats };
+return { SOCIAL_OWNER, DEFAULT_SS_DAILY_JIN, DEFAULT_SS_PENSION_JIN, ensureSocialSecurity, hasSocialSecurityOffice, fundValueUnits, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, payFromFund, chargeFundForRelief, collectSocialContributions, payPensions, fundBuyShares, fundSellShares, recordFundDividend, selectSocialSecurityStats };
 })();
 
 // ===== systems/payroll.js =====
@@ -4976,9 +4864,6 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
       count: Math.max(0, Math.floor(project.workers || 0))
     }));
   });
-  const builderCreditFor = row => row.projectInstanceId
-    ? ((state.projects || []).find(project => project.instanceId === row.projectInstanceId)?.prepaidWageCreditUnits || 0)
-    : 0;
   const workerPay = [];
   const oldClaimTotals = {};
   const arrearsPaidByKey = {};
@@ -5004,12 +4889,10 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
     const due = Math.round(Math.max(0, row.count * rate) * scale);
     if (!due) continue;
     const isConstruction = row.key === "builders";
-    const builderCredit = isConstruction ? builderCreditFor(row) : 0;
-    const credit = isConstruction ? Math.min(due, builderCredit) : 0;
     const project = isConstruction && row.projectInstanceId
       ? (state.projects || []).find(item => item.instanceId === row.projectInstanceId) : null;
-    if (credit && project) project.prepaidWageCreditUnits -= credit;
-    const payable = due - credit;
+    const credit = 0;
+    const payable = due;
     const payrollKey = isConstruction && project ? "builders::" + project.instanceId : row.key;
     oldClaimTotals[payrollKey] ??= 0;
     arrearsPaidByKey[payrollKey] ||= 0;
@@ -5017,7 +4900,6 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
     currentDue[payrollKey] = (currentDue[payrollKey] || 0) + payable;
     arrears[payrollKey] = (arrears[payrollKey] || 0) + payable;
     recordWageExpense(state, row, payable, isConstruction ? "construction" : "operating", content);
-    if (credit > 0) recordLedger(state, { type: "wage_prepaid_credit", transactionId: makeTransactionId(state), source: project.instanceId, destination: "construction_payroll", itemId: "legacy_prepaid_wage", quantityUnits: credit, qeqUnits: 0, reason: "旧版工程已预付工资抵扣本日应付；不再次支付" }, content);
     workerPay.push({ key: row.key, payrollKey, scope: row.scope, roleId: row.roleId, buildingId: row.buildingId || (isConstruction ? project?.instanceId : null), buildingName: row.buildingName || (isConstruction ? "施工工程" : null), name: row.name, count: row.count, rate, due, credit, payable });
   }
 
@@ -6093,35 +5975,6 @@ const WHOLESALE_ITEM_IDS = Object.freeze(["wheat", "flour", "bread", "wood", "sa
   return market;
 }
 
-// 旧档兼容：0.2.3 早期批发市场有独立现金（粮券与小麦），载入时并回镇库并删除字段。
-// 粮券是账户间转移，不改变发行量；小麦按 1 斤 = 1 斤小麦等值补回镇库成本基础。
-       function mergeWholesaleCashIntoTown(state) {
-  const market = state.wholesaleMarket;
-  if (!market) return;
-  const voucherUnits = Number.isSafeInteger(market.cashVoucherUnits) && market.cashVoucherUnits > 0 ? market.cashVoucherUnits : 0;
-  const wheatUnits = Number.isSafeInteger(market.cashWheatUnits) && market.cashWheatUnits > 0 ? market.cashWheatUnits : 0;
-  if (voucherUnits > 0) {
-    const currency = ensureCurrencyState(state);
-    currency.balances.town = (currency.balances.town || 0) + voucherUnits;
-  }
-  if (wheatUnits > 0) {
-    state.accounts ||= {};
-    state.accounts.town ||= {};
-    state.accounts.town.wheat = (state.accounts.town.wheat || 0) + wheatUnits;
-    addTownCostBasis(state, "wheat", wheatUnits);
-  }
-  delete market.cashVoucherUnits;
-  delete market.cashWheatUnits;
-  delete market.monopolyWages;
-  if (market.monopoly) {
-    delete market.monopoly.wagesPaidVoucherUnits;
-    delete market.monopoly.injectedVoucherUnits;
-    delete market.monopoly.retainedVoucherUnits;
-    delete market.monopoly.subsidizedWheatUnits;
-    delete market.monopoly.wageSplit;
-  }
-  if (state.policy) delete state.policy.wholesaleDailyWheatJin;
-}
 
 function emptyItemMap(value = 0) {
   return Object.fromEntries(WHOLESALE_ITEM_IDS.map(itemId => [itemId, value]));
@@ -6655,7 +6508,7 @@ function readPurchasePrice(market, itemId, content) {
   }
   return result;
 }
-return { WHOLESALE_ITEM_IDS, WHOLESALE_MONOPOLY_ITEM_IDS, DEFAULT_PURCHASE_PRICES, DEFAULT_SALE_PRICES, INVENTORY_PRICE_FEEDBACK_ELASTICITY, INVENTORY_PRICE_FEEDBACK_SCALE, PURCHASE_PRICE_FLOOR_RATIO, ensureWholesaleMarket, mergeWholesaleCashIntoTown, hasWholesaleMarket, resetWholesaleDay, resetWholesaleYear, wholesaleUnitPrice, wholesalePurchasePrice, purchasePriceFeedback, refreshWholesalePurchasePrices, setWholesalePrice, setWholesalePurchasePrice, wholesalePurchaseQuote, setWholesaleTownAllocation, takeWholesaleInventoryForExport, transferTownToWholesale, stockpileWholesale, releaseWholesale, allocateTownOutputToWholesale, allocateInputToTown, depositWholesalePurchasedInventory, runWholesaleIntake, procureTownInputFromWholesale, buyWholesaleForOwner, readWholesaleMarket, wholesaleSummary, snapshotWholesaleHistory, wholesaleAvgSoldUnits, wholesaleTrends };
+return { WHOLESALE_ITEM_IDS, WHOLESALE_MONOPOLY_ITEM_IDS, DEFAULT_PURCHASE_PRICES, DEFAULT_SALE_PRICES, INVENTORY_PRICE_FEEDBACK_ELASTICITY, INVENTORY_PRICE_FEEDBACK_SCALE, PURCHASE_PRICE_FLOOR_RATIO, ensureWholesaleMarket, hasWholesaleMarket, resetWholesaleDay, resetWholesaleYear, wholesaleUnitPrice, wholesalePurchasePrice, purchasePriceFeedback, refreshWholesalePurchasePrices, setWholesalePrice, setWholesalePurchasePrice, wholesalePurchaseQuote, setWholesaleTownAllocation, takeWholesaleInventoryForExport, transferTownToWholesale, stockpileWholesale, releaseWholesale, allocateTownOutputToWholesale, allocateInputToTown, depositWholesalePurchasedInventory, runWholesaleIntake, procureTownInputFromWholesale, buyWholesaleForOwner, readWholesaleMarket, wholesaleSummary, snapshotWholesaleHistory, wholesaleAvgSoldUnits, wholesaleTrends };
 })();
 
 // ===== systems/public-procurement.js =====
@@ -6978,7 +6831,6 @@ function totalProjectWorkers(state) {
     workRequired: construction.workDays,
     recommendedWorkers: construction.recommendedWorkers,
     workers: 0,
-    prepaidWageCreditUnits: 0,
     materialsConsumed: materialLines.map(line => ({ itemId: line.itemId, quantityUnits: line.quantityUnits, sourceOwner: line.sourceOwner, transactionId: materialTransactionId })),
     started: (() => {
       // 年末最后一天开工，年份进位（之前只封顶天数，年份没进位）。
@@ -7058,11 +6910,10 @@ function finishProject(state, project, content, results) {
       });
     }
     const name = content.buildings[project.typeId]?.name || project.typeId;
-    const unusedCredit = project.prepaidWageCreditUnits || 0;
     releaseProjectWorkers(state, project, content);
     recordEvent(state, `${name}原地扩建完成，现为${upgraded.level}级；新增岗位保持空缺。`, content, { day: state.day + 1 });
-    results.push({ instanceId: project.instanceId, status: "completed", completed: true, upgraded: true, building: upgraded, unusedCredit, workers: 0 });
-    return { instanceId: project.instanceId, result: { status: "completed", completed: true, building: upgraded, upgraded: true, unusedCredit } };
+    results.push({ instanceId: project.instanceId, status: "completed", completed: true, upgraded: true, building: upgraded, workers: 0 });
+    return { instanceId: project.instanceId, result: { status: "completed", completed: true, building: upgraded, upgraded: true } };
   }
   const plot = state.plots.find(function (item) { return item.id === project.plotId; });
   const definition = content.buildings[project.typeId];
@@ -7085,26 +6936,8 @@ function finishProject(state, project, content, results) {
   state.buildings.push(building);
   initializeBuildingJobs(state, building, content);
   const name = definition ? definition.name : project.typeId;
-  const unusedCredit = project.prepaidWageCreditUnits || 0;
-  if (unusedCredit > 0) {
-    if (!state.payroll) state.payroll = { arrearsWheatUnits: {}, totals: {} };
-    if (!state.payroll.closedProjectCredits) state.payroll.closedProjectCredits = {};
-    state.payroll.closedProjectCredits[project.instanceId] = unusedCredit;
-    recordLedger(state, {
-      type: "construction_prepaid_remainder",
-      transactionId: makeTransactionId(state),
-      source: project.instanceId,
-      destination: "construction_investment",
-      itemId: "wheat",
-      quantityUnits: unusedCredit,
-      qeqUnits: unusedCredit * content.precision.qeqUnitsPerJin /
-        content.precision.inventoryUnitsPerJin,
-      reason: "工程完工时尚未抵扣的旧预付施工粮酬，保留为已付建设投入"
-    }, content);
-  }
   releaseProjectWorkers(state, project, content);
-  recordEvent(state, name + "落成，可以安排工人开工了。" +
-    (unusedCredit > 0 ? "剩余旧预付款仍记作已付建设投入。" : ""), content,
+  recordEvent(state, name + "落成，可以安排工人开工了。", content,
     { day: state.day + 1 });
   results.push({ instanceId: project.instanceId, status: "completed", completed: true, building, workers: 0 });
   return { instanceId: project.instanceId, result: { status: "completed", completed: true, building } };
@@ -7452,7 +7285,6 @@ function projectsForBuilding(state, building) {
     workDone: 0, workRequired: definition.upgrade.workDays,
     recommendedWorkers: definition.upgrade.recommendedWorkers || definition.construction.recommendedWorkers,
     workers: 0,
-    prepaidWageCreditUnits: 0,
     materialsConsumed: lines.map(row => ({ itemId: row.itemId, quantityUnits: row.quantityUnits, sourceOwner: row.sourceOwner, transactionId: row.transactionId })),
     started: { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) }
   };
@@ -12454,23 +12286,7 @@ function settleTownBondPayables(state, bonds, content) {
   }
   return { issues: bonds.issues.length, outstandingVoucherUnits: bondOutstandingVoucherUnits(state) };
 }
-
-// 旧档兼容：认购中的旧国债按已认购部分直接生效，取消拍卖相关字段。
-       function migrateBonds(state) {
-  const bonds = state.bonds;
-  if (!bonds || !Array.isArray(bonds.issues)) return;
-  delete bonds.creditPenaltyBps;
-  for (const issue of bonds.issues) {
-    delete issue.startRateAnnualPercent;
-    if (issue.status !== "subscribing") continue;
-    issue.holdings = Object.entries(issue.subscriptions || {}).filter(([, units]) => units > 0)
-      .map(([holderKey, units]) => ({ holderKey, principalVoucherUnits: units }));
-    issue.subscriptions = {};
-    issue.totalVoucherUnits = issue.subscribedVoucherUnits || 0;
-    issue.status = issue.holdings.length ? "active" : "failed";
-  }
-}
-return { BOND_MAX_EXTENSIONS, ensureBondState, bondAvailable, bondOutstandingVoucherUnits, issueGovernmentBond, subscribeBond, redeemBondEarly, settleBondsDay, migrateBonds };
+return { BOND_MAX_EXTENSIONS, ensureBondState, bondAvailable, bondOutstandingVoucherUnits, issueGovernmentBond, subscribeBond, redeemBondEarly, settleBondsDay };
 })();
 
 // ===== systems/outside-town.js =====
@@ -15538,51 +15354,7 @@ function companyDistributionIndex(state, reports = []) {
     if (report.companies[row.companyId]) report.companies[row.companyId].distribution = compactCompanyDistribution(row);
   }
 }
-
-       function summarizeLegacyAnnualReports(state) {
-  const reports = Array.isArray(state.annualReports) ? state.annualReports : [];
-  const distributions = companyDistributionIndex(state, reports);
-  return reports.map(report => {
-    if (!report || typeof report !== "object") return report;
-    const companies = {};
-    for (const [companyId, company] of Object.entries(report.companies || {})) {
-      const distribution = distributions.get(`${report.year}:${companyId}`) || company.distribution || null;
-      companies[companyId] = companyAnnualSummary({ id: companyId, ...company }, distribution);
-    }
-    const shops = {};
-    for (const [shopId, shop] of Object.entries(report.shops || {})) shops[shopId] = shopAnnualSummary({ id: shopId, ...shop });
-    const industries = {};
-    for (const [sector, value] of Object.entries(report.industries || {})) industries[sector] = annualPeriod(value);
-    const privateEconomy = report.privateEconomy?.year
-      ? { year: cloneValue(report.privateEconomy.year), rightSalesYearWheatUnits: report.privateEconomy.rightSales?.yearWheatUnits || 0 }
-      : { year: cloneValue(report.privateEconomy?.year || report.privateEconomy || {}), rightSalesYearWheatUnits: report.privateEconomy?.rightSalesYearWheatUnits || 0 };
-    const totals = Object.fromEntries(YEAR_TOTAL_FIELDS.map(key => [key, report[key] || 0]));
-    return {
-      summaryVersion: 1,
-      year: report.year,
-      ...totals,
-      business: annualPeriod(report.business),
-      payroll: annualPeriod(report.payroll),
-      industries,
-      privateEconomy,
-      agricultureTax: cloneValue(report.agricultureTax || []),
-      financialFlows: annualPeriod(report.financialFlows),
-      fiscal: annualPeriod(report.fiscal),
-      salt: annualPeriod(report.salt),
-      companies,
-      shops,
-      householdLife: cloneValue(report.householdLife || null),
-      populationAtClose: report.populationAtClose,
-      populationAfterAging: report.populationAfterAging,
-      births: report.births || 0,
-      deaths: report.deaths || 0,
-      marriages: report.marriages || 0,
-      laborChange: cloneValue(report.laborChange || null),
-      closingQeq: report.closingQeq || 0
-    };
-  });
-}
-return { buildAnnualReport, applyCompanyDistributionsToAnnualReport, summarizeLegacyAnnualReports };
+return { buildAnnualReport, applyCompanyDistributionsToAnnualReport };
 })();
 
 // ===== systems/daily.js =====
@@ -16872,504 +16644,27 @@ return { createSimulation, simulation, CONTENT, createInitialState, validateStat
 // ===== persistence/migrations.js =====
 const __mxmod76 = (() => {
 const { CONTENT } = __mxmod6;
-const { PERIODS } = __mxmod16;
 const { validateState } = __mxmod59;
-const { addTownCostBasis } = __mxmod17;
+const { ensureProjectAccessor } = __mxmod19;
 const { syncShopEmployment } = __mxmod49;
-const { summarizeLegacyAnnualReports } = __mxmod69;
-const { ensureWholesaleMarket, mergeWholesaleCashIntoTown } = __mxmod32;
-const { migrateSocialSecurityWallet } = __mxmod25;
-const { migrateMonetaryReform } = __mxmod22;
-const { migrateBonds } = __mxmod55;
-const { absorbLegacyWageArrears } = __mxmod24;
-const { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } = __mxmod15;
-const { defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor } = __mxmod19;
+const { syncResidentAggregates } = __mxmod15;
 function cloneJson(value) {
   if (typeof globalThis.structuredClone === "function") return globalThis.structuredClone(value);
   return JSON.parse(JSON.stringify(value));
 }
 
-// 旧档 state.project 是单对象或 null；幂等迁移为 state.projects 数组。
-// 有则单元素（补齐并行施工所需字段），无则空数组。不改存档版本号，不重算既有收成/在岗。
-function migrateProjects(raw, state) {
-  if (Array.isArray(state.projects)) {
-    state.projects = state.projects.filter(row => row && typeof row === "object");
-  } else if (raw?.project && typeof raw.project === "object") {
-    state.projects = [cloneJson(raw.project)];
-  } else if (state.project && typeof state.project === "object") {
-    state.projects = [state.project];
-  } else {
-    state.projects = [];
-  }
-  for (const project of state.projects) {
-    project.kind ||= "build";
-    if (!Array.isArray(project.materialsConsumed)) project.materialsConsumed = [];
-    if (!Number.isInteger(project.workers) || project.workers < 0) {
-      // 旧档没有“每工程投入人数”：按旧模型该工程独占全部营造工，迁移时如实登记。
-      project.workers = Math.max(0, Math.floor(Number(project.workers) || 0));
-    }
-    if (!Number.isSafeInteger(project.prepaidWageCreditUnits)) project.prepaidWageCreditUnits = 0;
-    if (project.kind === "upgrade") {
-      project.targetLevel ||= (state.buildings?.find(row => row.id === project.buildingId)?.level || 1) + 1;
-    }
-  }
-  // 兼容单工程访问器：旧迁移函数仍可能通过 state.project 读写。
-  ensureProjectAccessor(state);
-  return state;
-}
-
-function cohortBandTotals(state) {
-  const totals = { children: 0, workers: 0, elders: 0 };
-  for (const cohort of state.cohorts || []) {
-    const count = Math.max(0, Number(cohort.m) || 0) + Math.max(0, Number(cohort.f) || 0);
-    if (cohort.age < 18) totals.children += count;
-    else if (cohort.age < 65) totals.workers += count;
-    else totals.elders += count;
-  }
-  return totals;
-}
-
-function householdIdOrder(a, b) {
-  const number = value => Number(String(value?.id || value || "").match(/(\d+)$/)?.[1] || Number.MAX_SAFE_INTEGER);
-  return number(a) - number(b) || String(a?.id || a).localeCompare(String(b?.id || b));
-}
-
-function calibrateHouseholdBandsToCohorts(state) {
-  const households = householdList(state).slice().sort(householdIdOrder);
-  if (!households.length) throw new Error("v10 存档缺少家庭，无法迁移人口。");
-  const before = totalHouseholdAgeBands(state);
-  const target = cohortBandTotals(state);
-  const adjustments = {};
-  const touch = (household, band, delta) => {
-    if (!delta) return;
-    household.ageBands[band] += delta;
-    adjustments[household.id] ||= { children: 0, workers: 0, elders: 0 };
-    adjustments[household.id][band] += delta;
-  };
-  for (const band of ["children", "workers", "elders"]) {
-    let delta = target[band] - households.reduce((sum, h) => sum + h.ageBands[band], 0);
-    if (delta > 0) {
-      let cursor = 0;
-      while (delta > 0) {
-        const household = households[cursor % households.length];
-        touch(household, band, 1);
-        delta -= 1;
-        cursor += 1;
-      }
-    } else if (delta < 0) {
-      let left = -delta;
-      // Deterministic constrained removal: highest current count first, then stable household id.
-      while (left > 0) {
-        const candidates = households.filter(h => h.ageBands[band] > 0)
-          .sort((a, b) => b.ageBands[band] - a.ageBands[band] || householdIdOrder(a, b));
-        if (!candidates.length) throw new Error("v10 家庭人口校准失败：" + band);
-        for (const household of candidates) {
-          if (left <= 0) break;
-          touch(household, band, -1);
-          left -= 1;
-        }
-      }
-    }
-  }
-  return { before, target, after: totalHouseholdAgeBands(state), adjustments };
-}
-
-function normalizeV11(raw, definitions) {
-  const state = cloneJson(raw);
-  state.version = 11;
-  state.schemaVersion = 11;
-  // 尽早把旧单工程迁移为 projects 数组并装好兼容访问器，后续归一化与运行期都按数组读写。
-  migrateProjects(raw, state);
-  state.accounts ||= { residents: {}, town: {} };
-  for (const owner of ["residents", "town"]) {
-    state.accounts[owner] ||= {};
-    for (const itemId of Object.keys(definitions.items)) state.accounts[owner][itemId] ??= 0;
-  }
-  if (!state.households?.byId) throw new Error("v11 存档缺少家庭账户。");
-  state.households.exchange ||= { dayKey: null, eligibleByHousehold: {}, usedByHousehold: {} };
-  state.households.exchange.eligibleByHousehold ||= {};
-  state.households.exchange.usedByHousehold ||= {};
-  for (const household of Object.values(state.households.byId || {})) {
-    household.ageBands ||= { children: 0, workers: 0, elders: 0 };
-    household.jobs ||= {};
-    household.inventory ||= {};
-    for (const itemId of Object.keys(definitions.items)) household.inventory[itemId] ??= 0;
-    household.voucherUnits ??= 0;
-    household.shares ||= {};
-    household.shopIds ||= [];
-    household.operatingRights ||= [];
-    household.life ||= { day: {}, year: {}, cumulative: {}, recent: [], satisfaction: null, satisfactionHistory: [] };
-  }
-  for (const building of state.buildings || []) {
-    building.ownership ||= { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
-    building.ownership.townLevels ??= building.level || 1;
-    building.ownership.privateLevels ??= 0;
-    building.ownership.listedLevels ??= 0;
-    building.privateOwners ||= [];
-  }
-  state.market ||= {};
-  state.market.pricesVoucherPerUnit = { ...(definitions.rules.marketPricesVoucherPerUnit || {}), ...(state.market.pricesVoucherPerUnit || {}) };
-  state.market.operatingPlan ||= { updatedSerial: -1, rotation: {}, rows: {}, demand: {} };
-  state.market.consumerHistory ||= { bread: [], salt: [], wood: [] };
-  state.market.publicProcurementDemand ||= {};
-  state.privateEconomy ||= {};
-  state.privateEconomy.plans ||= {};
-  state.privateEconomy.payrollByBuilding ||= {};
-  for (const payroll of Object.values(state.privateEconomy.payrollByBuilding)) {
-    payroll.claimsVoucherUnits ||= {};
-  }
-  state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
-  state.payroll.creditorClaims ||= {};
-  state.shops ||= {};
-  state.nextShopNumber ||= Object.keys(state.shops).length + 1;
-  for (const shop of Object.values(state.shops)) {
-    shop.inventory ||= {};
-    for (const itemId of Object.keys(definitions.items)) shop.inventory[itemId] ??= 0;
-    shop.history ||= [];
-    shop.plan ||= { lastAdjustedSerial: -1 };
-    shop.retainedEarningsVoucherUnits ??= 0;
-    shop.liabilities ||= { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 };
-    shop.liabilities.claimsVoucherUnits ||= {};
-  }
-  for (const company of Object.values(state.companies || {})) {
-    company.inventory ||= {};
-    for (const itemId of Object.keys(definitions.items)) company.inventory[itemId] ??= 0;
-    company.householdShares ||= {};
-    company.history ||= [];
-    company.plan ||= { ageDays: 0 };
-    company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0 };
-    company.payroll.claimsVoucherUnits ||= {};
-  }
-  state.policy ||= {};
-  state.policy.employmentExchangeJin ??= definitions.rules.employmentExchangeDefaultJin ?? 2;
-  state.policy.shopRentVoucher ??= definitions.rules.shopRentDefaultVoucher ?? 1;
-  state.policy.shopProfitTaxPercent ??= definitions.rules.shopProfitTaxDefaultPercent ?? 10;
-  state.employment ||= {};
-  state.employment.wageRates = { ...defaultWageRates(definitions), ...(state.employment.wageRates || {}) };
-  delete state.employment.roles;
-  delete state.employment.byBuilding;
-  delete state.employment.privateByBuilding;
-  delete state.employment.listedByBuilding;
-  syncShopEmployment(state, definitions);
-  syncResidentAggregates(state, definitions);
-  return state;
-}
-
-function legacyVoucherObligation(units) {
-  const value = Math.max(0, Math.round(Number(units) || 0));
-  return { valueUnits: value, wheatValueUnits: 0, voucherValueUnits: value };
-}
-
-function normalizeV12(raw, definitions, legacyCompleted = false) {
-  const state = normalizeV11(raw, definitions);
-  state.version = 12;
-  state.schemaVersion = 12;
-  state.monetaryReform ||= { stage: "wheat", legacyBankAccess: false, started: null, completed: null };
-  migrateMonetaryReform(state);
-  state.monetaryReform.legacyBankAccess = Boolean(state.monetaryReform.legacyBankAccess || legacyCompleted);
-
-  state.payroll.creditorPaymentClaims ||= {};
-  for (const [payrollKey, claims] of Object.entries(state.payroll.creditorClaims || {})) {
-    const target = state.payroll.creditorPaymentClaims[payrollKey] ||= {};
-    for (const [householdId, units] of Object.entries(claims || {})) target[householdId] ||= legacyVoucherObligation(units);
-  }
-
-  for (const [buildingId, payroll] of Object.entries(state.privateEconomy.payrollByBuilding || {})) {
-    payroll.claimsPayment ||= {};
-    for (const [householdId, units] of Object.entries(payroll.claimsVoucherUnits || {})) payroll.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-  }
-  for (const shop of Object.values(state.shops || {})) {
-    shop.cashWheatUnits ??= 0;
-    shop.liabilities.claimsPayment ||= {};
-    for (const [householdId, units] of Object.entries(shop.liabilities.claimsVoucherUnits || {})) shop.liabilities.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-    shop.liabilities.rentPaymentClaim ||= legacyVoucherObligation(shop.liabilities.rentVoucherUnits || 0);
-    shop.liabilities.taxPaymentClaim ||= legacyVoucherObligation(shop.liabilities.taxVoucherUnits || 0);
-  }
-  for (const company of Object.values(state.companies || {})) {
-    company.cashWheatUnits ??= 0;
-    company.payroll.claimsPayment ||= {};
-    for (const [householdId, units] of Object.entries(company.payroll.claimsVoucherUnits || {})) company.payroll.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-  }
-  state.legacyMigration = { ...(state.legacyMigration || {}), toVersion: 12, v12: { ...(state.legacyMigration?.v12 || {}), monetaryReformCompatibility: legacyCompleted ? "completed" : "native" } };
-  syncShopEmployment(state, definitions);
-  syncResidentAggregates(state, definitions);
-  return state;
-}
-
-function normalizeV13(raw, definitions, legacyCompleted = false) {
-  const state = normalizeV12(raw, definitions, legacyCompleted);
-  state.version = 13;
-  state.schemaVersion = 13;
-  state.employment ||= {};
-  state.employment.targets ||= {};
-  if (!Number.isInteger(state.employment.targets.farmers)) {
-    state.employment.targets.farmers = householdList(state).reduce((sum, household) => sum + Math.max(0, household.jobs?.farmers || 0), 0);
-  }
-  state.services ||= {};
-  state.services.demandByHousehold ||= {};
-  state.services.carryByHousehold ||= {};
-  state.services.rotation ||= { households: 0, shops: {}, services: 0 };
-  state.services.rotation.shops ||= {};
-  state.services.day ||= { demandedUses: {}, servedUses: {}, spendingVoucherUnits: 0 };
-  state.services.history = Array.isArray(state.services.history) ? state.services.history : [];
-  for (const household of householdList(state)) {
-    state.services.demandByHousehold[household.id] ||= {};
-    state.services.carryByHousehold[household.id] ||= {};
-    for (const serviceId of Object.keys(definitions.rules.serviceTypes || {})) {
-      state.services.demandByHousehold[household.id][serviceId] ??= 0;
-      state.services.carryByHousehold[household.id][serviceId] ??= 0;
-    }
-  }
-  for (const shop of Object.values(state.shops || {})) {
-    const oldTypeId = shop.typeId;
-    const oldDef = definitions.rules.shopTypes?.[oldTypeId];
-    const legacyItem = oldDef?.aliasOf ? oldDef.itemId : null;
-    if (oldDef?.aliasOf) {
-      shop.legacyTypeId ||= oldTypeId;
-      shop.typeId = oldDef.aliasOf;
-      shop.primaryItemId ||= shop.itemId || legacyItem || "wheat";
-    }
-    const def = definitions.rules.shopTypes?.[shop.typeId];
-    shop.itemId = shop.primaryItemId || shop.itemId || def?.itemIds?.[0] || null;
-    shop.itemIds = def?.kind === "retail" ? [...(def.itemIds || [])] : [];
-    shop.serviceId = def?.kind === "service" ? def.serviceId : null;
-    for (const period of PERIODS) {
-      shop.accounts ||= {};
-      shop.accounts[period] ||= {};
-      shop.accounts[period].soldUnits ||= {};
-      shop.accounts[period].purchasedUnits ||= {};
-      shop.accounts[period].serviceUses ||= {};
-      shop.accounts[period].customerCount ||= 0;
-    }
-    shop.history = (shop.history || []).map(row => ({ ...row, soldUnitsByItem: { ...(row.soldUnitsByItem || (shop.primaryItemId ? { [shop.primaryItemId]: row.soldUnits || 0 } : {})) }, serviceUses: { ...(row.serviceUses || {}) }, customerCount: row.customerCount || 0 }));
-  }
-  state.legacyMigration = { ...(state.legacyMigration || {}), toVersion: 13, v13: { ...(state.legacyMigration?.v13 || {}), agricultureTargetFromActual: true, commercialStreet: "general_store+services" } };
-  syncShopEmployment(state, definitions);
-  syncResidentAggregates(state, definitions);
-  return state;
-}
-
-function gcdInt(a, b) {
-  let x = Math.abs(Math.trunc(a));
-  let y = Math.abs(Math.trunc(b));
-  while (y) [x, y] = [y, x % y];
-  return x || 1;
-}
-
-function normalizeV14(raw, definitions, legacyCompleted = false) {
-  const state = normalizeV13(raw, definitions, legacyCompleted);
-  state.version = 14;
-  state.schemaVersion = 14;
-  state.stockExchange ||= { legacyAccess: false, rotation: 0 };
-  state.stockExchange.rotation ||= 0;
-  const usedCodes = new Set();
-  let codeCursor = 0;
-  const nextCode = () => {
-    while (codeCursor < 1000) {
-      const code = String(codeCursor++).padStart(3, "0");
-      if (!usedCodes.has(code)) { usedCodes.add(code); return code; }
-    }
-    throw new Error("旧公司数量超过三位股票代码容量");
-  };
-  for (const company of Object.values(state.companies || {}).sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
-    company.settings ||= { wagePerWorkerDay: null, targetWorkers: null, salePricesVoucherPerUnit: {} };
-    company.settings.salePricesVoucherPerUnit ||= {};
-    const definition = definitions.buildings[company.typeId];
-    const job = definition?.jobs?.[0];
-    if (!Number.isFinite(company.settings.wagePerWorkerDay)) company.settings.wagePerWorkerDay = state.employment?.wageRates?.[job?.id] ?? job?.wagePerWorkerDay ?? 5;
-    if (!Number.isInteger(company.settings.targetWorkers)) company.settings.targetWorkers = Math.min(job?.slots * company.listedLevels || 0, company.plan?.desiredWorkers ?? job?.slots * company.listedLevels ?? 0);
-    company.annualSettlement ||= { lastSettledYear: company.lastDividendYear || 0, lastYearNetProfitVoucherUnits: 0, workingCapitalTargetVoucherUnits: 0, distributedVoucherUnits: 0, undistributedVoucherUnits: company.retainedEarningsVoucherUnits || 0 };
-
-    const hadShares = Number.isInteger(company.totalShares) && company.totalShares > 0;
-    if (hadShares) {
-      // 旧公司都是“上市即成立”。迁移后保留为上市状态。
-      const levels = Math.max(1, company.listedLevels || 1);
-      if (company.totalShares % levels !== 0) {
-        const factor = levels / gcdInt(company.totalShares, levels);
-        company.totalShares *= factor;
-        company.townShares *= factor;
-        company.residentShares *= factor;
-        for (const householdId of Object.keys(company.householdShares || {})) company.householdShares[householdId] *= factor;
-        for (const household of householdList(state)) {
-          if (household.shares?.[company.id]) household.shares[company.id] *= factor;
-        }
-      }
-      let ticker = /^\d{3}$/.test(company.listing?.ticker || "") ? company.listing.ticker : null;
-      if (ticker && usedCodes.has(ticker)) ticker = null;
-      if (ticker) usedCodes.add(ticker); else ticker = nextCode();
-      company.listing = { listed: true, ticker, listedAt: company.listing?.listedAt || { legacy: true } };
-      state.stockExchange.legacyAccess = true;
-    } else {
-      company.totalShares = 0; company.townShares = 0; company.residentShares = 0; company.householdShares ||= {};
-      company.listing = { listed: false, ticker: null, listedAt: null };
-    }
-  }
-  state.legacyMigration = { ...(state.legacyMigration || {}), toVersion: 14, v14: { independentCompanies: true, exchangeCompatibility: state.stockExchange.legacyAccess, integerShareSplit: true } };
-  syncShopEmployment(state, definitions);
-  syncResidentAggregates(state, definitions);
-  return state;
-}
-
-function normalizeV15(raw, definitions, legacyCompleted = false) {
-  const state = normalizeV14(raw, definitions, legacyCompleted);
-  state.version = 15;
-  state.schemaVersion = 15;
-  for (const shop of Object.values(state.shops || {})) {
-    for (const period of PERIODS) {
-      shop.accounts ||= {};
-      shop.accounts[period] ||= {};
-      shop.accounts[period].distributedVoucherUnits ??= 0;
-    }
-  }
-  // r05：旧兑付储备一次性释放回镇库；以后换券只转移镇库已印粮券，小麦直接进入镇库，不再维护独立储备。
-  state.currency ||= {};
-  if (state.currency.reserveModel !== "town-inventory-v1") {
-    const legacyReserve = Math.max(0, Math.floor(state.currency.reserveWheatUnits || 0));
-    const legacyCost = Math.max(0, Math.floor(state.currency.reserveWheatCostVoucherUnits || 0));
-    if (legacyReserve > 0) {
-      state.accounts.town.wheat = (state.accounts.town.wheat || 0) + legacyReserve;
-      addTownCostBasis(state, "wheat", legacyCost);
-    }
-    state.currency.reserveWheatUnits = 0;
-    state.currency.reserveWheatCostVoucherUnits = 0;
-    state.currency.reserveModel = "town-inventory-v1";
-  }
-
-  // 旧档只有欠薪总额的部分，一次性分配成家庭债权（含清理 r03 误记到镇库的商业街岗位欠薪）。
-  state.payroll ||= {};
-  state.payroll.arrearsVoucherUnits ||= state.payroll.arrearsWheatUnits || {};
-  absorbLegacyWageArrears(state, definitions);
-  state.payroll.arrearsWheatUnits = state.payroll.arrearsVoucherUnits;
-
-  // 0.2.3 做市商：旧档若已有批发市场挂价则沿用（玩家可能已调过），缺项补做市商默认价。
-  mergeWholesaleCashIntoTown(state);
-  delete state.neighborAid; // 邻里互助已删除
-  migrateBonds(state);
-  // 外交房已并入外贸房：拆除旧档里的外交房与在建工程，岗位上的人回到待业。
-  for (const building of (state.buildings || []).filter(row => row.typeId === "diplomacy_house")) {
-    for (const household of Object.values(state.households?.byId || {})) {
-      for (const key of Object.keys(household.jobs || {})) if (key.startsWith(building.id + "::")) delete household.jobs[key];
-    }
-  }
-  state.buildings = (state.buildings || []).filter(row => row.typeId !== "diplomacy_house");
-  if (Array.isArray(state.projects)) state.projects = state.projects.filter(row => row.typeId !== "diplomacy_house");
-  ensureWholesaleMarket(state, definitions);
-  state.services ||= {};
-  state.services.demandByHousehold ||= {};
-  state.services.carryByHousehold ||= {};
-  state.services.pricesVoucherPerUse ||= {};
-  for (const def of Object.values(definitions.rules.serviceTypes || {})) {
-    if (!(Number.isFinite(state.services.pricesVoucherPerUse[def.id]) && state.services.pricesVoucherPerUse[def.id] >= 0)) {
-      state.services.pricesVoucherPerUse[def.id] = def.priceVoucher || 0;
-    }
-  }
-  state.services.mealsByHousehold ||= {};
-  state.services.rotation ||= { households: 0, shops: {}, services: 0 };
-  state.services.rotation.shops ||= {};
-
-  // 0.2.0 adds more v15 fields without bumping the save version. Older v15 saves
-  // must receive the same neutral defaults as a new game before validation.
-  state.policy ||= {};
-  state.policy.villa ||= { priceWheatJin: 10000, taxRatePercent: 0.5 };
-  state.policy.villa.priceWheatJin ??= 10000;
-  state.policy.villa.taxRatePercent ??= 0.5;
-  state.policy.wageControl ||= { civil: 1.0, industry: 1.0 };
-  state.policy.wageControl.civil ??= 1.0;
-  state.policy.wageControl.industry ??= 1.0;
-  state.policy.tradeTariffRate ??= 5;
-  // 自动存档频率是 v15 内新增的策略字段，旧档缺失时补默认"每月"（读取方虽有 ?? 1 兜底，仍按铁律补齐）。
-  state.policy.autosaveMonths ??= 1;
-  state.socialSecurity ||= { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 };
-  state.socialSecurity.enabled ??= false;
-  state.socialSecurity.dailyPerWorkerJin ??= 1;
-  state.socialSecurity.pensionPerElderJin ??= 2;
-  state.socialSecurity.totalInjectedUnits ??= 0;
-  state.socialSecurity.totalCollectedUnits ??= 0;
-  state.socialSecurity.totalPaidUnits ??= 0;
-  migrateSocialSecurityWallet(state);
-  state.villas ||= { sold: [], taxArrearsValueUnits: {}, stats: {} };
-  if (!Array.isArray(state.villas.sold)) state.villas.sold = [];
-  state.villas.taxArrearsValueUnits ||= {};
-  state.villas.stats ||= {};
-  state.villas.stats.soldTotal ??= 0;
-  state.villas.stats.revenueValueUnits ??= 0;
-  state.villas.stats.taxCollectedValueUnits ??= 0;
-  state.villas.stats.taxArrearsValueUnits ??= 0;
-  state.outsideTown ||= { name: "民镇", rulers: ["民镇议事会"], landMu: 10000, laborers: 1000, population: 3500, wheatStockJin: 3000000, saltStockJin: 20000, woodStockUnits: 8000, relations: 60, prosperity: 60, saltDemand: 1.4, woodDemand: 1.3, grainDemand: 0.7, weather: 1.0, event: null, tradeClosed: false, stats: {} };
-  // 民镇（原四地主镇）：老存档补名字迁移与盐/木材库存、外交关系分默认值。
-  if (state.outsideTown.name === "四地主镇") state.outsideTown.name = "民镇";
-  // 执政迁移：四地主 → 民镇议事会（与改名保持一致，存档本体一次收敛）。
-  if (Array.isArray(state.outsideTown.rulers) &&
-      state.outsideTown.rulers.join("|") === ["陈", "王", "李", "赵"].join("|")) {
-    state.outsideTown.rulers = ["民镇议事会"];
-  }
-  state.outsideTown.saltStockJin ??= 20000;
-  state.outsideTown.woodStockUnits ??= 8000;
-  state.outsideTown.relations ??= 60;
-  // 长期贸易协定（民镇）：老存档补空数组，字段由 trade-agreements.js 的 ||= 兜底。
-  if (!Array.isArray(state.tradeAgreements)) state.tradeAgreements = [];
-  state.outsideTown.stats ||= {};
-  // 动态劳动力市场（用户 0.1.11）：挖人竞争统计。
-  state.laborCompetition ||= { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] };
-  state.laborCompetition.day ||= { moves: 0 };
-  state.laborCompetition.year ||= { moves: 0 };
-  if (!Array.isArray(state.laborCompetition.recent)) state.laborCompetition.recent = [];
-  // 经济历史曲线（用户 0.1.11）。
-  if (!Array.isArray(state.economyHistory)) state.economyHistory = [];
-
-  // Earlier v15 saves can contain household age-band aggregates that drifted
-  // from the authoritative cohorts. Reconcile deterministically so the existing
-  // v15 save remains playable, then release only assignments that no longer fit.
-  const householdBands = totalHouseholdAgeBands(state);
-  const cohortBands = cohortBandTotals(state);
-  if (["children", "workers", "elders"].some(band => householdBands[band] !== cohortBands[band])) {
-    calibrateHouseholdBandsToCohorts(state);
-    releaseExcessHouseholdEmployment(state);
-  }
-
-  state.annualReports = summarizeLegacyAnnualReports(state);
-  // 开荒是 v15 内的增量字段：旧档没有该字段时按“初始已开荒亩数”补齐，
-  // 不改变存档版本号，也不重算既有收成与在岗农人。
-  state.agriculture ||= { workUnits: 0, lastHarvestYear: 0 };
-  const acresMaximum = definitions.agriculture.acresMaximum ?? definitions.agriculture.acres;
-  if (!Number.isInteger(state.agriculture.reclaimedAcres)) {
-    const legacyAcres = Number.isInteger(state.agriculture.acres)
-      ? state.agriculture.acres : definitions.agriculture.acres;
-    state.agriculture.reclaimedAcres = Math.max(0, Math.min(acresMaximum, legacyAcres));
-  }
-  state.agriculture.reclaimedAcres = Math.max(0, Math.min(acresMaximum, Math.floor(state.agriculture.reclaimedAcres)));
-  state.agriculture.reclaim ||= {
-    day: { acres: 0, workDays: 0, paidVoucherUnits: 0 },
-    year: { acres: 0, workDays: 0, paidVoucherUnits: 0 },
-    cumulative: { acres: 0, workDays: 0, paidVoucherUnits: 0 },
-    last: null,
-    history: []
-  };
-  for (const period of PERIODS) {
-    state.agriculture.reclaim[period] ||= { acres: 0, workDays: 0, paidVoucherUnits: 0 };
-  }
-  if (!Array.isArray(state.agriculture.reclaim.history)) state.agriculture.reclaim.history = [];
-  state.legacyMigration = {
-    ...(state.legacyMigration || {}),
-    toVersion: 15,
-    v15: { annualReportSummary: true, saveContainerVersion: 2, r04TownInventoryExchange: true, r04ShopPayrollCleanup: true, reclaimFarmland: true, parallelConstruction: true }
-  };
-  // v12–v15 直接进入本函数时也要保证 projects 数组与兼容访问器就位。
-  migrateProjects(raw, state);
-  syncShopEmployment(state, definitions);
-  syncResidentAggregates(state, definitions);
-  return state;
-}
-
        function migrateSave(raw, content) {
   const definitions = content || CONTENT;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("存档必须是 JSON 对象。");
-  const current = definitions.rules.saveVersion || 15;
+  const current = definitions.rules.saveVersion;
   const stored = Math.max(Number(raw.schemaVersion) || 0, Number(raw.version) || 0);
-  if (stored > current) throw new Error("该存档来自更高版本，当前版本无法读取。");
-  // 只读取 v15 存档（0.1.10 起一直是 v15）；更早的存档请开新局。
-  if (stored !== 15) throw new Error("旧版存档不兼容，请开始新游戏。");
-  const state = normalizeV15(raw, definitions, false);
+  if (stored > current) throw new Error("该存档来自更新版本，当前版本无法读取。");
+  if (stored !== current) throw new Error("旧版存档不兼容，请开始新游戏。");
+  const state = cloneJson(raw);
+  // 存档里不保存的派生部分：单工程访问器、店铺岗位、居民汇总。
+  ensureProjectAccessor(state);
+  syncShopEmployment(state, definitions);
+  syncResidentAggregates(state, definitions);
   const result = validateState(state, definitions);
   if (!result.valid) throw new Error("存档校验失败：" + result.errors.join("；"));
   return state;
@@ -17419,18 +16714,12 @@ function preserveRaw(storage, raw, label) {
   } catch {
     throw new Error("本机存档无法读取。原存档未更改。");
   }
-  const currentVersion = definitions.rules.saveVersion || 3;
+  const currentVersion = definitions.rules.saveVersion;
   const storedVersion = Math.max(Number(parsed.version) || 0, Number(parsed.schemaVersion) || 0);
-  if (storedVersion < 10) {
+  if (storedVersion !== currentVersion) {
     return { state: null, migrated: false, created: false, legacy: true, legacyVersion: storedVersion || null };
   }
-  const state = migrateSave(parsed, definitions);
-  const migrated = JSON.stringify(parsed) !== JSON.stringify(state);
-  if (migrated) {
-    if (storedVersion < currentVersion) preserveRaw(storage, raw, `before-v${currentVersion}-migration`);
-    storage.setItem(SAVE_KEY, JSON.stringify(state));
-  }
-  return { state, migrated, created: false, legacy: false };
+  return { state: migrateSave(parsed, definitions), migrated: false, created: false, legacy: false };
 }
 
        function exportState(state) {
@@ -17440,10 +16729,6 @@ function preserveRaw(storage, raw, label) {
        function parseSaveObject(parsed, content) {
   const definitions = content || CONTENT;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("文件不是麦乡存档。");
-  const currentVersion = definitions.rules.saveVersion || 10;
-  const storedVersion = Math.max(Number(parsed.version) || 0, Number(parsed.schemaVersion) || 0);
-  if (storedVersion < 10) throw new Error("旧版存档不兼容，请开始新游戏。");
-  if (storedVersion > currentVersion) throw new Error("此存档来自更新版本，暂无法读取。");
   return migrateSave(parsed, definitions);
 }
 
@@ -17476,17 +16761,12 @@ function preserveRaw(storage, raw, label) {
 return { SAVE_KEY, saveState, loadState, exportState, parseSaveObject, parseSaveFile, importState, resetState };
 })();
 
-// ===== persistence/save-manager.js =====
+// ===== persistence/save-container.js =====
 const __mxmod78 = (() => {
-const { CONTENT } = __mxmod6;
-const { createInitialState } = __mxmod19;
 const { validateState } = __mxmod59;
-const { SAVE_KEY, parseSaveFile, parseSaveObject } = __mxmod77;
+const { parseSaveObject } = __mxmod77;
 const SAVE_CONTAINER_VERSION = 2;
        const SAVE_CATALOG_VERSION = 1;
-       const SAVE_CATALOG_KEY = "maixiang-save-catalog-v1";
-       const SAVE_SLOT_PREFIX = "maixiang-save-slot-v1:";
-const MAX_NAME_LENGTH = 36;
 
        class SavePersistenceError extends Error {
   constructor(code, message, original = null) {
@@ -17511,82 +16791,14 @@ const MAX_NAME_LENGTH = 36;
   return new SavePersistenceError("program", `本机存储${action}失败。`, error);
 }
 
-function slotKey(id) { return SAVE_SLOT_PREFIX + id; }
-function backupKey(id) { return slotKey(id) + ":backup"; }
        function checksumSaveText(text) {
   let hash = 2166136261;
   for (let i = 0; i < text.length; i += 1) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
   return (hash >>> 0).toString(16);
 }
-function get(storage, key) {
-  try { return storage.getItem(key); }
-  catch (error) { throw classifyPersistenceError(error, "读取"); }
-}
-function put(storage, key, value) {
-  try { storage.setItem(key, value); }
-  catch (error) { throw classifyPersistenceError(error, "写入"); }
-}
-function drop(storage, key) {
-  try { storage.removeItem(key); return true; }
-  catch (error) { throw classifyPersistenceError(error, "清理"); }
-}
-function storageLength(storage) {
-  try { return storage.length; }
-  catch (error) { throw classifyPersistenceError(error, "读取"); }
-}
-function storageKey(storage, index) {
-  try { return storage.key(index); }
-  catch (error) { throw classifyPersistenceError(error, "读取"); }
-}
        function stringifySaveJson(value, label = "存档") {
   try { return JSON.stringify(value); }
   catch (error) { throw new SavePersistenceError("serialization", `${label}序列化失败，未写入本机存储。`, error); }
-}
-function catalogValue(activeId = null, deletedIds = []) {
-  return { containerVersion: SAVE_CATALOG_VERSION, activeId, deletedIds };
-}
-function readCatalog(storage) {
-  const raw = get(storage, SAVE_CATALOG_KEY);
-  if (raw === null) return { value: catalogValue(), missing: true };
-  try {
-    const value = JSON.parse(raw);
-    if (value.containerVersion !== SAVE_CATALOG_VERSION ||
-      (value.activeId !== null && typeof value.activeId !== "string") ||
-      !Array.isArray(value.deletedIds) || !value.deletedIds.every(id => typeof id === "string")) {
-      throw new Error("unsupported");
-    }
-    return { value, missing: false };
-  } catch {
-    return { value: catalogValue(), damaged: true };
-  }
-}
-function writeCatalog(storage, value) { put(storage, SAVE_CATALOG_KEY, stringifySaveJson(value, "存档目录")); }
-function idsInStorage(storage) {
-  const ids = new Set();
-  const length = storageLength(storage);
-  for (let i = 0; i < length; i += 1) {
-    const key = storageKey(storage, i);
-    if (key?.startsWith(SAVE_SLOT_PREFIX)) {
-      const id = key.slice(SAVE_SLOT_PREFIX.length).replace(/:backup$/, "");
-      if (id && !id.includes(":")) ids.add(id);
-    }
-  }
-  return [...ids];
-}
-function newId(storage) {
-  let id;
-  do {
-    id = typeof globalThis.crypto?.randomUUID === "function"
-      ? globalThis.crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  } while (get(storage, slotKey(id)) !== null || get(storage, backupKey(id)) !== null);
-  return id;
-}
-function nameOf(value) {
-  const name = String(value ?? "").trim();
-  if (!name) throw new SavePersistenceError("validation", "请输入存档名称。");
-  if (name.length > MAX_NAME_LENGTH) throw new SavePersistenceError("validation", `名称最多${MAX_NAME_LENGTH}字。`);
-  return name;
 }
 function validState(state, content) {
   const result = validateState(state, content);
@@ -17608,7 +16820,7 @@ function validState(state, content) {
 }
 
 function validateContainerMetadata(entry, id) {
-  return entry && [1, SAVE_CONTAINER_VERSION].includes(entry.containerVersion) && entry.id === id &&
+  return entry && entry.containerVersion === SAVE_CONTAINER_VERSION && entry.id === id &&
     typeof entry.name === "string" && entry.name.trim() &&
     typeof entry.savedAt === "string" && Number.isFinite(Date.parse(entry.savedAt)) &&
     typeof entry.checksum === "string";
@@ -17628,16 +16840,8 @@ function verifySaveContainerRaw(raw, id) {
   try { entry = JSON.parse(raw); }
   catch { throw new SavePersistenceError("corrupt", "存档内容损坏。"); }
   if (!validateContainerMetadata(entry, id)) throw new SavePersistenceError("corrupt", "存档内容损坏。");
-  if (entry.containerVersion === SAVE_CONTAINER_VERSION) {
-    const stateText = stateTextFromV2Container(raw, entry);
-    if (stateText === null || entry.checksum !== checksumSaveText(stateText)) {
-      throw new SavePersistenceError("corrupt", "存档内容损坏。");
-    }
-  } else {
-    // v1 容器没有可直接复用的 state 文本，只在兼容读取时做一次旧式校验。
-    const stateText = stringifySaveJson(entry.state, "旧存档校验");
-    if (entry.checksum !== checksumSaveText(stateText)) throw new SavePersistenceError("corrupt", "存档内容损坏。");
-  }
+  const stateText = stateTextFromV2Container(raw, entry);
+  if (stateText === null || entry.checksum !== checksumSaveText(stateText)) throw new SavePersistenceError("corrupt", "存档内容损坏。");
   return entry;
 }
 
@@ -17657,183 +16861,20 @@ function verifySaveContainerRaw(raw, id) {
   }
   return { id, name: entry.name, savedAt: entry.savedAt, state };
 }
-
-function readSlot(storage, id, content) {
-  const primary = get(storage, slotKey(id));
-  if (primary !== null) {
-    try { return { ...decodeSaveContainer(primary, id, content), recovered: false }; }
-    catch (error) { if (error.code !== "corrupt" && error.code !== "validation") throw error; }
-  }
-  const backup = get(storage, backupKey(id));
-  if (backup !== null) {
-    try { return { ...decodeSaveContainer(backup, id, content), recovered: true }; }
-    catch (error) { if (error.code !== "corrupt" && error.code !== "validation") throw error; }
-  }
-  throw new SavePersistenceError("corrupt", "存档损坏，且自动备份无法读取。原文件仍保留。");
-}
-function writeSlot(storage, id, name, state, content, savedAt = new Date().toISOString()) {
-  const next = encodeSaveContainer(id, name, state, savedAt, content);
-  const primaryKey = slotKey(id);
-  const previous = get(storage, primaryKey);
-
-  // A brand-new slot has no useful previous version. Writing the same bytes to :backup first
-  // doubled first-save space and could strand an orphan backup when the primary write failed.
-  if (previous !== null) {
-    try {
-      inspectSaveContainer(previous, id);
-      const currentBackup = get(storage, backupKey(id));
-      if (currentBackup !== previous) put(storage, backupKey(id), previous);
-    } catch (error) {
-      if (error.code !== "corrupt" && error.code !== "validation") throw error;
-      // Preserve any existing readable backup; do not overwrite it with a corrupt primary.
-    }
-  }
-  put(storage, primaryKey, next);
-  return { id, name, savedAt, state, recovered: false };
-}
-
-       function createSaveManager(storage, content = CONTENT) {
-  if (!storage) throw new SavePersistenceError("denied", "浏览器未提供可用的本机存储。请使用临时游玩或调整浏览器站点存储权限。");
-  function catalog() { return readCatalog(storage).value; }
-  function list() {
-    const known = readCatalog(storage);
-    const deleted = new Set(known.value.deletedIds);
-    const slots = idsInStorage(storage).filter(id => !deleted.has(id)).map(id => {
-      try {
-        const entry = readSlot(storage, id, content);
-        return { id, name: entry.name, savedAt: entry.savedAt, year: entry.state.year,
-          day: entry.state.day + 1, population: (entry.state.cohorts || []).reduce((sum, group) => sum + group.m + group.f, 0),
-          recovered: entry.recovered, current: known.value.activeId === id, damaged: false };
-      } catch (error) {
-        if (["quota", "denied", "program", "serialization"].includes(error.code)) throw error;
-        return { id, name: "损坏的存档", savedAt: null, current: known.value.activeId === id, damaged: true };
-      }
-    });
-    slots.sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
-    return { slots, activeId: known.value.activeId,
-      warning: known.damaged ? "存档目录损坏；可读取的存档仍在，请手动选择。"
-        : known.missing && slots.length ? "已找到存档，请选择要读取的一局。" : null };
-  }
-  function createSlot(state, name, activate = true) {
-    const id = newId(storage);
-    let wroteSlot = false;
-    try {
-      const result = writeSlot(storage, id, nameOf(name), state, content);
-      wroteSlot = true;
-      if (activate) {
-        const previous = catalog();
-        writeCatalog(storage, { ...previous, activeId: id });
-      }
-      return result;
-    } catch (error) {
-      // New slot creation is transactional from the catalog's point of view. A failed create
-      // never leaves a new index entry and best-effort removes any just-written slot bytes.
-      if (wroteSlot) {
-        try { drop(storage, slotKey(id)); } catch {}
-        try { drop(storage, backupKey(id)); } catch {}
-      }
-      throw error;
-    }
-  }
-  function initialize() {
-    const known = readCatalog(storage);
-    const existing = list();
-    if (known.value.activeId) {
-      try {
-        const entry = readSlot(storage, known.value.activeId, content);
-        return { state: entry.state, ...existing,
-          warning: entry.recovered ? "当前存档损坏，已从自动备份恢复；请保存当前进度。" : existing.warning };
-      }
-      catch (error) {
-        if (["quota", "denied", "program"].includes(error.code)) throw error;
-        return { state: null, ...existing, warning: "当前存档无法读取，请从列表选择可用存档或备份。" };
-      }
-    }
-    if (!known.missing || existing.slots.length) return { state: null, ...existing };
-    const raw = get(storage, SAVE_KEY);
-    if (raw !== null) {
-      let state;
-      try { state = parseSaveFile(raw, content); }
-      catch (error) { return { state: null, ...existing, warning: `原有存档无法接入：${error.message} 原数据仍保留。` }; }
-      const entry = createSlot(state, "原有进度");
-      return { state, ...list(), migrated: true, entry };
-    }
-    // 空存储只展示“新游戏”入口；真正初始化与首次持久化必须由玩家确认新游戏后完成。
-    // 这样存储受限不会在页面启动阶段阻断恢复入口，也避免生成玩家从未进入的半成品新局。
-    return { state: null, ...existing, created: false };
-  }
-  function saveCurrent(state, expectedId) {
-    const id = catalog().activeId;
-    if (!id || id !== expectedId) throw new SavePersistenceError("validation", "当前没有可保存的存档，请先选择一局。");
-    const old = readSlot(storage, id, content);
-    return writeSlot(storage, id, old.name, state, content);
-  }
-  function activate(id) {
-    const known = catalog();
-    if (known.deletedIds.includes(id)) throw new SavePersistenceError("validation", "该存档已删除。");
-    const entry = readSlot(storage, id, content);
-    writeCatalog(storage, { ...known, activeId: id });
-    return entry;
-  }
-  function rename(id, newName) {
-    const entry = readSlot(storage, id, content);
-    return writeSlot(storage, id, nameOf(newName), entry.state, content, entry.savedAt);
-  }
-  function remove(id) {
-    const known = catalog();
-    if (!idsInStorage(storage).includes(id) || known.deletedIds.includes(id)) throw new SavePersistenceError("validation", "存档不存在。");
-    const current = known.activeId === id;
-    writeCatalog(storage, { ...known, activeId: current ? null : known.activeId,
-      deletedIds: [...known.deletedIds, id] });
-    try { drop(storage, slotKey(id)); drop(storage, backupKey(id)); } catch { /* tombstone hides retained bytes */ }
-    return { current };
-  }
-  function importFile(text, name) {
-    const state = parseSaveFile(text, content);
-    const defaultName = `导入存档 ${list().slots.length + 1}`;
-    return createSlot(state, name || defaultName, false);
-  }
-  function storageStats() {
-    let primaryBytes = 0;
-    let backupBytes = 0;
-    let legacyBytes = 0;
-    let catalogBytes = 0;
-    let slotCount = 0;
-    let backupCount = 0;
-    const length = storageLength(storage);
-    for (let i = 0; i < length; i += 1) {
-      const key = storageKey(storage, i);
-      if (!key) continue;
-      const value = get(storage, key) || "";
-      const bytes = (key.length + value.length) * 2;
-      if (key === SAVE_KEY) legacyBytes += bytes;
-      else if (key === SAVE_CATALOG_KEY) catalogBytes += bytes;
-      else if (key.startsWith(SAVE_SLOT_PREFIX) && key.endsWith(":backup")) { backupBytes += bytes; backupCount += 1; }
-      else if (key.startsWith(SAVE_SLOT_PREFIX)) { primaryBytes += bytes; slotCount += 1; }
-    }
-    return { primaryBytes, backupBytes, legacyBytes, catalogBytes, totalBytes: primaryBytes + backupBytes + legacyBytes + catalogBytes, slotCount, backupCount };
-  }
-  return { initialize, list, createNew: name => createSlot(createInitialState({ content }), name),
-    createTransient: name => ({ id: null, name: name || "临时游戏", savedAt: null, state: createInitialState({ content }), transient: true }),
-    saveCurrent, saveAs: (state, name) => createSlot(state, name), activate, rename, remove, importFile,
-    read: id => readSlot(storage, id, content), storageStats };
-}
-return { SAVE_CONTAINER_VERSION, SAVE_CATALOG_VERSION, SAVE_CATALOG_KEY, SAVE_SLOT_PREFIX, SavePersistenceError, classifyPersistenceError, checksumSaveText, stringifySaveJson, encodeSaveContainer, inspectSaveContainer, decodeSaveContainer, createSaveManager };
+return { SAVE_CONTAINER_VERSION, SAVE_CATALOG_VERSION, SavePersistenceError, classifyPersistenceError, checksumSaveText, stringifySaveJson, encodeSaveContainer, inspectSaveContainer, decodeSaveContainer };
 })();
 
 // ===== persistence/indexed-save-manager.js =====
 const __mxmod79 = (() => {
 const { CONTENT } = __mxmod6;
 const { createInitialState } = __mxmod19;
-const { SAVE_KEY, parseSaveFile } = __mxmod77;
-const { SAVE_CATALOG_KEY, SAVE_CATALOG_VERSION, SAVE_SLOT_PREFIX, SavePersistenceError, checksumSaveText: checksum, classifyPersistenceError, decodeSaveContainer: decode, encodeSaveContainer: encode, inspectSaveContainer: inspect, stringifySaveJson: stringify } = __mxmod78;
+const { parseSaveFile } = __mxmod77;
+const { SAVE_CATALOG_VERSION, SavePersistenceError, classifyPersistenceError, decodeSaveContainer: decode, encodeSaveContainer: encode, inspectSaveContainer: inspect, stringifySaveJson: stringify } = __mxmod78;
 const SAVE_DB_NAME = "maixiang-save-db-v2";
        const SAVE_DB_VERSION = 1;
 const SLOT_STORE = "slots";
 const META_STORE = "meta";
-const LEGACY_STORE = "legacy";
 const CATALOG_META_KEY = "catalog";
-const MIGRATION_META_KEY = "legacyMigration";
 const MAX_NAME_LENGTH = 36;
 
 function byteLength(text) {
@@ -17851,56 +16892,6 @@ function nameOf(value) {
 
 function defaultCatalog() {
   return { containerVersion: SAVE_CATALOG_VERSION, activeId: null, deletedIds: [] };
-}
-
-function safeLocalGet(storage, key) {
-  if (!storage) return null;
-  try { return storage.getItem(key); }
-  catch (error) { throw classifyPersistenceError(error, "读取遗留 localStorage"); }
-}
-
-function safeLocalRemove(storage, key) {
-  if (!storage) return;
-  try { storage.removeItem(key); }
-  catch (error) { throw classifyPersistenceError(error, "清理遗留 localStorage"); }
-}
-
-function localKeys(storage) {
-  if (!storage) return [];
-  try {
-    return Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(Boolean);
-  } catch (error) {
-    throw classifyPersistenceError(error, "扫描遗留 localStorage");
-  }
-}
-
-function legacyKind(key) {
-  if (key === SAVE_KEY) return { kind: "legacy-single", label: "旧单存档" };
-  if (key.startsWith(SAVE_KEY + ".backup-")) return { kind: "legacy-history", label: "旧单存档历史备份" };
-  if (key === SAVE_CATALOG_KEY) return { kind: "r01-catalog", label: "0.1.5-r01 存档目录" };
-  if (key.startsWith(SAVE_SLOT_PREFIX) && key.endsWith(":backup")) return { kind: "r01-backup", label: "0.1.5-r01 自动备份" };
-  if (key.startsWith(SAVE_SLOT_PREFIX)) return { kind: "r01-primary", label: "0.1.5-r01 主存档" };
-  return null;
-}
-
-       function scanLegacyLocalStorage(storage) {
-  const artifacts = [];
-  const stats = { mainBytes: 0, slotPrimaryBytes: 0, oldSingleBytes: 0, backupBytes: 0, catalogBytes: 0, totalBytes: 0, count: 0 };
-  for (const key of localKeys(storage)) {
-    const info = legacyKind(key);
-    if (!info) continue;
-    const raw = safeLocalGet(storage, key) ?? "";
-    const bytes = byteLength(key) + byteLength(raw);
-    const artifact = { key, raw, bytes, checksum: checksum(raw), ...info };
-    artifacts.push(artifact);
-    stats.count += 1;
-    stats.totalBytes += bytes;
-    if (info.kind === "r01-catalog") stats.catalogBytes += bytes;
-    else if (info.kind.includes("backup") || info.kind === "legacy-history") stats.backupBytes += bytes;
-    else if (info.kind === "legacy-single") { stats.oldSingleBytes += bytes; stats.mainBytes += bytes; }
-    else { stats.slotPrimaryBytes += bytes; stats.mainBytes += bytes; }
-  }
-  return { artifacts, stats };
 }
 
 function requestResult(request) {
@@ -17928,7 +16919,6 @@ function openDatabase(factory) {
       const db = request.result;
       if (!db.objectStoreNames.contains(SLOT_STORE)) db.createObjectStore(SLOT_STORE, { keyPath: "id" });
       if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: "key" });
-      if (!db.objectStoreNames.contains(LEGACY_STORE)) db.createObjectStore(LEGACY_STORE, { keyPath: "key" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(classifyPersistenceError(request.error, "打开 IndexedDB"));
@@ -17961,36 +16951,19 @@ async function putOne(db, storeName, row) {
   await done;
 }
 
-function parseLegacyCatalog(raw) {
-  try {
-    const value = JSON.parse(raw);
-    if (value?.containerVersion !== SAVE_CATALOG_VERSION || (value.activeId !== null && typeof value.activeId !== "string")) return null;
-    return { ...defaultCatalog(), ...value, deletedIds: Array.isArray(value.deletedIds) ? value.deletedIds.filter(id => typeof id === "string") : [] };
-  } catch { return null; }
-}
-
-function slotIdFromLegacyKey(key) {
-  if (!key.startsWith(SAVE_SLOT_PREFIX)) return null;
-  return key.slice(SAVE_SLOT_PREFIX.length).replace(/:backup$/, "");
-}
-
-function legacyPlayable(raw, content) {
-  try { return { state: parseSaveFile(raw, content), readable: true }; }
-  catch (error) { return { state: null, readable: false, reason: error.message }; }
-}
-
 function describeSlot(record, catalog, content) {
   let entry = null;
   let recovered = false;
+  let oldVersion = false;
   if (record?.primary) {
     try { entry = decode(record.primary, record.id, content); }
-    catch (error) { if (!["corrupt", "validation"].includes(error.code)) throw error; }
+    catch (error) { if (!["corrupt", "validation"].includes(error.code)) throw error; oldVersion ||= /旧版存档/.test(error.message); }
   }
   if (!entry && record?.backup) {
     try { entry = decode(record.backup, record.id, content); recovered = true; }
-    catch (error) { if (!["corrupt", "validation"].includes(error.code)) throw error; }
+    catch (error) { if (!["corrupt", "validation"].includes(error.code)) throw error; oldVersion ||= /旧版存档/.test(error.message); }
   }
-  if (!entry) return { id: record.id, name: "损坏的存档", savedAt: null, current: catalog.activeId === record.id, damaged: true };
+  if (!entry) return { id: record.id, name: oldVersion ? "旧版存档（不兼容，可删除）" : "损坏的存档", savedAt: null, current: catalog.activeId === record.id, damaged: true };
   return {
     id: record.id,
     name: entry.name,
@@ -18030,42 +17003,17 @@ function safeError(error, action) {
   return error instanceof SavePersistenceError ? error : classifyPersistenceError(error, action);
 }
 
-       async function probeLocalStorageWrite(storage) {
-  if (!storage) return { ok: false, code: "unavailable", message: "localStorage 不可用。" };
-  const key = `maixiang-storage-probe-v2:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-  const value = "mx-probe";
-  try {
-    storage.setItem(key, value);
-    const read = storage.getItem(key);
-    if (read !== value) throw new Error("localStorage 写入后读回不一致");
-    storage.removeItem(key);
-    if (storage.getItem(key) !== null) throw new Error("localStorage 探测键删除失败");
-    return { ok: true };
-  } catch (error) {
-    try { storage.removeItem(key); } catch {}
-    const classified = classifyPersistenceError(error, "localStorage 写入探测");
-    return { ok: false, code: classified.code, message: classified.message, originalName: classified.originalName, originalMessage: classified.originalMessage };
-  }
-}
-
-       async function createIndexedSaveManager({ indexedDB: factory = globalThis.indexedDB, legacyStorage = null, content = CONTENT } = {}) {
+       async function createIndexedSaveManager({ indexedDB: factory = globalThis.indexedDB, content = CONTENT } = {}) {
   let db;
   try { db = await openDatabase(factory); }
   catch (error) {
     const classified = safeError(error, "打开 IndexedDB");
     classified.step = "indexeddb_open";
     classified.pendingBytes = 0;
-    try { classified.storageUsage = { indexedDB: null, localStorage: scanLegacyLocalStorage(legacyStorage).stats }; } catch {}
     throw classified;
   }
   let catalog = defaultCatalog();
   let slotRecords = new Map();
-  let legacyRecords = new Map();
-
-  function localStats() {
-    try { return scanLegacyLocalStorage(legacyStorage).stats; }
-    catch { return { mainBytes: 0, slotPrimaryBytes: 0, oldSingleBytes: 0, backupBytes: 0, catalogBytes: 0, totalBytes: 0, count: 0, unavailable: true }; }
-  }
 
   function indexedStats() {
     let primaryBytes = 0;
@@ -18074,26 +17022,21 @@ function safeError(error, action) {
       primaryBytes += byteLength(record.primary || "");
       backupBytes += byteLength(record.backup || "");
     }
-    let archiveBytes = 0;
-    for (const record of legacyRecords.values()) archiveBytes += byteLength(record.raw || "");
-    return { primaryBytes, backupBytes, archiveBytes, totalBytes: primaryBytes + backupBytes + archiveBytes, slotCount: slotRecords.size, archiveCount: legacyRecords.size };
+    return { primaryBytes, backupBytes, totalBytes: primaryBytes + backupBytes, slotCount: slotRecords.size };
   }
 
   function decorate(error, step, pendingBytes = 0) {
     const classified = safeError(error, "写入 IndexedDB");
     classified.step = classified.step || step;
     classified.pendingBytes = Number.isFinite(classified.pendingBytes) ? classified.pendingBytes : pendingBytes;
-    classified.storageUsage = { indexedDB: indexedStats(), localStorage: localStats() };
+    classified.storageUsage = { indexedDB: indexedStats() };
     return classified;
   }
 
   async function refreshCaches() {
     try {
-      const [slots, metaRows, legacy] = await Promise.all([
-        readAll(db, SLOT_STORE), readAll(db, META_STORE), readAll(db, LEGACY_STORE)
-      ]);
+      const [slots, metaRows] = await Promise.all([readAll(db, SLOT_STORE), readAll(db, META_STORE)]);
       slotRecords = new Map(slots.map(row => [row.id, row]));
-      legacyRecords = new Map(legacy.map(row => [row.key, row]));
       const catalogRow = metaRows.find(row => row.key === CATALOG_META_KEY);
       catalog = catalogRow?.value && typeof catalogRow.value === "object" ? { ...defaultCatalog(), ...catalogRow.value } : defaultCatalog();
       catalog.deletedIds = Array.isArray(catalog.deletedIds) ? catalog.deletedIds : [];
@@ -18108,148 +17051,13 @@ function safeError(error, action) {
     else await putOne(db, META_STORE, row);
   }
 
-  async function archiveLegacyArtifacts(artifacts) {
-    for (const artifact of artifacts) {
-      const current = legacyRecords.get(artifact.key);
-      if (current?.checksum === artifact.checksum && current?.raw === artifact.raw && current?.verified) continue;
-      const row = {
-        key: artifact.key,
-        raw: artifact.raw,
-        bytes: artifact.bytes,
-        checksum: artifact.checksum,
-        kind: artifact.kind,
-        label: artifact.label,
-        archivedAt: new Date().toISOString(),
-        verified: false
-      };
-      try {
-        await putOne(db, LEGACY_STORE, row);
-        const readBack = await readOne(db, LEGACY_STORE, artifact.key);
-        if (!readBack || readBack.raw !== artifact.raw || readBack.checksum !== artifact.checksum) {
-          throw new Error("IndexedDB 遗留数据读回校验不一致");
-        }
-        readBack.verified = true;
-        await putOne(db, LEGACY_STORE, readBack);
-        legacyRecords.set(artifact.key, readBack);
-      } catch (error) {
-        throw decorate(error, "legacy_archive_verify", artifact.bytes);
-      }
-    }
-  }
-
-  async function migrateLegacyArtifacts() {
-    let scan;
-    try { scan = scanLegacyLocalStorage(legacyStorage); }
-    catch (error) {
-      // localStorage 可能被拒，但 IndexedDB 仍可作为新持久层使用。
-      return { warning: `无法扫描遗留 localStorage：${error.message}`, migratedCount: 0 };
-    }
-    if (!scan.artifacts.length) return { warning: null, migratedCount: 0 };
-
-    await archiveLegacyArtifacts(scan.artifacts);
-
-    const byKey = new Map(scan.artifacts.map(row => [row.key, row]));
-    const existingBefore = slotRecords.size;
-    let migratedCount = 0;
-    let legacyCatalog = null;
-    const catalogArtifact = byKey.get(SAVE_CATALOG_KEY);
-    if (catalogArtifact) legacyCatalog = parseLegacyCatalog(catalogArtifact.raw);
-
-    // r01 多存档：主档和轮换备份原样搬入同一个 IndexedDB 记录。
-    const r01Ids = new Set(scan.artifacts.map(row => slotIdFromLegacyKey(row.key)).filter(Boolean));
-    for (const id of r01Ids) {
-      if (slotRecords.has(id)) continue;
-      const primary = byKey.get(SAVE_SLOT_PREFIX + id)?.raw ?? null;
-      const backup = byKey.get(SAVE_SLOT_PREFIX + id + ":backup")?.raw ?? null;
-      let readable = false;
-      if (primary) { try { decode(primary, id, content); readable = true; } catch {} }
-      if (!readable && backup) { try { decode(backup, id, content); readable = true; } catch {} }
-      if (!readable) continue;
-      const record = { id, primary, backup, migratedFrom: "localStorage-r01", migratedAt: new Date().toISOString() };
-      try {
-        await putOne(db, SLOT_STORE, record);
-        const readBack = await readOne(db, SLOT_STORE, id);
-        if (!readBack || readBack.primary !== primary || readBack.backup !== backup) throw new Error("r01 存档迁移读回校验失败");
-        slotRecords.set(id, readBack);
-        migratedCount += 1;
-      } catch (error) {
-        throw decorate(error, "legacy_r01_slot_verify", byteLength(primary || "") + byteLength(backup || ""));
-      }
-    }
-
-    // 更早的单存档及历史备份：迁移为独立 IndexedDB 存档，原 localStorage 字节继续保留，等待玩家确认清理。
-    const directArtifacts = scan.artifacts.filter(row => row.kind === "legacy-single" || row.kind === "legacy-history");
-    for (const artifact of directArtifacts) {
-      const parsed = legacyPlayable(artifact.raw, content);
-      const archived = legacyRecords.get(artifact.key);
-      if (archived) {
-        archived.readable = parsed.readable;
-        archived.readError = parsed.reason || null;
-        legacyRecords.set(artifact.key, archived);
-        try { await putOne(db, LEGACY_STORE, archived); } catch (error) { throw decorate(error, "legacy_archive_metadata", artifact.bytes); }
-      }
-      if (!parsed.readable) continue;
-      const prefix = artifact.kind === "legacy-single" ? "legacy-single" : "legacy-history";
-      const id = `${prefix}-${artifact.checksum}`;
-      if (slotRecords.has(id)) continue;
-      const name = artifact.kind === "legacy-single" ? "迁移：旧单存档" : `迁移：历史备份 ${artifact.key.slice(-12)}`;
-      const savedAt = new Date().toISOString();
-      const primary = encode(id, name, parsed.state, savedAt, content);
-      const record = { id, primary, backup: null, migratedFrom: artifact.key, migratedAt: savedAt };
-      try {
-        await putOne(db, SLOT_STORE, record);
-        const readBack = await readOne(db, SLOT_STORE, id);
-        if (!readBack || readBack.primary !== primary) throw new Error("旧单存档迁移读回校验失败");
-        decode(readBack.primary, id, content);
-        slotRecords.set(id, readBack);
-        migratedCount += 1;
-      } catch (error) {
-        throw decorate(error, "legacy_single_slot_verify", byteLength(primary));
-      }
-    }
-
-    let nextCatalog = { ...catalog, deletedIds: [...new Set(catalog.deletedIds || [])] };
-    if (!nextCatalog.activeId) {
-      if (legacyCatalog?.activeId && slotRecords.has(legacyCatalog.activeId)) nextCatalog.activeId = legacyCatalog.activeId;
-      else if (existingBefore === 0) {
-        const migratedSingle = [...slotRecords.values()].find(row => row.migratedFrom === SAVE_KEY);
-        if (migratedSingle) nextCatalog.activeId = migratedSingle.id;
-      }
-    }
-    try {
-      await writeCatalog(nextCatalog);
-      const readBack = await readOne(db, META_STORE, CATALOG_META_KEY);
-      if (!readBack || stringify(readBack.value) !== stringify(nextCatalog)) throw new Error("迁移目录读回校验失败");
-      catalog = nextCatalog;
-      const fingerprints = scan.artifacts.map(row => ({ key: row.key, checksum: row.checksum, bytes: row.bytes }));
-      await putOne(db, META_STORE, { key: MIGRATION_META_KEY, value: { verifiedAt: new Date().toISOString(), fingerprints } });
-    } catch (error) {
-      throw decorate(error, "legacy_migration_mark", byteLength(stringify(nextCatalog)));
-    }
-    return { warning: null, migratedCount };
-  }
-
-  await refreshCaches();
-  let migration = { warning: null, migratedCount: 0, failed: false };
-  try {
-    migration = { ...(await migrateLegacyArtifacts()), failed: false };
-  } catch (error) {
-    const issue = error?.code ? error : safeError(error, "迁移遗留存档");
-    migration = {
-      warning: `遗留 localStorage 迁移未完成：${issue.message} 原数据仍保留；现有 IndexedDB 存档仍可读取。可稍后再次打开页面重试迁移。`,
-      migratedCount: 0,
-      failed: true,
-      issue
-    };
-  }
-  // 迁移可能在失败前已完成部分独立写入；重新读取缓存，但迁移故障本身不阻断管理器。
   await refreshCaches();
 
   function list() {
     const deleted = new Set(catalog.deletedIds || []);
     const slots = [...slotRecords.values()].filter(row => !deleted.has(row.id)).map(record => describeSlot(record, catalog, content));
     slots.sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
-    return { slots, activeId: catalog.activeId, warning: migration.warning };
+    return { slots, activeId: catalog.activeId, warning: null };
   }
 
   function read(id) {
@@ -18395,7 +17203,7 @@ function safeError(error, action) {
       await done;
       const deleted = await readOne(db, META_STORE, key);
       if (deleted !== undefined) throw new Error("IndexedDB 探测键删除失败");
-      return { ok: true, localStorage: await probeLocalStorageWrite(legacyStorage) };
+      return { ok: true };
     } catch (error) {
       try {
         const tx = db.transaction(META_STORE, "readwrite");
@@ -18407,41 +17215,8 @@ function safeError(error, action) {
     }
   }
 
-  function legacyArtifacts() {
-    let current = new Map();
-    try { current = new Map(scanLegacyLocalStorage(legacyStorage).artifacts.map(row => [row.key, row])); } catch {}
-    return [...legacyRecords.values()].map(row => ({
-      key: row.key,
-      kind: row.kind,
-      label: row.label,
-      bytes: row.bytes,
-      checksum: row.checksum,
-      verified: Boolean(row.verified),
-      readable: row.readable !== false,
-      readError: row.readError || null,
-      stillInLocalStorage: current.get(row.key)?.checksum === row.checksum
-    })).sort((a, b) => a.label.localeCompare(b.label, "zh-CN") || a.key.localeCompare(b.key));
-  }
-
-  function exportLegacy(key) {
-    const row = legacyRecords.get(key);
-    if (!row?.verified) throw new SavePersistenceError("validation", "该遗留数据尚未完成 IndexedDB 读回校验，不能清理或替代原数据。");
-    return row.raw;
-  }
-
-  async function removeLegacy(key) {
-    const row = legacyRecords.get(key);
-    if (!row?.verified) throw new SavePersistenceError("validation", "该遗留数据尚未完成迁移校验，不能清理。");
-    const current = safeLocalGet(legacyStorage, key);
-    if (current === null) return { removed: false, alreadyMissing: true };
-    if (checksum(current) !== row.checksum || current !== row.raw) throw new SavePersistenceError("validation", "遗留数据已发生变化，未清理；请先重新载入并再次迁移校验。");
-    safeLocalRemove(legacyStorage, key);
-    if (safeLocalGet(legacyStorage, key) !== null) throw new SavePersistenceError("program", "遗留数据清理后仍可读，未确认删除成功。");
-    return { removed: true };
-  }
-
   function storageStats() {
-    return { indexedDB: indexedStats(), localStorage: localStats() };
+    return { indexedDB: indexedStats() };
   }
 
   return {
@@ -18457,14 +17232,11 @@ function safeError(error, action) {
     remove,
     importFile,
     probePersistentStorage,
-    legacyArtifacts,
-    exportLegacy,
-    removeLegacy,
     storageStats,
     close: () => db.close()
   };
 }
-return { SAVE_DB_NAME, SAVE_DB_VERSION, scanLegacyLocalStorage, probeLocalStorageWrite, createIndexedSaveManager };
+return { SAVE_DB_NAME, SAVE_DB_VERSION, createIndexedSaveManager };
 })();
 
 // ===== persistence/autosave-coordinator.js =====
@@ -21517,12 +20289,10 @@ function slotCard(slot) {
 function diagnosticsMarkup(issue, stats) {
   if (!issue && !stats) return "";
   const idb = issue?.storageUsage?.indexedDB || stats?.indexedDB;
-  const local = issue?.storageUsage?.localStorage || stats?.localStorage;
   const rows = [];
   if (issue?.step) rows.push(`失败步骤：${escapeHtml(issue.step)}`);
   if (Number.isFinite(issue?.pendingBytes)) rows.push(`待写入：${bytes(issue.pendingBytes)}`);
-  if (idb) rows.push(`IndexedDB：主档 ${bytes(idb.primaryBytes)}；轮换备份 ${bytes(idb.backupBytes)}；遗留归档 ${bytes(idb.archiveBytes)}；合计 ${bytes(idb.totalBytes)}`);
-  if (local) rows.push(`遗留 localStorage：r01 主档 ${bytes(local.slotPrimaryBytes)}；旧单存档 ${bytes(local.oldSingleBytes)}；历史/自动备份 ${bytes(local.backupBytes)}；目录 ${bytes(local.catalogBytes)}；合计 ${bytes(local.totalBytes)}`);
+  if (idb) rows.push(`IndexedDB：主档 ${bytes(idb.primaryBytes)}；轮换备份 ${bytes(idb.backupBytes)}；合计 ${bytes(idb.totalBytes)}`);
   if (issue?.originalName) rows.push(`原始异常：${escapeHtml(issue.originalName)}${issue.originalMessage ? `：${escapeHtml(issue.originalMessage)}` : ""}`);
   return rows.length ? `<details class="cardlet" data-detail-key="storage-diagnostics"><summary>${issue ? "存储故障详情" : "存储详情"}</summary><p class="subtle">${rows.join("<br>")}</p><p class="subtle">这里只记录步骤与字节占用，不显示存档正文。</p></details>` : "";
 }
@@ -21543,22 +20313,6 @@ function recoveryMarkup(view, ui) {
     </div>
   </div>`;
 }
-
-function legacyMarkup(artifacts) {
-  if (!artifacts?.length) return "";
-  return `<div class="cardlet"><div class="setting-title">遗留 localStorage 数据</div>
-    <p class="subtle">原数据不会自动删除。只有已写入 IndexedDB 并完成逐字节读回校验的项目，才允许导出归档或清理对应 localStorage。</p>
-    <div class="save-list">${artifacts.map((row, index) => {
-      const key = escapeHtml(row.key);
-      const storageState = row.stillInLocalStorage ? "仍占用 localStorage" : "localStorage 已清理；IndexedDB 归档仍保留";
-      const verifyState = row.verified ? "归档已校验" : "归档未完成校验；原数据保留";
-      return `<div class="save-slot"><div class="save-slot-heading"><strong>${escapeHtml(row.label)}</strong></div>
-        <p class="subtle">${bytes(row.bytes)} · ${escapeHtml(storageState)} · ${escapeHtml(verifyState)}${row.readable ? "" : ` · 无法作为当前版本存档读取${row.readError ? `：${escapeHtml(row.readError)}` : ""}`}</p>
-        <div class="save-slot-actions">${row.verified ? `<button class="secondary" data-export-legacy="${key}">导出遗留数据</button>` : ""}${row.verified && row.stillInLocalStorage ? `<button class="danger-button" data-clean-legacy="${key}" data-legacy-index="${index}">清理此项 localStorage</button>` : ""}</div>
-      </div>`;
-    }).join("")}</div></div>`;
-}
-
 
 function buildIdentityMarkup(ui) {
   return `<div class="cardlet build-identity"><div class="setting-title">当前运行版本</div><p class="subtle">麦乡 ${escapeHtml(ui.appVersion || APP_VERSION)} · 构建 ${escapeHtml(ui.buildId || BUILD_ID)}<br>页面：${escapeHtml(ui.pageAddress || "未知")}</p></div>`;
@@ -21583,7 +20337,6 @@ function buildIdentityMarkup(ui) {
         ${ui.transientMode ? "" : `<div class="save-input-row"><input id="saveAsName" maxlength="36" placeholder="新存档名称" aria-label="另存为名称"><button class="secondary" data-save-as ${ui.persistenceBusy ? "disabled" : ""}>另存为新存档</button></div>`}` : ""}
       <div class="settings-actions"><button class="primary" data-new-game ${ui.persistenceBusy ? "disabled" : ""}>新游戏</button><button class="secondary" data-import-save ${ui.persistenceIssue || ui.persistenceBusy ? "disabled" : ""}>导入存档文件</button><input id="saveImportFile" type="file" accept="application/json,.json" hidden></div>
       <h3>IndexedDB 本机存档</h3><div class="save-list">${slots.length ? slots.map(slotCard).join("") : `<p class="subtle">暂无可读取的持久存档。</p>`}</div>
-      ${legacyMarkup(ui.legacyArtifacts)}
     </div>` : `<div class="cardlet"><div class="setting-title">新游戏</div><p class="subtle">当前进度将保存，新局使用独立存档。</p><button class="primary" data-new-game ${ui.persistenceBusy ? "disabled" : ""}>新游戏</button></div>
       <div class="cardlet"><div class="setting-title">存档管理</div><p class="subtle" id="saveStatus" role="status">${escapeHtml(status)}</p><button class="secondary" data-open-save-manager>打开存档管理</button></div>
       <div class="cardlet"><div class="setting-title">音效</div><button class="secondary" id="soundToggle" aria-pressed="${Boolean(ui.soundMuted)}">${ui.soundMuted ? "开启音效" : "关闭音效"}</button></div>
@@ -21683,11 +20436,7 @@ function closest(element, selector) {
   let saves = null;
   let persistenceIssue = null;
   let persistenceBusy = true;
-  try { storage = window.localStorage; }
-  catch (error) {
-    persistenceIssue = classifyPersistenceError(error, "访问 localStorage");
-    console.error("[麦乡存档] localStorage 访问失败", error, error?.cause || "");
-  }
+  try { storage = window.localStorage; } catch {} // 只用来记音效开关
   const clock = new SimulationClock(simulation.content);
   const navigation = createNavigationState();
   const dashboardViews = createDashboardViewCache((currentState, selection) => simulation.selectDashboard(currentState, selection));
@@ -21919,14 +20668,10 @@ function closest(element, selector) {
         persistenceIssue = error;
         console.error("[麦乡存档] 读取存档列表失败", error, error?.cause || "");
       }
-      let legacyArtifacts = [];
       let storageStats = null;
-      try {
-        legacyArtifacts = saves?.legacyArtifacts?.() || [];
-        storageStats = saves?.storageStats?.() || null;
-      } catch {}
+      try { storageStats = saves?.storageStats?.() || null; } catch {}
       return { soundMuted: sound.isMuted, slots, warning: saveWarning, saveStatus: saveNotice,
-        managerOpen, pending: pendingAction, transientMode, persistenceIssue, persistenceBusy, legacyArtifacts, storageStats,
+        managerOpen, pending: pendingAction, transientMode, persistenceIssue, persistenceBusy, storageStats,
         appVersion: APP_VERSION, buildId: BUILD_ID, pageAddress: window.location.href };
     };
     if (startupError || !state) return renderSettings(view, startupError?.message || null, settingsUi());
@@ -22282,14 +21027,13 @@ function closest(element, selector) {
   async function retryPersistentStorage() {
     persistenceBusy = true;
     try {
-      if (!storage) { try { storage = window.localStorage; } catch {} }
-      if (!saves) saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, legacyStorage: storage, content: simulation.content });
+      if (!saves) saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, content: simulation.content });
       const probe = await saves.probePersistentStorage();
       if (!probe?.ok) throw new Error("IndexedDB 写入探测未通过");
       const listed = saves.list();
       persistenceIssue = null;
       startupError = null;
-      saveWarning = listed.warning || (probe.localStorage?.ok === false ? "IndexedDB 持久保存可用；遗留 localStorage 仍不可写，可在存档管理中导出并按需清理旧数据。" : null);
+      saveWarning = listed.warning;
       return true;
     } catch (error) {
       persistenceIssue = error?.code ? error : classifyPersistenceError(error, "IndexedDB 写入探测");
@@ -22439,30 +21183,6 @@ function closest(element, selector) {
       if (exportCurrentState()) showToast("当前进度已导出。", 3200);
       return;
     }
-    const exportLegacy = closest(target, "[data-export-legacy]");
-    if (exportLegacy && saves) {
-      try {
-        const raw = saves.exportLegacy(exportLegacy.dataset.exportLegacy);
-        const blob = new Blob([raw], { type: "application/json;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `maixiang-legacy-${Date.now()}.json`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast("遗留数据已导出。", 3200);
-      } catch (error) { showToast("导出遗留数据失败：" + error.message, 5000); }
-      return;
-    }
-    const cleanLegacy = closest(target, "[data-clean-legacy]");
-    if (cleanLegacy && saves) {
-      const artifact = saves.legacyArtifacts().find(row => row.key === cleanLegacy.dataset.cleanLegacy);
-      if (!artifact) return;
-      pendingAction = { kind: "legacy-clean", key: artifact.key, title: `清理「${artifact.label}」？`,
-        message: "只删除这一项 localStorage 原数据。IndexedDB 已校验归档仍会保留；不会自动清理其他进度。" };
-      render(true);
-      return;
-    }
     if (closest(target, "[data-new-game]")) {
       pendingAction = { kind: "new", title: "开始新游戏？", message: transientMode
         ? "当前为临时游玩，不会自动持久保存；如需保留请先导出。新局将尝试建立独立本机存档。"
@@ -22507,11 +21227,6 @@ function closest(element, selector) {
         } else if (action.kind === "load") {
           adoptSave(await saves.activate(action.id));
           showToast("存档已读取，时光保持暂停。");
-        } else if (action.kind === "legacy-clean") {
-          const result = await saves.removeLegacy(action.key);
-          pendingAction = null;
-          render(true);
-          showToast(result.removed ? "遗留 localStorage 数据已清理；IndexedDB 归档仍保留。" : "该项 localStorage 已不存在。", 3800);
         } else if (action.kind === "delete") {
           const result = await saves.remove(action.id);
           pendingAction = null;
@@ -23480,7 +22195,7 @@ function closest(element, selector) {
     persistenceBusy = true;
     render(true);
     try {
-      saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, legacyStorage: storage, content: simulation.content });
+      saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, content: simulation.content });
       const probe = await saves.probePersistentStorage();
       if (!probe?.ok) throw new Error("IndexedDB 写入探测未通过");
       const loaded = saves.initialize();
@@ -23491,7 +22206,7 @@ function closest(element, selector) {
       saveSession += 1;
       stateRevision = 0;
       autosave.clearFailure();
-      saveWarning = loaded.warning || (probe.localStorage?.ok === false ? "IndexedDB 持久保存可用；遗留 localStorage 仍不可写，可按需导出并清理旧数据。" : null);
+      saveWarning = loaded.warning;
       const current = loaded.slots.find(slot => slot.current);
       saveNotice = current?.savedAt ? `最近保存：${new Date(current.savedAt).toLocaleString("zh-CN", { hour12: false })} · 成功` : "尚未保存";
       startupError = null;

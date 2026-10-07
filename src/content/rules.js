@@ -1,4 +1,4 @@
-export const SAVE_VERSION = 15;
+export const SAVE_VERSION = 16;
 
 export const RULES = Object.freeze({
   saveVersion: SAVE_VERSION,

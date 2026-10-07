@@ -1,6 +1,6 @@
 import { simulation } from "../engine.js";
 import { exportState } from "../persistence/storage.js";
-import { classifyPersistenceError } from "../persistence/save-manager.js";
+import { classifyPersistenceError } from "../persistence/save-container.js";
 import { createIndexedSaveManager, SAVE_DB_NAME } from "../persistence/indexed-save-manager.js";
 import { createAutosaveCoordinator } from "../persistence/autosave-coordinator.js";
 import { createInitialState } from "../core/state.js";
@@ -39,11 +39,7 @@ export function mountGame(root) {
   let saves = null;
   let persistenceIssue = null;
   let persistenceBusy = true;
-  try { storage = window.localStorage; }
-  catch (error) {
-    persistenceIssue = classifyPersistenceError(error, "访问 localStorage");
-    console.error("[麦乡存档] localStorage 访问失败", error, error?.cause || "");
-  }
+  try { storage = window.localStorage; } catch {} // 只用来记音效开关
   const clock = new SimulationClock(simulation.content);
   const navigation = createNavigationState();
   const dashboardViews = createDashboardViewCache((currentState, selection) => simulation.selectDashboard(currentState, selection));
@@ -275,14 +271,10 @@ export function mountGame(root) {
         persistenceIssue = error;
         console.error("[麦乡存档] 读取存档列表失败", error, error?.cause || "");
       }
-      let legacyArtifacts = [];
       let storageStats = null;
-      try {
-        legacyArtifacts = saves?.legacyArtifacts?.() || [];
-        storageStats = saves?.storageStats?.() || null;
-      } catch {}
+      try { storageStats = saves?.storageStats?.() || null; } catch {}
       return { soundMuted: sound.isMuted, slots, warning: saveWarning, saveStatus: saveNotice,
-        managerOpen, pending: pendingAction, transientMode, persistenceIssue, persistenceBusy, legacyArtifacts, storageStats,
+        managerOpen, pending: pendingAction, transientMode, persistenceIssue, persistenceBusy, storageStats,
         appVersion: APP_VERSION, buildId: BUILD_ID, pageAddress: window.location.href };
     };
     if (startupError || !state) return renderSettings(view, startupError?.message || null, settingsUi());
@@ -638,14 +630,13 @@ export function mountGame(root) {
   async function retryPersistentStorage() {
     persistenceBusy = true;
     try {
-      if (!storage) { try { storage = window.localStorage; } catch {} }
-      if (!saves) saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, legacyStorage: storage, content: simulation.content });
+      if (!saves) saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, content: simulation.content });
       const probe = await saves.probePersistentStorage();
       if (!probe?.ok) throw new Error("IndexedDB 写入探测未通过");
       const listed = saves.list();
       persistenceIssue = null;
       startupError = null;
-      saveWarning = listed.warning || (probe.localStorage?.ok === false ? "IndexedDB 持久保存可用；遗留 localStorage 仍不可写，可在存档管理中导出并按需清理旧数据。" : null);
+      saveWarning = listed.warning;
       return true;
     } catch (error) {
       persistenceIssue = error?.code ? error : classifyPersistenceError(error, "IndexedDB 写入探测");
@@ -795,30 +786,6 @@ export function mountGame(root) {
       if (exportCurrentState()) showToast("当前进度已导出。", 3200);
       return;
     }
-    const exportLegacy = closest(target, "[data-export-legacy]");
-    if (exportLegacy && saves) {
-      try {
-        const raw = saves.exportLegacy(exportLegacy.dataset.exportLegacy);
-        const blob = new Blob([raw], { type: "application/json;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `maixiang-legacy-${Date.now()}.json`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast("遗留数据已导出。", 3200);
-      } catch (error) { showToast("导出遗留数据失败：" + error.message, 5000); }
-      return;
-    }
-    const cleanLegacy = closest(target, "[data-clean-legacy]");
-    if (cleanLegacy && saves) {
-      const artifact = saves.legacyArtifacts().find(row => row.key === cleanLegacy.dataset.cleanLegacy);
-      if (!artifact) return;
-      pendingAction = { kind: "legacy-clean", key: artifact.key, title: `清理「${artifact.label}」？`,
-        message: "只删除这一项 localStorage 原数据。IndexedDB 已校验归档仍会保留；不会自动清理其他进度。" };
-      render(true);
-      return;
-    }
     if (closest(target, "[data-new-game]")) {
       pendingAction = { kind: "new", title: "开始新游戏？", message: transientMode
         ? "当前为临时游玩，不会自动持久保存；如需保留请先导出。新局将尝试建立独立本机存档。"
@@ -863,11 +830,6 @@ export function mountGame(root) {
         } else if (action.kind === "load") {
           adoptSave(await saves.activate(action.id));
           showToast("存档已读取，时光保持暂停。");
-        } else if (action.kind === "legacy-clean") {
-          const result = await saves.removeLegacy(action.key);
-          pendingAction = null;
-          render(true);
-          showToast(result.removed ? "遗留 localStorage 数据已清理；IndexedDB 归档仍保留。" : "该项 localStorage 已不存在。", 3800);
         } else if (action.kind === "delete") {
           const result = await saves.remove(action.id);
           pendingAction = null;
@@ -1836,7 +1798,7 @@ export function mountGame(root) {
     persistenceBusy = true;
     render(true);
     try {
-      saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, legacyStorage: storage, content: simulation.content });
+      saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, content: simulation.content });
       const probe = await saves.probePersistentStorage();
       if (!probe?.ok) throw new Error("IndexedDB 写入探测未通过");
       const loaded = saves.initialize();
@@ -1847,7 +1809,7 @@ export function mountGame(root) {
       saveSession += 1;
       stateRevision = 0;
       autosave.clearFailure();
-      saveWarning = loaded.warning || (probe.localStorage?.ok === false ? "IndexedDB 持久保存可用；遗留 localStorage 仍不可写，可按需导出并清理旧数据。" : null);
+      saveWarning = loaded.warning;
       const current = loaded.slots.find(slot => slot.current);
       saveNotice = current?.savedAt ? `最近保存：${new Date(current.savedAt).toLocaleString("zh-CN", { hour12: false })} · 成功` : "尚未保存";
       startupError = null;

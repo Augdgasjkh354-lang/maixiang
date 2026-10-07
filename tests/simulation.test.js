@@ -133,7 +133,6 @@ test("wages, relief and construction start preserve total food until workers are
   assert.equal(totalQeqUnits(building, CONTENT), beforeBuild);
   const wages = recordByType(building, "construction");
   assert.equal(wages.length, 0);
-  assert.equal(building.project.prepaidWageCreditUnits, 0);
 });
 
 test("construction consumes worker-days, releases jobs, and rejects duplicate sites", () => {

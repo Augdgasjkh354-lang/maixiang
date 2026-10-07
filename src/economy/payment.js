@@ -18,19 +18,6 @@ export function ensureMonetaryReform(state) {
   return reform;
 }
 
-// 旧档兼容：过渡期存档直接视为已完成改革；删除过渡期专用字段。
-export function migrateMonetaryReform(state) {
-  const reform = state.monetaryReform;
-  if (!reform) return;
-  if (reform.stage === "transition") {
-    reform.stage = MONETARY_STAGE_VOUCHER;
-    reform.completed ||= { year: state.year, day: state.day + 1, fromTransition: true };
-  }
-  delete reform.targetVoucherBps;
-  delete reform.residentExchangeEnabled;
-  delete reform.paymentHistory;
-  delete reform.voucherShortfallByKey;
-}
 
 export function hasCompletedBank(state) {
   return (state.buildings || []).some(row => row.typeId === "bank");

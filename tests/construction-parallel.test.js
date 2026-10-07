@@ -149,41 +149,6 @@ test("升级工程与新建工程可并行", () => {
   assert.equal(projectById(state, fresh.instanceId).workDone, 8);
 });
 
-test("旧存档 state.project 单对象幂等迁移为数组后行为正常", () => {
-  const state = stock(simulation.createInitialState({ seed: 41008 }));
-  const started = simulation.buildAt(state, "mill", "east", { workers: 7 });
-  assert.equal(started.ok, true, started.reason);
-
-  // 构造旧格式存档：单对象 project，不含 projects
-  const raw = JSON.parse(exportState(state));
-  raw.project = raw.projects[0];
-  delete raw.projects;
-  raw.schemaVersion = 15;
-  raw.version = 15;
-
-  const restored = parseSaveFile(JSON.stringify(raw), CONTENT);
-  assert.equal(Array.isArray(restored.projects), true);
-  assert.equal(restored.projects.length, 1);
-  assert.equal(restored.projects[0].instanceId, started.instanceId);
-  assert.equal(restored.projects[0].plotId, "east");
-  // 兼容访问器：单工程仍可经 state.project 读取
-  assert.equal(restored.project.instanceId, started.instanceId);
-  assert.equal(restored.project.workers, 7);
-  assert.equal(simulation.validateState(restored).valid, true);
-
-  // 迁移后可继续并行施工
-  const second = simulation.buildAt(restored, "bakery", "south", { workers: 5 });
-  assert.equal(second.ok, true, second.reason);
-  assert.equal(restored.projects.length, 2);
-  // 旧工程也继续推进
-  simulation.advanceDay(restored);
-  assert.equal(projectById(restored, started.instanceId).workDone, 7);
-
-  // 幂等：再次迁移不重复、不丢失
-  const again = parseSaveFile(JSON.stringify(JSON.parse(exportState(restored))), CONTENT);
-  assert.equal(again.projects.length, 2);
-});
-
 test("劳力不足时开工人数受约束，调整人数遵守待业余量", () => {
   const state = stock(simulation.createInitialState({ seed: 41009 }), 100000);
   setJobCount(state, "farmers", 0, CONTENT);

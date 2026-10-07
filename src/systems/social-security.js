@@ -40,28 +40,6 @@ function requireOffice(state) {
   return hasSocialSecurityOffice(state) ? null : { ok: false, reason: "需先建成社保局" };
 }
 
-// 旧档兼容：早期基金只是镇库里的记账标签（balanceUnits），钱实际在镇库。
-// 载入时按标签余额把钱从镇库划入基金钱包（镇库不足时有多少划多少），历史注资计为负债。
-export function migrateSocialSecurityWallet(state) {
-  const ss = ensureSocialSecurity(state);
-  if (ss.balanceUnits === undefined) return;
-  const label = Math.max(0, Math.floor(Number(ss.balanceUnits) || 0));
-  delete ss.balanceUnits;
-  const currency = state.currency;
-  const townVouchers = Math.max(0, currency?.balances?.town || 0);
-  const fromVouchers = Math.min(label, townVouchers);
-  if (fromVouchers > 0) {
-    currency.balances.town = townVouchers - fromVouchers;
-    ss.cashVoucherUnits += fromVouchers;
-  }
-  const townWheat = Math.max(0, state.accounts?.town?.wheat || 0);
-  const fromWheat = Math.min(label - fromVouchers, townWheat);
-  if (fromWheat > 0) {
-    state.accounts.town.wheat = townWheat - fromWheat;
-    ss.cashWheatUnits += fromWheat;
-  }
-  ss.debtToTownUnits = Math.max(ss.debtToTownUnits || 0, ss.totalInjectedUnits || 0);
-}
 
 export function fundValueUnits(state, content) {
   return maximumPayableValueUnits(state, SOCIAL_OWNER, content);

@@ -12,7 +12,7 @@
 // - 目标利润率是"店铺级"设置（shop.pricing.targetMarginPercent），因为用户明确要求"店铺统一一个目标"；
 //   但实际利润率与调价决策是"按商品"的（每个商品有独立的进货价与售价）。
 // - 其他小店（legacy 别名店）沿用 content.rules.generalStoreMarkupPercent 固定加价，不受本模块影响。
-// - 所有新字段一律 ||= 初始化，SAVE_VERSION 保持 v15。
+// - 所有新字段一律 ||= 初始化。
 
 import { recordEvent } from "../economy/ledger.js";
 import { currentUnitPrice } from "../economy/prices.js";

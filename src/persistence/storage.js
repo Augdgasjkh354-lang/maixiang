@@ -39,18 +39,12 @@ export function loadState(storage, content) {
   } catch {
     throw new Error("本机存档无法读取。原存档未更改。");
   }
-  const currentVersion = definitions.rules.saveVersion || 3;
+  const currentVersion = definitions.rules.saveVersion;
   const storedVersion = Math.max(Number(parsed.version) || 0, Number(parsed.schemaVersion) || 0);
-  if (storedVersion < 10) {
+  if (storedVersion !== currentVersion) {
     return { state: null, migrated: false, created: false, legacy: true, legacyVersion: storedVersion || null };
   }
-  const state = migrateSave(parsed, definitions);
-  const migrated = JSON.stringify(parsed) !== JSON.stringify(state);
-  if (migrated) {
-    if (storedVersion < currentVersion) preserveRaw(storage, raw, `before-v${currentVersion}-migration`);
-    storage.setItem(SAVE_KEY, JSON.stringify(state));
-  }
-  return { state, migrated, created: false, legacy: false };
+  return { state: migrateSave(parsed, definitions), migrated: false, created: false, legacy: false };
 }
 
 export function exportState(state) {
@@ -60,10 +54,6 @@ export function exportState(state) {
 export function parseSaveObject(parsed, content) {
   const definitions = content || CONTENT;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("文件不是麦乡存档。");
-  const currentVersion = definitions.rules.saveVersion || 10;
-  const storedVersion = Math.max(Number(parsed.version) || 0, Number(parsed.schemaVersion) || 0);
-  if (storedVersion < 10) throw new Error("旧版存档不兼容，请开始新游戏。");
-  if (storedVersion > currentVersion) throw new Error("此存档来自更新版本，暂无法读取。");
   return migrateSave(parsed, definitions);
 }
 

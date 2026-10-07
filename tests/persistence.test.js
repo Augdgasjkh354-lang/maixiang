@@ -46,21 +46,6 @@ test("unreadable local save stays untouched", () => {
   assert.equal(storage.keys().length, 1);
 });
 
-test("旧存档拒绝迁移，当前版本仍补齐新增内容项", () => {
-  const content = extendContent(CONTENT, {
-    items: { timber: Object.freeze({ id: "timber", name: "木材", unit: "根", category: "material", edible: false, qeq: null }) }
-  });
-  assert.throws(() => migrateSave(Legacy.createNewState(), content), /旧版存档不兼容/);
-
-  const current = simulation.createInitialState();
-  delete current.accounts.residents.timber;
-  delete current.accounts.town.timber;
-  for (const household of Object.values(current.households.byId)) delete household.inventory.timber;
-  const restored = migrateSave(current, content);
-  assert.equal(restored.accounts.residents.timber, 0);
-  assert.equal(restored.accounts.town.timber, 0);
-  assert.ok(Object.values(restored.households.byId).every(household => household.inventory.timber === 0));
-});
 test("export and import round-trip a resumable paused save and preserve replaced data", () => {
   const state = simulation.createInitialState({ seed: 2718 });
   simulation.advanceDays(state, 70);

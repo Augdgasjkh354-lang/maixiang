@@ -108,7 +108,6 @@ export function startBuildingUpgrade(state, buildingId, content, options = {}) {
     workDone: 0, workRequired: definition.upgrade.workDays,
     recommendedWorkers: definition.upgrade.recommendedWorkers || definition.construction.recommendedWorkers,
     workers: 0,
-    prepaidWageCreditUnits: 0,
     materialsConsumed: lines.map(row => ({ itemId: row.itemId, quantityUnits: row.quantityUnits, sourceOwner: row.sourceOwner, transactionId: row.transactionId })),
     started: { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) }
   };

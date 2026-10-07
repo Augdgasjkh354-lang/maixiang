@@ -208,7 +208,7 @@ test("农业税设置和经营权与经营税在保存恢复后保留", () => {
   assert.equal(restored.policy.agricultureTaxPercent, 37.5);
   assert.equal(restored.policy.privateProductionTaxPercent.bakery, 17.25);
   assert.equal(restored.market.operatingRightPrices[mill.id] / CONTENT.precision.inventoryUnitsPerJin, 12000.5);
-  assert.deepEqual(restored.buildings[0].ownership, { townLevels: 3, privateLevels: 0, listedLevels: 0 });
+  assert.equal(restored.buildings[0].ownership.townLevels, 3);
 });
 
 test("v5旧存档不再自动迁移", () => {

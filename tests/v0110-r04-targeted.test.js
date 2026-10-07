@@ -127,31 +127,6 @@ test("r04 兑付储备为0仍可直接换券；小麦进入镇库且自动换券
   assert.equal(simulation.validateCurrencyInvariant(automatic).valid, true);
 });
 
-test("r04 旧存档兑付储备只迁移一次回镇库，商业街聚合幽灵欠薪同时安全清理", () => {
-  const raw = legacyVoucherState({ seed: 110408 });
-  const street = addBuilding(raw, "commercial_street", "legacy-street");
-  delete raw.currency.reserveModel;
-  raw.currency.reserveWheatUnits = 5 * I;
-  raw.currency.reserveWheatCostVoucherUnits = 7 * V;
-  const ghostKey = `${street.id}::shop_clerks`;
-  raw.payroll.arrearsVoucherUnits ||= {};
-  raw.payroll.arrearsVoucherUnits[ghostKey] = 12 * V;
-  raw.payroll.legacyUnattributedArrearsVoucherUnits ||= {};
-  raw.payroll.legacyUnattributedArrearsVoucherUnits[ghostKey] = 12 * V;
-  raw.payroll.arrearsVoucherUnits["legacy-real-town"] = 4 * V;
-  const physicalBefore = raw.accounts.town.wheat + raw.accounts.residents.wheat + raw.currency.reserveWheatUnits;
-  const migrated = migrateSave(JSON.parse(JSON.stringify(raw)), CONTENT);
-  assert.equal(migrated.currency.reserveWheatUnits, 0);
-  assert.equal(migrated.currency.reserveWheatCostVoucherUnits, 0);
-  assert.equal(migrated.currency.reserveModel, "town-inventory-v1");
-  assert.equal(migrated.accounts.town.wheat + migrated.accounts.residents.wheat, physicalBefore);
-  assert.equal(migrated.payroll.arrearsVoucherUnits[ghostKey], undefined);
-  assert.equal(migrated.payroll.arrearsVoucherUnits["legacy-real-town"], 4 * V);
-  const townAfterFirst = migrated.accounts.town.wheat;
-  const again = migrateSave(JSON.parse(JSON.stringify(migrated)), CONTENT);
-  assert.equal(again.accounts.town.wheat, townAfterFirst, "兼容迁移不能重复释放旧储备");
-});
-
 test("r04 公司估值不受库存直接影响；相同利润下投入资本利润率会改变估值", () => {
   const state = { year: 1, day: 30 };
   const a = valuationCompany({ capitalVoucher: 20000, inventoryCostVoucher: 0, dailyProfitVoucher: 10 });

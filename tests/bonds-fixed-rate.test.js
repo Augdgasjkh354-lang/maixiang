@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
 import { householdList, syncResidentAggregates } from "../src/systems/households.js";
-import { migrateBonds } from "../src/systems/bonds.js";
 
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 
@@ -40,10 +39,3 @@ test("利率不高于存款利率且银行无闲钱时无人认购，不发行",
   assert.equal((state.bonds?.issues || []).length, 0);
 });
 
-test("旧档认购中的国债载入时按已认购部分生效", () => {
-  const state = { bonds: { seq: 1, creditPenaltyBps: 200, issues: [{ id: "GB1", status: "subscribing", startRateAnnualPercent: 3, couponRateAnnualPercent: 3, subscribedVoucherUnits: 300, subscriptions: { "bank:bank": 300 }, holdings: [] }] } };
-  migrateBonds(state);
-  assert.equal(state.bonds.issues[0].status, "active");
-  assert.deepEqual(state.bonds.issues[0].holdings, [{ holderKey: "bank:bank", principalVoucherUnits: 300 }]);
-  assert.equal(state.bonds.creditPenaltyBps, undefined);
-});

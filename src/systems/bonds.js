@@ -282,18 +282,3 @@ export function settleBondsDay(state, content) {
   return { issues: bonds.issues.length, outstandingVoucherUnits: bondOutstandingVoucherUnits(state) };
 }
 
-// 旧档兼容：认购中的旧国债按已认购部分直接生效，取消拍卖相关字段。
-export function migrateBonds(state) {
-  const bonds = state.bonds;
-  if (!bonds || !Array.isArray(bonds.issues)) return;
-  delete bonds.creditPenaltyBps;
-  for (const issue of bonds.issues) {
-    delete issue.startRateAnnualPercent;
-    if (issue.status !== "subscribing") continue;
-    issue.holdings = Object.entries(issue.subscriptions || {}).filter(([, units]) => units > 0)
-      .map(([holderKey, units]) => ({ holderKey, principalVoucherUnits: units }));
-    issue.subscriptions = {};
-    issue.totalVoucherUnits = issue.subscribedVoucherUnits || 0;
-    issue.status = issue.holdings.length ? "active" : "failed";
-  }
-}
