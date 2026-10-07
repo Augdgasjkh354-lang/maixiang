@@ -55,7 +55,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 ## 铁律
 
 1. **存档兼容**：新字段一律 `||=` 初始化；`SAVE_VERSION` 保持 15；旧档迁移（`normalizeV15`）优先保留存档值，别被新默认值覆盖。
-2. **测试全绿**：`node --test` 零失败，新功能和修 bug 都要加测试。
+2. **测试全绿**：`node --test` 零失败，新功能和修 bug 都要加测试。设计变了，验证旧行为的测试直接删掉，不必改写。
 3. **selector 只读**：`src/selectors/` 和 `selectDashboard` 里绝不写 state。
 4. **状态合法**：`validateState` 必须通过，禁止 NaN / Infinity / 负钱负粮。
 5. **不手改构建产物**：改 `src/`，再打包。
