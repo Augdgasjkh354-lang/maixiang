@@ -8,6 +8,7 @@ import { ensureWholesaleMarket, mergeWholesaleCashIntoTown } from "../systems/wh
 import { migrateSocialSecurityWallet } from "../systems/social-security.js";
 import { migrateMonetaryReform } from "../economy/payment.js";
 import { migrateBonds } from "../systems/bonds.js";
+import { absorbLegacyWageArrears } from "../systems/employer.js";
 import { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } from "../systems/households.js";
 import {
   defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor
@@ -146,11 +147,9 @@ function normalizeV11(raw, definitions) {
   state.privateEconomy.payrollByBuilding ||= {};
   for (const payroll of Object.values(state.privateEconomy.payrollByBuilding)) {
     payroll.claimsVoucherUnits ||= {};
-    if (payroll.legacyUnattributedArrearsVoucherUnits === undefined) payroll.legacyUnattributedArrearsVoucherUnits = payroll.arrearsVoucherUnits || 0;
   }
   state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
   state.payroll.creditorClaims ||= {};
-  state.payroll.legacyUnattributedArrearsVoucherUnits ||= { ...(state.payroll.arrearsVoucherUnits || state.payroll.arrearsWheatUnits || {}) };
   state.shops ||= {};
   state.nextShopNumber ||= Object.keys(state.shops).length + 1;
   for (const shop of Object.values(state.shops)) {
@@ -161,7 +160,6 @@ function normalizeV11(raw, definitions) {
     shop.retainedEarningsVoucherUnits ??= 0;
     shop.liabilities ||= { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 };
     shop.liabilities.claimsVoucherUnits ||= {};
-    if (shop.liabilities.legacyUnattributedWageVoucherUnits === undefined) shop.liabilities.legacyUnattributedWageVoucherUnits = shop.liabilities.wageVoucherUnits || 0;
   }
   for (const company of Object.values(state.companies || {})) {
     company.inventory ||= {};
@@ -171,7 +169,6 @@ function normalizeV11(raw, definitions) {
     company.plan ||= { ageDays: 0 };
     company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0 };
     company.payroll.claimsVoucherUnits ||= {};
-    if (company.payroll.legacyUnattributedArrearsVoucherUnits === undefined) company.payroll.legacyUnattributedArrearsVoucherUnits = company.payroll.arrearsVoucherUnits || 0;
   }
   state.policy ||= {};
   state.policy.employmentExchangeJin ??= definitions.rules.employmentExchangeDefaultJin ?? 2;
@@ -206,21 +203,15 @@ function normalizeV12(raw, definitions, legacyCompleted = false) {
     const target = state.payroll.creditorPaymentClaims[payrollKey] ||= {};
     for (const [householdId, units] of Object.entries(claims || {})) target[householdId] ||= legacyVoucherObligation(units);
   }
-  state.payroll.legacyUnattributedPaymentClaims ||= {};
-  for (const [key, units] of Object.entries(state.payroll.legacyUnattributedArrearsVoucherUnits || {})) {
-    state.payroll.legacyUnattributedPaymentClaims[key] ||= legacyVoucherObligation(units);
-  }
 
   for (const [buildingId, payroll] of Object.entries(state.privateEconomy.payrollByBuilding || {})) {
     payroll.claimsPayment ||= {};
     for (const [householdId, units] of Object.entries(payroll.claimsVoucherUnits || {})) payroll.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-    payroll.legacyUnattributedPaymentClaim ||= legacyVoucherObligation(payroll.legacyUnattributedArrearsVoucherUnits || 0);
   }
   for (const shop of Object.values(state.shops || {})) {
     shop.cashWheatUnits ??= 0;
     shop.liabilities.claimsPayment ||= {};
     for (const [householdId, units] of Object.entries(shop.liabilities.claimsVoucherUnits || {})) shop.liabilities.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-    shop.liabilities.legacyUnattributedWagePaymentClaim ||= legacyVoucherObligation(shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
     shop.liabilities.rentPaymentClaim ||= legacyVoucherObligation(shop.liabilities.rentVoucherUnits || 0);
     shop.liabilities.taxPaymentClaim ||= legacyVoucherObligation(shop.liabilities.taxVoucherUnits || 0);
   }
@@ -228,7 +219,6 @@ function normalizeV12(raw, definitions, legacyCompleted = false) {
     company.cashWheatUnits ??= 0;
     company.payroll.claimsPayment ||= {};
     for (const [householdId, units] of Object.entries(company.payroll.claimsVoucherUnits || {})) company.payroll.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-    company.payroll.legacyUnattributedPaymentClaim ||= legacyVoucherObligation(company.payroll.legacyUnattributedArrearsVoucherUnits || 0);
   }
   state.legacyMigration = { ...(state.legacyMigration || {}), toVersion: 12, v12: { ...(state.legacyMigration?.v12 || {}), monetaryReformCompatibility: legacyCompleted ? "completed" : "native" } };
   syncShopEmployment(state, definitions);
@@ -375,24 +365,10 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
     state.currency.reserveModel = "town-inventory-v1";
   }
 
-  // r03 可能把商业街聚合岗位错记为镇库欠薪。仅清理内容定义明确 managedBy=shops 的 key，
-  // 真实镇营岗位、公司岗位和店铺自身 liabilities 均不受影响。
+  // 旧档只有欠薪总额的部分，一次性分配成家庭债权（含清理 r03 误记到镇库的商业街岗位欠薪）。
   state.payroll ||= {};
   state.payroll.arrearsVoucherUnits ||= state.payroll.arrearsWheatUnits || {};
-  state.payroll.creditorClaims ||= {};
-  state.payroll.creditorPaymentClaims ||= {};
-  state.payroll.legacyUnattributedArrearsVoucherUnits ||= {};
-  for (const building of state.buildings || []) {
-    const def = definitions.buildings?.[building.typeId];
-    for (const job of def?.jobs || []) {
-      if (job.managedBy !== "shops") continue;
-      const key = `${building.id}::${job.id}`;
-      delete state.payroll.arrearsVoucherUnits[key];
-      delete state.payroll.creditorClaims[key];
-      delete state.payroll.creditorPaymentClaims[key];
-      delete state.payroll.legacyUnattributedArrearsVoucherUnits[key];
-    }
-  }
+  absorbLegacyWageArrears(state, definitions);
   state.payroll.arrearsWheatUnits = state.payroll.arrearsVoucherUnits;
 
   // 0.2.3 做市商：旧档若已有批发市场挂价则沿用（玩家可能已调过），缺项补做市商默认价。

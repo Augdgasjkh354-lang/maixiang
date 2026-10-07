@@ -1,11 +1,9 @@
 import { addWageExpense } from "../economy/business.js";
 import { currencyScale } from "../economy/currency.js";
-import { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } from "../economy/payment.js";
+import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
-import { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits, syncResidentAggregates } from "./households.js";
-import { allocateIntegerByWeight } from "../core/allocation.js";
-import { recordHouseholdWageDue } from "./household-life.js";
-import { attributeLegacyUnattributedWageClaims } from "./wage-claims.js";
+import { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } from "./households.js";
+import { accrueWages, payWages, wageArrears } from "./employer.js";
 import { collectSocialContributions, ensureSocialSecurity, payFromFund } from "./social-security.js";
 
 function ensurePayroll(state) {
@@ -72,74 +70,12 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
   addWageExpense(state, kind, voucherUnits, sector);
 }
 
-function householdAllocationForJob(state, jobKey) {
-  const weights = Object.fromEntries(jobAssignments(state, jobKey).map(row => [row.householdId, row.count]));
-  return { householdIds: Object.keys(weights), weights };
-}
-
-function claimMapTotal(claims) {
-  return Object.values(claims || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
-}
-
-function attributeLegacyTownWageClaims(state, payroll) {
-  payroll.creditorClaims ||= {};
-  payroll.creditorPaymentClaims ||= {};
-  payroll.legacyUnattributedArrearsVoucherUnits ||= {};
-  payroll.legacyUnattributedPaymentClaims ||= {};
-  const keys = new Set([
-    ...Object.keys(payroll.arrearsVoucherUnits || {}),
-    ...Object.keys(payroll.legacyUnattributedArrearsVoucherUnits || {})
-  ]);
-  for (const payrollKey of [...keys].sort()) {
-    const totalArrears = Math.max(0, Math.round(Number(payroll.arrearsVoucherUnits?.[payrollKey]) || 0));
-    const claims = payroll.creditorClaims[payrollKey] ||= {};
-    const paymentClaims = payroll.creditorPaymentClaims[payrollKey] ||= {};
-    const unrepresented = Math.max(0, totalArrears - claimMapTotal(claims));
-    if (unrepresented <= 0) {
-      delete payroll.legacyUnattributedArrearsVoucherUnits[payrollKey];
-      delete payroll.legacyUnattributedPaymentClaims[payrollKey];
-      continue;
-    }
-    // 历史版本可能只保存岗位总欠薪，没有债权家庭。当前岗位仍在时按原岗位分配；
-    // 岗位已撤销/退休时由兼容分配器落到仍存在的家庭账户，保证债务有可偿还对象。
-    const owner = { claimsVoucherUnits: claims, claimsPayment: paymentClaims };
-    const currentJobKey = payrollKey.startsWith("builders::") ? "builders" : payrollKey;
-    const result = attributeLegacyUnattributedWageClaims(state, owner, unrepresented, jobAssignments(state, currentJobKey));
-    const remaining = Math.max(0, totalArrears - claimMapTotal(claims));
-    if (remaining > 0) {
-      payroll.legacyUnattributedArrearsVoucherUnits[payrollKey] = remaining;
-      payroll.legacyUnattributedPaymentClaims[payrollKey] = { valueUnits: remaining, wheatValueUnits: 0, voucherValueUnits: remaining };
-    } else {
-      delete payroll.legacyUnattributedArrearsVoucherUnits[payrollKey];
-      delete payroll.legacyUnattributedPaymentClaims[payrollKey];
-    }
-    if (result.attributed <= 0) continue;
-  }
-}
-
 export function payDailyWages(state, laborAtStart, content) {
   const payroll = ensurePayroll(state);
   payroll.creditorClaims ||= {};
   payroll.creditorPaymentClaims ||= {};
   const arrears = payroll.arrearsVoucherUnits;
 
-  // 商业街岗位由各店铺自己的工资债权/统一支付链承担。r03 曾把商业街的聚合展示行
-  // 错送入镇库工资循环，且该聚合 key 没有家庭分配，形成“只有总欠薪、没有债权人”的幽灵欠薪。
-  // 这里只清理由内容定义明确标记为 shop 的聚合 key，不触碰任何真实镇营岗位债权。
-  const invalidShopPayrollKeys = new Set(laborAtStart.rows.filter(item => item.scope === "shop").map(row => row.key));
-  // 即使商业街建筑后来已拆除，r03 遗留的聚合岗位 key 仍可辨认；这些岗位从未应由镇库承担。
-  for (const key of Object.keys(arrears)) {
-    if (key.endsWith("::merchants") || key.endsWith("::shop_clerks")) invalidShopPayrollKeys.add(key);
-  }
-  for (const payrollKey of invalidShopPayrollKeys) {
-    delete arrears[payrollKey];
-    delete payroll.creditorClaims[payrollKey];
-    delete payroll.creditorPaymentClaims[payrollKey];
-    delete payroll.legacyUnattributedArrearsVoucherUnits?.[payrollKey];
-    delete payroll.legacyUnattributedPaymentClaims?.[payrollKey];
-  }
-
-  attributeLegacyTownWageClaims(state, payroll);
   const baseRows = laborAtStart.rows.filter(row => !["private", "listed", "shop"].includes(row.scope));
   const scale = currencyScale(content);
   // 镇营岗位（含批发市场）工资一律由镇库发放。
@@ -169,28 +105,14 @@ export function payDailyWages(state, laborAtStart, content) {
   const currentDue = {};
 
   // 历史债权先独立偿付，不依赖当前岗位、工资设置或建筑是否还存在。
-  // 债权的付款构成保存在 creditorPaymentClaims 中；统一支付层会按原构成继续结算并同步改革缺券记录。
+  const bookFor = payrollKey => ({ claimsVoucherUnits: payroll.creditorClaims[payrollKey] ||= {}, claimsPayment: payroll.creditorPaymentClaims[payrollKey] ||= {} });
   for (const payrollKey of Object.keys(payroll.creditorClaims).sort()) {
-    const claims = payroll.creditorClaims[payrollKey] || {};
-    const paymentClaims = payroll.creditorPaymentClaims[payrollKey] ||= {};
-    oldClaimTotals[payrollKey] = Object.values(claims).reduce((sum, value) => sum + (value || 0), 0);
-    let paidKey = 0;
-    const payer = "town";
-    for (const householdId of Object.keys(claims).sort()) {
-      const amount = claims[householdId] || 0;
-      if (amount <= 0) continue;
-      const obligation = normalizePaymentObligation(paymentClaims[householdId] || amount, state);
-      const construction = payrollKey.startsWith("builders::");
-      const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
-        construction ? "construction_wage_arrears_payment" : "wage_arrears_payment", "偿付原债权家庭历史欠薪",
-        { requireFull: false });
-      const paid = result.paidValueUnits || 0;
-      claims[householdId] = Math.max(0, amount - paid);
-      paymentClaims[householdId] = result.remainingComposition;
-      arrears[payrollKey] = Math.max(0, (arrears[payrollKey] || 0) - paid);
-      paidKey += paid;
-    }
-    arrearsPaidByKey[payrollKey] = paidKey;
+    const book = bookFor(payrollKey);
+    oldClaimTotals[payrollKey] = wageArrears(book);
+    const construction = payrollKey.startsWith("builders::");
+    const paid = payWages(state, book, "town", content, construction ? "construction_wage_arrears_payment" : "wage_arrears_payment", "偿付原债权家庭历史欠薪").paid;
+    arrears[payrollKey] = Math.max(0, (arrears[payrollKey] || 0) - paid);
+    arrearsPaidByKey[payrollKey] = paid;
   }
 
   // 历史债权处理后，才计提今天的工资费用与家庭债权；不会因偿还旧债重复计费。
@@ -208,19 +130,9 @@ export function payDailyWages(state, laborAtStart, content) {
     if (credit && project) project.prepaidWageCreditUnits -= credit;
     const payable = due - credit;
     const payrollKey = isConstruction && project ? "builders::" + project.instanceId : row.key;
-    const claims = payroll.creditorClaims[payrollKey] ||= {};
-    const paymentClaims = payroll.creditorPaymentClaims[payrollKey] ||= {};
     oldClaimTotals[payrollKey] ??= 0;
     arrearsPaidByKey[payrollKey] ||= 0;
-    const allocationByHousehold = householdAllocationForJob(state, row.key);
-    const weights = allocationByHousehold.weights;
-    const households = allocationByHousehold.householdIds.map(id => state.households?.byId?.[id]).filter(Boolean);
-    const allocation = allocateIntegerByWeight(payable, households, household => weights[household.id] || 0);
-    if (allocation.ok) for (const { recipient: household, units } of allocation.rows) {
-      claims[household.id] = (claims[household.id] || 0) + units;
-      paymentClaims[household.id] = addPaymentObligation(paymentClaims[household.id], currentPaymentComposition(state, units));
-      recordHouseholdWageDue(state, household.id, units, content);
-    }
+    accrueWages(state, bookFor(payrollKey), jobAssignments(state, row.key), payable, content);
     currentDue[payrollKey] = (currentDue[payrollKey] || 0) + payable;
     arrears[payrollKey] = (arrears[payrollKey] || 0) + payable;
     recordWageExpense(state, row, payable, isConstruction ? "construction" : "operating", content);
@@ -231,25 +143,12 @@ export function payDailyWages(state, laborAtStart, content) {
   // 再处理当日工资。若同一债权家庭仍有历史余额，统一债权表天然保持旧债在前一次偿付后留下的余额，且改革缺券键仍使用同一债权键。
   const paidByHousehold = {};
   for (const row of workerPay) {
-    const claims = payroll.creditorClaims[row.payrollKey] || {};
-    const paymentClaims = payroll.creditorPaymentClaims[row.payrollKey] ||= {};
-    let paidKey = 0;
-    const payer = "town";
+    const result = payWages(state, bookFor(row.payrollKey), "town", content,
+      row.key === "builders" ? "construction_wage_payment" : "wage_payment", "支付具体债权家庭本日工资");
+    const paidKey = result.paid;
+    arrears[row.payrollKey] = Math.max(0, (arrears[row.payrollKey] || 0) - paidKey);
     const paidRows = (paidByHousehold[row.payrollKey] ||= {});
-    for (const householdId of Object.keys(claims).sort()) {
-      const amount = claims[householdId] || 0;
-      if (amount <= 0) continue;
-      const obligation = normalizePaymentObligation(paymentClaims[householdId] || amount, state);
-      const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
-        row.key === "builders" ? "construction_wage_payment" : "wage_payment", "支付具体债权家庭本日工资",
-        { requireFull: false });
-      const paid = result.paidValueUnits || 0;
-      paymentClaims[householdId] = result.remainingComposition;
-      claims[householdId] = Math.max(0, amount - paid);
-      arrears[row.payrollKey] = Math.max(0, (arrears[row.payrollKey] || 0) - paid);
-      paidKey += paid;
-      if (paid > 0) paidRows[householdId] = (paidRows[householdId] || 0) + paid;
-    }
+    for (const { householdId, units } of result.rows) paidRows[householdId] = (paidRows[householdId] || 0) + units;
     const historicalRemainingBeforeCurrent = Math.max(0, (oldClaimTotals[row.payrollKey] || 0) - (arrearsPaidByKey[row.payrollKey] || 0));
     const historicalPaidNow = Math.min(historicalRemainingBeforeCurrent, paidKey);
     arrearsPaidByKey[row.payrollKey] = (arrearsPaidByKey[row.payrollKey] || 0) + historicalPaidNow;

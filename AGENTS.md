@@ -70,6 +70,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 - 新增经济主体（要收付钱的）：在 `economy/accounts.js` 登记账户名和存放位置即可，不要在货币、支付、库存里再写 `owner.startsWith(...)` 分支。
 - 三段记账一律用 `economy/books.js` 的 `bookAdd` / `bookAddMap`，不要手写 day/year/cumulative 循环。
 - 直接买卖（镇库采购、直购、公司卖货）一律走 `economy/trade.js`，不要再各写一套卖家循环和库存成本计算。
+- 发工资一律走 `systems/employer.js`：`accrueWages` 记家庭债权、`payWages` 按户偿付、欠薪 = `wageArrears`。镇库、民营、公司、店铺同一套；行业实物生产税用 `productionTaxUnits`。
 - 付钱就要真到账：采购必须真实入库到买方账户。
 - 镇里内部（镇库 ↔ 批发市场 ↔ 镇营建筑）之间只搬货不付钱；自己付钱给自己是 bug 温床，0.2.3 早期就因此出过三个 bug。
 - 多阶段支付：每阶段以上一阶段返回的 `remainingComposition` 为准，不能拿付款前的总额，否则重复支付。

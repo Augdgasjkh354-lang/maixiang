@@ -10,7 +10,7 @@ import { currentUnitPrice } from "../economy/prices.js";
 import { buyWholesaleForOwner } from "./wholesale-market.js";
 import { householdConvertibleWheatUnits, householdFoodQeqUnits, householdList, householdReserveQeqUnits, syncResidentAggregates, jobAssignments, isActiveHousehold, creditHouseholdInventory } from "./households.js";
 
-import { accrueWageClaims, attributeLegacyUnattributedWageClaims, claimTotal, payMonetaryWageClaimsFromPayers } from "./wage-claims.js";
+import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
 const SELLABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
 
 function targetBatches(state, building) {
@@ -82,12 +82,7 @@ export function arrangePrivateWorkers(state, content) {
     const cap = role.slots * building.ownership.privateLevels;
     const plannedWorkers = plannedWorkersForProducer(state, `private:${building.id}`);
     const desired = Math.min(cap, plannedWorkers == null ? readJobCount(state, key) : plannedWorkers);
-    const current = readJobCount(state, key);
-    const next = Math.min(desired, current + idle);
-    setPrivateWorkers(state, building.id, role.id, next, content);
-    // 按实际招聘数扣减闲置（之前按请求值扣，招聘失败时多扣了）。
-    const actual = readJobCount(state, key);
-    idle -= Math.max(0, actual - current);
+    idle = hireToward(desired, idle, () => readJobCount(state, key), next => setPrivateWorkers(state, building.id, role.id, next, content));
   }
 }
 
@@ -123,27 +118,18 @@ export function payPrivateIndustryWages(state, content) {
     const definition = content.buildings[building.typeId]; const job = definition?.jobs?.[0]; if (!job) continue;
     const key = privateJobKeyForBuilding(building.id, job.id); const workers = readJobCount(state, key);
     const rate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5; const due = Math.round(workers * rate * scale);
-    const payroll = state.privateEconomy.payrollByBuilding[building.id] ||= { arrearsVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, cumulativePaidVoucherUnits: 0, claimsVoucherUnits: {} };
-    const assignments = jobAssignments(state, key); accrueWageClaims(state, payroll, assignments, due, content);
-    payroll.legacyUnattributedArrearsVoucherUnits ??= Math.max(0, (payroll.arrearsVoucherUnits || 0) - claimTotal(payroll));
-    if (payroll.legacyUnattributedArrearsVoucherUnits > 0) {
-      const attributed = attributeLegacyUnattributedWageClaims(state, payroll, payroll.legacyUnattributedArrearsVoucherUnits, assignments);
-      payroll.legacyUnattributedArrearsVoucherUnits = Math.max(0, payroll.legacyUnattributedArrearsVoucherUnits - attributed.attributed);
-    }
-    payroll.arrearsVoucherUnits = claimTotal(payroll) + (payroll.legacyUnattributedArrearsVoucherUnits || 0); payroll.cumulativeAccruedVoucherUnits += due;
-    const owners = privateOwners(building, state); const ownerLevels = new Map(); for (const householdId of owners) ownerLevels.set(householdId, (ownerLevels.get(householdId) || 0) + 1);
-    // 过滤已消亡家庭，避免付款方失效导致欠薪永久挂账（之前不校验）。
-    const liveOwners = [...ownerLevels.keys()].filter(ownerId => isActiveHousehold(state, ownerId));
-    const payers = liveOwners.map(ownerId => ({
+    const payroll = wageBook(state.privateEconomy.payrollByBuilding[building.id] ||= { arrearsVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, cumulativePaidVoucherUnits: 0 });
+    accrueWages(state, payroll, jobAssignments(state, key), due, content);
+    payroll.cumulativeAccruedVoucherUnits += due;
+    // 业主家庭轮流付工资（已消亡家庭跳过），付款时给业主留够口粮。
+    const ownerIds = [...new Set(privateOwners(building, state))].filter(ownerId => isActiveHousehold(state, ownerId));
+    const payers = ownerIds.map(ownerId => ({
       id: `household:${ownerId}`,
       maxWheatUnits: householdConvertibleWheatUnits(state, state.households.byId[ownerId], content, content.rules.householdFoodReserveDays ?? 30)
     }));
-    const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
-    const paidResult = payMonetaryWageClaimsFromPayers(state, payroll, payers, content, "private_wage_payment",
-      `${definition.name}民营业主偿付具体债权家庭工资`);
-    state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
-    payroll.arrearsVoucherUnits = claimTotal(payroll) + (payroll.legacyUnattributedArrearsVoucherUnits || 0); payroll.cumulativePaidVoucherUnits += paidResult.paid;
-    results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paidResult.paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
+    const paid = payWages(state, payroll, payers, content, "private_wage_payment", `${definition.name}民营业主偿付具体债权家庭工资`).paid;
+    payroll.arrearsVoucherUnits = wageArrears(payroll); payroll.cumulativePaidVoucherUnits += paid;
+    results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
   }
   return results;
 }
@@ -182,17 +168,15 @@ export function processPrivateBuilding(state, building, content) {
       batches = Math.min(batches, Math.floor(productionAvailableUnits(state, household, input.itemId, content) / perBatch));
     }
     if (batches <= 0) continue;
-    const taxPercent = state.policy.privateProductionTaxPercent[building.typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
     const outputs = [];
     const localTaxRows = [];
     const carryAfter = {};
     for (const output of recipe.outputs) {
       const totalUnits = quantityToUnits(output.quantity * batches, content);
       const carryKey = `${building.typeId}|${building.id}|${ownerHouseholdId}|${output.itemId}`;
-      const carry = state.privateEconomy.taxRemainders[carryKey] || 0;
-      const numerator = totalUnits * Math.round(taxPercent * 100) + carry;
-      const taxUnits = Math.floor(numerator / 10000);
-      carryAfter[carryKey] = numerator % 10000;
+      const tax = productionTaxUnits(state, building.typeId, state.privateEconomy.taxRemainders, carryKey, totalUnits, content);
+      const taxUnits = tax.taxUnits;
+      carryAfter[carryKey] = tax.carryAfter;
       const residentUnits = totalUnits - taxUnits;
       if (residentUnits > 0) outputs.push({ owner: `household:${ownerHouseholdId}`, itemId: output.itemId, quantityUnits: residentUnits, type: "private_production_output", source: "private_production" });
       if (taxUnits > 0) outputs.push({ owner: "town", itemId: output.itemId, quantityUnits: taxUnits, type: "private_production_tax", source: "private_production", destination: "town" });

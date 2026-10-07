@@ -13,7 +13,7 @@ import { currentUnitPrice, setCurrentUnitPrice } from "../economy/prices.js";
 import { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold, jobAssignments, setJobCount, syncResidentAggregates } from "./households.js";
 import { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } from "../economy/operating-plan.js";
 
-import { accrueWageClaims, attributeLegacyUnattributedWageClaims, claimTotal, payMonetaryWageClaims } from "./wage-claims.js";
+import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
 import { buyWholesaleForOwner, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } from "./wholesale-market.js";
 const LISTABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
 
@@ -43,9 +43,7 @@ function ensureCompanyBooks(company) {
   }
   company.inventory ||= {};
   company.inventoryCostVoucherUnits ||= {};
-  company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, claimsVoucherUnits: {}, legacyUnattributedArrearsVoucherUnits: 0 };
-  company.payroll.claimsVoucherUnits ||= {};
-  company.payroll.legacyUnattributedArrearsVoucherUnits ??= 0;
+  wageBook(company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0 });
   company.shareSale ||= { offeredShares: 0, sharePriceVoucherUnits: 0, cumulativeProceedsVoucherUnits: 0, lastSaleVoucherUnits: 0, lastSoldShares: 0 };
   company.listing ||= { listed: (company.totalShares || 0) > 0, ticker: null, listedAt: null };
   company.settings ||= { wagePerWorkerDay: null, targetWorkers: null, salePricesVoucherPerUnit: {} };
@@ -559,9 +557,7 @@ export function arrangeListedWorkers(state, content) {
     const current = Math.min(readJobCount(state, jobKey), job.slots * company.listedLevels);
     const plannedWorkers = plannedWorkersForProducer(state, `company:${company.id}`);
     const desired = Number.isInteger(company.settings?.targetWorkers) ? company.settings.targetWorkers : (plannedWorkers == null ? current : plannedWorkers);
-    const next = Math.min(desired, current + idle);
-    setJobCount(state, jobKey, next, content, { type: "company", id: company.id });
-    idle += current - readJobCount(state, jobKey);
+    idle = hireToward(desired, idle, () => readJobCount(state, jobKey), next => setJobCount(state, jobKey, next, content, { type: "company", id: company.id }));
   }
 }
 
@@ -571,21 +567,13 @@ export function payListedCompanyWages(state, content) {
     const definition = content.buildings[company.typeId]; const job = definition?.jobs?.[0]; if (!job) continue;
     const jobKey = listedJobKeyForBuilding(company.buildingId, job.id); const workers = readJobCount(state, jobKey);
     const rate = Number.isFinite(company.settings?.wagePerWorkerDay) ? company.settings.wagePerWorkerDay : (state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5); const due = Math.round(workers * rate * scale);
-    const assignments = jobAssignments(state, jobKey); accrueWageClaims(state, company.payroll, assignments, due, content);
-    company.payroll.legacyUnattributedArrearsVoucherUnits ??= Math.max(0, (company.payroll.arrearsVoucherUnits || 0) - claimTotal(company.payroll));
-    if (company.payroll.legacyUnattributedArrearsVoucherUnits > 0) {
-      const attributed = attributeLegacyUnattributedWageClaims(state, company.payroll, company.payroll.legacyUnattributedArrearsVoucherUnits, assignments);
-      company.payroll.legacyUnattributedArrearsVoucherUnits = Math.max(0, company.payroll.legacyUnattributedArrearsVoucherUnits - attributed.attributed);
-    }
-    company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + company.payroll.legacyUnattributedArrearsVoucherUnits;
-    company.payroll.cumulativeAccruedVoucherUnits += due; addPeriodValue(company, "wageExpenseVoucherUnits", due); applyProfit(company, -due);
-    const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
-    const result = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
-      "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`);
-    state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
-    company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + company.payroll.legacyUnattributedArrearsVoucherUnits;
-    company.payroll.cumulativePaidVoucherUnits += result.paid; addPeriodValue(company, "wagesPaidVoucherUnits", result.paid);
-    results.push({ companyId: company.id, workers, dueVoucherUnits: due, paidVoucherUnits: result.paid, arrearsVoucherUnits: company.payroll.arrearsVoucherUnits });
+    const payroll = wageBook(company.payroll);
+    accrueWages(state, payroll, jobAssignments(state, jobKey), due, content);
+    payroll.cumulativeAccruedVoucherUnits += due; addPeriodValue(company, "wageExpenseVoucherUnits", due); applyProfit(company, -due);
+    const paid = payWages(state, payroll, "company:" + company.id, content, "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`).paid;
+    payroll.arrearsVoucherUnits = wageArrears(payroll);
+    payroll.cumulativePaidVoucherUnits += paid; addPeriodValue(company, "wagesPaidVoucherUnits", paid);
+    results.push({ companyId: company.id, workers, dueVoucherUnits: due, paidVoucherUnits: paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
   }
   return results;
 }
@@ -600,13 +588,10 @@ function companyCapacity(company, state, content) {
 }
 
 function planTaxUnits(state, company, outputItemId, outputUnits, content) {
-  const rate = state.policy?.privateProductionTaxPercent?.[company.typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
   company.taxRemainders ||= {};
-  const carry = company.taxRemainders[outputItemId] || 0;
-  const numerator = outputUnits * Math.round(rate * 100) + carry;
-  const taxed = Math.floor(numerator / 10000);
-  company.taxRemainders[outputItemId] = numerator % 10000;
-  return taxed;
+  const { taxUnits, carryAfter } = productionTaxUnits(state, company.typeId, company.taxRemainders, outputItemId, outputUnits, content);
+  company.taxRemainders[outputItemId] = carryAfter;
+  return taxUnits;
 }
 
 export function processListedCompany(state, company, content) {
@@ -757,19 +742,10 @@ export function settleAnnualCompanyProfits(state, endingYear, content) {
     const pending = company.pendingAnnualSettlement;
     const lastYearNetProfit = pending?.year === endingYear ? (pending.accounts?.profitVoucherUnits || 0) : 0;
 
-    // 旧档可能只有工资欠款总额、没有家庭债权人。先一次性归属给当前岗位家庭；若岗位已不存在，
-    // 则按仍存在家庭人口分配债权，避免真实旧债永久阻塞分红。
-    if ((company.payroll.legacyUnattributedArrearsVoucherUnits || 0) > 0) {
-      const definition = content.buildings[company.typeId];
-      const job = definition?.jobs?.[0];
-      const assignments = job ? jobAssignments(state, listedJobKeyForBuilding(company.buildingId, job.id)) : [];
-      const attributed = attributeLegacyUnattributedWageClaims(state, company.payroll, company.payroll.legacyUnattributedArrearsVoucherUnits, assignments);
-      company.payroll.legacyUnattributedArrearsVoucherUnits = Math.max(0, company.payroll.legacyUnattributedArrearsVoucherUnits - attributed.attributed);
-    }
     // 先尝试偿付已形成的工资债务。债权仍归原家庭，支付媒介由统一支付层决定。
-    const debtResult = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
+    const debtResult = payWages(state, company.payroll, "company:" + company.id, content,
       "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`);
-    company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + (company.payroll.legacyUnattributedArrearsVoucherUnits || 0);
+    company.payroll.arrearsVoucherUnits = wageArrears(company.payroll);
 
     const retainedBefore = Math.max(0, company.retainedEarningsVoucherUnits || 0);
     const reserve = companyWorkingCapitalReserve(company, state, content);

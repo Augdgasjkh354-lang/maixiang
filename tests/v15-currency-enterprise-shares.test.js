@@ -192,8 +192,10 @@ test("年度分红不超过未分配利润和可支付现金，未偿清欠薪�
   company.lastDividendYear = 1;
   company.retainedEarningsVoucherUnits = 5000 * V;
   const impossibleDebt = 1000000 * V;
+  const creditorId = Object.keys(state.households.byId)[0];
+  company.payroll.claimsVoucherUnits = { [creditorId]: impossibleDebt };
+  company.payroll.claimsPayment = { [creditorId]: { valueUnits: impossibleDebt, wheatValueUnits: 0, voucherValueUnits: impossibleDebt } };
   company.payroll.arrearsVoucherUnits = impossibleDebt;
-  company.payroll.legacyUnattributedArrearsVoucherUnits = impossibleDebt;
   const blocked = settleAnnualCompanyDividends(state, 2, CONTENT);
   assert.ok(company.payroll.arrearsVoucherUnits > 0, "资金不足时必须保留未偿工资债务");
   assert.equal(blocked[0].totalVoucherUnits, 0);

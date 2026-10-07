@@ -1990,7 +1990,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod13 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-7085e3d";
+       const BUILD_ID = "0203-bdec22c";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -4410,17 +4410,25 @@ function payReclaimWages(state, wageRows, workers, workDays, dueVoucherUnits, co
 return { ensureAgricultureState, reclaimedAcresMaximum, reclaimedAcres, reclaimWorkDaysPerAcre, reclaimWorkDaysForAcres, reclaimCostEstimate, reclaimFarmland, accumulateFarmDay, harvest };
 })();
 
-// ===== systems/wage-claims.js =====
+// ===== systems/employer.js =====
 const __mxmod24 = (() => {
 const { allocateIntegerByWeight } = __mxmod10;
 const { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } = __mxmod22;
 const { recordHouseholdWageDue } = __mxmod18;
-function ensureClaimMap(owner) { owner.claimsVoucherUnits ||= {}; return owner.claimsVoucherUnits; }
-       function ensurePaymentClaimMap(owner) { owner.claimsPayment ||= {}; return owner.claimsPayment; }
+const { jobAssignments, syncResidentAggregates } = __mxmod15;
+function wageBook(holder) {
+  holder.claimsVoucherUnits ||= {};
+  holder.claimsPayment ||= {};
+  return holder;
+}
 
-       function accrueWageClaims(state, owner, assignments, dueUnits, content) {
-  const claims = ensureClaimMap(owner);
-  const paymentClaims = ensurePaymentClaimMap(owner);
+       function wageArrears(book) {
+  return Object.values(book?.claimsVoucherUnits || {}).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
+}
+
+// 把 dueUnits 按各户在岗人数分到家庭债权上。返回 [{ householdId, units }]。
+       function accrueWages(state, book, assignments, dueUnits, content) {
+  wageBook(book);
   if (dueUnits <= 0 || !assignments?.length) return [];
   const weights = {};
   for (const row of assignments) if (row?.householdId && row.count > 0) weights[row.householdId] = (weights[row.householdId] || 0) + row.count;
@@ -4430,121 +4438,139 @@ function ensureClaimMap(owner) { owner.claimsVoucherUnits ||= {}; return owner.c
   const rows = [];
   for (const { recipient: household, units } of allocation.rows) {
     if (units <= 0) continue;
-    claims[household.id] = (claims[household.id] || 0) + units;
-    paymentClaims[household.id] = addPaymentObligation(paymentClaims[household.id], currentPaymentComposition(state, units));
+    book.claimsVoucherUnits[household.id] = (book.claimsVoucherUnits[household.id] || 0) + units;
+    book.claimsPayment[household.id] = addPaymentObligation(book.claimsPayment[household.id], currentPaymentComposition(state, units));
     recordHouseholdWageDue(state, household.id, units, content);
     rows.push({ householdId: household.id, units });
   }
   return rows;
 }
 
-       function attributeLegacyUnattributedWageClaims(state, owner, legacyUnits, assignments = []) {
-  const total = Math.max(0, Math.round(Number(legacyUnits) || 0));
-  if (total <= 0) return { attributed: 0, rows: [] };
-  const byId = state.households?.byId || {};
-  const weights = {};
-  for (const row of assignments || []) {
-    if (!row?.householdId || !byId[row.householdId] || row.count <= 0) continue;
-    weights[row.householdId] = (weights[row.householdId] || 0) + row.count;
-  }
-  let households = Object.keys(weights).map(id => byId[id]).filter(Boolean);
-  if (!households.length) {
-    households = Object.values(byId).filter(household => {
-      const bands = household?.ageBands || {};
-      return Math.max(0, (bands.children || 0) + (bands.workers || 0) + (bands.elders || 0)) > 0;
-    });
-    for (const household of households) {
-      const bands = household.ageBands || {};
-      weights[household.id] = Math.max(1, (bands.children || 0) + (bands.workers || 0) + (bands.elders || 0));
-    }
-  }
-  if (!households.length) return { attributed: 0, rows: [] };
-  const allocation = allocateIntegerByWeight(total, households, household => weights[household.id] || 0);
-  if (!allocation.ok) return { attributed: 0, rows: [] };
-  const claims = ensureClaimMap(owner);
-  const paymentClaims = ensurePaymentClaimMap(owner);
-  const rows = [];
-  for (const { recipient: household, units } of allocation.rows) {
-    if (units <= 0) continue;
-    claims[household.id] = (claims[household.id] || 0) + units;
-    // 旧版只有总额、没有债权人和支付媒介明细；当时该字段以粮券价值记账。
-    paymentClaims[household.id] = addPaymentObligation(paymentClaims[household.id], {
-      valueUnits: units, wheatValueUnits: 0, voucherValueUnits: units
-    });
-    rows.push({ householdId: household.id, units });
-  }
-  return { attributed: rows.reduce((sum, row) => sum + row.units, 0), rows };
-}
-
-       function claimTotal(owner) { return Object.values(ensureClaimMap(owner)).reduce((sum, value) => sum + (value || 0), 0); }
-
-       function payWageClaims(state, owner, availableUnits, payHousehold) {
-  const claims = ensureClaimMap(owner);
-  let available = Math.max(0, availableUnits || 0);
+// 按户偿付工资债权。payers：付款方账户名，或 { id, maxWheatUnits }（家庭业主要留口粮），按顺序轮流付。
+// 返回 { paid, rows: [{ householdId, units }] }。
+       function payWages(state, book, payers, content, type, reason) {
+  wageBook(book);
+  const list = (Array.isArray(payers) ? payers : [payers]).map(payer => typeof payer === "string" ? { id: payer } : payer);
+  const previousDefer = Boolean(state._deferHouseholdSync);
+  state._deferHouseholdSync = true;
   let paid = 0;
   const rows = [];
-  for (const householdId of Object.keys(claims).sort()) {
-    if (available <= 0) break;
-    const due = claims[householdId] || 0;
+  for (const householdId of Object.keys(book.claimsVoucherUnits).sort()) {
+    const due = book.claimsVoucherUnits[householdId] || 0;
     if (due <= 0) continue;
-    const amount = Math.min(due, available);
-    const actual = payHousehold(householdId, amount) || 0;
-    if (actual <= 0) continue;
-    claims[householdId] = Math.max(0, due - actual);
-    available -= actual;
-    paid += actual;
-    rows.push({ householdId, units: actual });
-  }
-  return { paid, rows, remaining: claimTotal(owner) };
-}
-
-       function payMonetaryWageClaims(state, owner, payer, content, type, reason, options = {}) {
-  const claims = ensureClaimMap(owner);
-  const paymentClaims = ensurePaymentClaimMap(owner);
-  let paid = 0;
-  const rows = [];
-  for (const householdId of Object.keys(claims).sort()) {
-    const due = claims[householdId] || 0;
-    if (due <= 0) continue;
-    const obligation = normalizePaymentObligation(paymentClaims[householdId] || due, state);
-    const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content, type, reason,
-      { requireFull: false });
-    const actual = result.paidValueUnits || 0;
-    claims[householdId] = Math.max(0, due - actual);
-    paymentClaims[householdId] = result.remainingComposition;
-    if (actual > 0) rows.push({ householdId, units: actual, payment: result });
-    paid += actual;
-  }
-  return { paid, rows, remaining: claimTotal(owner) };
-}
-
-       function payMonetaryWageClaimsFromPayers(state, owner, payers, content, type, reason, options = {}) {
-  const claims = ensureClaimMap(owner);
-  const paymentClaims = ensurePaymentClaimMap(owner);
-  let paid = 0;
-  const rows = [];
-  for (const householdId of Object.keys(claims).sort()) {
-    const original = claims[householdId] || 0;
-    if (original <= 0) continue;
-    let obligation = normalizePaymentObligation(paymentClaims[householdId] || original, state);
+    let obligation = normalizePaymentObligation(book.claimsPayment[householdId] || due, state);
     let householdPaid = 0;
-    for (const payer of payers) {
+    for (const payer of list) {
       if (obligation.valueUnits <= 0) break;
-      const payerId = typeof payer === "string" ? payer : payer.id;
-      const maxWheatUnits = typeof payer === "string" ? undefined : payer.maxWheatUnits;
-      const result = settleMonetaryPayment(state, payerId, `household:${householdId}`, obligation, content, type, reason,
-        { requireFull: false, maxWheatUnits });
+      const result = settleMonetaryPayment(state, payer.id, `household:${householdId}`, obligation, content, type, reason,
+        { requireFull: false, maxWheatUnits: payer.maxWheatUnits });
       householdPaid += result.paidValueUnits || 0;
       obligation = result.remainingComposition;
     }
-    claims[householdId] = Math.max(0, original - householdPaid);
-    paymentClaims[householdId] = obligation;
+    book.claimsVoucherUnits[householdId] = Math.max(0, due - householdPaid);
+    book.claimsPayment[householdId] = obligation;
     if (householdPaid > 0) rows.push({ householdId, units: householdPaid });
     paid += householdPaid;
   }
-  return { paid, rows, remaining: claimTotal(owner) };
+  state._deferHouseholdSync = previousDefer;
+  if (!previousDefer) syncResidentAggregates(state, content);
+  return { paid, rows };
 }
-return { ensureClaimMap, ensurePaymentClaimMap, accrueWageClaims, attributeLegacyUnattributedWageClaims, claimTotal, payWageClaims, payMonetaryWageClaims, payMonetaryWageClaimsFromPayers };
+
+// ---------------------------------------------------------------- 旧档欠薪
+
+// 把只有总额的旧欠薪分给家庭：优先按岗位在岗户，岗位已撤销时按各户人口分配。
+function attributeUnits(state, book, units, assignments) {
+  const total = Math.max(0, Math.round(Number(units) || 0));
+  if (total <= 0) return;
+  const byId = state.households?.byId || {};
+  const weights = {};
+  for (const row of assignments || []) {
+    if (row?.householdId && byId[row.householdId] && row.count > 0) weights[row.householdId] = (weights[row.householdId] || 0) + row.count;
+  }
+  let households = Object.keys(weights).map(id => byId[id]);
+  if (!households.length) {
+    for (const household of Object.values(byId)) {
+      const bands = household?.ageBands || {};
+      const people = (bands.children || 0) + (bands.workers || 0) + (bands.elders || 0);
+      if (people > 0) { households.push(household); weights[household.id] = people; }
+    }
+  }
+  const allocation = allocateIntegerByWeight(total, households, household => weights[household.id] || 0);
+  if (!allocation.ok) return;
+  wageBook(book);
+  for (const { recipient: household, units: share } of allocation.rows) {
+    if (share <= 0) continue;
+    book.claimsVoucherUnits[household.id] = (book.claimsVoucherUnits[household.id] || 0) + share;
+    book.claimsPayment[household.id] = addPaymentObligation(book.claimsPayment[household.id],
+      { valueUnits: share, wheatValueUnits: 0, voucherValueUnits: share });
+  }
+}
+
+function absorbBook(state, book, recordedTotal, assignments) {
+  wageBook(book);
+  attributeUnits(state, book, Math.max(0, Math.round(Number(recordedTotal) || 0)) - wageArrears(book), assignments);
+}
+
+// 读档时调用一次：各雇主记录的欠薪总额与家庭债权之差分配到家庭，并清掉旧字段。
+       function absorbLegacyWageArrears(state, content) {
+  const payroll = state.payroll;
+  if (payroll) {
+    payroll.creditorClaims ||= {};
+    payroll.creditorPaymentClaims ||= {};
+    payroll.arrearsVoucherUnits ||= {};
+    for (const key of Object.keys(payroll.arrearsVoucherUnits).sort()) {
+      if (key.endsWith("::merchants") || key.endsWith("::shop_clerks")) {
+        delete payroll.arrearsVoucherUnits[key]; delete payroll.creditorClaims[key]; delete payroll.creditorPaymentClaims[key];
+        continue;
+      }
+      const book = { claimsVoucherUnits: payroll.creditorClaims[key] ||= {}, claimsPayment: payroll.creditorPaymentClaims[key] ||= {} };
+      absorbBook(state, book, payroll.arrearsVoucherUnits[key], jobAssignments(state, key.startsWith("builders::") ? "builders" : key));
+      payroll.arrearsVoucherUnits[key] = wageArrears(book);
+    }
+    delete payroll.legacyUnattributedArrearsVoucherUnits;
+    delete payroll.legacyUnattributedPaymentClaims;
+  }
+  for (const [buildingId, book] of Object.entries(state.privateEconomy?.payrollByBuilding || {})) {
+    const building = (state.buildings || []).find(row => row.id === buildingId);
+    const job = building && content.buildings[building.typeId]?.jobs?.[0];
+    absorbBook(state, book, book.arrearsVoucherUnits, job ? jobAssignments(state, `${buildingId}::${job.id}::private`) : []);
+    book.arrearsVoucherUnits = wageArrears(book);
+    delete book.legacyUnattributedArrearsVoucherUnits; delete book.legacyUnattributedPaymentClaim;
+  }
+  for (const company of Object.values(state.companies || {})) {
+    if (!company.payroll) continue;
+    const job = content.buildings[company.typeId]?.jobs?.[0];
+    absorbBook(state, company.payroll, company.payroll.arrearsVoucherUnits, job ? jobAssignments(state, `${company.buildingId}::${job.id}::listed`) : []);
+    company.payroll.arrearsVoucherUnits = wageArrears(company.payroll);
+    delete company.payroll.legacyUnattributedArrearsVoucherUnits; delete company.payroll.legacyUnattributedPaymentClaim;
+  }
+  for (const shop of Object.values(state.shops || {})) {
+    if (!shop.liabilities) continue;
+    const assignments = jobAssignments(state, `shop:${shop.id}:merchant`).concat(jobAssignments(state, `shop:${shop.id}:clerk`));
+    absorbBook(state, shop.liabilities, shop.liabilities.wageVoucherUnits, assignments);
+    shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
+    delete shop.liabilities.legacyUnattributedWageVoucherUnits; delete shop.liabilities.legacyUnattributedWagePaymentClaim;
+  }
+}
+
+// ---------------------------------------------------------------- 生产共用
+
+// 行业生产税（实物）：按税率从产出里扣，零头记在 carry[carryKey] 里下次累计。
+       function productionTaxUnits(state, typeId, carry, carryKey, outputUnits, content) {
+  const rate = state.policy?.privateProductionTaxPercent?.[typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
+  const numerator = outputUnits * Math.round(rate * 100) + (carry[carryKey] || 0);
+  return { taxUnits: Math.floor(numerator / 10000), carryAfter: numerator % 10000 };
+}
+
+// 招工：在不超过闲置劳力的前提下把岗位调到 desired。setCount(n) 实际设置人数，readCount() 读回。
+// 返回新的闲置劳力数。
+       function hireToward(desired, idle, readCount, setCount) {
+  const current = readCount();
+  setCount(Math.min(desired, current + idle));
+  return idle - (readCount() - current);
+}
+return { wageBook, wageArrears, accrueWages, payWages, absorbLegacyWageArrears, productionTaxUnits, hireToward };
 })();
 
 // ===== systems/social-security.js =====
@@ -4856,12 +4882,10 @@ return { SOCIAL_OWNER, DEFAULT_SS_DAILY_JIN, DEFAULT_SS_PENSION_JIN, ensureSocia
 const __mxmod26 = (() => {
 const { addWageExpense } = __mxmod17;
 const { currencyScale } = __mxmod21;
-const { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } = __mxmod22;
+const { currentPaymentComposition, settleMonetaryPayment } = __mxmod22;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod9;
-const { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits, syncResidentAggregates } = __mxmod15;
-const { allocateIntegerByWeight } = __mxmod10;
-const { recordHouseholdWageDue } = __mxmod18;
-const { attributeLegacyUnattributedWageClaims } = __mxmod24;
+const { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } = __mxmod15;
+const { accrueWages, payWages, wageArrears } = __mxmod24;
 const { collectSocialContributions, ensureSocialSecurity, payFromFund } = __mxmod25;
 function ensurePayroll(state) {
   state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
@@ -4927,74 +4951,12 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
   addWageExpense(state, kind, voucherUnits, sector);
 }
 
-function householdAllocationForJob(state, jobKey) {
-  const weights = Object.fromEntries(jobAssignments(state, jobKey).map(row => [row.householdId, row.count]));
-  return { householdIds: Object.keys(weights), weights };
-}
-
-function claimMapTotal(claims) {
-  return Object.values(claims || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
-}
-
-function attributeLegacyTownWageClaims(state, payroll) {
-  payroll.creditorClaims ||= {};
-  payroll.creditorPaymentClaims ||= {};
-  payroll.legacyUnattributedArrearsVoucherUnits ||= {};
-  payroll.legacyUnattributedPaymentClaims ||= {};
-  const keys = new Set([
-    ...Object.keys(payroll.arrearsVoucherUnits || {}),
-    ...Object.keys(payroll.legacyUnattributedArrearsVoucherUnits || {})
-  ]);
-  for (const payrollKey of [...keys].sort()) {
-    const totalArrears = Math.max(0, Math.round(Number(payroll.arrearsVoucherUnits?.[payrollKey]) || 0));
-    const claims = payroll.creditorClaims[payrollKey] ||= {};
-    const paymentClaims = payroll.creditorPaymentClaims[payrollKey] ||= {};
-    const unrepresented = Math.max(0, totalArrears - claimMapTotal(claims));
-    if (unrepresented <= 0) {
-      delete payroll.legacyUnattributedArrearsVoucherUnits[payrollKey];
-      delete payroll.legacyUnattributedPaymentClaims[payrollKey];
-      continue;
-    }
-    // 历史版本可能只保存岗位总欠薪，没有债权家庭。当前岗位仍在时按原岗位分配；
-    // 岗位已撤销/退休时由兼容分配器落到仍存在的家庭账户，保证债务有可偿还对象。
-    const owner = { claimsVoucherUnits: claims, claimsPayment: paymentClaims };
-    const currentJobKey = payrollKey.startsWith("builders::") ? "builders" : payrollKey;
-    const result = attributeLegacyUnattributedWageClaims(state, owner, unrepresented, jobAssignments(state, currentJobKey));
-    const remaining = Math.max(0, totalArrears - claimMapTotal(claims));
-    if (remaining > 0) {
-      payroll.legacyUnattributedArrearsVoucherUnits[payrollKey] = remaining;
-      payroll.legacyUnattributedPaymentClaims[payrollKey] = { valueUnits: remaining, wheatValueUnits: 0, voucherValueUnits: remaining };
-    } else {
-      delete payroll.legacyUnattributedArrearsVoucherUnits[payrollKey];
-      delete payroll.legacyUnattributedPaymentClaims[payrollKey];
-    }
-    if (result.attributed <= 0) continue;
-  }
-}
-
        function payDailyWages(state, laborAtStart, content) {
   const payroll = ensurePayroll(state);
   payroll.creditorClaims ||= {};
   payroll.creditorPaymentClaims ||= {};
   const arrears = payroll.arrearsVoucherUnits;
 
-  // 商业街岗位由各店铺自己的工资债权/统一支付链承担。r03 曾把商业街的聚合展示行
-  // 错送入镇库工资循环，且该聚合 key 没有家庭分配，形成“只有总欠薪、没有债权人”的幽灵欠薪。
-  // 这里只清理由内容定义明确标记为 shop 的聚合 key，不触碰任何真实镇营岗位债权。
-  const invalidShopPayrollKeys = new Set(laborAtStart.rows.filter(item => item.scope === "shop").map(row => row.key));
-  // 即使商业街建筑后来已拆除，r03 遗留的聚合岗位 key 仍可辨认；这些岗位从未应由镇库承担。
-  for (const key of Object.keys(arrears)) {
-    if (key.endsWith("::merchants") || key.endsWith("::shop_clerks")) invalidShopPayrollKeys.add(key);
-  }
-  for (const payrollKey of invalidShopPayrollKeys) {
-    delete arrears[payrollKey];
-    delete payroll.creditorClaims[payrollKey];
-    delete payroll.creditorPaymentClaims[payrollKey];
-    delete payroll.legacyUnattributedArrearsVoucherUnits?.[payrollKey];
-    delete payroll.legacyUnattributedPaymentClaims?.[payrollKey];
-  }
-
-  attributeLegacyTownWageClaims(state, payroll);
   const baseRows = laborAtStart.rows.filter(row => !["private", "listed", "shop"].includes(row.scope));
   const scale = currencyScale(content);
   // 镇营岗位（含批发市场）工资一律由镇库发放。
@@ -5024,28 +4986,14 @@ function attributeLegacyTownWageClaims(state, payroll) {
   const currentDue = {};
 
   // 历史债权先独立偿付，不依赖当前岗位、工资设置或建筑是否还存在。
-  // 债权的付款构成保存在 creditorPaymentClaims 中；统一支付层会按原构成继续结算并同步改革缺券记录。
+  const bookFor = payrollKey => ({ claimsVoucherUnits: payroll.creditorClaims[payrollKey] ||= {}, claimsPayment: payroll.creditorPaymentClaims[payrollKey] ||= {} });
   for (const payrollKey of Object.keys(payroll.creditorClaims).sort()) {
-    const claims = payroll.creditorClaims[payrollKey] || {};
-    const paymentClaims = payroll.creditorPaymentClaims[payrollKey] ||= {};
-    oldClaimTotals[payrollKey] = Object.values(claims).reduce((sum, value) => sum + (value || 0), 0);
-    let paidKey = 0;
-    const payer = "town";
-    for (const householdId of Object.keys(claims).sort()) {
-      const amount = claims[householdId] || 0;
-      if (amount <= 0) continue;
-      const obligation = normalizePaymentObligation(paymentClaims[householdId] || amount, state);
-      const construction = payrollKey.startsWith("builders::");
-      const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
-        construction ? "construction_wage_arrears_payment" : "wage_arrears_payment", "偿付原债权家庭历史欠薪",
-        { requireFull: false });
-      const paid = result.paidValueUnits || 0;
-      claims[householdId] = Math.max(0, amount - paid);
-      paymentClaims[householdId] = result.remainingComposition;
-      arrears[payrollKey] = Math.max(0, (arrears[payrollKey] || 0) - paid);
-      paidKey += paid;
-    }
-    arrearsPaidByKey[payrollKey] = paidKey;
+    const book = bookFor(payrollKey);
+    oldClaimTotals[payrollKey] = wageArrears(book);
+    const construction = payrollKey.startsWith("builders::");
+    const paid = payWages(state, book, "town", content, construction ? "construction_wage_arrears_payment" : "wage_arrears_payment", "偿付原债权家庭历史欠薪").paid;
+    arrears[payrollKey] = Math.max(0, (arrears[payrollKey] || 0) - paid);
+    arrearsPaidByKey[payrollKey] = paid;
   }
 
   // 历史债权处理后，才计提今天的工资费用与家庭债权；不会因偿还旧债重复计费。
@@ -5063,19 +5011,9 @@ function attributeLegacyTownWageClaims(state, payroll) {
     if (credit && project) project.prepaidWageCreditUnits -= credit;
     const payable = due - credit;
     const payrollKey = isConstruction && project ? "builders::" + project.instanceId : row.key;
-    const claims = payroll.creditorClaims[payrollKey] ||= {};
-    const paymentClaims = payroll.creditorPaymentClaims[payrollKey] ||= {};
     oldClaimTotals[payrollKey] ??= 0;
     arrearsPaidByKey[payrollKey] ||= 0;
-    const allocationByHousehold = householdAllocationForJob(state, row.key);
-    const weights = allocationByHousehold.weights;
-    const households = allocationByHousehold.householdIds.map(id => state.households?.byId?.[id]).filter(Boolean);
-    const allocation = allocateIntegerByWeight(payable, households, household => weights[household.id] || 0);
-    if (allocation.ok) for (const { recipient: household, units } of allocation.rows) {
-      claims[household.id] = (claims[household.id] || 0) + units;
-      paymentClaims[household.id] = addPaymentObligation(paymentClaims[household.id], currentPaymentComposition(state, units));
-      recordHouseholdWageDue(state, household.id, units, content);
-    }
+    accrueWages(state, bookFor(payrollKey), jobAssignments(state, row.key), payable, content);
     currentDue[payrollKey] = (currentDue[payrollKey] || 0) + payable;
     arrears[payrollKey] = (arrears[payrollKey] || 0) + payable;
     recordWageExpense(state, row, payable, isConstruction ? "construction" : "operating", content);
@@ -5086,25 +5024,12 @@ function attributeLegacyTownWageClaims(state, payroll) {
   // 再处理当日工资。若同一债权家庭仍有历史余额，统一债权表天然保持旧债在前一次偿付后留下的余额，且改革缺券键仍使用同一债权键。
   const paidByHousehold = {};
   for (const row of workerPay) {
-    const claims = payroll.creditorClaims[row.payrollKey] || {};
-    const paymentClaims = payroll.creditorPaymentClaims[row.payrollKey] ||= {};
-    let paidKey = 0;
-    const payer = "town";
+    const result = payWages(state, bookFor(row.payrollKey), "town", content,
+      row.key === "builders" ? "construction_wage_payment" : "wage_payment", "支付具体债权家庭本日工资");
+    const paidKey = result.paid;
+    arrears[row.payrollKey] = Math.max(0, (arrears[row.payrollKey] || 0) - paidKey);
     const paidRows = (paidByHousehold[row.payrollKey] ||= {});
-    for (const householdId of Object.keys(claims).sort()) {
-      const amount = claims[householdId] || 0;
-      if (amount <= 0) continue;
-      const obligation = normalizePaymentObligation(paymentClaims[householdId] || amount, state);
-      const result = settleMonetaryPayment(state, payer, `household:${householdId}`, obligation, content,
-        row.key === "builders" ? "construction_wage_payment" : "wage_payment", "支付具体债权家庭本日工资",
-        { requireFull: false });
-      const paid = result.paidValueUnits || 0;
-      paymentClaims[householdId] = result.remainingComposition;
-      claims[householdId] = Math.max(0, amount - paid);
-      arrears[row.payrollKey] = Math.max(0, (arrears[row.payrollKey] || 0) - paid);
-      paidKey += paid;
-      if (paid > 0) paidRows[householdId] = (paidRows[householdId] || 0) + paid;
-    }
+    for (const { householdId, units } of result.rows) paidRows[householdId] = (paidRows[householdId] || 0) + units;
     const historicalRemainingBeforeCurrent = Math.max(0, (oldClaimTotals[row.payrollKey] || 0) - (arrearsPaidByKey[row.payrollKey] || 0));
     const historicalPaidNow = Math.min(historicalRemainingBeforeCurrent, paidKey);
     arrearsPaidByKey[row.payrollKey] = (arrearsPaidByKey[row.payrollKey] || 0) + historicalPaidNow;
@@ -7973,7 +7898,7 @@ const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod17;
 const { currentUnitPrice, setCurrentUnitPrice } = __mxmod30;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold, jobAssignments, setJobCount, syncResidentAggregates } = __mxmod15;
 const { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } = __mxmod39;
-const { accrueWageClaims, attributeLegacyUnattributedWageClaims, claimTotal, payMonetaryWageClaims } = __mxmod24;
+const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod24;
 const { buyWholesaleForOwner, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } = __mxmod32;
 const LISTABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
 
@@ -8003,9 +7928,7 @@ function ensureCompanyBooks(company) {
   }
   company.inventory ||= {};
   company.inventoryCostVoucherUnits ||= {};
-  company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, claimsVoucherUnits: {}, legacyUnattributedArrearsVoucherUnits: 0 };
-  company.payroll.claimsVoucherUnits ||= {};
-  company.payroll.legacyUnattributedArrearsVoucherUnits ??= 0;
+  wageBook(company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0 });
   company.shareSale ||= { offeredShares: 0, sharePriceVoucherUnits: 0, cumulativeProceedsVoucherUnits: 0, lastSaleVoucherUnits: 0, lastSoldShares: 0 };
   company.listing ||= { listed: (company.totalShares || 0) > 0, ticker: null, listedAt: null };
   company.settings ||= { wagePerWorkerDay: null, targetWorkers: null, salePricesVoucherPerUnit: {} };
@@ -8519,9 +8442,7 @@ function residentsFoodReserveQeq(state, content) {
     const current = Math.min(readJobCount(state, jobKey), job.slots * company.listedLevels);
     const plannedWorkers = plannedWorkersForProducer(state, `company:${company.id}`);
     const desired = Number.isInteger(company.settings?.targetWorkers) ? company.settings.targetWorkers : (plannedWorkers == null ? current : plannedWorkers);
-    const next = Math.min(desired, current + idle);
-    setJobCount(state, jobKey, next, content, { type: "company", id: company.id });
-    idle += current - readJobCount(state, jobKey);
+    idle = hireToward(desired, idle, () => readJobCount(state, jobKey), next => setJobCount(state, jobKey, next, content, { type: "company", id: company.id }));
   }
 }
 
@@ -8531,21 +8452,13 @@ function residentsFoodReserveQeq(state, content) {
     const definition = content.buildings[company.typeId]; const job = definition?.jobs?.[0]; if (!job) continue;
     const jobKey = listedJobKeyForBuilding(company.buildingId, job.id); const workers = readJobCount(state, jobKey);
     const rate = Number.isFinite(company.settings?.wagePerWorkerDay) ? company.settings.wagePerWorkerDay : (state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5); const due = Math.round(workers * rate * scale);
-    const assignments = jobAssignments(state, jobKey); accrueWageClaims(state, company.payroll, assignments, due, content);
-    company.payroll.legacyUnattributedArrearsVoucherUnits ??= Math.max(0, (company.payroll.arrearsVoucherUnits || 0) - claimTotal(company.payroll));
-    if (company.payroll.legacyUnattributedArrearsVoucherUnits > 0) {
-      const attributed = attributeLegacyUnattributedWageClaims(state, company.payroll, company.payroll.legacyUnattributedArrearsVoucherUnits, assignments);
-      company.payroll.legacyUnattributedArrearsVoucherUnits = Math.max(0, company.payroll.legacyUnattributedArrearsVoucherUnits - attributed.attributed);
-    }
-    company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + company.payroll.legacyUnattributedArrearsVoucherUnits;
-    company.payroll.cumulativeAccruedVoucherUnits += due; addPeriodValue(company, "wageExpenseVoucherUnits", due); applyProfit(company, -due);
-    const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
-    const result = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
-      "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`);
-    state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
-    company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + company.payroll.legacyUnattributedArrearsVoucherUnits;
-    company.payroll.cumulativePaidVoucherUnits += result.paid; addPeriodValue(company, "wagesPaidVoucherUnits", result.paid);
-    results.push({ companyId: company.id, workers, dueVoucherUnits: due, paidVoucherUnits: result.paid, arrearsVoucherUnits: company.payroll.arrearsVoucherUnits });
+    const payroll = wageBook(company.payroll);
+    accrueWages(state, payroll, jobAssignments(state, jobKey), due, content);
+    payroll.cumulativeAccruedVoucherUnits += due; addPeriodValue(company, "wageExpenseVoucherUnits", due); applyProfit(company, -due);
+    const paid = payWages(state, payroll, "company:" + company.id, content, "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`).paid;
+    payroll.arrearsVoucherUnits = wageArrears(payroll);
+    payroll.cumulativePaidVoucherUnits += paid; addPeriodValue(company, "wagesPaidVoucherUnits", paid);
+    results.push({ companyId: company.id, workers, dueVoucherUnits: due, paidVoucherUnits: paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
   }
   return results;
 }
@@ -8560,13 +8473,10 @@ function companyCapacity(company, state, content) {
 }
 
 function planTaxUnits(state, company, outputItemId, outputUnits, content) {
-  const rate = state.policy?.privateProductionTaxPercent?.[company.typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
   company.taxRemainders ||= {};
-  const carry = company.taxRemainders[outputItemId] || 0;
-  const numerator = outputUnits * Math.round(rate * 100) + carry;
-  const taxed = Math.floor(numerator / 10000);
-  company.taxRemainders[outputItemId] = numerator % 10000;
-  return taxed;
+  const { taxUnits, carryAfter } = productionTaxUnits(state, company.typeId, company.taxRemainders, outputItemId, outputUnits, content);
+  company.taxRemainders[outputItemId] = carryAfter;
+  return taxUnits;
 }
 
        function processListedCompany(state, company, content) {
@@ -8717,19 +8627,10 @@ function planTaxUnits(state, company, outputItemId, outputUnits, content) {
     const pending = company.pendingAnnualSettlement;
     const lastYearNetProfit = pending?.year === endingYear ? (pending.accounts?.profitVoucherUnits || 0) : 0;
 
-    // 旧档可能只有工资欠款总额、没有家庭债权人。先一次性归属给当前岗位家庭；若岗位已不存在，
-    // 则按仍存在家庭人口分配债权，避免真实旧债永久阻塞分红。
-    if ((company.payroll.legacyUnattributedArrearsVoucherUnits || 0) > 0) {
-      const definition = content.buildings[company.typeId];
-      const job = definition?.jobs?.[0];
-      const assignments = job ? jobAssignments(state, listedJobKeyForBuilding(company.buildingId, job.id)) : [];
-      const attributed = attributeLegacyUnattributedWageClaims(state, company.payroll, company.payroll.legacyUnattributedArrearsVoucherUnits, assignments);
-      company.payroll.legacyUnattributedArrearsVoucherUnits = Math.max(0, company.payroll.legacyUnattributedArrearsVoucherUnits - attributed.attributed);
-    }
     // 先尝试偿付已形成的工资债务。债权仍归原家庭，支付媒介由统一支付层决定。
-    const debtResult = payMonetaryWageClaims(state, company.payroll, "company:" + company.id, content,
+    const debtResult = payWages(state, company.payroll, "company:" + company.id, content,
       "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`);
-    company.payroll.arrearsVoucherUnits = claimTotal(company.payroll) + (company.payroll.legacyUnattributedArrearsVoucherUnits || 0);
+    company.payroll.arrearsVoucherUnits = wageArrears(company.payroll);
 
     const retainedBefore = Math.max(0, company.retainedEarningsVoucherUnits || 0);
     const reserve = companyWorkingCapitalReserve(company, state, content);
@@ -10203,7 +10104,7 @@ const { recordEvent } = __mxmod9;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold, syncResidentAggregates, setHouseholdJobCount, setJobCount, jobCount, jobAssignments } = __mxmod15;
 const { shopTradePrices, recentAverage } = __mxmod39;
 const { currentUnitPrice } = __mxmod30;
-const { accrueWageClaims, attributeLegacyUnattributedWageClaims, claimTotal, payMonetaryWageClaims } = __mxmod24;
+const { accrueWages, payWages, wageArrears, wageBook } = __mxmod24;
 const { buyWholesaleForOwner, hasWholesaleMarket } = __mxmod32;
 const { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } = __mxmod27;
 const { ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory, updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop } = __mxmod48;
@@ -10751,31 +10652,8 @@ function removeShopInventoryCost(shop, itemId, units) {
   return { purchasedUnits: purchasedTotal, purchasedByItem, reason: !hadNeed ? "库存充足" : (purchasedTotal > 0 ? "已补货" : shop.statusReason) };
 }
 
-function attributeLegacyShopWageClaims(state, shop) {
-  shop.liabilities ||= {};
-  shop.liabilities.claimsVoucherUnits ||= {};
-  shop.liabilities.claimsPayment ||= {};
-  const represented = claimTotal(shop.liabilities);
-  shop.liabilities.legacyUnattributedWageVoucherUnits ??= Math.max(0, (shop.liabilities.wageVoucherUnits || 0) - represented);
-  const unrepresented = Math.max(0, (shop.liabilities.wageVoucherUnits || 0) - represented);
-  if (unrepresented > 0) {
-    const assignments = jobAssignments(state, merchantJobKey(shop)).concat(jobAssignments(state, clerkJobKey(shop)));
-    const attributed = attributeLegacyUnattributedWageClaims(state, shop.liabilities, unrepresented, assignments);
-    shop.liabilities.legacyUnattributedWageVoucherUnits = Math.max(0, unrepresented - attributed.attributed);
-  } else {
-    shop.liabilities.legacyUnattributedWageVoucherUnits = 0;
-  }
-  if (shop.liabilities.legacyUnattributedWageVoucherUnits > 0) {
-    const remaining = shop.liabilities.legacyUnattributedWageVoucherUnits;
-    shop.liabilities.legacyUnattributedWagePaymentClaim = { valueUnits: remaining, wheatValueUnits: 0, voucherValueUnits: remaining };
-  } else {
-    delete shop.liabilities.legacyUnattributedWagePaymentClaim;
-  }
-  shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
-}
-
 function accrueDailyLiabilities(state, shop, content) {
-  attributeLegacyShopWageClaims(state, shop);
+  wageBook(shop.liabilities);
   const scale = currencyScale(content);
   const merchantRate = state.employment.wageRates?.merchants ?? content.rules.shopMerchantDefaultWageVoucher ?? 10;
   // 店员日薪走动态劳动力市场：商店按行情自行调薪（shop.clerkWageVoucher），缺省回落到统一定薪。
@@ -10792,9 +10670,9 @@ function accrueDailyLiabilities(state, shop, content) {
   // 负值保护：租金/工资取max(0)，避免负负债（之前无保护）。
   const rent = Math.max(0, Math.round((state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1) * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
-  accrueWageClaims(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
-  accrueWageClaims(state, shop.liabilities, clerkAssignments, clerkWage, content);
-  shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
+  accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
+  accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
+  shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
   shop.liabilities.rentVoucherUnits += rent;
   shop.liabilities.rentPaymentClaim = addPaymentObligation(shop.liabilities.rentPaymentClaim, currentPaymentComposition(state, rent));
   addBookValue(shop, "wageExpenseVoucherUnits", wage);
@@ -10819,13 +10697,8 @@ function payLiability(state, shop, key, destination, content, type, reason) {
 }
 
 function payDailyLiabilities(state, shop, content) {
-  // 清算中的店铺不会再计提日工资，但旧档总欠薪仍必须先恢复到家庭债权后才能偿还。
-  attributeLegacyShopWageClaims(state, shop);
-  const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
-  payMonetaryWageClaims(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment",
-    `${shop.name}偿付具体债权家庭员工工资`);
-  state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
-  shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
+  payWages(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`);
+  shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
   payLiability(state, shop, "rentVoucherUnits", "town", content, "shop_rent_payment", `${shop.name}支付店租`);
   payLiability(state, shop, "taxVoucherUnits", "town", content, "shop_profit_tax_payment", `${shop.name}缴纳商业利润税`);
 }
@@ -15242,7 +15115,7 @@ const { plannedBatchesForProducer, plannedWorkersForProducer } = __mxmod39;
 const { currentUnitPrice } = __mxmod30;
 const { buyWholesaleForOwner } = __mxmod32;
 const { householdConvertibleWheatUnits, householdFoodQeqUnits, householdList, householdReserveQeqUnits, syncResidentAggregates, jobAssignments, isActiveHousehold, creditHouseholdInventory } = __mxmod15;
-const { accrueWageClaims, attributeLegacyUnattributedWageClaims, claimTotal, payMonetaryWageClaimsFromPayers } = __mxmod24;
+const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod24;
 const SELLABLE = new Set(["mill", "bakery", "lumberyard", "saltworks"]);
 
 function targetBatches(state, building) {
@@ -15314,12 +15187,7 @@ function buyMissingPrivateInputs(state, household, definition, recipe, batches, 
     const cap = role.slots * building.ownership.privateLevels;
     const plannedWorkers = plannedWorkersForProducer(state, `private:${building.id}`);
     const desired = Math.min(cap, plannedWorkers == null ? readJobCount(state, key) : plannedWorkers);
-    const current = readJobCount(state, key);
-    const next = Math.min(desired, current + idle);
-    setPrivateWorkers(state, building.id, role.id, next, content);
-    // 按实际招聘数扣减闲置（之前按请求值扣，招聘失败时多扣了）。
-    const actual = readJobCount(state, key);
-    idle -= Math.max(0, actual - current);
+    idle = hireToward(desired, idle, () => readJobCount(state, key), next => setPrivateWorkers(state, building.id, role.id, next, content));
   }
 }
 
@@ -15355,27 +15223,18 @@ function ownerCapacity(state, building, content) {
     const definition = content.buildings[building.typeId]; const job = definition?.jobs?.[0]; if (!job) continue;
     const key = privateJobKeyForBuilding(building.id, job.id); const workers = readJobCount(state, key);
     const rate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5; const due = Math.round(workers * rate * scale);
-    const payroll = state.privateEconomy.payrollByBuilding[building.id] ||= { arrearsVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, cumulativePaidVoucherUnits: 0, claimsVoucherUnits: {} };
-    const assignments = jobAssignments(state, key); accrueWageClaims(state, payroll, assignments, due, content);
-    payroll.legacyUnattributedArrearsVoucherUnits ??= Math.max(0, (payroll.arrearsVoucherUnits || 0) - claimTotal(payroll));
-    if (payroll.legacyUnattributedArrearsVoucherUnits > 0) {
-      const attributed = attributeLegacyUnattributedWageClaims(state, payroll, payroll.legacyUnattributedArrearsVoucherUnits, assignments);
-      payroll.legacyUnattributedArrearsVoucherUnits = Math.max(0, payroll.legacyUnattributedArrearsVoucherUnits - attributed.attributed);
-    }
-    payroll.arrearsVoucherUnits = claimTotal(payroll) + (payroll.legacyUnattributedArrearsVoucherUnits || 0); payroll.cumulativeAccruedVoucherUnits += due;
-    const owners = privateOwners(building, state); const ownerLevels = new Map(); for (const householdId of owners) ownerLevels.set(householdId, (ownerLevels.get(householdId) || 0) + 1);
-    // 过滤已消亡家庭，避免付款方失效导致欠薪永久挂账（之前不校验）。
-    const liveOwners = [...ownerLevels.keys()].filter(ownerId => isActiveHousehold(state, ownerId));
-    const payers = liveOwners.map(ownerId => ({
+    const payroll = wageBook(state.privateEconomy.payrollByBuilding[building.id] ||= { arrearsVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, cumulativePaidVoucherUnits: 0 });
+    accrueWages(state, payroll, jobAssignments(state, key), due, content);
+    payroll.cumulativeAccruedVoucherUnits += due;
+    // 业主家庭轮流付工资（已消亡家庭跳过），付款时给业主留够口粮。
+    const ownerIds = [...new Set(privateOwners(building, state))].filter(ownerId => isActiveHousehold(state, ownerId));
+    const payers = ownerIds.map(ownerId => ({
       id: `household:${ownerId}`,
       maxWheatUnits: householdConvertibleWheatUnits(state, state.households.byId[ownerId], content, content.rules.householdFoodReserveDays ?? 30)
     }));
-    const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
-    const paidResult = payMonetaryWageClaimsFromPayers(state, payroll, payers, content, "private_wage_payment",
-      `${definition.name}民营业主偿付具体债权家庭工资`);
-    state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
-    payroll.arrearsVoucherUnits = claimTotal(payroll) + (payroll.legacyUnattributedArrearsVoucherUnits || 0); payroll.cumulativePaidVoucherUnits += paidResult.paid;
-    results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paidResult.paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
+    const paid = payWages(state, payroll, payers, content, "private_wage_payment", `${definition.name}民营业主偿付具体债权家庭工资`).paid;
+    payroll.arrearsVoucherUnits = wageArrears(payroll); payroll.cumulativePaidVoucherUnits += paid;
+    results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
   }
   return results;
 }
@@ -15414,17 +15273,15 @@ function ownerCapacity(state, building, content) {
       batches = Math.min(batches, Math.floor(productionAvailableUnits(state, household, input.itemId, content) / perBatch));
     }
     if (batches <= 0) continue;
-    const taxPercent = state.policy.privateProductionTaxPercent[building.typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
     const outputs = [];
     const localTaxRows = [];
     const carryAfter = {};
     for (const output of recipe.outputs) {
       const totalUnits = quantityToUnits(output.quantity * batches, content);
       const carryKey = `${building.typeId}|${building.id}|${ownerHouseholdId}|${output.itemId}`;
-      const carry = state.privateEconomy.taxRemainders[carryKey] || 0;
-      const numerator = totalUnits * Math.round(taxPercent * 100) + carry;
-      const taxUnits = Math.floor(numerator / 10000);
-      carryAfter[carryKey] = numerator % 10000;
+      const tax = productionTaxUnits(state, building.typeId, state.privateEconomy.taxRemainders, carryKey, totalUnits, content);
+      const taxUnits = tax.taxUnits;
+      carryAfter[carryKey] = tax.carryAfter;
       const residentUnits = totalUnits - taxUnits;
       if (residentUnits > 0) outputs.push({ owner: `household:${ownerHouseholdId}`, itemId: output.itemId, quantityUnits: residentUnits, type: "private_production_output", source: "private_production" });
       if (taxUnits > 0) outputs.push({ owner: "town", itemId: output.itemId, quantityUnits: taxUnits, type: "private_production_tax", source: "private_production", destination: "town" });
@@ -17047,6 +16904,7 @@ const { ensureWholesaleMarket, mergeWholesaleCashIntoTown } = __mxmod32;
 const { migrateSocialSecurityWallet } = __mxmod25;
 const { migrateMonetaryReform } = __mxmod22;
 const { migrateBonds } = __mxmod55;
+const { absorbLegacyWageArrears } = __mxmod24;
 const { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } = __mxmod15;
 const { defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor } = __mxmod19;
 function cloneJson(value) {
@@ -17182,11 +17040,9 @@ function normalizeV11(raw, definitions) {
   state.privateEconomy.payrollByBuilding ||= {};
   for (const payroll of Object.values(state.privateEconomy.payrollByBuilding)) {
     payroll.claimsVoucherUnits ||= {};
-    if (payroll.legacyUnattributedArrearsVoucherUnits === undefined) payroll.legacyUnattributedArrearsVoucherUnits = payroll.arrearsVoucherUnits || 0;
   }
   state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
   state.payroll.creditorClaims ||= {};
-  state.payroll.legacyUnattributedArrearsVoucherUnits ||= { ...(state.payroll.arrearsVoucherUnits || state.payroll.arrearsWheatUnits || {}) };
   state.shops ||= {};
   state.nextShopNumber ||= Object.keys(state.shops).length + 1;
   for (const shop of Object.values(state.shops)) {
@@ -17197,7 +17053,6 @@ function normalizeV11(raw, definitions) {
     shop.retainedEarningsVoucherUnits ??= 0;
     shop.liabilities ||= { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 };
     shop.liabilities.claimsVoucherUnits ||= {};
-    if (shop.liabilities.legacyUnattributedWageVoucherUnits === undefined) shop.liabilities.legacyUnattributedWageVoucherUnits = shop.liabilities.wageVoucherUnits || 0;
   }
   for (const company of Object.values(state.companies || {})) {
     company.inventory ||= {};
@@ -17207,7 +17062,6 @@ function normalizeV11(raw, definitions) {
     company.plan ||= { ageDays: 0 };
     company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0 };
     company.payroll.claimsVoucherUnits ||= {};
-    if (company.payroll.legacyUnattributedArrearsVoucherUnits === undefined) company.payroll.legacyUnattributedArrearsVoucherUnits = company.payroll.arrearsVoucherUnits || 0;
   }
   state.policy ||= {};
   state.policy.employmentExchangeJin ??= definitions.rules.employmentExchangeDefaultJin ?? 2;
@@ -17242,21 +17096,15 @@ function normalizeV12(raw, definitions, legacyCompleted = false) {
     const target = state.payroll.creditorPaymentClaims[payrollKey] ||= {};
     for (const [householdId, units] of Object.entries(claims || {})) target[householdId] ||= legacyVoucherObligation(units);
   }
-  state.payroll.legacyUnattributedPaymentClaims ||= {};
-  for (const [key, units] of Object.entries(state.payroll.legacyUnattributedArrearsVoucherUnits || {})) {
-    state.payroll.legacyUnattributedPaymentClaims[key] ||= legacyVoucherObligation(units);
-  }
 
   for (const [buildingId, payroll] of Object.entries(state.privateEconomy.payrollByBuilding || {})) {
     payroll.claimsPayment ||= {};
     for (const [householdId, units] of Object.entries(payroll.claimsVoucherUnits || {})) payroll.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-    payroll.legacyUnattributedPaymentClaim ||= legacyVoucherObligation(payroll.legacyUnattributedArrearsVoucherUnits || 0);
   }
   for (const shop of Object.values(state.shops || {})) {
     shop.cashWheatUnits ??= 0;
     shop.liabilities.claimsPayment ||= {};
     for (const [householdId, units] of Object.entries(shop.liabilities.claimsVoucherUnits || {})) shop.liabilities.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-    shop.liabilities.legacyUnattributedWagePaymentClaim ||= legacyVoucherObligation(shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
     shop.liabilities.rentPaymentClaim ||= legacyVoucherObligation(shop.liabilities.rentVoucherUnits || 0);
     shop.liabilities.taxPaymentClaim ||= legacyVoucherObligation(shop.liabilities.taxVoucherUnits || 0);
   }
@@ -17264,7 +17112,6 @@ function normalizeV12(raw, definitions, legacyCompleted = false) {
     company.cashWheatUnits ??= 0;
     company.payroll.claimsPayment ||= {};
     for (const [householdId, units] of Object.entries(company.payroll.claimsVoucherUnits || {})) company.payroll.claimsPayment[householdId] ||= legacyVoucherObligation(units);
-    company.payroll.legacyUnattributedPaymentClaim ||= legacyVoucherObligation(company.payroll.legacyUnattributedArrearsVoucherUnits || 0);
   }
   state.legacyMigration = { ...(state.legacyMigration || {}), toVersion: 12, v12: { ...(state.legacyMigration?.v12 || {}), monetaryReformCompatibility: legacyCompleted ? "completed" : "native" } };
   syncShopEmployment(state, definitions);
@@ -17411,24 +17258,10 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
     state.currency.reserveModel = "town-inventory-v1";
   }
 
-  // r03 可能把商业街聚合岗位错记为镇库欠薪。仅清理内容定义明确 managedBy=shops 的 key，
-  // 真实镇营岗位、公司岗位和店铺自身 liabilities 均不受影响。
+  // 旧档只有欠薪总额的部分，一次性分配成家庭债权（含清理 r03 误记到镇库的商业街岗位欠薪）。
   state.payroll ||= {};
   state.payroll.arrearsVoucherUnits ||= state.payroll.arrearsWheatUnits || {};
-  state.payroll.creditorClaims ||= {};
-  state.payroll.creditorPaymentClaims ||= {};
-  state.payroll.legacyUnattributedArrearsVoucherUnits ||= {};
-  for (const building of state.buildings || []) {
-    const def = definitions.buildings?.[building.typeId];
-    for (const job of def?.jobs || []) {
-      if (job.managedBy !== "shops") continue;
-      const key = `${building.id}::${job.id}`;
-      delete state.payroll.arrearsVoucherUnits[key];
-      delete state.payroll.creditorClaims[key];
-      delete state.payroll.creditorPaymentClaims[key];
-      delete state.payroll.legacyUnattributedArrearsVoucherUnits[key];
-    }
-  }
+  absorbLegacyWageArrears(state, definitions);
   state.payroll.arrearsWheatUnits = state.payroll.arrearsVoucherUnits;
 
   // 0.2.3 做市商：旧档若已有批发市场挂价则沿用（玩家可能已调过），缺项补做市商默认价。

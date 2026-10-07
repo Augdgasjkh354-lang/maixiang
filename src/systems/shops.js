@@ -11,7 +11,7 @@ import {
 } from "./households.js";
 import { shopTradePrices, recentAverage } from "../economy/operating-plan.js";
 import { currentUnitPrice } from "../economy/prices.js";
-import { accrueWageClaims, attributeLegacyUnattributedWageClaims, claimTotal, payMonetaryWageClaims } from "./wage-claims.js";
+import { accrueWages, payWages, wageArrears, wageBook } from "./employer.js";
 import { buyWholesaleForOwner, hasWholesaleMarket } from "./wholesale-market.js";
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
 import {
@@ -563,31 +563,8 @@ export function procureShopInventory(state, shop, content) {
   return { purchasedUnits: purchasedTotal, purchasedByItem, reason: !hadNeed ? "库存充足" : (purchasedTotal > 0 ? "已补货" : shop.statusReason) };
 }
 
-function attributeLegacyShopWageClaims(state, shop) {
-  shop.liabilities ||= {};
-  shop.liabilities.claimsVoucherUnits ||= {};
-  shop.liabilities.claimsPayment ||= {};
-  const represented = claimTotal(shop.liabilities);
-  shop.liabilities.legacyUnattributedWageVoucherUnits ??= Math.max(0, (shop.liabilities.wageVoucherUnits || 0) - represented);
-  const unrepresented = Math.max(0, (shop.liabilities.wageVoucherUnits || 0) - represented);
-  if (unrepresented > 0) {
-    const assignments = jobAssignments(state, merchantJobKey(shop)).concat(jobAssignments(state, clerkJobKey(shop)));
-    const attributed = attributeLegacyUnattributedWageClaims(state, shop.liabilities, unrepresented, assignments);
-    shop.liabilities.legacyUnattributedWageVoucherUnits = Math.max(0, unrepresented - attributed.attributed);
-  } else {
-    shop.liabilities.legacyUnattributedWageVoucherUnits = 0;
-  }
-  if (shop.liabilities.legacyUnattributedWageVoucherUnits > 0) {
-    const remaining = shop.liabilities.legacyUnattributedWageVoucherUnits;
-    shop.liabilities.legacyUnattributedWagePaymentClaim = { valueUnits: remaining, wheatValueUnits: 0, voucherValueUnits: remaining };
-  } else {
-    delete shop.liabilities.legacyUnattributedWagePaymentClaim;
-  }
-  shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
-}
-
 function accrueDailyLiabilities(state, shop, content) {
-  attributeLegacyShopWageClaims(state, shop);
+  wageBook(shop.liabilities);
   const scale = currencyScale(content);
   const merchantRate = state.employment.wageRates?.merchants ?? content.rules.shopMerchantDefaultWageVoucher ?? 10;
   // 店员日薪走动态劳动力市场：商店按行情自行调薪（shop.clerkWageVoucher），缺省回落到统一定薪。
@@ -604,9 +581,9 @@ function accrueDailyLiabilities(state, shop, content) {
   // 负值保护：租金/工资取max(0)，避免负负债（之前无保护）。
   const rent = Math.max(0, Math.round((state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1) * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
-  accrueWageClaims(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
-  accrueWageClaims(state, shop.liabilities, clerkAssignments, clerkWage, content);
-  shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
+  accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
+  accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
+  shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
   shop.liabilities.rentVoucherUnits += rent;
   shop.liabilities.rentPaymentClaim = addPaymentObligation(shop.liabilities.rentPaymentClaim, currentPaymentComposition(state, rent));
   addBookValue(shop, "wageExpenseVoucherUnits", wage);
@@ -631,13 +608,8 @@ function payLiability(state, shop, key, destination, content, type, reason) {
 }
 
 function payDailyLiabilities(state, shop, content) {
-  // 清算中的店铺不会再计提日工资，但旧档总欠薪仍必须先恢复到家庭债权后才能偿还。
-  attributeLegacyShopWageClaims(state, shop);
-  const previousDefer = Boolean(state._deferHouseholdSync); state._deferHouseholdSync = true;
-  payMonetaryWageClaims(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment",
-    `${shop.name}偿付具体债权家庭员工工资`);
-  state._deferHouseholdSync = previousDefer; if (!previousDefer) syncResidentAggregates(state, content);
-  shop.liabilities.wageVoucherUnits = claimTotal(shop.liabilities) + (shop.liabilities.legacyUnattributedWageVoucherUnits || 0);
+  payWages(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`);
+  shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
   payLiability(state, shop, "rentVoucherUnits", "town", content, "shop_rent_payment", `${shop.name}支付店租`);
   payLiability(state, shop, "taxVoucherUnits", "town", content, "shop_profit_tax_payment", `${shop.name}缴纳商业利润税`);
 }

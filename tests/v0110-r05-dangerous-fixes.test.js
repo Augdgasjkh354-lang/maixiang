@@ -67,51 +67,6 @@ test("r05 粮券必须先印入镇库；换券只转移镇库已有粮券，镇�
   assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
 });
 
-test("r05 旧档无债权人的店铺工资欠款会归属并偿还，不再永久卡住账本", () => {
-  const state = simulation.createInitialState({ seed: 110502 });
-  const { shop } = openTeaShop(state);
-  state.monetaryReform = {
-    stage: "voucher", targetVoucherBps: 10000, residentExchangeEnabled: true, legacyBankAccess: true,
-    started: null, completed: { legacy: true }, paymentHistory: [], voucherShortfallByKey: {}
-  };
-  assert.equal(simulation.issueGrainVouchers(state, "town", 100).ok, true);
-  assert.equal(transferVouchers(state, "town", `shop:${shop.id}`, 60 * V, CONTENT, "r05_shop_fund", "测试店铺资金").ok, true);
-
-  shop.liabilities.wageVoucherUnits = 30 * V;
-  shop.liabilities.claimsVoucherUnits = {};
-  shop.liabilities.claimsPayment = {};
-  shop.liabilities.legacyUnattributedWageVoucherUnits = 30 * V;
-  const residentsBefore = householdList(state).reduce((sum, h) => sum + (h.voucherUnits || 0), 0);
-
-  prepareShopsForDay(state, CONTENT);
-  const residentsAfter = householdList(state).reduce((sum, h) => sum + (h.voucherUnits || 0), 0);
-  assert.equal(shop.liabilities.legacyUnattributedWageVoucherUnits, 0);
-  assert.equal(shop.liabilities.wageVoucherUnits, 0, "30旧欠薪+当日商人工资都应有偿还路径");
-  assert.equal(Object.values(shop.liabilities.claimsVoucherUnits).reduce((a, b) => a + b, 0), 0);
-  // 基线清理：店主商人不领固定工资，仅旧欠薪 30 到账。
-  assert.equal(residentsAfter - residentsBefore, 30 * V, "旧欠薪30应真实到账（店主商人当日工资为0）");
-});
-
-test("r05 公司旧档无债权人欠薪即使当前岗位为0也能偿还，不再永久阻塞分红", () => {
-  const state = legacyVoucherState({ seed: 110503 });
-  const mill = addBuilding(state, "mill", "r05-company-mill", 1);
-  assert.equal(simulation.issueGrainVouchers(state, "town", 100).ok, true);
-  const created = simulation.createCompany(state, mill.id, { name: "旧债测试公司", levels: 1, operatingCapitalVoucher: 20, initialMaterials: {} });
-  assert.equal(created.ok, true, created.reason);
-  const company = state.companies[created.companyId];
-  company.payroll.arrearsVoucherUnits = 10 * V;
-  company.payroll.claimsVoucherUnits = {};
-  company.payroll.claimsPayment = {};
-  company.payroll.legacyUnattributedArrearsVoucherUnits = 10 * V;
-  syncResidentAggregates(state, CONTENT);
-
-  const paid = payListedCompanyWages(state, CONTENT).find(row => row.companyId === company.id);
-  assert.ok(paid);
-  assert.equal(company.payroll.legacyUnattributedArrearsVoucherUnits, 0);
-  assert.equal(company.payroll.arrearsVoucherUnits, 0);
-  assert.equal(paid.paidVoucherUnits, 10 * V);
-});
-
 test("r05 跨年立即归档第365天公司利润，新年Day0估值不会漏掉最后一天", () => {
   const state = legacyVoucherState({ seed: 110504 });
   state.year = 2;
