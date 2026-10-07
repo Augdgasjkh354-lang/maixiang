@@ -597,3 +597,18 @@ button.wide { width: 100%; }
 .resource-tag { pointer-events: none; }
 .resource-tag rect { fill: #28392dcc; stroke: #eedb9a; stroke-width: 1.2; }
 .resource-tag text { fill: #fff8de; font: 700 12px sans-serif; text-anchor: middle; }
+.whitewash { fill: #f1ecd9; stroke: #7b7c66; stroke-width: 3; stroke-linejoin: round; }
+.grey-tile { fill: #7e8984; stroke: #555f5d; stroke-width: 3; stroke-linejoin: round; }
+.wine-jar { fill: #b08462; stroke: #6b4a36; stroke-width: 2.5; stroke-linejoin: round; }
+.wine-mouth { fill: none; stroke: #8c6548; stroke-width: 3; stroke-linecap: round; }
+.wine-banner { fill: #9a5f48; stroke: #6e4534; stroke-width: 2; stroke-linejoin: round; }
+.cotton-soil { fill: #dcd3a8; stroke: #8c7d5a; stroke-width: 2.5; stroke-linejoin: round; }
+.cotton-row { fill: none; stroke: #b9ad84; stroke-width: 2; stroke-linecap: round; }
+.cotton-bush { fill: #7f9466; stroke: #4f5f3c; stroke-width: 2; }
+.cotton-boll { fill: #fbfaf2; stroke: #9c9a80; stroke-width: 1.2; }
+.thatch { fill: #c9b985; stroke: #7d6d47; stroke-width: 2; stroke-linejoin: round; }
+.thatch-wall { fill: #f4f0df; stroke: #72533a; stroke-width: 2; stroke-linejoin: round; }
+.loom-bay { fill: #4b4236; }
+.loom-thread { fill: none; stroke: #d8c59a; stroke-width: 1.5; stroke-linecap: round; }
+.indigo-cloth { fill: #4f6078; stroke: #2f3c52; stroke-width: 1.6; stroke-linejoin: round; }
+.grey-tile-line { fill: none; stroke: #5e6b68; stroke-width: 1.8; stroke-linecap: round; }

@@ -15,6 +15,7 @@ export const BUILDING_ART_CATALOG = Object.freeze({
   bakery:{name:'面包房',connected:true}, lumberyard:{name:'伐木场',connected:true},
   stock_exchange:{name:'交易所',connected:true}, bank:{name:'银行',connected:true},
   saltworks:{name:'盐场',connected:true}, wholesale_market:{name:'批发市场',connected:true},
+  winery:{name:'酒坊',connected:true}, cotton_field:{name:'棉田',connected:true}, weaving_mill:{name:'织坊',connected:true},
   commercial_street:{name:'商业街',connected:true}, town_hall:{name:'政务厅',connected:true},
   police_station:{name:'警察局',connected:true}, social_security_office:{name:'社保局',connected:true},
   school:{name:'学堂',connected:false}, clinic:{name:'医馆',connected:false},
@@ -30,8 +31,27 @@ ${roof(-56,-56-extra,102,43)}${label?`<path d="M-27-20l36 12v12L-27-8Z" fill="#5
 function courtyard(){return '<path d="M-67 10L-9-22 71 14 15 51Z" fill="#e2ddc5" stroke="#bfc3ad"/><path d="M-67 10v15l82 35 56-35V14L15 47Z" fill="#eae7d6"/><path d="M-67 10L15 47 71 14" fill="none" stroke="#6e7a6d" stroke-width="4"/>';}
 function awning(x,y){return `<g transform="translate(${x} ${y})"><path d="M-34-5l53 18-10 14-53-18Z" fill="#d0bd91"/><path d="M-44 9v23M9 27v23" stroke="#8c7657" stroke-width="2"/><path d="M-36 25l40 14v6l-40-14Z" fill="#b59c71"/></g>`;}
 function logs(){return `<g fill="#b39b70">${[0,1,2].map(i=>`<path d="M${-55+i*9} 27l27-15 7 5-27 15Z"/><ellipse cx="${-51+i*9}" cy="30" rx="5" ry="4" fill="#d3c292"/>`).join('')}</g>`;}
+function jar(x,y){return `<g transform="translate(${x} ${y})"><path d="M-6-10Q-10-2-6 3Q0 6 6 3Q10-2 6-10Z" fill="#b08462" stroke="#7a5a43"/><ellipse cy="-10" rx="6.5" ry="2.2" fill="#8c6548" stroke="#6b4a36"/><path d="M-7-3h14" fill="none" stroke="#d8c59a" stroke-width="1.5"/></g>`;}
+function wineJars(){return jar(-47,34)+jar(-34,40)+jar(-21,46)+jar(40,46);}
+function wineFlag(){return `<path d="M58-46V8" fill="none" stroke="#79755b" stroke-width="2"/><path d="M58-46l19 5-4 7 4 7-19-5Z" fill="#9a5f48" stroke="#6e4534"/><path d="M56 8h5" stroke="#79755b" stroke-width="2"/>`;}
+function cottonPlot(){
+const L=[-62,14],T=[-8,-16],B=[12,42],R=[66,12];
+const P=(u,v)=>[L[0]+u*(T[0]-L[0])+v*(B[0]-L[0]),L[1]+u*(T[1]-L[1])+v*(B[1]-L[1])].map(n=>+n.toFixed(1));
+const pt=p=>p.join(' ');
+let rows='',bushes='';
+for(const v of [.45,.7,.92]){const a=P(.04,v),b=P(.96,v);rows+=`<path d="M${pt(a)}L${pt(b)}"/>`;
+ for(const u of [.4,.62,.84]){const [x,y]=P(u,v);bushes+=`<ellipse cx="${x}" cy="${y}" rx="6.5" ry="4" fill="#8fa07a" stroke="#5f6e4f"/><circle cx="${x-2.5}" cy="${y-2}" r="1.8" fill="#fbfaf2" stroke="#9c9a80" stroke-width=".8"/><circle cx="${x+2.5}" cy="${y-1}" r="1.8" fill="#fbfaf2" stroke="#9c9a80" stroke-width=".8"/><circle cx="${x}" cy="${y+1.5}" r="1.6" fill="#fbfaf2" stroke="#9c9a80" stroke-width=".8"/>`;}}
+let fence='';
+for(const [a,b] of [[L,B],[B,R]]){const top=p=>[p[0],p[1]-7];fence+=`<path d="M${pt(top(a))}L${pt(top(b))}"/>`;
+ for(let k=0;k<=5;k++){const t=k/5,x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;fence+=`<path d="M${x} ${y-7}V${y}"/>`;}}
+return `<path d="M${pt(L)}L${pt(T)}L${pt(R)}L${pt(B)}Z" fill="#dcd3a8" stroke="#b3ad8a"/><g fill="none" stroke="#c2b98f" stroke-width="1.4">${rows}</g>${bushes}<g fill="none" stroke="#8c7657" stroke-width="1.6">${fence}</g>`;}
+function thatchShed(x,y,s){return `<g transform="translate(${x} ${y}) scale(${s})"><path d="M0 0L62 22V-8L0-30Z" fill="#f4f0df"/><path d="M62 22L93 3V-27L62-8Z" fill="#d5dbcc"/><path d="M0-30L62-8 77.5-27.5 15.5-49.5Z" fill="#c9b985"/><path d="M62-8L93-27 77.5-27.5Z" fill="#b3a474"/><path d="M18.6 6.6L34.1 12.1V-5.9L18.6-11.4Z" fill="#967e5d"/><g fill="none" stroke="#8a7a55" stroke-width="1" opacity=".7">${[1,2,3,4].map(k=>{const t=k/5;return `<path d="M${15.5*t} ${-30-19.5*t}L${62+15.5*t} ${-8-19.5*t}"/>`;}).join('')}</g></g>`;}
+function clothRack(){return `<path d="M50 12V46M76 8V42M50 12H76" fill="none" stroke="#8a7456" stroke-width="2.5" stroke-linecap="round"/><g fill="#4f6078" stroke="#33405a" stroke-width=".8"><path d="M55 12h6v24l-3 3-3-3Z"/><path d="M63 12h6v30l-3 3-3-3Z"/><path d="M71 12h6v18l-3 3-3-3Z"/></g><path d="M56 22h4M64 26h4M72 19h4" stroke="#7d8ca3" stroke-width="1" fill="none"/><ellipse cx="60" cy="50" rx="9" ry="3.5" fill="#7d8ca3" stroke="#4a5873"/>`;}
 function renderComplete(type,level){
 switch(type){
+case 'winery':return house(-8,-6,.92,'酒')+wineJars()+wineFlag();
+case 'cotton_field':return cottonPlot()+thatchShed(-49,12,.6);
+case 'weaving_mill':return house(-8,-6,.92,'织')+clothRack();
 case 'public_housing': return courtyard()+house(-29,-9,.58)+house(27,7,.58)+house(-9,31,.58);
 case 'commercial_street':return house(-32,-8,.66,'店')+house(25,13,.66,'铺')+awning(-17,5)+awning(36,26);
 case 'wholesale_market':return house(0,-18,.88,'集')+awning(-28,13)+awning(31,32)+logs();

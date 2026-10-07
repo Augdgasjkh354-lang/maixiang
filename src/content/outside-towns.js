@@ -32,7 +32,34 @@ export const OUTSIDE_TOWNS = Object.freeze({
       salt: Object.freeze({ basePrice: 4, needPerPersonDay: 10 / 365, producePerPersonDay: 0, targetDays: 240, stock: 20000, sellsToUs: false, supplyWeight: 0.35 }),
       wood: Object.freeze({ basePrice: 9, needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 8000, sellsToUs: false, supplyWeight: 0.2 }),
       flour: Object.freeze({ basePrice: 2.2, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 31500, sellsToUs: true, supplyWeight: 0 }),
-      bread: Object.freeze({ basePrice: 2.4, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 15750, sellsToUs: true, supplyWeight: 0 })
+      bread: Object.freeze({ basePrice: 2.4, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 15750, sellsToUs: true, supplyWeight: 0 }),
+      // 民镇自己酿一些酒、织一些布，不够的部分从外面买。
+      wine: Object.freeze({ basePrice: 5, needPerPersonDay: 6 / 365, producePerPersonDay: 4 / 365, targetDays: 90, stock: 5200, sellsToUs: false, supplyWeight: 0.05 }),
+      cloth: Object.freeze({ basePrice: 20, needPerPersonDay: 1 / 365, producePerPersonDay: 0.55 / 365, targetDays: 180, stock: 1700, sellsToUs: false, supplyWeight: 0.1 })
+    })
+  }),
+  // 王镇：规模与民镇相同（待调），但几乎不产布、少酿酒，更看重布和酒——我镇新产业的主要买家。
+  wangzhen: Object.freeze({
+    id: "wangzhen",
+    name: "王镇",
+    rulers: Object.freeze(["王氏宗族"]),
+    description: "宗族治理的富庶小镇，讲究衣着、好饮酒；布几乎全靠外购，盐木同样不产。",
+    population: 3500,
+    landMu: 10000,
+    landGrowthMuPerYear: 100,
+    yieldPerMuJin: 300,
+    foodPerPersonDayJin: 2,
+    wheatStockJin: 3000000,
+    foodReserveDays: 90,
+    prosperity: 60,
+    relations: 50,
+    goods: Object.freeze({
+      salt: Object.freeze({ basePrice: 4, needPerPersonDay: 10 / 365, producePerPersonDay: 0, targetDays: 240, stock: 20000, sellsToUs: false, supplyWeight: 0.25 }),
+      wood: Object.freeze({ basePrice: 9, needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 8000, sellsToUs: false, supplyWeight: 0.15 }),
+      flour: Object.freeze({ basePrice: 2.2, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 31500, sellsToUs: true, supplyWeight: 0 }),
+      bread: Object.freeze({ basePrice: 2.4, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 15750, sellsToUs: true, supplyWeight: 0 }),
+      wine: Object.freeze({ basePrice: 6, needPerPersonDay: 10 / 365, producePerPersonDay: 2 / 365, targetDays: 90, stock: 6000, sellsToUs: false, supplyWeight: 0.1 }),
+      cloth: Object.freeze({ basePrice: 24, needPerPersonDay: 1.5 / 365, producePerPersonDay: 0.1 / 365, targetDays: 180, stock: 1500, sellsToUs: false, supplyWeight: 0.2 })
     })
   })
 });

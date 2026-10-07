@@ -67,6 +67,44 @@ export function buildingSymbol(type, state = "idle", ghost = false) {
       <path class="salt-steam" d="M65 56c-8-8 5-9 0-17m9 16c-6-6 4-9 0-15"/>
     </g>`;
   }
+  if (type === "winery") {
+    const jar = (cx, cy) => `<path class="wine-jar" d="M${cx - 4} ${cy - 9}h8l1.5 4q3 3 2.5 7h-14q-.5-4 2.5-7Z"/><path class="wine-mouth" d="M${cx - 4.5} ${cy - 9}h9"/>`;
+    return `<g class="${classes}">
+      <ellipse class="building-shadow" cx="50" cy="101" rx="39" ry="7"/>
+      <path class="whitewash" d="M16 50 50 34l34 16v42H16Z"/>
+      <path class="grey-tile" d="M10 51 50 27l40 24v7H10Z"/>
+      <path class="grey-tile-line" d="M18 52 50 36l32 16M26 57l24-12m-4 12 28-13"/>
+      <path class="wood-line" d="M24 60h52"/>
+      <rect class="bakery-door" x="44" y="66" width="12" height="26" rx="6"/>
+      <rect class="home-window" x="24" y="66" width="10" height="10" rx="3"/><rect class="home-window" x="70" y="66" width="10" height="10" rx="3"/>
+      ${jar(24, 92)}${jar(40, 95)}${jar(74, 95)}
+      <path class="wood-line" d="M84 18v70"/><path class="wine-banner" d="M84 18l14 4-4 7 4 7-14-4Z"/>
+    </g>`;
+  }
+  if (type === "cotton_field") {
+    const bush = (x, y) => `<ellipse class="cotton-bush" cx="${x}" cy="${y}" rx="5.5" ry="3.6"/><circle class="cotton-boll" cx="${x - 2.4}" cy="${y - 1.8}" r="1.7"/><circle class="cotton-boll" cx="${x + 2.4}" cy="${y - 1.2}" r="1.7"/>`;
+    return `<g class="${classes}">
+      <ellipse class="building-shadow" cx="50" cy="101" rx="42" ry="8"/>
+      <path class="cotton-soil" d="M8 74 50 52l42 22-42 24Z"/>
+      <path class="cotton-row" d="M22 76l30-15M30 84l28-14M42 92l26-13"/>
+      ${bush(31, 71.5)}${bush(40, 67)}${bush(49, 62.5)}${bush(37, 80.5)}${bush(44, 77)}${bush(51, 73.5)}${bush(48.5, 88.5)}${bush(55, 85.5)}${bush(61, 82)}
+      <path class="wood-line" d="M8 74 50 98 92 74"/>
+      <path class="thatch-wall" d="M61 67v-9h14v9Z"/><path class="thatch" d="M57 60 68 50l11 10-11 3Z"/><rect class="home-door" x="66" y="61" width="4" height="6"/>
+    </g>`;
+  }
+  if (type === "weaving_mill") {
+    return `<g class="${classes}">
+      <ellipse class="building-shadow" cx="50" cy="101" rx="42" ry="7"/>
+      <path class="whitewash" d="M16 50 50 34l34 16v42H16Z"/>
+      <path class="grey-tile" d="M10 51 50 27l40 24v7H10Z"/>
+      <path class="grey-tile-line" d="M18 52 50 36l32 16M26 57l24-12m-4 12 28-13"/>
+      <rect class="loom-bay" x="24" y="66" width="22" height="26" rx="2"/>
+      <path class="loom-thread" d="M28 68v22M33 68v22M38 68v22M43 68v22M27 75h18"/>
+      <rect class="bakery-door" x="54" y="68" width="10" height="24" rx="5"/>
+      <path class="wood-line" d="M76 62v30M92 62v30M76 62h16"/>
+      <path class="indigo-cloth" d="M79 62h4v24l-2 3-2-3Z"/><path class="indigo-cloth" d="M85 62h4v18l-2 3-2-3Z"/>
+    </g>`;
+  }
   if (type === "public_housing") {
     return `<g class="${classes}">
       <ellipse class="building-shadow" cx="50" cy="101" rx="42" ry="8"/>
