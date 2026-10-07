@@ -523,9 +523,8 @@ export function selectDashboard(state, content, selection) {
       bondStats: (function () {
         const bonds = state.bonds || {};
         const daysPerYear = content.rules.daysPerYear || 360;
-        const statusLabel = { subscribing: "认购中", active: "存续中", matured: "已兑付", failed: "已流拍", defaulted: "已违约" };
+        const statusLabel = { active: "存续中", matured: "已兑付", failed: "未发行", defaulted: "已违约" };
         return {
-          creditPenaltyBps: bonds.creditPenaltyBps || 0,
           issues: (bonds.issues || []).slice(-5).reverse().map(issue => ({
             id: issue.id,
             status: issue.status,

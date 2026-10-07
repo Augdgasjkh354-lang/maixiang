@@ -5,23 +5,16 @@ import { wholesalePrice } from "./wealth-stats.js";
 import { bankLoanableVoucherUnits, bankPolicy, ensureBankState } from "./bank.js";
 import { liquidityInvestRatio } from "./liquidity.js";
 
-// 国债系统（金融扩展第三期）：镇库发行，拍卖定价。
-// - 认购期7天；认购踊跃则票面利率下调，认购不足则上浮；不足3成流拍退款
-// - 购买方：住户（存款后剩余闲钱）、银行（闲置可贷额度）；票面须高于存款利率才有人买
-// - 每年付息，到期还本；镇库没钱先展期（最多2次，利率+1%），再还不上违约（持有者血本无归，信用惩罚+2%）
-export const BOND_SUBSCRIBE_DAYS = 7;
-export const BOND_MIN_SUBSCRIBE_RATIO = 0.3;
-export const BOND_HOT_RATIO = 1.5;
-export const BOND_RATE_STEP_PERCENT = 1;
+// 国债：镇库按玩家定的固定票面利率发行，发行当天由住户（存款后剩余闲钱）与银行（闲置可贷额度）
+// 直接认购，卖出多少算多少；票面须高于存款利率住户才会买。每年付息、到期还本，
+// 镇库没钱先展期（最多2次，利率不变），再还不上则违约（持有者血本无归）。
 export const BOND_MAX_EXTENSIONS = 2;
-export const BOND_DEFAULT_PENALTY_BPS = 200;
 
 export function ensureBondState(state) {
   state.bonds ||= {};
   const bonds = state.bonds;
   bonds.seq ||= 0;
   if (!Array.isArray(bonds.issues)) bonds.issues = [];
-  bonds.creditPenaltyBps ||= 0;
   bonds.townOwesBankVoucherUnits ||= 0;
   return bonds;
 }
@@ -77,42 +70,48 @@ export function issueGovernmentBond(state, options, content) {
   const totalVoucher = Number(options?.totalVoucher);
   const totalUnits = Math.round(totalVoucher * scale);
   const termYears = Math.floor(Number(options?.termYears) || 0);
-  const startRate = Number(options?.startRateAnnualPercent);
+  const rate = Number(options?.rateAnnualPercent ?? options?.startRateAnnualPercent);
   if (!Number.isFinite(totalVoucher) || totalVoucher <= 0 || !Number.isSafeInteger(totalUnits) || totalUnits <= 0) {
     return { ok: false, reason: "发行总额必须为正数（券）" };
   }
   if (!Number.isSafeInteger(termYears) || termYears < 1 || termYears > 10) return { ok: false, reason: "期限须为1—10年" };
-  if (!Number.isFinite(startRate) || startRate < 0 || startRate > 20) return { ok: false, reason: "起拍票面年利率须在0—20%之间" };
+  if (!Number.isFinite(rate) || rate < 0 || rate > 20) return { ok: false, reason: "票面年利率须在0—20%之间" };
   const bonds = ensureBondState(state);
-  if (bonds.issues.some(issue => issue.status === "subscribing")) {
-    return { ok: false, reason: "已有国债正在认购，暂勿重复发行" };
-  }
   const daysPerYear = content.rules.daysPerYear || 360;
-  bonds.seq += 1;
+  const dayIndex = (state.year - 1) * daysPerYear + state.day;
   const issue = {
-    id: `GB${bonds.seq}`,
+    id: `GB${bonds.seq + 1}`,
     totalVoucherUnits: totalUnits,
     subscribedVoucherUnits: 0,
     subscriptions: {},
     holdings: [],
     termDays: termYears * daysPerYear,
-    startRateAnnualPercent: startRate,
-    couponRateAnnualPercent: startRate,
-    status: "subscribing",
-    issuedDayIndex: (state.year - 1) * daysPerYear + state.day,
-    lastCouponDayIndex: (state.year - 1) * daysPerYear + state.day,
+    couponRateAnnualPercent: rate,
+    status: "active",
+    issuedDayIndex: dayIndex,
+    lastCouponDayIndex: dayIndex,
     extensions: 0,
     stats: { couponPaidVoucherUnits: 0, principalRepaidVoucherUnits: 0 }
   };
   bonds.issues.push(issue);
-  recordEvent(state, `镇库发行国债${issue.id}：总额${totalVoucher}券，${termYears}年期，起拍票面年利率${startRate}%，认购期${BOND_SUBSCRIBE_DAYS}天。`, content);
-  return { ok: true, issue };
+  autoSubscribe(state, issue, content);
+  if (issue.subscribedVoucherUnits <= 0) {
+    bonds.issues.pop();
+    return { ok: false, reason: "无人认购：票面利率需高于存款利率，且住户或银行要有闲钱" };
+  }
+  bonds.seq += 1;
+  issue.totalVoucherUnits = issue.subscribedVoucherUnits;
+  issue.holdings = Object.entries(issue.subscriptions).map(([holderKey, units]) => ({ holderKey, principalVoucherUnits: units }));
+  issue.subscriptions = {};
+  const soldVoucher = issue.totalVoucherUnits / scale;
+  recordEvent(state, `镇库发行国债${issue.id}：售出${soldVoucher}券（计划${totalVoucher}券），${termYears}年期，票面年利率${rate}%。`, content);
+  return { ok: true, issue, soldVoucher };
 }
 
 export function subscribeBond(state, issueId, holderKind, holderId, voucherUnits, content) {
   const bonds = ensureBondState(state);
   const issue = bonds.issues.find(row => row.id === issueId);
-  if (!issue || issue.status !== "subscribing") return { ok: false, reason: "该国债不在认购期" };
+  if (!issue) return { ok: false, reason: "国债不存在" };
   const units = Math.floor(Number(voucherUnits) || 0);
   if (!Number.isSafeInteger(units) || units <= 0) return { ok: false, reason: "认购金额必须为正整数" };
   const key = holderKeyOf(holderKind, holderId);
@@ -136,67 +135,13 @@ export function subscribeBond(state, issueId, holderKind, holderId, voucherUnits
   return { ok: true, issueId, holderKey: key, voucherUnits: units };
 }
 
-// 流拍退款：认购款已进镇库，但认购期内镇库可能已把钱花出去。
-// 镇库现金只够退多少就退多少，退不出的部分挂为家庭对镇库的持久应收
-// （household.townOwesVoucherUnits，与开店失败垫付同一机制，每日由 shops 结算优先偿付），
-// 绝不把镇库余额扣成负数。
-function refundSubscription(state, issue, content) {
-  for (const [key, units] of Object.entries(issue.subscriptions)) {
-    if (!(units > 0)) continue;
-    const townCash = Math.max(0, townCashUnits(state));
-    const refundable = Math.min(units, townCash);
-    if (refundable > 0) {
-      addTownCashUnits(state, -refundable);
-      payToHolder(state, key, refundable, content);
-    }
-    const shortfall = units - refundable;
-    if (shortfall > 0) {
-      if (key.startsWith("household:")) {
-        const household = state.households?.byId?.[key.slice(10)];
-        if (household) {
-          household.townOwesVoucherUnits ||= 0;
-          household.townOwesVoucherUnits += shortfall;
-        }
-      } else {
-        // 银行认购退不出：同样挂为镇库对银行的应付款，日结算时优先补付。
-        state.bonds.townOwesBankVoucherUnits = (state.bonds.townOwesBankVoucherUnits || 0) + shortfall;
-      }
-      recordEvent(state, `国债${issue.id}流拍退款：镇库现金不足，${shortfall}券暂记为应付，日后优先偿付。`, content);
-    }
-  }
-  issue.subscriptions = {};
-  issue.subscribedVoucherUnits = 0;
-}
-
-function finalizeSubscription(state, issue, content) {
-  const bonds = ensureBondState(state);
-  const ratio = issue.subscribedVoucherUnits / issue.totalVoucherUnits;
-  if (ratio < BOND_MIN_SUBSCRIBE_RATIO) {
-    refundSubscription(state, issue, content);
-    issue.status = "failed";
-    recordEvent(state, `国债${issue.id}认购不足（${Math.round(ratio * 100)}%），流拍，已退款。`, content);
-    return;
-  }
-  let rate = issue.startRateAnnualPercent + bonds.creditPenaltyBps / 100;
-  if (ratio >= BOND_HOT_RATIO) rate = Math.max(0.5, rate - BOND_RATE_STEP_PERCENT);
-  else if (ratio < 1) rate += BOND_RATE_STEP_PERCENT * 2;
-  issue.couponRateAnnualPercent = Math.round(rate * 100) / 100;
-  issue.totalVoucherUnits = issue.subscribedVoucherUnits;
-  issue.holdings = Object.entries(issue.subscriptions)
-    .filter(([, units]) => units > 0)
-    .map(([holderKey, units]) => ({ holderKey, principalVoucherUnits: units }));
-  issue.subscriptions = {};
-  issue.status = "active";
-  recordEvent(state, `国债${issue.id}发行成功：认购${Math.round(ratio * 100)}%，票面年利率${issue.couponRateAnnualPercent}%。`, content);
-}
-
 function autoSubscribe(state, issue, content) {
   const remaining = issue.totalVoucherUnits - issue.subscribedVoucherUnits;
   if (remaining <= 0) return;
   const scale = currencyScale(content);
   const depositRate = bankPolicy(state).depositRateAnnualPercent;
   // 票面不高于存款利率时无人问津（收益阶梯）
-  if (issue.startRateAnnualPercent > depositRate) {
+  if (issue.couponRateAnnualPercent > depositRate) {
     const wheatPricePerJin = wholesalePrice(state, "wheat", content) || 0;
     for (const household of householdList(state)) {
       if (!isActiveHousehold(household)) continue;
@@ -214,7 +159,7 @@ function autoSubscribe(state, issue, content) {
   }
   // 银行：闲置可贷额度的一半认购
   const left = issue.totalVoucherUnits - issue.subscribedVoucherUnits;
-  if (left > 0 && issue.startRateAnnualPercent > 0) {
+  if (left > 0 && issue.couponRateAnnualPercent > 0) {
     const loanable = bankLoanableVoucherUnits(state);
     const amount = Math.min(Math.floor(loanable * 0.5), left);
     if (amount > 0) subscribeBond(state, issue.id, "bank", "bank", amount, content);
@@ -252,10 +197,7 @@ function payCoupon(state, issue, content) {
     }
     issue.stats.couponPaidVoucherUnits += distributed;
   }
-  if (pay < totalDue) {
-    issue.couponRateAnnualPercent = Math.round((issue.couponRateAnnualPercent + 0.5) * 100) / 100;
-    recordEvent(state, `镇库无力足额支付国债${issue.id}利息，票面利率上浮至${issue.couponRateAnnualPercent}%以安抚持有者。`, content);
-  }
+  if (pay < totalDue) recordEvent(state, `镇库无力足额支付国债${issue.id}利息，少付${totalDue - pay}券。`, content);
 }
 
 function settleMaturity(state, issue, content) {
@@ -279,17 +221,14 @@ function settleMaturity(state, issue, content) {
   }
   if (issue.extensions < BOND_MAX_EXTENSIONS) {
     issue.extensions += 1;
-    issue.termDays += 360;
-    issue.couponRateAnnualPercent = Math.round((issue.couponRateAnnualPercent + 1) * 100) / 100;
-    recordEvent(state, `镇库现金不足，国债${issue.id}展期1年（第${issue.extensions}次），票面利率上浮至${issue.couponRateAnnualPercent}%。`, content);
+    issue.termDays += content.rules.daysPerYear || 360;
+    recordEvent(state, `镇库现金不足，国债${issue.id}展期1年（第${issue.extensions}次）。`, content);
     return;
   }
   // 违约：剩余持有者血本无归
   issue.holdings = [];
   issue.status = "defaulted";
-  const bonds = ensureBondState(state);
-  bonds.creditPenaltyBps += BOND_DEFAULT_PENALTY_BPS;
-  recordEvent(state, `国债${issue.id}违约！镇库无力偿还，持有者血本无归；镇库信用受损，今后发债利率上浮${BOND_DEFAULT_PENALTY_BPS / 100}%。`, content);
+  recordEvent(state, `国债${issue.id}违约！镇库无力偿还，持有者血本无归。`, content);
 }
 
 // 提前赎回：拿回本金 + 持有期应计利息的 50%（API；界面后续接）
@@ -332,10 +271,7 @@ export function settleBondsDay(state, content) {
   // 镇库欠银行/住户的流拍退款：镇库有钱就优先补付（家庭侧由 shops 结算的 townOwes 一并处理）。
   settleTownBondPayables(state, bonds, content);
   for (const issue of bonds.issues) {
-    if (issue.status === "subscribing") {
-      autoSubscribe(state, issue, content);
-      if (dayIndex >= issue.issuedDayIndex + BOND_SUBSCRIBE_DAYS) finalizeSubscription(state, issue, content);
-    } else if (issue.status === "active") {
+    if (issue.status === "active") {
       if (dayIndex - issue.lastCouponDayIndex >= daysPerYear) {
         payCoupon(state, issue, content);
         issue.lastCouponDayIndex = dayIndex;
@@ -344,4 +280,20 @@ export function settleBondsDay(state, content) {
     }
   }
   return { issues: bonds.issues.length, outstandingVoucherUnits: bondOutstandingVoucherUnits(state) };
+}
+
+// 旧档兼容：认购中的旧国债按已认购部分直接生效，取消拍卖相关字段。
+export function migrateBonds(state) {
+  const bonds = state.bonds;
+  if (!bonds || !Array.isArray(bonds.issues)) return;
+  delete bonds.creditPenaltyBps;
+  for (const issue of bonds.issues) {
+    delete issue.startRateAnnualPercent;
+    if (issue.status !== "subscribing") continue;
+    issue.holdings = Object.entries(issue.subscriptions || {}).filter(([, units]) => units > 0)
+      .map(([holderKey, units]) => ({ holderKey, principalVoucherUnits: units }));
+    issue.subscriptions = {};
+    issue.totalVoucherUnits = issue.subscribedVoucherUnits || 0;
+    issue.status = issue.holdings.length ? "active" : "failed";
+  }
 }

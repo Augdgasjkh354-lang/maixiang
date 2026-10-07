@@ -6,6 +6,7 @@ import { summarizeLegacyAnnualReports } from "../systems/annual-reports.js";
 import { ensureWholesaleMarket, mergeWholesaleCashIntoTown } from "../systems/wholesale-market.js";
 import { migrateSocialSecurityWallet } from "../systems/social-security.js";
 import { migrateMonetaryReform } from "../economy/payment.js";
+import { migrateBonds } from "../systems/bonds.js";
 import { releaseExcessHouseholdEmployment, totalHouseholdAgeBands, householdList, syncResidentAggregates } from "../systems/households.js";
 import {
   defaultWageRates, emptyBusinessState, emptyIndustryState, emptyFiscalState, ensureProjectAccessor
@@ -396,6 +397,7 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
   // 0.2.3 做市商：旧档若已有批发市场挂价则沿用（玩家可能已调过），缺项补做市商默认价。
   mergeWholesaleCashIntoTown(state);
   delete state.neighborAid; // 邻里互助已删除
+  migrateBonds(state);
   // 外交房已并入外贸房：拆除旧档里的外交房与在建工程，岗位上的人回到待业。
   for (const building of (state.buildings || []).filter(row => row.typeId === "diplomacy_house")) {
     for (const household of Object.values(state.households?.byId || {})) {
