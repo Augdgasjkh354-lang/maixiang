@@ -9,7 +9,7 @@ import {
   setEmployment, buildAt, toggleAutomaticRelief,
   setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl,
   setBankPolicy, issueGovernmentBond,
-  setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setTradeTariffRate, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax,
+  setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax,
   setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers,
   setAutosaveMonths,
   sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares,
@@ -111,14 +111,11 @@ export function createSimulation(content) {
     socialSellShares: function (state, companyId, shares) {
       return socialSellShares(state, companyId, shares, definitions);
     },
-    setTradeTariffRate: function (state, percent) {
-      return setTradeTariffRate(state, percent);
+    tradeWithOutsideTown: function (state, direction, itemId, quantityJin, townId) {
+      return tradeWithOutsideTown(state, direction, itemId, quantityJin, definitions, townId);
     },
-    tradeWithOutsideTown: function (state, direction, itemId, quantityJin) {
-      return tradeWithOutsideTown(state, direction, itemId, quantityJin, definitions);
-    },
-    issueWheatLoan: function (state, principalJin, annualRatePercent) {
-      return issueWheatLoan(state, principalJin, annualRatePercent, definitions);
+    issueWheatLoan: function (state, principalJin, annualRatePercent, townId) {
+      return issueWheatLoan(state, principalJin, annualRatePercent, definitions, townId);
     },
     signTradeAgreement: function (state, options) {
       return signTradeAgreement(state, options, definitions);

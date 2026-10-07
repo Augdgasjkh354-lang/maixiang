@@ -1,8 +1,51 @@
-{"name":"qa-s3e-salt-dump2","seed":99,"years":4,
- "metrics":["year","town_balance_jin","outside_wheat_stock_jin","outside_buy_salt","trade_export_jin","trade_tariff_jin","trade_count","satisfaction"],
- "script":[
-  {"action":"grantTownMaterial","args":{"itemId":"salt","quantity":150000},"year":1},
-  {"action":"tradeOutside","args":{"direction":"sell","itemId":"salt","quantityJin":50000},"year":2},
-  {"action":"tradeOutside","args":{"direction":"sell","itemId":"salt","quantityJin":50000},"year":2},
-  {"action":"tradeOutside","args":{"direction":"sell","itemId":"salt","quantityJin":40000},"year":3}
- ]}
+{
+ "name": "qa-s3e-salt-dump2",
+ "seed": 99,
+ "years": 4,
+ "metrics": [
+  "year",
+  "town_balance_jin",
+  "outside_wheat_stock_jin",
+  "outside_salt_sell_price",
+  "trade_export_jin",
+  "trade_count",
+  "satisfaction"
+ ],
+ "script": [
+  {
+   "action": "grantTownMaterial",
+   "args": {
+    "itemId": "salt",
+    "quantity": 150000
+   },
+   "year": 1
+  },
+  {
+   "action": "tradeOutside",
+   "args": {
+    "direction": "sell",
+    "itemId": "salt",
+    "quantityJin": 50000
+   },
+   "year": 2
+  },
+  {
+   "action": "tradeOutside",
+   "args": {
+    "direction": "sell",
+    "itemId": "salt",
+    "quantityJin": 50000
+   },
+   "year": 2
+  },
+  {
+   "action": "tradeOutside",
+   "args": {
+    "direction": "sell",
+    "itemId": "salt",
+    "quantityJin": 40000
+   },
+   "year": 3
+  }
+ ]
+}

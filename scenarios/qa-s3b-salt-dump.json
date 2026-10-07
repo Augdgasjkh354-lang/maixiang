@@ -6,10 +6,9 @@
   "year",
   "town_balance_jin",
   "outside_wheat_stock_jin",
-  "outside_buy_salt",
+  "outside_salt_sell_price",
   "outside_prosperity",
   "trade_export_jin",
-  "trade_tariff_jin",
   "trade_count",
   "satisfaction"
  ],
@@ -43,13 +42,6 @@
    "args": {
     "itemId": "salt",
     "quantity": 120000
-   },
-   "year": 1
-  },
-  {
-   "action": "setTradeTariffRate",
-   "args": {
-    "percent": 5
    },
    "year": 1
   },

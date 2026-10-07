@@ -6,12 +6,9 @@
   "outside_wheat_stock_jin",
   "outside_prosperity",
   "outside_population",
-  "outside_buy_salt",
-  "outside_buy_wheat",
-  "outside_sell_wheat",
+  "outside_salt_sell_price",
   "trade_export_jin",
   "trade_import_jin",
-  "trade_tariff_jin",
   "trade_count"
  ],
  "name": "outside-town-10y",
@@ -53,13 +50,6 @@
    "args": {
     "itemId": "wood",
     "quantity": 3000
-   },
-   "year": 1
-  },
-  {
-   "action": "setTradeTariffRate",
-   "args": {
-    "percent": 5
    },
    "year": 1
   },

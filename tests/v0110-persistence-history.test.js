@@ -29,7 +29,7 @@ test("旧版本存档读档时直接拒绝，提示开新游戏", () => {
   state.schemaVersion = 15;
   assert.throws(() => migrateSave(state, CONTENT), /旧版存档不兼容/);
   const raw = encodeSaveContainer("slot-b", "旧档", simulation.createInitialState({ seed: 11002 }), "2026-09-27T12:00:00.000Z", CONTENT)
-    .replace('"version":16', '"version":15').replace('"schemaVersion":16', '"schemaVersion":15');
+    .replace(`"version":${CONTENT.rules.saveVersion}`, '"version":15').replace(`"schemaVersion":${CONTENT.rules.saveVersion}`, '"schemaVersion":15');
   assert.throws(() => decodeSaveContainer(raw, "slot-b", CONTENT), error => ["corrupt", "validation"].includes(error.code));
 });
 

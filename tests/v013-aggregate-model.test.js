@@ -105,8 +105,8 @@ function totalHouseholdAssets(state) {
 
 test("0.1.3 新局只保留 cohort + 家庭年龄段 + 家庭岗位三层聚合权威", () => {
   const state = simulation.createInitialState({ seed: 130101 });
-  assert.equal(state.version, 16);
-  assert.equal(state.schemaVersion, 16);
+  assert.equal(state.version, CONTENT.rules.saveVersion);
+  assert.equal(state.schemaVersion, CONTENT.rules.saveVersion);
   assert.equal("members" in state.households, false);
   assert.equal("nextMemberNumber" in state.households, false);
   for (const h of householdList(state)) assert.equal("memberIds" in h, false);

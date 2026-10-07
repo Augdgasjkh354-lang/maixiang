@@ -1,612 +1,523 @@
 import { nextRandom } from "../core/random.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { addInventory, changeInventory, quantityToUnits, unitsToQuantity } from "../economy/inventory.js";
-import { hasWholesaleMarket, readWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } from "./wholesale-market.js";
-import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
+import { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } from "../content/outside-towns.js";
+import { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } from "./wholesale-market.js";
+import { jobCount } from "./households.js";
 
-// 民镇（原「四地主镇」）：纯贸易伙伴，不做完整模拟，只用动态算法维持基础数值。
-// 民镇议事会执政的农业小镇：1万亩、1000劳动力，主产小麦，有面粉店/面包店；
-// 盐、木材零自产、按人按年消耗，完全依赖我方贸易；贸易以小麦斤计价：
-// 本镇可卖面粉/面包/盐/木材，可买面粉/面包。
-// 结算走实物小麦（镇小麦库存 <-> 外镇小麦库存），不印新券，不破坏货币恒等式。
+// 外镇：所有外镇共用这一套"库存驱动"算法，每个镇的差别只在 content/outside-towns.js 的档案里。
+//
+// 每天：每样商品按人口自产、消耗；吃口粮小麦。供应满足率滚动平均 → 繁荣度慢慢靠拢。
+// 价格：只看外镇自己的库存。库存低于目标就涨，高于目标就跌：
+//   中间价 = 基准价 × clamp((目标库存 / 库存)^0.7, 0.35, 3) × 繁荣度系数
+//   外镇收购价（我们卖）= 中间价 × (1 − 价差/2)；外镇出售价（我们买）= 中间价 × (1 + 价差/2)
+//   我们卖给它，它库存涨、价格跌；向它买，库存跌、价格涨。买进再卖回只会亏掉价差，没有套利。
+//   大单按 20 段逐段计价，越卖越便宜。
+// 结算：一律实物小麦。外镇只动用口粮储备以上的小麦付款。
+// 每年：秋收入库；元旦抽天气与年事件、按繁荣度和口粮增减人口、开垦新耕地。
 
-export const OUTSIDE_TOWN_NAME = "民镇";
-export const OUTSIDE_TOWN_LEGACY_NAME = "四地主镇";
-export const OUTSIDE_RULERS = ["民镇议事会"];
-export const OUTSIDE_RULERS_LEGACY = ["陈", "王", "李", "赵"];
-export const TRADE_SELL_ITEMS = ["flour", "bread", "salt", "wood"];
-export const TRADE_BUY_ITEMS = ["flour", "bread"];
-// 民镇每年每人的盐、木材需求（零自产，全靠我方贸易供给）。
-export const SALT_JIN_PER_PERSON_YEAR = 10;
-export const WOOD_UNITS_PER_PERSON_YEAR = 4;
-export const DEFAULT_SALT_STOCK_JIN = 20000;
-export const DEFAULT_WOOD_STOCK_UNITS = 8000;
-// 库存软上限：超出部分每年减半，防止无限囤积。
-export const SALT_STOCK_SOFT_CAP_JIN = 70000;
-export const WOOD_STOCK_SOFT_CAP_UNITS = 28000;
-// 警戒线：库存低于 90 天消耗时，该物资收购价 ×1.5。
-export const SUPPLY_WARNING_DAYS = 90;
-export const SUPPLY_WARNING_PRICE_FACTOR = 1.5;
-// 囤积程度决定收购价：库存/年需求 为 0 时 1.8 倍，1 年 1.3 倍，2 年 0.8 倍，3 年以上 0.5 倍。
-export const STOCK_PRICE_FACTOR_MAX = 1.8;
-export const STOCK_PRICE_FACTOR_MIN = 0.5;
+const SLICES = 20;
 export const MAX_TRADE_JIN_PER_ORDER = 100000;
-export const PRICE_ELASTICITY = 1.0;
-export const MEMORY_DECAY_PER_DAY = 0.995;
-export const DEFAULT_TRADE_TARIFF_PERCENT = 5;
-export const MAX_TRADE_TARIFF_PERCENT = 30;
 export const RELATIONS_DEFAULT = 60;
 export const RELATIONS_MAX = 100;
 export const RELATIONS_TRUSTED = 70;
 export const RELATIONS_DISTRUST = 40;
 export const RELATIONS_BREAKOFF = 20;
-export const RELATIONS_GAIN_PER_DAY = 0.2;
-export const RELATIONS_LOSS_PER_DAY = 0.5;
+const RELATIONS_GAIN_PER_DAY = 0.1;
+const RELATIONS_LOSS_PER_DAY = 0.3;
+// 每成交 2 万斤小麦的买卖，关系分 +1（单笔最多 +1）。
+const RELATIONS_PER_TRADE_JIN = 20000;
 // 长协容量：外贸房每人在岗可跟进的长协笔数（trade-agreements.js 共用）。
 export const AGREEMENTS_PER_STAFF = 2;
+// 外镇愿意卖给我们时，至少给自己留 30 天的量。
+const SELL_RESERVE_DAYS = 30;
+// 库存超过目标 2 倍的部分每天损耗 2%（陈货、转卖），防止无限囤积。
+const STOCK_SPOIL_MULTIPLE = 2;
+const SUPPLY_MEMORY = 0.97;
 
-// 民镇收购价（我们卖出）：小麦斤/单位。盐、木材零自产，实际价格由库存比驱动。
-// 小麦不做贸易商品（镇库直管的战略物资），只做结算货币；缺粮时走小麦贷款。
-// 基准价按我方成本+合理利润：木材成本5→9，盐成本1→4，面粉成本1.33→2，面包成本1.16→1.8。
-const BASE_BUY_PRICE = { flour: 2.2, bread: 2, salt: 4, wood: 9 };
-// 民镇售价（我们买入）
-const BASE_SELL_PRICE = { flour: 1.55, bread: 1.9 };
-const YIELD_PER_MU_JIN = 600;
-const FOOD_PER_PERSON_DAY_JIN = 2;
+const round2 = value => Math.round(value * 100) / 100;
 
-// 民镇年需求（按实际人口折算，不是写死 3500）。
-export function outsideTownAnnualSaltJin(ot) {
-  return Math.max(0, (ot?.population || 0) * SALT_JIN_PER_PERSON_YEAR);
-}
-export function outsideTownAnnualWoodUnits(ot) {
-  return Math.max(0, (ot?.population || 0) * WOOD_UNITS_PER_PERSON_YEAR);
-}
-// 90 天警戒线（盐斤 / 木材单位）。
-export function outsideTownSaltWarningJin(ot) {
-  return outsideTownAnnualSaltJin(ot) * SUPPLY_WARNING_DAYS / 365;
-}
-export function outsideTownWoodWarningUnits(ot) {
-  return outsideTownAnnualWoodUnits(ot) * SUPPLY_WARNING_DAYS / 365;
+// ---------------------------------------------------------------- 档案与状态
+
+function profiles(content) {
+  return content?.outsideTowns || OUTSIDE_TOWNS;
 }
 
-export function ensureOutsideTown(state) {
-  const ot = state.outsideTown ||= {};
-  applyOutsideTownDefaults(ot, ot);
-  return ot;
+export function outsideTownProfile(content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
+  return profiles(content)[townId] || null;
 }
 
-// 只读版本：供 selector/UI 使用，不回写游戏状态（0.1.8 selector 纯度要求）。
-export function readOutsideTown(state) {
-  const ot = {};
-  applyOutsideTownDefaults(ot, state.outsideTown || {});
-  return ot;
-}
-
-function applyOutsideTownDefaults(ot, source) {
-  const src = source || {};
-  ot.name = ot.name ?? src.name ?? OUTSIDE_TOWN_NAME;
-  // 老存档迁移：四地主镇已改名民镇（同上，保留玩家自行改过的名字）。
-  if (ot.name === OUTSIDE_TOWN_LEGACY_NAME) ot.name = OUTSIDE_TOWN_NAME;
-  ot.rulers = ot.rulers ?? (src.rulers ? [...src.rulers] : [...OUTSIDE_RULERS]);
-  // 老存档迁移：四地主已改为民镇议事会。
-  if (Array.isArray(ot.rulers) && ot.rulers.length === OUTSIDE_RULERS_LEGACY.length &&
-      OUTSIDE_RULERS_LEGACY.every((name, i) => ot.rulers[i] === name)) {
-    ot.rulers = [...OUTSIDE_RULERS];
+function createTown(profile) {
+  const stocks = {};
+  const supply = { food: 1 };
+  for (const [itemId, good] of Object.entries(profile.goods)) {
+    stocks[itemId] = good.stock;
+    supply[itemId] = 1;
   }
-  ot.landMu = ot.landMu ?? src.landMu ?? 10000;
-  ot.laborers = ot.laborers ?? src.laborers ?? 1000;
-  ot.population = ot.population ?? src.population ?? 3500;
-  ot.wheatStockJin = ot.wheatStockJin ?? src.wheatStockJin ?? 3000000;
-  // 民镇盐/木材库存（斤 / 单位）：零自产，只有我方出口能增加，每年按人口消耗。
-  ot.saltStockJin = ot.saltStockJin ?? src.saltStockJin ?? DEFAULT_SALT_STOCK_JIN;
-  ot.woodStockUnits = ot.woodStockUnits ?? src.woodStockUnits ?? DEFAULT_WOOD_STOCK_UNITS;
-  ot.saltShortageYears = ot.saltShortageYears ?? src.saltShortageYears ?? 0;
-  ot.woodShortageYears = ot.woodShortageYears ?? src.woodShortageYears ?? 0;
-  ot.lastYearSaltConsumptionJin = ot.lastYearSaltConsumptionJin ?? src.lastYearSaltConsumptionJin ?? 0;
-  ot.lastYearWoodConsumptionUnits = ot.lastYearWoodConsumptionUnits ?? src.lastYearWoodConsumptionUnits ?? 0;
-  // 外交关系分（0—100）：外交房有人值守则缓慢回升，无人则下滑；脏数据时回落默认值。
-  ot.relations = Number.isFinite(ot.relations) ? ot.relations
-    : (Number.isFinite(src.relations) ? src.relations : RELATIONS_DEFAULT);
-  ot.prosperity = ot.prosperity ?? src.prosperity ?? 60;
-  ot.saltDemand = ot.saltDemand ?? src.saltDemand ?? 1.4;
-  ot.woodDemand = ot.woodDemand ?? src.woodDemand ?? 1.3;
-  // 注：saltDemand/woodDemand 是旧版固定需求乘数，已不再参与定价（改由库存比驱动）。
-  // 保留字段只为存档与视图兼容，不再做均值回归。
-  ot.grainDemand = ot.grainDemand ?? src.grainDemand ?? 0.7;
-  ot.weather = ot.weather ?? src.weather ?? 1.0;
-  ot.event = ot.event ?? src.event ?? null;
-  ot.tradeClosed = ot.tradeClosed ?? src.tradeClosed ?? false;
-  ot.buyPrices = ot.buyPrices ?? {};
-  ot.sellPrices = ot.sellPrices ?? {};
-  ot.tradeMemory = ot.tradeMemory ?? {};
-  const srcBuy = src.buyPrices || {};
-  const srcSell = src.sellPrices || {};
-  const srcMemory = src.tradeMemory || {};
-  for (const itemId of TRADE_SELL_ITEMS) {
-    const buyPrice = ot.buyPrices[itemId] ?? srcBuy[itemId];
-    ot.buyPrices[itemId] = Number.isFinite(buyPrice) && buyPrice > 0 ? buyPrice : BASE_BUY_PRICE[itemId];
-    const memory = ot.tradeMemory[itemId] ?? srcMemory[itemId];
-    ot.tradeMemory[itemId] = Number.isFinite(memory) ? memory : 0;
-  }
-  for (const itemId of TRADE_BUY_ITEMS) {
-    const sellPrice = ot.sellPrices[itemId] ?? srcSell[itemId];
-    ot.sellPrices[itemId] = Number.isFinite(sellPrice) && sellPrice > 0 ? sellPrice : BASE_SELL_PRICE[itemId];
-  }
-  ot.stats = ot.stats ?? {};
-  const srcStats = src.stats || {};
-  for (const key of ["exportJin", "importJin", "tariffJin", "trades", "yearExportJin", "yearImportJin", "yearTariffJin"]) {
-    const value = ot.stats[key] ?? srcStats[key];
-    ot.stats[key] = Number.isFinite(value) && value >= 0 ? value : 0;
-  }
-  if (ot.lastYearProductionJin === undefined) ot.lastYearProductionJin = src.lastYearProductionJin || 0;
-  if (ot.lastYearConsumptionJin === undefined) ot.lastYearConsumptionJin = src.lastYearConsumptionJin || 0;
-  // 小麦贷款：天灾欠收时本镇放贷给民镇，玩家定斤数和利息
-  ot.loans = ot.loans ?? (Array.isArray(src.loans) ? src.loans.map(l => ({ ...l })) : []);
-  ot.loanStats = ot.loanStats ?? {};
-  const srcLoanStats = src.loanStats || {};
-  for (const key of ["totalIssuedJin", "totalRepaidJin", "totalInterestJin", "activeLoans"]) {
-    const value = ot.loanStats[key] ?? srcLoanStats[key];
-    ot.loanStats[key] = Number.isFinite(value) && value >= 0 ? value : 0;
-  }
-  return ot;
-}
-
-export function tradeTariffRate(state) {
-  const value = Number(state.policy?.tradeTariffRate);
-  if (!Number.isFinite(value) || value < 0) return DEFAULT_TRADE_TARIFF_PERCENT;
-  return Math.min(MAX_TRADE_TARIFF_PERCENT, value);
-}
-
-// 盐/木材收购价与民镇库存挂钩（放缓版）：
-// 库存为 0 → 1.8 倍（抢购）；1 年库存 → 1.3 倍；2 年 → 0.8 倍；3 年以上 → 0.5 倍（囤满了就不想买了）。
-// 旧公式 2.2-ratio 太陡：1 年库存就跌到 1.2 倍，配合贸易记忆能把木材压到成本线以下。
-function stockDemandFactor(stock, annualDemand) {
-  if (!(annualDemand > 0)) return 1;
-  const stockRatio = Math.max(0, stock) / annualDemand;
-  return Math.max(STOCK_PRICE_FACTOR_MIN, Math.min(STOCK_PRICE_FACTOR_MAX, 1.8 - stockRatio * 0.5));
-}
-
-// 警戒线恐慌加价：库存低于 90 天消耗时该物资收购价 ×1.5。
-function shortagePanicFactor(stock, warningLevel) {
-  if (!(warningLevel > 0)) return 1;
-  return stock < warningLevel ? SUPPLY_WARNING_PRICE_FACTOR : 1;
-}
-
-function demandMultiplier(ot, itemId) {
-  if (itemId === "salt") {
-    return stockDemandFactor(ot.saltStockJin, outsideTownAnnualSaltJin(ot))
-      * shortagePanicFactor(ot.saltStockJin, outsideTownSaltWarningJin(ot));
-  }
-  if (itemId === "wood") {
-    return stockDemandFactor(ot.woodStockUnits, outsideTownAnnualWoodUnits(ot))
-      * shortagePanicFactor(ot.woodStockUnits, outsideTownWoodWarningUnits(ot));
-  }
-  return Math.max(0.2, ot.grainDemand);
-}
-
-function prosperityFactor(ot) {
-  return 0.7 + Math.max(0, Math.min(100, ot.prosperity)) / 100 * 0.6;
-}
-
-// 价格反馈（防刷钱核心）：本镇某商品净卖出越多 -> 外镇收购价越低；
-// 净买入越多 -> 外镇售价越高。tradeMemory 以"净卖出斤数"为正。
-// 反馈有 0.5 下限：卖再多收购价也不低于 5 折，避免把正常贸易压到成本线以下。
-export function recomputePrices(state) {
-  const ot = ensureOutsideTown(state);
-  const prosperity = prosperityFactor(ot);
-  for (const itemId of TRADE_SELL_ITEMS) {
-    const memory = Math.max(0, ot.tradeMemory[itemId] || 0);
-    const feedback = Math.max(0.5, 1 / (1 + PRICE_ELASTICITY * memory / 10000));
-    ot.buyPrices[itemId] = clampPrice(BASE_BUY_PRICE[itemId] * demandMultiplier(ot, itemId) * prosperity * feedback);
-  }
-  for (const itemId of TRADE_BUY_ITEMS) {
-    const memory = Math.max(0, -(ot.tradeMemory[itemId] || 0));
-    const feedback = 1 + PRICE_ELASTICITY * memory / 10000;
-    ot.sellPrices[itemId] = clampPrice(BASE_SELL_PRICE[itemId] * prosperity * feedback);
-  }
-  return ot;
-}
-
-function clampPrice(value) {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(50, Math.max(0.05, Math.round(value * 100) / 100));
-}
-
-// 外贸房：该建筑存在且在岗人数 ≥1 才算运转。
-export function buildingOperational(state, buildingId) {
-  const building = (state.buildings || []).find(row => row.typeId === buildingId);
-  if (!building) return false;
-  return readJobCount(state, jobKeyForBuilding(building.id, jobStaffRoleId(buildingId))) >= 1;
-}
-
-export function buildingIdOfType(state, buildingId) {
-  return (state.buildings || []).find(row => row.typeId === buildingId)?.id || null;
-}
-
-export function buildingStaffOnDuty(state, buildingId) {
-  const id = buildingIdOfType(state, buildingId);
-  if (!id) return 0;
-  return readJobCount(state, jobKeyForBuilding(id, jobStaffRoleId(buildingId)));
-}
-
-// 民镇入库：盐按斤、木材按单位，其余品类民镇自产自足不入账。
-export function addOutsideTownStock(ot, itemId, amount) {
-  if (!(amount > 0)) return;
-  if (itemId === "salt") ot.saltStockJin = Math.round((ot.saltStockJin + amount) * 100) / 100;
-  else if (itemId === "wood") ot.woodStockUnits = Math.round((ot.woodStockUnits + amount) * 100) / 100;
-}
-
-function jobStaffRoleId(buildingId) {
-  void buildingId;
-  return "trade_staff";
-}
-
-// 与民镇比价的辅助：关税后到手净价（用于界面提示与关系分折扣展示）。
-export function netOfTariff(price, state) {
-  const rate = tradeTariffRate(state);
-  return Math.round(price * (1 - rate / 100) * 100) / 100;
-}
-
-// 每日：贸易记忆缓慢衰减（价格向基准恢复），外交关系分漂移，重算价格。
-export function advanceOutsideTownDay(state, content) {
-  const ot = ensureOutsideTown(state);
-  for (const itemId of TRADE_SELL_ITEMS) {
-    ot.tradeMemory[itemId] = (ot.tradeMemory[itemId] || 0) * MEMORY_DECAY_PER_DAY;
-    if (Math.abs(ot.tradeMemory[itemId]) < 0.01) ot.tradeMemory[itemId] = 0;
-  }
-  // 外贸房在岗 ≥1 人：关系分缓慢回升；无人值守：关系分下滑。
-  if (buildingOperational(state, "foreign_trade_house")) {
-    ot.relations = Math.min(RELATIONS_MAX, ot.relations + RELATIONS_GAIN_PER_DAY);
-  } else {
-    ot.relations = Math.max(0, ot.relations - RELATIONS_LOSS_PER_DAY);
-  }
-  recomputePrices(state);
-  return { tradeClosed: ot.tradeClosed, relations: Math.round(ot.relations * 10) / 10 };
-}
-
-// 每年1月1日：天气抽签 -> 年产出/年消费 -> 库存/人口/繁荣度均值回归 -> 低概率年事件。
-// 注意：调用方应把本函数放在 settleOneDay 末尾，避免扰动既有系统的随机数流。
-export function settleOutsideTownYear(state, content) {
-  const ot = ensureOutsideTown(state);
-  ot.tradeClosed = false;
-  ot.weather = Math.round((0.7 + nextRandom(state) * 0.6) * 100) / 100;
-  let eventFactor = 1;
-  let eventLabel = null;
-  const roll = nextRandom(state);
-  if (roll < 0.12) {
-    const pick = nextRandom(state);
-    if (pick < 0.3) {
-      eventFactor = 0.55;
-      eventLabel = "蝗灾";
-      recordEvent(state, `${OUTSIDE_TOWN_NAME}遭蝗灾，收成大减，粮价看涨。`, content, { day: 1 });
-    } else if (pick < 0.6) {
-      eventFactor = 1.15;
-      eventLabel = "丰收";
-      recordEvent(state, `${OUTSIDE_TOWN_NAME}风调雨顺，喜获丰收，粮价走低。`, content, { day: 1 });
-    } else if (pick < 0.8) {
-      ot.tradeClosed = true;
-      eventLabel = "商路中断";
-      recordEvent(state, `山匪截断商路，今年无法与${OUTSIDE_TOWN_NAME}贸易。`, content, { day: 1 });
-    } else {
-      eventLabel = "盐荒";
-      // 盐荒：盐仓减半；库存挂钩的价格机制会自动推高出价（与播报"出价高企"一致）。
-      ot.saltStockJin = Math.round(ot.saltStockJin * 0.5 * 100) / 100;
-      recordEvent(state, `${OUTSIDE_TOWN_NAME}闹盐荒，盐仓见底，对盐出价高企。`, content, { day: 1 });
-    }
-  }
-  ot.event = eventLabel ? { type: eventLabel, year: state.year } : null;
-  const production = ot.landMu * YIELD_PER_MU_JIN * ot.weather * eventFactor;
-  const consumption = ot.population * FOOD_PER_PERSON_DAY_JIN * (content.rules.daysPerYear || 365);
-  ot.wheatStockJin = Math.max(0, Math.round((ot.wheatStockJin + production - consumption) * 100) / 100);
-  ot.lastYearProductionJin = Math.round(production);
-  ot.lastYearConsumptionJin = Math.round(consumption);
-  // 库存软上限：超出部分每年一半外销/酿酒/损耗掉，避免无限累积。
-  const STOCK_SOFT_CAP_JIN = 6000000;
-  if (ot.wheatStockJin > STOCK_SOFT_CAP_JIN) {
-    ot.wheatStockJin = Math.round(STOCK_SOFT_CAP_JIN + (ot.wheatStockJin - STOCK_SOFT_CAP_JIN) * 0.5);
-  }
-  // 盐/木材年消耗：与小麦同节奏按年扣，零自产——不够就是断供。
-  const saltDemandJin = outsideTownAnnualSaltJin(ot);
-  const woodDemandUnits = outsideTownAnnualWoodUnits(ot);
-  ot.lastYearSaltConsumptionJin = Math.round(saltDemandJin);
-  ot.lastYearWoodConsumptionUnits = Math.round(woodDemandUnits);
-  ot.saltStockJin = Math.max(0, Math.round((ot.saltStockJin - saltDemandJin) * 100) / 100);
-  ot.woodStockUnits = Math.max(0, Math.round((ot.woodStockUnits - woodDemandUnits) * 100) / 100);
-  // 软上限：囤积超量部分每年减半。
-  if (ot.saltStockJin > SALT_STOCK_SOFT_CAP_JIN) {
-    ot.saltStockJin = Math.round(SALT_STOCK_SOFT_CAP_JIN + (ot.saltStockJin - SALT_STOCK_SOFT_CAP_JIN) * 0.5);
-  }
-  if (ot.woodStockUnits > WOOD_STOCK_SOFT_CAP_UNITS) {
-    ot.woodStockUnits = Math.round(WOOD_STOCK_SOFT_CAP_UNITS + (ot.woodStockUnits - WOOD_STOCK_SOFT_CAP_UNITS) * 0.5);
-  }
-  // 断供惩罚：库存归零（今年一斤没供上）民心动荡。
-  ot.saltShortageYears = 0;
-  ot.woodShortageYears = 0;
-  if (ot.saltStockJin <= 0) {
-    ot.saltShortageYears = 1;
-    ot.prosperity = Math.round(Math.max(5, ot.prosperity - 15) * 10) / 10;
-    recordEvent(state, `${OUTSIDE_TOWN_NAME}断盐，民心动荡。`, content, { day: 1 });
-  }
-  if (ot.woodStockUnits <= 0) {
-    ot.woodShortageYears = 1;
-    ot.prosperity = Math.round(Math.max(5, ot.prosperity - 8) * 10) / 10;
-    recordEvent(state, `${OUTSIDE_TOWN_NAME}缺木材，修缮停滞。`, content, { day: 1 });
-  }
-  // 关系分过低：有概率直接断交。
-  if (ot.relations < RELATIONS_BREAKOFF && nextRandom(state) < 0.3) {
-    ot.tradeClosed = true;
-    recordEvent(state, `${OUTSIDE_TOWN_NAME}与我镇关系破裂，商路断绝。`, content, { day: 1 });
-  }
-  // 人口/繁荣度/需求度均值回归 + 小扰动。
-  const jitter = () => (nextRandom(state) - 0.5);
-  ot.population = Math.round(Math.max(2500, Math.min(4500,
-    ot.population + (3500 - ot.population) * 0.05 + jitter() * 40)));
-  const grainBalance = ot.wheatStockJin > 0 ? 2 : -15;
-  ot.prosperity = Math.round(Math.max(5, Math.min(100,
-    ot.prosperity + (60 - ot.prosperity) * 0.08 + jitter() * 6 + grainBalance)) * 10) / 10;
-  ot.grainDemand = Math.round(Math.max(0.3, Math.min(1.2,
-    ot.grainDemand + (0.7 - ot.grainDemand) * 0.1 + jitter() * 0.05)) * 100) / 100;
-  ot.stats.yearExportJin = 0;
-  ot.stats.yearImportJin = 0;
-  ot.stats.yearTariffJin = 0;
-  recomputePrices(state);
   return {
-    weather: ot.weather,
-    event: eventLabel,
-    productionJin: Math.round(production),
-    wheatStockJin: ot.wheatStockJin,
-    saltStockJin: ot.saltStockJin,
-    woodStockUnits: ot.woodStockUnits,
-    saltShortage: ot.saltShortageYears > 0,
-    woodShortage: ot.woodShortageYears > 0
+    id: profile.id,
+    population: profile.population,
+    landMu: profile.landMu,
+    wheatStockJin: profile.wheatStockJin,
+    prosperity: profile.prosperity,
+    relations: profile.relations,
+    stocks,
+    supply,
+    weather: 1,
+    harvestFactor: 1,
+    lastHarvestYear: 0,
+    event: null,
+    tradeClosed: false,
+    lastYear: { harvestJin: 0, foodJin: 0, populationChange: 0, landAddedMu: 0 },
+    stats: { exportJin: 0, importJin: 0, trades: 0, yearExportJin: 0, yearImportJin: 0 },
+    loans: [],
+    loanStats: { totalIssuedJin: 0, totalRepaidJin: 0, totalInterestJin: 0, activeLoans: 0 }
   };
 }
 
-// 玩家命令：与民镇贸易。direction: "sell"（我们卖出）/ "buy"（我们买入）。
-// 以小麦斤计价、实物小麦结算：卖出 -> 民镇小麦库存减少、镇小麦库存增加；买入反之。
-export function tradeWithOutsideTown(state, direction, itemId, quantityJin, content) {
-  const ot = ensureOutsideTown(state);
-  recomputePrices(state);
-  if (ot.tradeClosed) return { ok: false, reason: `商路中断，今年无法与${OUTSIDE_TOWN_NAME}贸易` };
-  // 关键按键进建筑：外贸房无人值守则现货贸易也做不了。
-  if (!buildingOperational(state, "foreign_trade_house")) {
-    return { ok: false, reason: "外贸房无人值守，无法开展贸易" };
+export function createOutsideTowns(content) {
+  const towns = {};
+  for (const profile of Object.values(profiles(content))) towns[profile.id] = createTown(profile);
+  return towns;
+}
+
+export function ensureOutsideTowns(state, content) {
+  state.outsideTowns ||= createOutsideTowns(content);
+  for (const profile of Object.values(profiles(content))) state.outsideTowns[profile.id] ||= createTown(profile);
+  return state.outsideTowns;
+}
+
+export function outsideTown(state, content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
+  return ensureOutsideTowns(state, content)[townId] || null;
+}
+
+// 只读：selector 用，不回写。
+export function readOutsideTown(state, content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
+  const profile = outsideTownProfile(content, townId);
+  return state.outsideTowns?.[townId] || (profile ? createTown(profile) : null);
+}
+
+// ---------------------------------------------------------------- 定价
+
+function dailyNeed(town, good) {
+  return town.population * good.needPerPersonDay;
+}
+
+export function targetStock(town, good) {
+  return dailyNeed(town, good) * good.targetDays;
+}
+
+function prosperityFactor(town) {
+  return 0.8 + Math.max(0, Math.min(100, town.prosperity)) / 100 * 0.4;
+}
+
+function spreadRate(town) {
+  return 0.2 - Math.max(0, Math.min(100, town.relations)) / 100 * 0.1;
+}
+
+function midPrice(town, good, stock) {
+  const target = targetStock(town, good);
+  const scarcity = target > 0 ? (target / Math.max(stock, target * 0.05)) ** 0.7 : 1;
+  return good.basePrice * Math.max(0.35, Math.min(3, scarcity)) * prosperityFactor(town);
+}
+
+// direction: "sell" = 我们卖给外镇（外镇收购价），"buy" = 我们向外镇买。
+export function unitPrice(town, good, direction, stock = null) {
+  const mid = midPrice(town, good, stock ?? town.stocks[good.id] ?? 0);
+  const half = spreadRate(town) / 2;
+  return direction === "sell" ? mid * (1 - half) : mid * (1 + half);
+}
+
+function goodOf(profile, itemId) {
+  const good = profile.goods[itemId];
+  return good ? { ...good, id: itemId } : null;
+}
+
+// 逐段计价：返回这批货总共值多少斤小麦。
+function quoteValue(town, good, direction, quantity) {
+  let stock = town.stocks[good.id] || 0;
+  const step = quantity / SLICES;
+  let value = 0;
+  for (let i = 0; i < SLICES; i++) {
+    const after = direction === "sell" ? stock + step : stock - step;
+    value += step * unitPrice(town, good, direction, (stock + after) / 2);
+    stock = after;
   }
+  return value;
+}
+
+// 外镇能拿出来付款的小麦：口粮储备以上的部分。
+export function payableWheatJin(town, profile) {
+  const reserve = town.population * profile.foodPerPersonDayJin * profile.foodReserveDays;
+  return Math.max(0, town.wheatStockJin - reserve);
+}
+
+export function sellableStock(town, good) {
+  if (!good.sellsToUs) return 0;
+  return Math.max(0, (town.stocks[good.id] || 0) - dailyNeed(town, good) * SELL_RESERVE_DAYS);
+}
+
+// 我们卖 quantity 时外镇最多付得起多少：二分出货款不超过可付小麦的数量。
+function affordableSellQuantity(town, profile, good, quantity) {
+  const budget = payableWheatJin(town, profile);
+  if (quoteValue(town, good, "sell", quantity) <= budget) return quantity;
+  let low = 0;
+  let high = quantity;
+  for (let i = 0; i < 30; i++) {
+    const mid = (low + high) / 2;
+    if (quoteValue(town, good, "sell", mid) <= budget) low = mid; else high = mid;
+  }
+  return Math.floor(low * 100) / 100;
+}
+
+// 签长协、界面展示用的当前单价。
+export function currentPrice(state, content, townId, itemId, direction) {
+  const town = readOutsideTown(state, content, townId);
+  const profile = outsideTownProfile(content, townId);
+  const good = profile && goodOf(profile, itemId);
+  return town && good ? round2(unitPrice(town, good, direction)) : null;
+}
+
+// ---------------------------------------------------------------- 外贸房
+
+export function buildingOperational(state, typeId) {
+  return buildingStaffOnDuty(state, typeId) >= 1;
+}
+
+export function buildingStaffOnDuty(state, typeId) {
+  const building = (state.buildings || []).find(row => row.typeId === typeId);
+  return building ? jobCount(state, `${building.id}::trade_staff`) : 0;
+}
+
+export function changeRelations(town, delta) {
+  town.relations = Math.max(0, Math.min(RELATIONS_MAX, round2(town.relations + delta)));
+}
+
+// 外镇收货：长协交付也走这里。
+export function deliverToOutsideTown(town, itemId, quantity) {
+  if (quantity > 0 && town.stocks[itemId] !== undefined) town.stocks[itemId] = round2(town.stocks[itemId] + quantity);
+}
+
+function recordTradeStats(town, direction, valueJin) {
+  if (direction === "sell") {
+    town.stats.exportJin = round2(town.stats.exportJin + valueJin);
+    town.stats.yearExportJin = round2(town.stats.yearExportJin + valueJin);
+  } else {
+    town.stats.importJin = round2(town.stats.importJin + valueJin);
+    town.stats.yearImportJin = round2(town.stats.yearImportJin + valueJin);
+  }
+  town.stats.trades += 1;
+  changeRelations(town, Math.min(1, valueJin / RELATIONS_PER_TRADE_JIN));
+}
+
+export { recordTradeStats };
+
+// ---------------------------------------------------------------- 每日
+
+export function advanceOutsideTownDay(state, content) {
+  const towns = ensureOutsideTowns(state, content);
+  const staffed = buildingOperational(state, "foreign_trade_house");
+  const rows = {};
+  for (const town of Object.values(towns)) {
+    const profile = outsideTownProfile(content, town.id);
+    if (!profile) continue;
+    let score = 0;
+    let weightUsed = 0;
+    for (const [itemId, base] of Object.entries(profile.goods)) {
+      const good = { ...base, id: itemId };
+      const need = dailyNeed(town, good);
+      let stock = (town.stocks[itemId] || 0) + town.population * good.producePerPersonDay;
+      const used = Math.min(stock, need);
+      stock -= used;
+      const cap = targetStock(town, good) * STOCK_SPOIL_MULTIPLE;
+      if (stock > cap) stock -= (stock - cap) * 0.02;
+      town.stocks[itemId] = round2(stock);
+      const satisfied = need > 0 ? used / need : 1;
+      town.supply[itemId] = Math.round(((town.supply[itemId] ?? 1) * SUPPLY_MEMORY + satisfied * (1 - SUPPLY_MEMORY)) * 1e4) / 1e4;
+      score += good.supplyWeight * town.supply[itemId];
+      weightUsed += good.supplyWeight;
+    }
+    const foodNeed = town.population * profile.foodPerPersonDayJin;
+    const eaten = Math.min(town.wheatStockJin, foodNeed);
+    town.wheatStockJin = round2(town.wheatStockJin - eaten);
+    town.supply.food = Math.round(((town.supply.food ?? 1) * SUPPLY_MEMORY + (foodNeed > 0 ? eaten / foodNeed : 1) * (1 - SUPPLY_MEMORY)) * 1e4) / 1e4;
+    score += Math.max(0, 1 - weightUsed) * town.supply.food;
+    // 存粮超过一年口粮的部分每天损耗 0.1%（约一年三成：霉变、酿酒、转卖），防止小麦无限堆积。
+    const wheatCap = foodNeed * 365;
+    if (town.wheatStockJin > wheatCap) town.wheatStockJin = round2(town.wheatStockJin - (town.wheatStockJin - wheatCap) * 0.001);
+    // 繁荣度向"供应满足率 × 100"靠拢（约百日走完一半）：样样不缺是 100，只有口粮没有盐木只有 45 左右。
+    const target = 100 * score;
+    town.prosperity = round2(town.prosperity + (target - town.prosperity) * 0.01);
+    changeRelations(town, staffed ? RELATIONS_GAIN_PER_DAY : -RELATIONS_LOSS_PER_DAY);
+    // 秋收：与本镇同日入库。
+    if (state.day === content.rules.growingDays && town.lastHarvestYear !== state.year) {
+      const harvest = town.landMu * profile.yieldPerMuJin * town.weather * town.harvestFactor;
+      town.wheatStockJin = round2(town.wheatStockJin + harvest);
+      town.lastHarvestYear = state.year;
+      town.lastYear.harvestJin = Math.round(harvest);
+      recordEvent(state, `${profile.name}秋收入库${Math.round(harvest).toLocaleString("zh-CN")}斤小麦。`, content);
+    }
+    rows[town.id] = { prosperity: town.prosperity, relations: town.relations };
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------- 每年（元旦）
+
+export function settleOutsideTownYear(state, content) {
+  const towns = ensureOutsideTowns(state, content);
+  const rows = {};
+  // 开局当天不算"过年"：第一年用档案初值。
+  if (state.year <= 1) return rows;
+  for (const town of Object.values(towns)) {
+    const profile = outsideTownProfile(content, town.id);
+    if (!profile) continue;
+    town.tradeClosed = false;
+    town.harvestFactor = 1;
+    town.weather = round2(0.75 + nextRandom(state) * 0.5);
+    let event = null;
+    if (nextRandom(state) < 0.12) {
+      const pick = nextRandom(state);
+      if (pick < 0.3) {
+        event = "蝗灾"; town.harvestFactor = 0.55;
+        recordEvent(state, `${profile.name}遭蝗灾，今秋收成将大减。`, content, { day: 1 });
+      } else if (pick < 0.6) {
+        event = "丰收"; town.harvestFactor = 1.15;
+        recordEvent(state, `${profile.name}风调雨顺，今秋有望丰收。`, content, { day: 1 });
+      } else if (pick < 0.8) {
+        event = "商路中断"; town.tradeClosed = true;
+        recordEvent(state, `山匪截断商路，今年无法与${profile.name}贸易。`, content, { day: 1 });
+      } else if (town.stocks.salt !== undefined) {
+        event = "盐荒"; town.stocks.salt = round2(town.stocks.salt * 0.5);
+        recordEvent(state, `${profile.name}盐仓受潮，存盐折半，对盐出价走高。`, content, { day: 1 });
+      }
+    }
+    town.event = event ? { type: event, year: state.year } : null;
+    if (town.relations < RELATIONS_BREAKOFF && nextRandom(state) < 0.3) {
+      town.tradeClosed = true;
+      recordEvent(state, `${profile.name}与我镇关系破裂，商路断绝。`, content, { day: 1 });
+    }
+    // 人口：繁荣度 50 以上增长、以下减少，最多 ±3%/年；口粮不足时按缺口收缩。
+    let rate = Math.max(-0.03, Math.min(0.03, (town.prosperity - 50) / 50 * 0.03));
+    if (town.supply.food < 0.97) rate = Math.min(rate, -(1 - town.supply.food) * 0.5);
+    const before = town.population;
+    town.population = Math.max(100, Math.round(before * (1 + Math.max(-0.1, rate))));
+    town.lastYear.populationChange = town.population - before;
+    town.landMu += profile.landGrowthMuPerYear;
+    town.lastYear.landAddedMu = profile.landGrowthMuPerYear;
+    town.lastYear.foodJin = Math.round(before * profile.foodPerPersonDayJin * (content.rules.daysPerYear || 365));
+    town.stats.yearExportJin = 0;
+    town.stats.yearImportJin = 0;
+    rows[town.id] = { weather: town.weather, event, population: town.population, landMu: town.landMu };
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------- 现货贸易
+
+// 玩家命令：direction "sell" 我们卖出 / "buy" 我们买入。实物小麦结算。
+export function tradeWithOutsideTown(state, direction, itemId, quantityJin, content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
+  const profile = outsideTownProfile(content, townId);
+  const town = outsideTown(state, content, townId);
+  if (!profile || !town) return { ok: false, reason: "没有这个外镇" };
+  if (town.tradeClosed) return { ok: false, reason: `商路中断，今年无法与${profile.name}贸易` };
+  if (!buildingOperational(state, "foreign_trade_house")) return { ok: false, reason: "外贸房无人值守，无法开展贸易" };
   if (direction !== "sell" && direction !== "buy") return { ok: false, reason: "贸易方向无效" };
-  const sellable = direction === "sell" ? TRADE_SELL_ITEMS : TRADE_BUY_ITEMS;
-  if (!sellable.includes(itemId)) {
-    return { ok: false, reason: direction === "sell" ? "外镇不收购该商品" : "外镇不出售该商品" };
-  }
+  const good = goodOf(profile, itemId);
   const item = content.items[itemId];
-  if (!item) return { ok: false, reason: "未知商品" };
+  if (!good || !item) return { ok: false, reason: `${profile.name}不做这种买卖` };
+  if (direction === "buy" && !good.sellsToUs) return { ok: false, reason: `${profile.name}不出售${item.name}` };
   let qty = Number(quantityJin);
   if (!Number.isFinite(qty) || qty <= 0) return { ok: false, reason: "数量必须大于0" };
   qty = Math.min(qty, MAX_TRADE_JIN_PER_ORDER);
-  const price = direction === "sell" ? ot.buyPrices[itemId] : ot.sellPrices[itemId];
-  if (!Number.isFinite(price) || price <= 0) return { ok: false, reason: "价格无效" };
   const transactionId = makeTransactionId(state);
 
   if (direction === "sell") {
-    // 先按外镇小麦库存把数量夹紧（他们没粮就付不起）。
-    const affordableQty = Math.floor(ot.wheatStockJin / price * 100) / 100;
-    if (affordableQty < 0.01) return { ok: false, reason: `${OUTSIDE_TOWN_NAME}小麦不足，付不起这笔货款` };
-    qty = Math.min(qty, affordableQty);
+    qty = affordableSellQuantity(town, profile, good, qty);
+    if (qty < 0.01) return { ok: false, reason: `${profile.name}口粮储备以外的小麦不够，付不起这笔货款` };
     const qtyUnits = quantityToUnits(qty, content);
     if (qtyUnits <= 0) return { ok: false, reason: "数量过小" };
-    // 出口货源（0.2.3 做市商机制）：优先从批发市场库存出货，不足部分从镇库补。
-    // 之前只读镇库，批发市场有货也报"镇库存不足"。
-    let remainingUnits = qtyUnits;
+    // 货源：先批发市场，不足再镇库；镇库也不够就把市场已出的货退回。
     let fromMarketUnits = 0;
-    if (hasWholesaleMarket(state)) {
-      const taken = takeWholesaleInventoryForExport(state, itemId, remainingUnits, content);
-      fromMarketUnits = taken.units || 0;
-      remainingUnits -= fromMarketUnits;
-    }
+    if (hasWholesaleMarket(state)) fromMarketUnits = takeWholesaleInventoryForExport(state, itemId, qtyUnits, content).units || 0;
+    const remainingUnits = qtyUnits - fromMarketUnits;
     if (remainingUnits > 0) {
-      const take = changeInventory(state, "town", itemId, -remainingUnits, `对${OUTSIDE_TOWN_NAME}出口${item.name}`, "trade_export", content, transactionId);
+      const take = changeInventory(state, "town", itemId, -remainingUnits, `对${profile.name}出口${item.name}`, "trade_export", content, transactionId);
       if (!take.ok) {
-        // 镇库也不够：把批发市场已扣的回滚，避免货款两空。
-        // 注意必须用 ensureWholesaleMarket 拿活对象——readWholesaleMarket 返回的是拷贝，写进去会被丢弃。
         if (fromMarketUnits > 0) {
           const market = ensureWholesaleMarket(state, content);
           market.inventory[itemId] = (market.inventory[itemId] || 0) + fromMarketUnits;
         }
-        return { ok: false, reason: "批发市场与镇库存" + item.name + "不足" };
+        return { ok: false, reason: `批发市场与镇库的${item.name}不足` };
       }
-      remainingUnits = 0;
     }
-    const actualUnits = qtyUnits - Math.max(0, remainingUnits);
-    const actualJin = unitsToQuantity(actualUnits, content);
-    const valueJin = Math.round(actualJin * price * 100) / 100;
-    ot.wheatStockJin = Math.round(Math.max(0, ot.wheatStockJin - valueJin) * 100) / 100;
-    addInventory(state, "town", "wheat", valueJin, `对${OUTSIDE_TOWN_NAME}出口${item.name}所得`, "trade_export", content);
-    const tariffJin = Math.round(valueJin * tradeTariffRate(state) / 100 * 100) / 100;
-    ot.stats.exportJin = Math.round((ot.stats.exportJin + valueJin) * 100) / 100;
-    ot.stats.yearExportJin = Math.round((ot.stats.yearExportJin + valueJin) * 100) / 100;
-    ot.stats.tariffJin = Math.round((ot.stats.tariffJin + tariffJin) * 100) / 100;
-    ot.stats.yearTariffJin = Math.round((ot.stats.yearTariffJin + tariffJin) * 100) / 100;
-    ot.stats.trades += 1;
-    ot.tradeMemory[itemId] = (ot.tradeMemory[itemId] || 0) + actualJin;
-    // 民镇入库：盐/木材零自产，出口到货即入其库存（统一换算回 斤/单位口径）。
-    addOutsideTownStock(ot, itemId, unitsToQuantity(actualUnits, content));
-    if (tariffJin > 0) {
-      recordLedger(state, {
-        type: "trade_tariff", transactionId, source: "trade", destination: "town",
-        itemId: "money_value", quantityUnits: quantityToUnits(tariffJin, content), qeqUnits: 0,
-        reason: `对${OUTSIDE_TOWN_NAME}出口关税（${tradeTariffRate(state)}%）`
-      }, content);
-    }
-    recomputePrices(state);
-    return { ok: true, direction, itemId, quantityJin: actualJin, valueJin, tariffJin, priceWheatPerUnit: price };
+    const actualJin = unitsToQuantity(qtyUnits, content);
+    const valueJin = round2(quoteValue(town, good, "sell", actualJin));
+    town.wheatStockJin = round2(Math.max(0, town.wheatStockJin - valueJin));
+    deliverToOutsideTown(town, itemId, actualJin);
+    addInventory(state, "town", "wheat", valueJin, `对${profile.name}出口${item.name}所得`, "trade_export", content);
+    recordTradeStats(town, "sell", valueJin);
+    return { ok: true, direction, itemId, quantityJin: actualJin, valueJin, priceWheatPerUnit: round2(valueJin / actualJin) };
   }
 
-  // buy
-  const valueJin = Math.round(qty * price * 100) / 100;
+  qty = Math.min(qty, Math.floor(sellableStock(town, good) * 100) / 100);
+  if (qty < 0.01) return { ok: false, reason: `${profile.name}的${item.name}只够自用，暂不外卖` };
+  const valueJin = round2(quoteValue(town, good, "buy", qty));
   const payUnits = quantityToUnits(valueJin, content);
-  const pay = changeInventory(state, "town", "wheat", -payUnits, `从${OUTSIDE_TOWN_NAME}进口${item.name}付款`, "trade_import", content, transactionId);
-  if (!pay.ok) return { ok: false, reason: "镇小麦库存不足以支付" };
-  const actualPayJin = unitsToQuantity(payUnits, content);
-  const actualQtyJin = Math.round(actualPayJin / price * 100) / 100;
-  ot.wheatStockJin = Math.round((ot.wheatStockJin + actualPayJin) * 100) / 100;
-  addInventory(state, "town", itemId, actualQtyJin, `从${OUTSIDE_TOWN_NAME}进口${item.name}`, "trade_import", content);
-  ot.stats.importJin = Math.round((ot.stats.importJin + actualPayJin) * 100) / 100;
-  ot.stats.yearImportJin = Math.round((ot.stats.yearImportJin + actualPayJin) * 100) / 100;
-  ot.stats.trades += 1;
-  ot.tradeMemory[itemId] = (ot.tradeMemory[itemId] || 0) - actualQtyJin;
-  recomputePrices(state);
-  return { ok: true, direction, itemId, quantityJin: actualQtyJin, valueJin: actualPayJin, tariffJin: 0, priceWheatPerUnit: price };
+  const pay = changeInventory(state, "town", "wheat", -payUnits, `从${profile.name}进口${item.name}付款`, "trade_import", content, transactionId);
+  if (!pay.ok) return { ok: false, reason: "镇库小麦不足以支付" };
+  town.wheatStockJin = round2(town.wheatStockJin + valueJin);
+  town.stocks[itemId] = round2(town.stocks[itemId] - qty);
+  addInventory(state, "town", itemId, qty, `从${profile.name}进口${item.name}`, "trade_import", content);
+  recordTradeStats(town, "buy", valueJin);
+  return { ok: true, direction, itemId, quantityJin: qty, valueJin, priceWheatPerUnit: round2(valueJin / qty) };
 }
 
-// 政策命令：调整出口关税税率（%）。
-export function setTradeTariffRate(state, percent) {
-  const value = Number(percent);
-  if (!Number.isFinite(value) || value < 0 || value > MAX_TRADE_TARIFF_PERCENT) {
-    return { ok: false, reason: `关税税率须在0—${MAX_TRADE_TARIFF_PERCENT}%之间` };
-  }
-  state.policy ||= {};
-  state.policy.tradeTariffRate = value;
-  return { ok: true, tradeTariffRate: value };
-}
+// ---------------------------------------------------------------- 小麦贷款
 
-// 小麦贷款：天灾欠收时本镇放贷给民镇。玩家定斤数和年利率。
-// 放贷：镇库小麦 -> 外镇小麦库存；还款：外镇按年结时从小麦库存扣还本付息。
 export const MAX_LOAN_JIN = 1000000;
 export const MAX_LOAN_RATE_PERCENT = 50;
-export function issueWheatLoan(state, principalJin, annualRatePercent, content) {
-  const ot = ensureOutsideTown(state);
-  const principal = Math.round(Number(principalJin) * 100) / 100;
+
+export function issueWheatLoan(state, principalJin, annualRatePercent, content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
+  const profile = outsideTownProfile(content, townId);
+  const town = outsideTown(state, content, townId);
+  if (!profile || !town) return { ok: false, reason: "没有这个外镇" };
+  const principal = round2(Number(principalJin));
   const rate = Number(annualRatePercent);
   if (!Number.isFinite(principal) || principal <= 0) return { ok: false, reason: "贷款斤数须大于0" };
   if (principal > MAX_LOAN_JIN) return { ok: false, reason: `单笔贷款不超过${MAX_LOAN_JIN}斤` };
-  if (!Number.isFinite(rate) || rate < 0 || rate > MAX_LOAN_RATE_PERCENT) {
-    return { ok: false, reason: `年利率须在0—${MAX_LOAN_RATE_PERCENT}%之间` };
-  }
-  const scale = content.precision.inventoryUnitsPerJin;
-  const units = Math.floor(principal * scale);
+  if (!Number.isFinite(rate) || rate < 0 || rate > MAX_LOAN_RATE_PERCENT) return { ok: false, reason: `年利率须在0—${MAX_LOAN_RATE_PERCENT}%之间` };
+  const units = Math.floor(principal * content.precision.inventoryUnitsPerJin);
   if (units <= 0) return { ok: false, reason: "贷款斤数过小" };
   const townWheat = Math.max(0, state.accounts?.town?.wheat || 0);
   if (townWheat < units) return { ok: false, reason: "镇库小麦不足，放贷失败" };
   state.accounts.town.wheat = townWheat - units;
-  ot.wheatStockJin = Math.round((ot.wheatStockJin + principal) * 100) / 100;
+  town.wheatStockJin = round2(town.wheatStockJin + principal);
   const loan = {
-    id: `loan-${state.year}-${state.day}-${ot.loans.length}`,
+    id: `loan-${state.year}-${state.day}-${town.loans.length}`,
     principalJin: principal,
-    annualRatePercent: Math.round(rate * 100) / 100,
+    annualRatePercent: round2(rate),
     outstandingJin: principal,
     accruedInterestJin: 0,
     issueYear: state.year,
     issueDay: state.day,
     status: "active"
   };
-  ot.loans.push(loan);
-  ot.loanStats.totalIssuedJin = Math.round((ot.loanStats.totalIssuedJin + principal) * 100) / 100;
-  ot.loanStats.activeLoans = ot.loans.filter(l => l.status === "active").length;
-  const transactionId = makeTransactionId(state);
+  town.loans.push(loan);
+  town.loanStats.totalIssuedJin = round2(town.loanStats.totalIssuedJin + principal);
+  town.loanStats.activeLoans = town.loans.filter(row => row.status === "active").length;
+  changeRelations(town, Math.min(5, principal / 50000));
   recordLedger(state, {
-    type: "wheat_loan_issue", transactionId, source: "town", destination: "outside_town",
+    type: "wheat_loan_issue", transactionId: makeTransactionId(state), source: "town", destination: "outside_town",
     itemId: "wheat", quantityUnits: units, qeqUnits: 0,
-    reason: `向${OUTSIDE_TOWN_NAME}发放小麦贷款${principal}斤，年利率${loan.annualRatePercent}%`
+    reason: `向${profile.name}发放小麦贷款${principal}斤，年利率${loan.annualRatePercent}%`
   }, content);
-  recordEvent(state, `向${OUTSIDE_TOWN_NAME}发放小麦贷款${Math.round(principal)}斤（年利率${loan.annualRatePercent}%），解其天灾之急。`, content);
+  recordEvent(state, `向${profile.name}发放小麦贷款${Math.round(principal)}斤（年利率${loan.annualRatePercent}%）。`, content);
   return { ok: true, loan };
 }
 
-// 每年年结时：贷款计息 + 外镇从结余小麦中还款（先息后本）
+// 元旦：计一年利息，外镇用口粮储备以外的小麦先息后本偿还。
 export function settleWheatLoansYear(state, content) {
-  const ot = ensureOutsideTown(state);
+  const towns = ensureOutsideTowns(state, content);
   let repaidJin = 0;
   let interestJin = 0;
-  for (const loan of ot.loans) {
-    if (loan.status !== "active") continue;
-    // 计一年利息
-    const yearInterest = Math.round(loan.outstandingJin * loan.annualRatePercent / 100 * 100) / 100;
-    loan.accruedInterestJin = Math.round((loan.accruedInterestJin + yearInterest) * 100) / 100;
-    // 外镇用结余小麦还款：先还利息，再还本金
-    const totalDue = Math.round((loan.outstandingJin + loan.accruedInterestJin) * 100) / 100;
-    const payable = Math.min(totalDue, Math.max(0, ot.wheatStockJin));
-    if (payable > 0) {
+  for (const town of Object.values(towns)) {
+    const profile = outsideTownProfile(content, town.id);
+    if (!profile) continue;
+    let townRepaid = 0;
+    let townInterest = 0;
+    for (const loan of town.loans) {
+      if (loan.status !== "active") continue;
+      loan.accruedInterestJin = round2(loan.accruedInterestJin + loan.outstandingJin * loan.annualRatePercent / 100);
+      const payable = Math.min(loan.outstandingJin + loan.accruedInterestJin, payableWheatJin(town, profile));
+      if (payable <= 0) continue;
       const payInterest = Math.min(loan.accruedInterestJin, payable);
       const payPrincipal = Math.min(loan.outstandingJin, payable - payInterest);
-      loan.accruedInterestJin = Math.round((loan.accruedInterestJin - payInterest) * 100) / 100;
-      loan.outstandingJin = Math.round((loan.outstandingJin - payPrincipal) * 100) / 100;
-      ot.wheatStockJin = Math.round((ot.wheatStockJin - payInterest - payPrincipal) * 100) / 100;
-      const townUnits = Math.floor((payInterest + payPrincipal) * content.precision.inventoryUnitsPerJin);
-      state.accounts ||= {};
-      state.accounts.town ||= {};
-      state.accounts.town.wheat = (state.accounts.town.wheat || 0) + townUnits;
-      repaidJin = Math.round((repaidJin + payInterest + payPrincipal) * 100) / 100;
-      interestJin = Math.round((interestJin + payInterest) * 100) / 100;
+      loan.accruedInterestJin = round2(loan.accruedInterestJin - payInterest);
+      loan.outstandingJin = round2(loan.outstandingJin - payPrincipal);
+      town.wheatStockJin = round2(town.wheatStockJin - payInterest - payPrincipal);
+      state.accounts.town.wheat = (state.accounts.town.wheat || 0) + Math.floor((payInterest + payPrincipal) * content.precision.inventoryUnitsPerJin);
+      townRepaid += payInterest + payPrincipal;
+      townInterest += payInterest;
       if (loan.outstandingJin <= 0.01 && loan.accruedInterestJin <= 0.01) {
         loan.status = "repaid";
-        recordEvent(state, `${OUTSIDE_TOWN_NAME}还清小麦贷款（本金${loan.principalJin}斤）。`, content);
+        changeRelations(town, 3);
+        recordEvent(state, `${profile.name}还清小麦贷款（本金${loan.principalJin}斤）。`, content);
       }
     }
+    town.loanStats.totalRepaidJin = round2(town.loanStats.totalRepaidJin + townRepaid);
+    town.loanStats.totalInterestJin = round2(town.loanStats.totalInterestJin + townInterest);
+    town.loanStats.activeLoans = town.loans.filter(row => row.status === "active").length;
+    if (townRepaid > 0) {
+      recordLedger(state, {
+        type: "wheat_loan_repay", transactionId: makeTransactionId(state), source: "outside_town", destination: "town",
+        itemId: "wheat", quantityUnits: Math.floor(townRepaid * content.precision.inventoryUnitsPerJin), qeqUnits: 0,
+        reason: `${profile.name}偿还小麦贷款${Math.round(townRepaid)}斤（含利息${Math.round(townInterest)}斤）`
+      }, content);
+    }
+    repaidJin += townRepaid;
+    interestJin += townInterest;
   }
-  ot.loanStats.totalRepaidJin = Math.round((ot.loanStats.totalRepaidJin + repaidJin) * 100) / 100;
-  ot.loanStats.totalInterestJin = Math.round((ot.loanStats.totalInterestJin + interestJin) * 100) / 100;
-  ot.loanStats.activeLoans = ot.loans.filter(l => l.status === "active").length;
-  if (repaidJin > 0) {
-    recordLedger(state, {
-      type: "wheat_loan_repay", transactionId: makeTransactionId(state),
-      source: "outside_town", destination: "town", itemId: "wheat",
-      quantityUnits: Math.floor(repaidJin * content.precision.inventoryUnitsPerJin), qeqUnits: 0,
-      reason: `${OUTSIDE_TOWN_NAME}偿还小麦贷款${Math.round(repaidJin)}斤（含利息${Math.round(interestJin)}斤）`
-    }, content);
-  }
-  return { repaidJin, interestJin };
+  return { repaidJin: round2(repaidJin), interestJin: round2(interestJin) };
 }
 
-// 供 UI/面板读取的视图数据（只读，不回写游戏状态）。
-export function selectOutsideTownView(state, content) {
-  const ot = readOutsideTown(state);
+// ---------------------------------------------------------------- 视图
+
+export function selectOutsideTownView(state, content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
+  const profile = outsideTownProfile(content, townId);
+  const town = readOutsideTown(state, content, townId);
+  if (!profile || !town) return null;
   const scale = content.precision.inventoryUnitsPerJin;
-  const townStock = {};
-  for (const itemId of TRADE_SELL_ITEMS) {
-    townStock[itemId] = Math.round(((state.accounts?.town?.[itemId] || 0) / scale) * 100) / 100;
-  }
-  const annualSaltJin = outsideTownAnnualSaltJin(ot);
-  const annualWoodUnits = outsideTownAnnualWoodUnits(ot);
-  const saltWarningJin = outsideTownSaltWarningJin(ot);
-  const woodWarningUnits = outsideTownWoodWarningUnits(ot);
+  const foodPerDay = town.population * profile.foodPerPersonDayJin;
+  const goods = Object.entries(profile.goods).map(([itemId, base]) => {
+    const good = { ...base, id: itemId };
+    const need = dailyNeed(town, good);
+    const stock = town.stocks[itemId] || 0;
+    return {
+      itemId,
+      name: content.items[itemId]?.name || itemId,
+      unit: content.items[itemId]?.unit || "斤",
+      stock: Math.round(stock),
+      stockDays: need > 0 ? Math.round(stock / need) : null,
+      targetDays: good.targetDays,
+      dailyNeed: round2(need),
+      dailyProduce: round2(town.population * good.producePerPersonDay),
+      supply: Math.round((town.supply[itemId] ?? 1) * 100),
+      sellPrice: round2(unitPrice(town, good, "sell")),
+      buyPrice: good.sellsToUs ? round2(unitPrice(town, good, "buy")) : null,
+      sellable: Math.floor(sellableStock(town, good)),
+      sellsToUs: good.sellsToUs,
+      // 我镇可出口的存货：批发市场 + 镇库（出口先取批发市场）。
+      ourStock: round2(((state.accounts?.town?.[itemId] || 0) + (state.wholesaleMarket?.inventory?.[itemId] || 0)) / scale)
+    };
+  });
+  const staff = buildingStaffOnDuty(state, "foreign_trade_house");
   return {
-    name: ot.name,
-    rulers: ot.rulers,
-    landMu: ot.landMu,
-    laborers: ot.laborers,
-    population: Math.round(ot.population),
-    wheatStockJin: Math.round(ot.wheatStockJin),
-    prosperity: Math.round(ot.prosperity * 10) / 10,
-    weather: ot.weather,
-    event: ot.event,
-    tradeClosed: ot.tradeClosed,
-    saltDemand: ot.saltDemand,
-    woodDemand: ot.woodDemand,
-    buyPrices: { ...ot.buyPrices },
-    sellPrices: { ...ot.sellPrices },
-    townStock,
-    townWheatJin: Math.round(((state.accounts?.town?.wheat || 0) / scale) * 100) / 100,
-    tariffRate: tradeTariffRate(state),
-    stats: { ...ot.stats },
-    lastYearProductionJin: ot.lastYearProductionJin || 0,
-    lastYearConsumptionJin: ot.lastYearConsumptionJin || 0,
-    loans: (ot.loans || []).map(l => ({ ...l })),
-    loanStats: { ...ot.loanStats },
-    // 民镇盐/木材库存与年消耗（第三步面板与长协都要用）。
-    saltStockJin: Math.round(ot.saltStockJin),
-    woodStockUnits: Math.round(ot.woodStockUnits),
-    annualSaltJin: Math.round(annualSaltJin),
-    annualWoodUnits: Math.round(annualWoodUnits),
-    saltWarningJin: Math.round(saltWarningJin),
-    woodWarningUnits: Math.round(woodWarningUnits),
-    saltWarning: ot.saltStockJin < saltWarningJin,
-    woodWarning: ot.woodStockUnits < woodWarningUnits,
-    lastYearSaltConsumptionJin: ot.lastYearSaltConsumptionJin || 0,
-    lastYearWoodConsumptionUnits: ot.lastYearWoodConsumptionUnits || 0,
-    relations: Math.round(ot.relations * 10) / 10,
-    foreignTradeOperational: buildingOperational(state, "foreign_trade_house"),
-    foreignTradeStaff: buildingStaffOnDuty(state, "foreign_trade_house"),
-    foreignTradeCapacity: buildingStaffOnDuty(state, "foreign_trade_house") * AGREEMENTS_PER_STAFF,
-    diplomacyOperational: buildingOperational(state, "foreign_trade_house"),
-    diplomacyStaff: buildingStaffOnDuty(state, "foreign_trade_house")
+    id: town.id,
+    name: profile.name,
+    rulers: [...profile.rulers],
+    description: profile.description,
+    population: town.population,
+    landMu: town.landMu,
+    landGrowthMuPerYear: profile.landGrowthMuPerYear,
+    prosperity: round2(town.prosperity),
+    relations: round2(town.relations),
+    spreadPercent: round2(spreadRate(town) * 100),
+    wheatStockJin: Math.round(town.wheatStockJin),
+    wheatDays: foodPerDay > 0 ? Math.round(town.wheatStockJin / foodPerDay) : null,
+    payableWheatJin: Math.round(payableWheatJin(town, profile)),
+    foodSupply: Math.round((town.supply.food ?? 1) * 100),
+    weather: town.weather,
+    event: town.event,
+    tradeClosed: town.tradeClosed,
+    lastYear: { ...town.lastYear },
+    stats: { ...town.stats },
+    goods,
+    townWheatJin: round2((state.accounts?.town?.wheat || 0) / scale),
+    loans: town.loans.map(row => ({ ...row })),
+    loanStats: { ...town.loanStats },
+    foreignTradeOperational: staff >= 1,
+    foreignTradeStaff: staff,
+    foreignTradeCapacity: staff * AGREEMENTS_PER_STAFF
   };
 }

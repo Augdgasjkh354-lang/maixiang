@@ -1,6 +1,7 @@
 import { CONTENT } from "../content/index.js";
 import { emptyFinancialFlowPeriod } from "../economy/financial-flows.js";
 import { createInitialHouseholds } from "../systems/households.js";
+import { createOutsideTowns } from "../systems/outside-town.js";
 
 // 建造工程：state.projects 是权威数组，支持多工程并行。
 // state.project 保留为“单工程兼容访问器”（getter 返回首个工程、setter 整体替换数组），
@@ -294,8 +295,8 @@ export function createInitialState(options) {
     housing: { villageCapacity: content.rules.housingCapacity },
     villas: { sold: [], taxArrearsValueUnits: {}, stats: { soldTotal: 0, revenueValueUnits: 0, taxCollectedValueUnits: 0, taxArrearsValueUnits: 0 } },
     socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
-    outsideTown: { name: "民镇", rulers: ["民镇议事会"], landMu: 10000, laborers: 1000, population: 3500, wheatStockJin: 3000000, saltStockJin: 20000, woodStockUnits: 8000, relations: 60, prosperity: 60, saltDemand: 1.4, woodDemand: 1.3, grainDemand: 0.7, weather: 1.0, event: null, tradeClosed: false, stats: {} },
-    // 长期贸易协定（民镇）：外贸房签约，每月从批发市场交货。
+    outsideTowns: createOutsideTowns(content),
+    // 长期贸易协定：外贸房签约，每月从批发市场交货。
     tradeAgreements: [],
     laborCompetition: { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] },
     salt: {

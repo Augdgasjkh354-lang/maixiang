@@ -230,7 +230,7 @@ test("0.1.1保存恢复保持家庭、岗位、库存、股份与经营计划一
     plan: company.plan, operatingPlan: state.market.operatingPlan }));
   const restored = importState({ getItem() { return null; }, setItem() {} }, exportState(state), CONTENT);
   const restoredCompany = restored.companies[company.id];
-  assert.equal(restored.schemaVersion, 16);
+  assert.equal(restored.schemaVersion, CONTENT.rules.saveVersion);
   for (const [id, household] of Object.entries(before.households.byId)) {
     assert.deepEqual(restored.households.byId[id].inventory, household.inventory);
     assert.equal(restored.households.byId[id].voucherUnits, household.voucherUnits);

@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSimulation, CONTENT } from "../src/engine.js";
 import { APP_VERSION } from "../src/content/version.js";
+import { currentPrice } from "../src/systems/outside-town.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { populationStats, selectJobRows } = await import(path.join(root, "src", "selectors", "labor.js"));
@@ -218,13 +219,6 @@ const ACTIONS = {
     },
   },
   // 外贸
-  setTradeTariffRate: {
-    desc: "出口关税税率 {percent}",
-    run: (sim, state, a) => {
-      if (!Number.isFinite(Number(a.percent))) return { ok: false, reason: "需要 percent" };
-      return sim.setTradeTariffRate(state, Number(a.percent));
-    },
-  },
   tradeOutside: {
     desc: "与外镇贸易 {direction: sell|buy, itemId, quantityJin}",
     run: (sim, state, a) => {
@@ -533,46 +527,34 @@ const METRICS = [
     key: "social_injected_jin",
     compute: (ctx) => round2((ctx.state.socialSecurity?.totalInjectedUnits || 0) / CONTENT.precision.currencyUnitsPerVoucher),
   },
-  // 外贸·四地主镇
+  // 外贸·民镇（外镇档案见 src/content/outside-towns.js）
   {
     key: "outside_wheat_stock_jin",
-    compute: (ctx) => round2(ctx.state.outsideTown?.wheatStockJin || 0),
+    compute: (ctx) => round2(ctx.state.outsideTowns?.minzhen?.wheatStockJin || 0),
   },
   {
     key: "outside_prosperity",
-    compute: (ctx) => round2(ctx.state.outsideTown?.prosperity ?? 0),
+    compute: (ctx) => round2(ctx.state.outsideTowns?.minzhen?.prosperity ?? 0),
   },
   {
     key: "outside_population",
-    compute: (ctx) => Math.round(ctx.state.outsideTown?.population || 0),
+    compute: (ctx) => Math.round(ctx.state.outsideTowns?.minzhen?.population || 0),
   },
   {
-    key: "outside_buy_salt",
-    compute: (ctx) => round2(ctx.state.outsideTown?.buyPrices?.salt ?? 0),
-  },
-  {
-    key: "outside_buy_wheat",
-    compute: (ctx) => round2(ctx.state.outsideTown?.buyPrices?.wheat ?? 0),
-  },
-  {
-    key: "outside_sell_wheat",
-    compute: (ctx) => round2(ctx.state.outsideTown?.sellPrices?.wheat ?? 0),
+    key: "outside_salt_sell_price",
+    compute: (ctx) => currentPrice(ctx.state, CONTENT, "minzhen", "salt", "sell") ?? 0,
   },
   {
     key: "trade_export_jin",
-    compute: (ctx) => round2(ctx.state.outsideTown?.stats?.exportJin || 0),
+    compute: (ctx) => round2(ctx.state.outsideTowns?.minzhen?.stats?.exportJin || 0),
   },
   {
     key: "trade_import_jin",
-    compute: (ctx) => round2(ctx.state.outsideTown?.stats?.importJin || 0),
-  },
-  {
-    key: "trade_tariff_jin",
-    compute: (ctx) => round2(ctx.state.outsideTown?.stats?.tariffJin || 0),
+    compute: (ctx) => round2(ctx.state.outsideTowns?.minzhen?.stats?.importJin || 0),
   },
   {
     key: "trade_count",
-    compute: (ctx) => ctx.state.outsideTown?.stats?.trades || 0,
+    compute: (ctx) => ctx.state.outsideTowns?.minzhen?.stats?.trades || 0,
   },
   // ---- 0.2.3 流通改革：批发市场做市商 ----
   {

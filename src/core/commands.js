@@ -24,7 +24,7 @@ import { setBankPolicy as setBankPolicySystem } from "../systems/bank.js";
 import { issueGovernmentBond as issueGovernmentBondSystem } from "../systems/bonds.js";
 import { setWageControlPolicy as setWageControlPolicySystem } from "../systems/payroll.js";
 import { setSocialSecurityPolicy as setSocialSecurityPolicySystem, injectSocialSecurity as injectSocialSecuritySystem, repaySocialSecurityDebt as repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares } from "../systems/social-security.js";
-import { setTradeTariffRate as setTradeTariffRateSystem, tradeWithOutsideTown as tradeWithOutsideTownSystem, issueWheatLoan as issueWheatLoanSystem } from "../systems/outside-town.js";
+import { tradeWithOutsideTown as tradeWithOutsideTownSystem, issueWheatLoan as issueWheatLoanSystem } from "../systems/outside-town.js";
 import { signTradeAgreement as signTradeAgreementSystem, terminateTradeAgreement as terminateTradeAgreementSystem } from "../systems/trade-agreements.js";
 
 export function setWageRate(state, roleId, dailyJin, content) {
@@ -83,19 +83,15 @@ export function setSocialSecurityPolicy(state, patch) {
   return setSocialSecurityPolicySystem(state, patch || {});
 }
 
-export function setTradeTariffRate(state, percent) {
-  return setTradeTariffRateSystem(state, percent);
+export function tradeWithOutsideTown(state, direction, itemId, quantityJin, content, townId) {
+  return tradeWithOutsideTownSystem(state, direction, itemId, quantityJin, content, townId);
 }
 
-export function tradeWithOutsideTown(state, direction, itemId, quantityJin, content) {
-  return tradeWithOutsideTownSystem(state, direction, itemId, quantityJin, content);
+export function issueWheatLoan(state, principalJin, annualRatePercent, content, townId) {
+  return issueWheatLoanSystem(state, principalJin, annualRatePercent, content, townId);
 }
 
-export function issueWheatLoan(state, principalJin, annualRatePercent, content) {
-  return issueWheatLoanSystem(state, principalJin, annualRatePercent, content);
-}
-
-// 长期贸易协定（民镇）：外贸房在岗才能签约；主动解约收违约金。
+// 长期贸易协定：外贸房在岗才能签约；主动解约收违约金。
 export function signTradeAgreement(state, options, content) {
   return signTradeAgreementSystem(state, { ...(options || {}), content });
 }

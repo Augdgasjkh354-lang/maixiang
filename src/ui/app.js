@@ -415,9 +415,6 @@ export function mountGame(root) {
       // 外贸数量走卖出/买入按钮提交，此处仅做数值校验占位。
       result = { ok: true };
       successMessage = `数量已填写${number(parsed.value, 2)}，请点击卖出或买入按钮确认。`;
-    } else if (kind === "trade-tariff-rate") {
-      result = simulation.setTradeTariffRate(state, parsed.value);
-      successMessage = `出口关税税率已设为${number(parsed.value, 2)}%。`;
     } else if (kind === "agriculture-tax") {
       result = simulation.setAgricultureTax(state, parsed.value);
       successMessage = `农业税已设为${number(parsed.value, 2)}%。`;
@@ -1568,6 +1565,10 @@ export function mountGame(root) {
         setDraftError(key, parsed.reason, input);
         return;
       }
+      // 提示语里的城镇名与品名取交易前的视图，免得交易后视图变化。
+      const outsideView = buildView()?.outsideTown;
+      const outsideTownName = outsideView?.name || "外镇";
+      const outsideGood = outsideView?.goods?.find(good => good.itemId === itemId);
       const result = simulation.tradeWithOutsideTown(state, direction, itemId, parsed.value);
       if (!result?.ok) {
         setDraftError(key, result?.reason || "交易失败", input);
@@ -1576,10 +1577,11 @@ export function mountGame(root) {
       numericDrafts.delete(key);
       changed(true);
       render(true);
-      const itemName = { wheat: "小麦", flour: "面粉", bread: "面包", salt: "食盐", wood: "木材" }[itemId] || itemId;
+      const itemName = outsideGood?.name || itemId;
+      const itemUnit = outsideGood?.unit || "斤";
       showToast(direction === "sell"
-        ? `已向民镇卖出${number(result.quantityJin, 1)}${itemId === "wood" ? "单位" : "斤"}${itemName}，得小麦${number(result.valueJin, 1)}斤（含关税${number(result.tariffJin, 1)}斤）。`
-        : `已从民镇买入${number(result.quantityJin, 1)}斤${itemName}，支付小麦${number(result.valueJin, 1)}斤。`);
+        ? `已向${outsideTownName}卖出${number(result.quantityJin, 1)}${itemUnit}${itemName}，得小麦${number(result.valueJin, 1)}斤，均价${number(result.priceWheatPerUnit, 2)}斤/${itemUnit}。`
+        : `已从${outsideTownName}买入${number(result.quantityJin, 1)}${itemUnit}${itemName}，支付小麦${number(result.valueJin, 1)}斤，均价${number(result.priceWheatPerUnit, 2)}斤/${itemUnit}。`);
       return;
     }
     const wheatLoanButton = closest(target, "[data-wheat-loan-issue]");

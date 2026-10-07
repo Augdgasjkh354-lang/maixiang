@@ -4,6 +4,7 @@ import { CORE_ROLES } from "./roles.js";
 import { RECIPES } from "./recipes.js";
 import { BUILDINGS } from "./buildings.js";
 import { PLOTS } from "./world.js";
+import { OUTSIDE_TOWNS } from "./outside-towns.js";
 
 export const CONTENT = Object.freeze({
   agriculture: AGRICULTURE,
@@ -14,7 +15,8 @@ export const CONTENT = Object.freeze({
   roles: CORE_ROLES,
   recipes: RECIPES,
   buildings: BUILDINGS,
-  plots: PLOTS
+  plots: PLOTS,
+  outsideTowns: OUTSIDE_TOWNS
 });
 
 export function extendContent(base, additions) {
