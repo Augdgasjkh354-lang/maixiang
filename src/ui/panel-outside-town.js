@@ -67,13 +67,13 @@ export function renderOutsideTown(view) {
   const statusLine = ot.tradeClosed
     ? `<div class="row"><span class="label">商路</span><strong class="value">中断中（今年无法贸易）</strong></div>`
     : "";
-  // 关键按键进建筑：外贸房/外交房没人值守时的提示。
+  // 关键按键进建筑：外贸房没人值守时的提示。
   const staffLine = ot.foreignTradeOperational
     ? `<div class="row"><span class="label">外贸房</span><strong class="value">在岗 ${number(ot.foreignTradeStaff)}人 · 可同时跟 ${number(ot.foreignTradeCapacity)}笔长协</strong></div>`
     : `<div class="row"><span class="label">外贸房</span><strong class="value">无人值守（需至少1名外贸职员，否则无法贸易与签约）</strong></div>`;
   const diplomacyLine = ot.diplomacyOperational
-    ? `<div class="row"><span class="label">外交房</span><strong class="value">在岗 ${number(ot.diplomacyStaff)}人 · 关系分回升中</strong></div>`
-    : `<div class="row"><span class="label">外交房</span><strong class="value">无人值守（关系分每日下滑）</strong></div>`;
+    ? `<div class="row"><span class="label">关系维护</span><strong class="value">外贸房在岗 ${number(ot.diplomacyStaff)}人 · 关系分回升中</strong></div>`
+    : `<div class="row"><span class="label">关系维护</span><strong class="value">外贸房无人值守（关系分每日下滑）</strong></div>`;
   const relations = ot.relations ?? 60;
   const relationsNote = relations >= 70 ? "关系融洽（长协价×0.95、违约金减半）"
     : relations < 20 ? "关系破裂边缘（可能断交）"
@@ -111,7 +111,7 @@ export function renderOutsideTown(view) {
       <div class="row"><span class="label">外交关系分</span><strong class="value">${number(relations, 1)} / 100 · ${relationsNote}</strong></div>
       ${staffLine}
       ${diplomacyLine}
-      <div class="subtle">外交房在岗 ≥1 人关系分每日 +0.2；无人值守每日 −0.5。</div>
+      <div class="subtle">外贸房在岗 ≥1 人关系分每日 +0.2；无人值守每日 −0.5。</div>
     </div>
     <div class="cardlet"><h3>长期贸易协定</h3>
       <div class="row"><span class="label">占用</span><strong class="value">${number(ta.activeCount || 0)} / ${number(ta.capacity || 0)} 笔</strong></div>

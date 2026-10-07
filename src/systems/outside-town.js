@@ -212,7 +212,7 @@ function clampPrice(value) {
   return Math.min(50, Math.max(0.05, Math.round(value * 100) / 100));
 }
 
-// 外交房助手（第三步）：该建筑存在且在岗人数 ≥1 才算运转。
+// 外贸房：该建筑存在且在岗人数 ≥1 才算运转。
 export function buildingOperational(state, buildingId) {
   const building = (state.buildings || []).find(row => row.typeId === buildingId);
   if (!building) return false;
@@ -237,7 +237,8 @@ export function addOutsideTownStock(ot, itemId, amount) {
 }
 
 function jobStaffRoleId(buildingId) {
-  return buildingId === "foreign_trade_house" ? "trade_staff" : "diplomacy_staff";
+  void buildingId;
+  return "trade_staff";
 }
 
 // 与民镇比价的辅助：关税后到手净价（用于界面提示与关系分折扣展示）。
@@ -253,8 +254,8 @@ export function advanceOutsideTownDay(state, content) {
     ot.tradeMemory[itemId] = (ot.tradeMemory[itemId] || 0) * MEMORY_DECAY_PER_DAY;
     if (Math.abs(ot.tradeMemory[itemId]) < 0.01) ot.tradeMemory[itemId] = 0;
   }
-  // 外交房在岗 ≥1 人：关系分缓慢回升；无人值守：关系分下滑。
-  if (buildingOperational(state, "diplomacy_house")) {
+  // 外贸房在岗 ≥1 人：关系分缓慢回升；无人值守：关系分下滑。
+  if (buildingOperational(state, "foreign_trade_house")) {
     ot.relations = Math.min(RELATIONS_MAX, ot.relations + RELATIONS_GAIN_PER_DAY);
   } else {
     ot.relations = Math.max(0, ot.relations - RELATIONS_LOSS_PER_DAY);
@@ -605,7 +606,7 @@ export function selectOutsideTownView(state, content) {
     foreignTradeOperational: buildingOperational(state, "foreign_trade_house"),
     foreignTradeStaff: buildingStaffOnDuty(state, "foreign_trade_house"),
     foreignTradeCapacity: buildingStaffOnDuty(state, "foreign_trade_house") * AGREEMENTS_PER_STAFF,
-    diplomacyOperational: buildingOperational(state, "diplomacy_house"),
-    diplomacyStaff: buildingStaffOnDuty(state, "diplomacy_house")
+    diplomacyOperational: buildingOperational(state, "foreign_trade_house"),
+    diplomacyStaff: buildingStaffOnDuty(state, "foreign_trade_house")
   };
 }

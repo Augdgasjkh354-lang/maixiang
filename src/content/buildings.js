@@ -136,19 +136,11 @@ export const BUILDINGS = Object.freeze({
   }),
   foreign_trade_house: Object.freeze({
     id: "foreign_trade_house", name: "外贸房", icon: "🚢",
-    description: "对民镇贸易与长期协定 · 至少1人在岗才能接单 · 全镇限建一座",
+    description: "对民镇贸易、长期协定与关系维护 · 至少1人在岗才能接单、关系分才回升 · 全镇限建一座",
     maxInstances: 1,
     jobs: Object.freeze([Object.freeze({ id: "trade_staff", name: "外贸职员", slots: 8, capacityMode: "building", wagePerWorkerDay: 5, note: "每人每月可跟2笔长期协定", releasePriority: 55 })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
     construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 })
-  }),
-  diplomacy_house: Object.freeze({
-    id: "diplomacy_house", name: "外交房", icon: "🕊️",
-    description: "维系与民镇的外交关系 · 至少1人在岗关系分才回升 · 全镇限建一座",
-    maxInstances: 1,
-    jobs: Object.freeze([Object.freeze({ id: "diplomacy_staff", name: "外交人员", slots: 6, capacityMode: "building", wagePerWorkerDay: 5, note: "日常外事与关系维护", releasePriority: 55 })]),
-    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 700 }]),
-    construction: Object.freeze({ workDays: 500, recommendedWorkers: 10 })
   }),
 
   public_housing: Object.freeze({

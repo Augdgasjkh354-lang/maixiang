@@ -396,6 +396,14 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
   // 0.2.3 做市商：旧档若已有批发市场挂价则沿用（玩家可能已调过），缺项补做市商默认价。
   mergeWholesaleCashIntoTown(state);
   delete state.neighborAid; // 邻里互助已删除
+  // 外交房已并入外贸房：拆除旧档里的外交房与在建工程，岗位上的人回到待业。
+  for (const building of (state.buildings || []).filter(row => row.typeId === "diplomacy_house")) {
+    for (const household of Object.values(state.households?.byId || {})) {
+      for (const key of Object.keys(household.jobs || {})) if (key.startsWith(building.id + "::")) delete household.jobs[key];
+    }
+  }
+  state.buildings = (state.buildings || []).filter(row => row.typeId !== "diplomacy_house");
+  if (Array.isArray(state.projects)) state.projects = state.projects.filter(row => row.typeId !== "diplomacy_house");
   ensureWholesaleMarket(state, definitions);
   state.services ||= {};
   state.services.demandByHousehold ||= {};

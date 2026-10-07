@@ -734,19 +734,11 @@ const BUILDINGS = Object.freeze({
   }),
   foreign_trade_house: Object.freeze({
     id: "foreign_trade_house", name: "外贸房", icon: "🚢",
-    description: "对民镇贸易与长期协定 · 至少1人在岗才能接单 · 全镇限建一座",
+    description: "对民镇贸易、长期协定与关系维护 · 至少1人在岗才能接单、关系分才回升 · 全镇限建一座",
     maxInstances: 1,
     jobs: Object.freeze([Object.freeze({ id: "trade_staff", name: "外贸职员", slots: 8, capacityMode: "building", wagePerWorkerDay: 5, note: "每人每月可跟2笔长期协定", releasePriority: 55 })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
     construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 })
-  }),
-  diplomacy_house: Object.freeze({
-    id: "diplomacy_house", name: "外交房", icon: "🕊️",
-    description: "维系与民镇的外交关系 · 至少1人在岗关系分才回升 · 全镇限建一座",
-    maxInstances: 1,
-    jobs: Object.freeze([Object.freeze({ id: "diplomacy_staff", name: "外交人员", slots: 6, capacityMode: "building", wagePerWorkerDay: 5, note: "日常外事与关系维护", releasePriority: 55 })]),
-    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 700 }]),
-    construction: Object.freeze({ workDays: 500, recommendedWorkers: 10 })
   }),
 
   public_housing: Object.freeze({
@@ -1920,7 +1912,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod12 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-b7b5873";
+       const BUILD_ID = "0203-ab28cbe";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -12804,7 +12796,7 @@ function clampPrice(value) {
   return Math.min(50, Math.max(0.05, Math.round(value * 100) / 100));
 }
 
-// 外交房助手（第三步）：该建筑存在且在岗人数 ≥1 才算运转。
+// 外贸房：该建筑存在且在岗人数 ≥1 才算运转。
        function buildingOperational(state, buildingId) {
   const building = (state.buildings || []).find(row => row.typeId === buildingId);
   if (!building) return false;
@@ -12829,7 +12821,8 @@ function clampPrice(value) {
 }
 
 function jobStaffRoleId(buildingId) {
-  return buildingId === "foreign_trade_house" ? "trade_staff" : "diplomacy_staff";
+  void buildingId;
+  return "trade_staff";
 }
 
 // 与民镇比价的辅助：关税后到手净价（用于界面提示与关系分折扣展示）。
@@ -12845,8 +12838,8 @@ function jobStaffRoleId(buildingId) {
     ot.tradeMemory[itemId] = (ot.tradeMemory[itemId] || 0) * MEMORY_DECAY_PER_DAY;
     if (Math.abs(ot.tradeMemory[itemId]) < 0.01) ot.tradeMemory[itemId] = 0;
   }
-  // 外交房在岗 ≥1 人：关系分缓慢回升；无人值守：关系分下滑。
-  if (buildingOperational(state, "diplomacy_house")) {
+  // 外贸房在岗 ≥1 人：关系分缓慢回升；无人值守：关系分下滑。
+  if (buildingOperational(state, "foreign_trade_house")) {
     ot.relations = Math.min(RELATIONS_MAX, ot.relations + RELATIONS_GAIN_PER_DAY);
   } else {
     ot.relations = Math.max(0, ot.relations - RELATIONS_LOSS_PER_DAY);
@@ -13197,8 +13190,8 @@ function jobStaffRoleId(buildingId) {
     foreignTradeOperational: buildingOperational(state, "foreign_trade_house"),
     foreignTradeStaff: buildingStaffOnDuty(state, "foreign_trade_house"),
     foreignTradeCapacity: buildingStaffOnDuty(state, "foreign_trade_house") * AGREEMENTS_PER_STAFF,
-    diplomacyOperational: buildingOperational(state, "diplomacy_house"),
-    diplomacyStaff: buildingStaffOnDuty(state, "diplomacy_house")
+    diplomacyOperational: buildingOperational(state, "foreign_trade_house"),
+    diplomacyStaff: buildingStaffOnDuty(state, "foreign_trade_house")
   };
 }
 return { OUTSIDE_TOWN_NAME, OUTSIDE_TOWN_LEGACY_NAME, OUTSIDE_RULERS, OUTSIDE_RULERS_LEGACY, TRADE_SELL_ITEMS, TRADE_BUY_ITEMS, SALT_JIN_PER_PERSON_YEAR, WOOD_UNITS_PER_PERSON_YEAR, DEFAULT_SALT_STOCK_JIN, DEFAULT_WOOD_STOCK_UNITS, SALT_STOCK_SOFT_CAP_JIN, WOOD_STOCK_SOFT_CAP_UNITS, SUPPLY_WARNING_DAYS, SUPPLY_WARNING_PRICE_FACTOR, STOCK_PRICE_FACTOR_MAX, STOCK_PRICE_FACTOR_MIN, MAX_TRADE_JIN_PER_ORDER, PRICE_ELASTICITY, MEMORY_DECAY_PER_DAY, DEFAULT_TRADE_TARIFF_PERCENT, MAX_TRADE_TARIFF_PERCENT, RELATIONS_DEFAULT, RELATIONS_MAX, RELATIONS_TRUSTED, RELATIONS_DISTRUST, RELATIONS_BREAKOFF, RELATIONS_GAIN_PER_DAY, RELATIONS_LOSS_PER_DAY, AGREEMENTS_PER_STAFF, outsideTownAnnualSaltJin, outsideTownAnnualWoodUnits, outsideTownSaltWarningJin, outsideTownWoodWarningUnits, ensureOutsideTown, readOutsideTown, tradeTariffRate, recomputePrices, buildingOperational, buildingIdOfType, buildingStaffOnDuty, addOutsideTownStock, netOfTariff, advanceOutsideTownDay, settleOutsideTownYear, tradeWithOutsideTown, setTradeTariffRate, MAX_LOAN_JIN, MAX_LOAN_RATE_PERCENT, issueWheatLoan, settleWheatLoansYear, selectOutsideTownView };
@@ -17432,6 +17425,14 @@ function normalizeV15(raw, definitions, legacyCompleted = false) {
   // 0.2.3 做市商：旧档若已有批发市场挂价则沿用（玩家可能已调过），缺项补做市商默认价。
   mergeWholesaleCashIntoTown(state);
   delete state.neighborAid; // 邻里互助已删除
+  // 外交房已并入外贸房：拆除旧档里的外交房与在建工程，岗位上的人回到待业。
+  for (const building of (state.buildings || []).filter(row => row.typeId === "diplomacy_house")) {
+    for (const household of Object.values(state.households?.byId || {})) {
+      for (const key of Object.keys(household.jobs || {})) if (key.startsWith(building.id + "::")) delete household.jobs[key];
+    }
+  }
+  state.buildings = (state.buildings || []).filter(row => row.typeId !== "diplomacy_house");
+  if (Array.isArray(state.projects)) state.projects = state.projects.filter(row => row.typeId !== "diplomacy_house");
   ensureWholesaleMarket(state, definitions);
   state.services ||= {};
   state.services.demandByHousehold ||= {};
@@ -20197,7 +20198,7 @@ const { renderNumericInput } = __mxmod91;
 const BUILD_CATEGORIES = [
   { id: "production", name: "生产", types: ["mill", "bakery", "lumberyard", "saltworks"] },
   { id: "commercial", name: "商业", types: ["wholesale_market", "commercial_street", "bank", "stock_exchange", "foreign_trade_house"] },
-  { id: "government", name: "政务", types: ["town_hall", "police_station", "social_security_office", "diplomacy_house"] },
+  { id: "government", name: "政务", types: ["town_hall", "police_station", "social_security_office"] },
   { id: "housing", name: "住宅", types: ["public_housing", "villa_complex"] }
 ];
 let activeBuildCategory = "production";
@@ -20570,13 +20571,13 @@ function agreementRow(agreement) {
   const statusLine = ot.tradeClosed
     ? `<div class="row"><span class="label">商路</span><strong class="value">中断中（今年无法贸易）</strong></div>`
     : "";
-  // 关键按键进建筑：外贸房/外交房没人值守时的提示。
+  // 关键按键进建筑：外贸房没人值守时的提示。
   const staffLine = ot.foreignTradeOperational
     ? `<div class="row"><span class="label">外贸房</span><strong class="value">在岗 ${number(ot.foreignTradeStaff)}人 · 可同时跟 ${number(ot.foreignTradeCapacity)}笔长协</strong></div>`
     : `<div class="row"><span class="label">外贸房</span><strong class="value">无人值守（需至少1名外贸职员，否则无法贸易与签约）</strong></div>`;
   const diplomacyLine = ot.diplomacyOperational
-    ? `<div class="row"><span class="label">外交房</span><strong class="value">在岗 ${number(ot.diplomacyStaff)}人 · 关系分回升中</strong></div>`
-    : `<div class="row"><span class="label">外交房</span><strong class="value">无人值守（关系分每日下滑）</strong></div>`;
+    ? `<div class="row"><span class="label">关系维护</span><strong class="value">外贸房在岗 ${number(ot.diplomacyStaff)}人 · 关系分回升中</strong></div>`
+    : `<div class="row"><span class="label">关系维护</span><strong class="value">外贸房无人值守（关系分每日下滑）</strong></div>`;
   const relations = ot.relations ?? 60;
   const relationsNote = relations >= 70 ? "关系融洽（长协价×0.95、违约金减半）"
     : relations < 20 ? "关系破裂边缘（可能断交）"
@@ -20614,7 +20615,7 @@ function agreementRow(agreement) {
       <div class="row"><span class="label">外交关系分</span><strong class="value">${number(relations, 1)} / 100 · ${relationsNote}</strong></div>
       ${staffLine}
       ${diplomacyLine}
-      <div class="subtle">外交房在岗 ≥1 人关系分每日 +0.2；无人值守每日 −0.5。</div>
+      <div class="subtle">外贸房在岗 ≥1 人关系分每日 +0.2；无人值守每日 −0.5。</div>
     </div>
     <div class="cardlet"><h3>长期贸易协定</h3>
       <div class="row"><span class="label">占用</span><strong class="value">${number(ta.activeCount || 0)} / ${number(ta.capacity || 0)} 笔</strong></div>
