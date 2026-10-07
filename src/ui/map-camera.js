@@ -57,13 +57,22 @@ export function createMapCamera(stage, world) {
     }
   }
 
+  // 初始视野：以小镇为中心（小镇位于地图西部，全部地块与资源点都在这个矩形内）。
+  const TOWN_FRAME = { x: 0, y: 60, width: 1250, height: 990, centerX: 625, centerY: 555 };
+  // 窄屏（手机竖屏）用的近景框：整镇框得太小时，改取建筑更清楚的一块。
+  const NARROW_FRAME = { x: 180, y: 200, width: 970, height: 760, centerX: 650, centerY: 560 };
+  const READABLE_TOWN_SCALE = 0.6;
+
   function fitInitial() {
     if (!stage.clientWidth || !stage.clientHeight) return;
-    const widthScale = stage.clientWidth / MAP_WIDTH;
-    const heightScale = stage.clientHeight / MAP_HEIGHT;
-    scale = clampScale(Math.max(widthScale * .94, heightScale * .92));
-    x = (stage.clientWidth - MAP_WIDTH * scale) / 2;
-    y = (stage.clientHeight - MAP_HEIGHT * scale) / 2;
+    const sw = stage.clientWidth;
+    const sh = stage.clientHeight;
+    const fitScale = (frame) => Math.min(sw / frame.width, sh / frame.height) * .94;
+    let frame = TOWN_FRAME;
+    if (clampScale(fitScale(TOWN_FRAME)) < READABLE_TOWN_SCALE) frame = NARROW_FRAME;
+    scale = clampScale(fitScale(frame));
+    x = sw / 2 - frame.centerX * scale;
+    y = sh / 2 - frame.centerY * scale;
     initialized = true;
     apply();
   }

@@ -424,6 +424,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 @media (max-width: 759px) {
   /* During mobile plot selection, uncover the map so every buildable tile can receive taps. */
   .build-site-picking .panel-surface { display: none; }
+  /* 窄屏地图顶部两行：第一行秋收预估，第二行宏观摘要右对齐；临时提示与提示条放到两行之下，互不遮挡。 */
+  .map-topline { top: 8px; left: 8px; right: 8px; }
+  .map-ribbon { min-height: 28px; padding: 5px 8px; font-size: 10px; }
+  .map-side { top: 46px; right: 8px; }
+  .macro-panel summary { padding: 5px 9px; font-size: 11px; }
+  .map-hint { top: 82px; }
+  .toast { top: 82px; }
 }
 
 @media (min-width: 760px) {
