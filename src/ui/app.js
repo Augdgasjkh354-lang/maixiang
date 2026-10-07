@@ -208,7 +208,7 @@ export function mountGame(root) {
     // 经济迷你面板（用户 0.1.11）：摘要常显失业率，展开看走势。
     const econSummary = $("#econSummary");
     const econBody = $("#econBody");
-    if (econSummary) econSummary.textContent = econMiniSummary(view);
+    if (econSummary) econSummary.textContent = econMiniSummary();
     if (econBody) {
       const html = renderEconMini(view);
       if (econBody.innerHTML !== html) econBody.innerHTML = html;

@@ -244,27 +244,34 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 .map-ribbon { font-size: 11px; white-space: nowrap; }
 .map-ribbon b { color: #f4d47c; font-size: 12px; }
 .map-ribbon i { width: 1px; height: 15px; margin: 0 2px; background: #fff5d477; }
-.map-hint { position: absolute; z-index: 2; left: 50%; top: 54px; transform: translateX(-50%); padding: 6px 11px; border: 1px solid #fff2bf88; border-radius: 99px; color: #fff8e1; background: #263c30cf; font-size: 12px; line-height: 1.25; white-space: nowrap; pointer-events: none; }
+.map-hint { position: absolute; z-index: 2; left: 10px; top: 54px; max-width: calc(100% - 160px); overflow: hidden; text-overflow: ellipsis; padding: 6px 11px; border: 1px solid #fff2bf88; border-radius: 99px; color: #fff8e1; background: #263c30cf; font-size: 12px; line-height: 1.25; white-space: nowrap; pointer-events: none; }
 .map-zoom { position: absolute; z-index: 4; right: 9px; bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
 .map-zoom button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid #fff0c7b0; border-radius: 13px; color: #fff8df; background: #2e4739df; box-shadow: 0 2px 5px #26322340; }
 .map-zoom .ui-icon { width: 18px; height: 18px; }
 .event-float { position: absolute; z-index: 5; left: 10px; bottom: 11px; width: min(330px, calc(100% - 72px)); max-width: 420px; border: 1px solid #fff0c384; border-radius: 13px; color: #fff9e5; background: #304a39e8; box-shadow: 0 4px 12px #202b2145; }
-.event-toggle { width: 100%; min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 7px 42px 7px 11px; border: 0; border-radius: inherit; color: inherit; background: transparent; text-align: left; font-size: 12px; }
+.event-toggle { width: 100%; min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 7px 42px 7px 11px; border: 0; border-radius: inherit; color: inherit; background: transparent; text-align: left; font-size: 12px; white-space: nowrap; }
 .event-toggle::before { content: ""; width: 7px; height: 7px; flex: none; border-radius: 50%; background: #ebc862; }
-.event-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f4e7c3; }
+.event-toggle span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f4e7c3; }
 .event-close { position: absolute; top: 0; right: 0; width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 12px; color: #f6e8bf; background: transparent; }
 .event-close .ui-icon { width: 16px; height: 16px; }
 .event-history { max-height: 192px; overflow-y: auto; padding: 0 11px 10px; border-top: 1px solid #ffffff28; }
 .event-line { padding-top: 8px; color: #f5ebce; font-size: 12px; line-height: 1.45; }
 /* 宏观面板（金融扩展第一期）：右上角透明，可折叠 */
-.macro-panel { position: absolute; z-index: 3; top: 54px; right: 10px; width: 212px; border: 1px solid #f5e9c785; border-radius: 11px; color: #fff9e4; background: #2f4739d9; box-shadow: 0 2px 8px #1d28173a; font-size: 12px; }
-.macro-panel summary { padding: 7px 10px; cursor: pointer; list-style: none; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.macro-panel summary::-webkit-details-marker { display: none; }
-.macro-panel[open] summary { border-bottom: 1px solid #f5e9c744; }
-.macro-body { padding: 5px 10px 9px; }
-.macro-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 2.5px 0; line-height: 1.35; }
-.macro-row span { color: #e8dfc2; flex: none; }
-.macro-row strong { color: #f4d47c; font-weight: 700; text-align: right; }
+.map-side { position: absolute; z-index: 3; top: 54px; right: 10px; max-width: calc(100% - 20px); display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.map-side > * { pointer-events: auto; }
+.macro-panel, .econ-mini { max-width: 100%; border: 1px solid #f5e9c785; border-radius: 11px; color: #fff9e4; background: #2f4739d9; box-shadow: 0 2px 8px #1d28173a; font-size: 12px; }
+.macro-panel[open], .econ-mini[open] { width: 212px; }
+.macro-panel summary, .econ-mini summary { padding: 7px 10px; cursor: pointer; list-style: none; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.macro-panel summary::-webkit-details-marker, .econ-mini summary::-webkit-details-marker { display: none; }
+.macro-panel[open] summary, .econ-mini[open] summary { border-bottom: 1px solid #f5e9c744; }
+.macro-body, .econ-body { padding: 5px 10px 9px; }
+.macro-row, .econ-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 2.5px 0; line-height: 1.35; }
+.macro-row span, .econ-row span { color: #e8dfc2; flex: none; }
+.macro-row strong, .econ-row strong { color: #f4d47c; font-weight: 700; text-align: right; }
+.econ-note { padding: 1px 0 3px; color: #d8cfaf; font-size: 11px; line-height: 1.4; }
+.econ-spark { margin: 6px 0 2px; color: #f4d47c; }
+.econ-spark svg { display: block; width: 100%; height: 32px; }
+.econ-spark figcaption { margin-top: 2px; color: #d8cfaf; font-size: 10px; line-height: 1.35; }
 .event-line time { display: block; color: #dbcb9c; font-size: 10px; }
 .bottom-nav { z-index: 3; flex: none; min-height: 60px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 5px 2px 0; }
 .tab { min-width: 0; min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px solid transparent; border-radius: 14px; color: #6d6958; background: transparent; font-size: 11px; font-weight: 650; }
@@ -389,7 +396,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 .rename-detail summary { display: inline-flex; min-height: 44px; align-items: center; padding: 8px 13px; border: 1px solid #d6ceb9; border-radius: 11px; color: var(--deep-green); background: #f9f6ec; font-size: 14px; font-weight: 700; cursor: pointer; }
 .save-confirm { position: sticky; z-index: 3; top: 0; margin: 0 0 12px; padding: 13px; border: 1px solid #b3aa87; border-radius: 13px; background: #fff8df; box-shadow: 0 4px 14px #453c272e; }
 .save-confirm p { margin: 6px 0; font-size: 14px; line-height: 1.5; }
-.no-active-save .hud, .no-active-save .map-world, .no-active-save .map-topline, .no-active-save .map-hint, .no-active-save .map-zoom, .no-active-save .event-float, .no-active-save .bottom-nav { display: none !important; }
+.no-active-save .hud, .no-active-save .map-world, .no-active-save .map-topline, .no-active-save .map-hint, .no-active-save .map-side, .no-active-save .map-zoom, .no-active-save .event-float, .no-active-save .bottom-nav { display: none !important; }
 .no-active-save .panel-surface { left: 8px; right: 8px; top: max(8px, env(safe-area-inset-top)); bottom: max(8px, env(safe-area-inset-bottom)); width: auto; max-height: none; }
 .setting-title { color: #4a4537; font-size: 14px; font-weight: 800; }
 .danger-card { border-color: #ead1c6; }
@@ -433,26 +440,39 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 
 @media (min-width: 760px) {
   .shell { padding: max(8px, env(safe-area-inset-top)) clamp(10px, 1.4vw, 22px) max(6px, env(safe-area-inset-bottom)); }
-  .hud { grid-template-columns: 1fr; gap: 6px; padding-bottom: 7px; }
+  .hud { gap: 6px 10px; padding-bottom: 7px; }
   .resource-bar { grid-template-columns: repeat(4, minmax(90px, 150px)); justify-content: end; }
   .resource-pill { min-height: 38px; }
-  .time-row { position: absolute; z-index: 7; top: 56px; left: clamp(10px, 1.4vw, 22px); right: clamp(10px, 1.4vw, 22px); pointer-events: none; }
-  .time-row > * { pointer-events: auto; }
+  /* 日期与速度并入顶栏左侧，不再浮在地图上压住秋收预估、宏观面板和面板关闭按钮 */
+  .hud { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  .time-row { order: -1; justify-content: flex-start; gap: 8px; }
+  .resource-bar { margin-left: auto; }
   .date-block { padding: 8px 12px; border: 1px solid #eadfbe; border-radius: 13px; background: #fffdf0e8; box-shadow: 0 2px 8px #27331a2e; }
   .date-block strong { font-size: 14px; }
   .time-controls { padding: 3px; border: 1px solid #e9dcba; border-radius: 15px; background: #fffdf0dc; box-shadow: 0 2px 8px #27331a2e; }
   .map-stage { border-radius: 21px; }
   .map-topline { top: 10px; left: 12px; right: 12px; }
-  .map-ribbon { margin-left: 165px; }
-  .map-hint { top: 14px; }
+  .map-hint { left: 50%; top: 14px; max-width: 46%; transform: translateX(-50%); }
   .panel-surface { left: auto; top: 14px; right: 14px; bottom: 14px; width: min(405px, 38vw); max-height: none; border-radius: 18px; }
   .panel { padding: 0 18px 20px; }
   .build-confirm-actions { margin-left: -18px; margin-right: -18px; margin-bottom: -20px; padding-left: 18px; padding-right: 18px; }
   .panel-open .event-float { display: block; opacity: .68; }
-  .bottom-nav { position: absolute; z-index: 8; left: 14px; bottom: 13px; width: 248px; min-height: 54px; display: flex; padding: 4px; border: 1px solid #cfc7ae; border-radius: 16px; background: #fffdf0e8; box-shadow: 0 3px 10px #27331a2e; }
-  .bottom-nav .tab { flex: 1; min-height: 44px; flex-direction: row; gap: 6px; font-size: 12px; }
+  .event-float { bottom: 78px; left: 14px; }
+  .town-minimap { left: auto; right: 66px; bottom: 10px; }
+  .bottom-nav { position: absolute; z-index: 8; left: 14px; bottom: 13px; width: auto; min-height: 54px; display: flex; padding: 4px; border: 1px solid #cfc7ae; border-radius: 16px; background: #fffdf0e8; box-shadow: 0 3px 10px #27331a2e; }
+  .bottom-nav .tab { flex: 1; min-height: 44px; padding: 0 14px; flex-direction: row; gap: 6px; font-size: 13px; white-space: nowrap; }
   .bottom-nav .tab .ui-icon { width: 17px; height: 17px; }
   .game-frame { position: relative; }
+}
+
+@media (max-width: 430px) {
+  .resource-label { display: none; }
+}
+
+@media (max-width: 380px) {
+  /* 季节已在日期里显示，窄屏让出位置给秋收预估，避免顶条溢出屏幕 */
+  .season-ribbon { display: none; }
+  .map-topline { justify-content: flex-end; }
 }
 
 @media (max-width: 390px) {
@@ -1831,7 +1851,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod12 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-fcf3908";
+       const BUILD_ID = "0203-b4e1bb1";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -20587,10 +20607,10 @@ const { renderMiniMap } = __mxmod84;
 const SHELL_HTML = `<main class="shell">
   <header class="hud">
     <div class="resource-bar" aria-label="小镇资源">
-      <button class="resource-pill" data-resource="residents" aria-label="查看小镇人口"><span class="resource-icon">${uiIcon("people")}</span><span>人口 <b id="populationStat">1,000</b></span></button>
-      <button class="resource-pill" data-resource="residents" aria-label="查看待业人数"><span class="resource-icon idle-icon">${uiIcon("idle")}</span><span>待业 <b id="idleStat">200</b></span></button>
-      <button class="resource-pill" data-resource="business" aria-label="查看居民口粮"><span class="resource-icon grain-icon">${uiIcon("grain")}</span><span>居民 <b id="residentStat">73万</b></span></button>
-      <button class="resource-pill" data-resource="business" aria-label="查看镇库储备"><span class="resource-icon store-icon">${uiIcon("store")}</span><span>镇库 <b id="townStat">73万</b></span></button>
+      <button class="resource-pill" data-resource="residents" aria-label="查看小镇人口"><span class="resource-icon">${uiIcon("people")}</span><span><span class="resource-label">人口</span> <b id="populationStat">1,000</b></span></button>
+      <button class="resource-pill" data-resource="residents" aria-label="查看待业人数"><span class="resource-icon idle-icon">${uiIcon("idle")}</span><span><span class="resource-label">待业</span> <b id="idleStat">200</b></span></button>
+      <button class="resource-pill" data-resource="business" aria-label="查看居民口粮"><span class="resource-icon grain-icon">${uiIcon("grain")}</span><span><span class="resource-label">居民</span> <b id="residentStat">73万</b></span></button>
+      <button class="resource-pill" data-resource="business" aria-label="查看镇库储备"><span class="resource-icon store-icon">${uiIcon("store")}</span><span><span class="resource-label">镇库</span> <b id="townStat">73万</b></span></button>
     </div>
     <div class="time-row">
       <div class="date-block" aria-live="polite"><div class="brand-title">麦乡 <span>镇务簿</span></div><strong id="dateLabel">第1年 · 春 · 第1天</strong><span id="timeLabel">时光暂停</span></div>
@@ -20613,8 +20633,10 @@ const SHELL_HTML = `<main class="shell">
         <span class="map-ribbon">秋收预估 <b id="forecastMap">1,600,000斤</b><i></i> 口粮可吃 <b id="daysMap">365天</b></span>
       </div>
       <div class="map-hint" id="mapHint">点田地、粮仓或作坊查看</div>
-      <details class="econ-mini" id="econMini"><summary id="econSummary">经济</summary><div class="econ-body" id="econBody"></div></details>
-      <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div></details>
+      <div class="map-side">
+        <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div></details>
+        <details class="econ-mini" id="econMini"><summary id="econSummary">经济走势</summary><div class="econ-body" id="econBody"></div></details>
+      </div>
       <div class="map-zoom" role="group" aria-label="地图缩放">
         <button data-map-zoom="1" aria-label="放大地图">＋</button><button data-map-reset aria-label="复位地图">${uiIcon("reset")}</button><button data-map-zoom="-1" aria-label="缩小地图">−</button>
       </div>
@@ -22429,10 +22451,9 @@ function moodNote(mood) {
   return "行情平稳";
 }
 
-       function econMiniSummary(view) {
-  const market = view.laborMarket;
-  if (!market) return "经济";
-  return `经济 · 失业${number(market.unemploymentRate * 100, 1)}%`;
+       function econMiniSummary() {
+  // 失业率已在宏观面板摘要常显，这里只做走势入口，避免两处重复。
+  return "经济走势";
 }
 
        function renderEconMini(view) {
@@ -23361,7 +23382,7 @@ function closest(element, selector) {
     // 经济迷你面板（用户 0.1.11）：摘要常显失业率，展开看走势。
     const econSummary = $("#econSummary");
     const econBody = $("#econBody");
-    if (econSummary) econSummary.textContent = econMiniSummary(view);
+    if (econSummary) econSummary.textContent = econMiniSummary();
     if (econBody) {
       const html = renderEconMini(view);
       if (econBody.innerHTML !== html) econBody.innerHTML = html;

@@ -24,10 +24,9 @@ function moodNote(mood) {
   return "行情平稳";
 }
 
-export function econMiniSummary(view) {
-  const market = view.laborMarket;
-  if (!market) return "经济";
-  return `经济 · 失业${number(market.unemploymentRate * 100, 1)}%`;
+export function econMiniSummary() {
+  // 失业率已在宏观面板摘要常显，这里只做走势入口，避免两处重复。
+  return "经济走势";
 }
 
 export function renderEconMini(view) {

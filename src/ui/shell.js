@@ -4,10 +4,10 @@ import { renderMiniMap } from "./map.js";
 export const SHELL_HTML = `<main class="shell">
   <header class="hud">
     <div class="resource-bar" aria-label="小镇资源">
-      <button class="resource-pill" data-resource="residents" aria-label="查看小镇人口"><span class="resource-icon">${uiIcon("people")}</span><span>人口 <b id="populationStat">1,000</b></span></button>
-      <button class="resource-pill" data-resource="residents" aria-label="查看待业人数"><span class="resource-icon idle-icon">${uiIcon("idle")}</span><span>待业 <b id="idleStat">200</b></span></button>
-      <button class="resource-pill" data-resource="business" aria-label="查看居民口粮"><span class="resource-icon grain-icon">${uiIcon("grain")}</span><span>居民 <b id="residentStat">73万</b></span></button>
-      <button class="resource-pill" data-resource="business" aria-label="查看镇库储备"><span class="resource-icon store-icon">${uiIcon("store")}</span><span>镇库 <b id="townStat">73万</b></span></button>
+      <button class="resource-pill" data-resource="residents" aria-label="查看小镇人口"><span class="resource-icon">${uiIcon("people")}</span><span><span class="resource-label">人口</span> <b id="populationStat">1,000</b></span></button>
+      <button class="resource-pill" data-resource="residents" aria-label="查看待业人数"><span class="resource-icon idle-icon">${uiIcon("idle")}</span><span><span class="resource-label">待业</span> <b id="idleStat">200</b></span></button>
+      <button class="resource-pill" data-resource="business" aria-label="查看居民口粮"><span class="resource-icon grain-icon">${uiIcon("grain")}</span><span><span class="resource-label">居民</span> <b id="residentStat">73万</b></span></button>
+      <button class="resource-pill" data-resource="business" aria-label="查看镇库储备"><span class="resource-icon store-icon">${uiIcon("store")}</span><span><span class="resource-label">镇库</span> <b id="townStat">73万</b></span></button>
     </div>
     <div class="time-row">
       <div class="date-block" aria-live="polite"><div class="brand-title">麦乡 <span>镇务簿</span></div><strong id="dateLabel">第1年 · 春 · 第1天</strong><span id="timeLabel">时光暂停</span></div>
@@ -30,8 +30,10 @@ export const SHELL_HTML = `<main class="shell">
         <span class="map-ribbon">秋收预估 <b id="forecastMap">1,600,000斤</b><i></i> 口粮可吃 <b id="daysMap">365天</b></span>
       </div>
       <div class="map-hint" id="mapHint">点田地、粮仓或作坊查看</div>
-      <details class="econ-mini" id="econMini"><summary id="econSummary">经济</summary><div class="econ-body" id="econBody"></div></details>
-      <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div></details>
+      <div class="map-side">
+        <details class="macro-panel" id="macroPanel"><summary id="macroSummary">宏观</summary><div class="macro-body" id="macroBody"></div></details>
+        <details class="econ-mini" id="econMini"><summary id="econSummary">经济走势</summary><div class="econ-body" id="econBody"></div></details>
+      </div>
       <div class="map-zoom" role="group" aria-label="地图缩放">
         <button data-map-zoom="1" aria-label="放大地图">＋</button><button data-map-reset aria-label="复位地图">${uiIcon("reset")}</button><button data-map-zoom="-1" aria-label="缩小地图">−</button>
       </div>
