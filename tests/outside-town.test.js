@@ -95,8 +95,9 @@ test("盐木长期断供时外镇繁荣度下降但人口不减，供应充足�
   const town = fed.outsideTowns.minzhen;
   for (let i = 0; i < 365 * 5; i++) {
     runDays(fed, 1);
-    for (const itemId of ["salt", "wood"]) {
-      const good = { ...PROFILE.goods[itemId], id: itemId };
+    for (const [itemId, profile] of Object.entries(PROFILE.goods)) {
+      if (profile.sellsToUs !== false) continue;
+      const good = { ...profile, id: itemId };
       town.stocks[itemId] = Math.max(town.stocks[itemId], targetStock(town, good));
     }
   }

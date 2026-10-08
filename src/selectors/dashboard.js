@@ -25,7 +25,7 @@ import { WAGE_CONTROL_CIVIL_ROLE_IDS } from "../systems/payroll.js";
 import { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } from "../systems/households.js";
 import { bondOutstandingVoucherUnits } from "../systems/bonds.js";
 import { shopSummaries } from "../systems/shops.js";
-import { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO, DEFAULT_SALE_PRICES } from "../systems/wholesale-market.js";
+import { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO } from "../systems/wholesale-market.js";
 import { selectOutsideTownView } from "../systems/outside-town.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { selectTradeAgreementView } from "../systems/trade-agreements.js";
@@ -282,9 +282,9 @@ export function selectDashboard(state, content, selection) {
         const salePriceOf = (itemId) => {
           const v = Number(market.pricesVoucherPerUnit?.[itemId]);
           if (Number.isFinite(v) && v > 0) return v;
-          if (itemId === "wheat") return content.rules.marketPricesVoucherPerUnit?.[itemId] ?? DEFAULT_SALE_PRICES[itemId] ?? 1;
+          if (itemId === "wheat") return content.rules.marketPricesVoucherPerUnit?.[itemId] ?? content.rules.wholesaleDefaultSalePrices?.[itemId] ?? 1;
           return content.rules.wholesaleDefaultSalePrices?.[itemId]
-            ?? content.rules.marketPricesVoucherPerUnit?.[itemId] ?? DEFAULT_SALE_PRICES[itemId] ?? 1;
+            ?? content.rules.marketPricesVoucherPerUnit?.[itemId] ?? content.rules.wholesaleDefaultSalePrices?.[itemId] ?? 1;
         };
         const purchasePriceOf = (itemId) => {
           const reference = Number(market.purchasePriceReferenceVoucherPerUnit?.[itemId] || market.purchasePricesVoucherPerUnit?.[itemId] || 0);

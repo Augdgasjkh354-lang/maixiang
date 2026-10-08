@@ -1,5 +1,5 @@
-// 已启用 mod 的内容清单（纯数据）。新 mod：在这里加一行 import，并在 registry.js 登记它的 mod.js。
-// 见 MODDING.md。
+// 已启用 mod 的内容（见 MODDING.md）。加 mod：import 一行 + 数组里加一项。
+import tea from "./tea/content.js";
+import pottery from "./pottery/content.js";
 
-export const MOD_CONTENTS = [
-];
+export const MOD_CONTENTS = [tea, pottery];

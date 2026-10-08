@@ -49,6 +49,8 @@ export const MODS = [tea];
 
 建筑带 `industryTier`（0 原料 / 1 加工 / 2 成品）就自动成为产业：镇营/民营/公司/生产税/熟练度/经营计划全部支持；`accountingSector` 自动建产业账本。每个建筑必须有 `jobs` 数组。
 
+加工建筑的原料（小麦除外）都从批发市场领用，测试里要先建好批发市场并派人（见 `tests/mod-pottery.test.js` 的 `potteryWorld`）。
+
 居民日用品：在 `rules.householdGoods` 里加一项，居民就会到综合商店买、用了加舒心值。
 
 ## 三、mod.js（默认导出 `defineMod({...})`）

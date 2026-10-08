@@ -29,13 +29,20 @@ import { householdConvertibleWheatUnits, syncResidentAggregates } from "./househ
 // 镇营统购统销的商品（不含小麦——小麦继续归镇库直管）。
 // 同时也是做市商可挂牌买卖的商品清单：小麦不在批发市场买卖，
 // 只走镇库调拨（磨坊免费领用）与单次调运。
-export const WHOLESALE_MONOPOLY_ITEM_IDS = Object.freeze(wholesaleItemIds(CONTENT));
+// 由物品的 wholesale 标记推导，按传入的 content 计算（含已组装的 mod 物品）。
+const idCache = new WeakMap();
+export function wholesaleMonopolyItemIds(content = CONTENT) {
+  if (!idCache.has(content)) {
+    const monopoly = Object.freeze(wholesaleItemIds(content));
+    idCache.set(content, { monopoly, all: Object.freeze(["wheat", ...monopoly]) });
+  }
+  return idCache.get(content).monopoly;
+}
 // 批发市场账上出现的全部商品：做市品 + 小麦（小麦只走镇库调拨，不挂牌）。
-export const WHOLESALE_ITEM_IDS = Object.freeze(["wheat", ...WHOLESALE_MONOPOLY_ITEM_IDS]);
-
-// 默认做市价（小麦斤等价/单位）：收购 1.4 / 售出 1.8 等，用户拍板。
-export const DEFAULT_PURCHASE_PRICES = CONTENT.rules.wholesaleDefaultPurchasePrices;
-export const DEFAULT_SALE_PRICES = CONTENT.rules.wholesaleDefaultSalePrices;
+export function wholesaleMarketItemIds(content = CONTENT) {
+  wholesaleMonopolyItemIds(content);
+  return idCache.get(content).all;
+}
 
 // 库存价格反馈：以「参考库存（斤）」为基准，库存达到参考库存的 feedbackScale 倍时
 // 收购价按 1/(1+elasticity*ratio) 衰减，ratio = max(0, 库存/参考库存 − 1)。
@@ -46,22 +53,22 @@ export const PURCHASE_PRICE_FLOOR_RATIO = 0.25; // 收购价最多跌到基准�
 export function ensureWholesaleMarket(state, content) {
   state.wholesaleMarket ||= {};
   const market = state.wholesaleMarket;
-  market.inventory ||= emptyItemMap(0);
-  market.inventoryCostVoucherUnits ||= emptyItemMap(0);
+  market.inventory ||= emptyItemMap(content, 0);
+  market.inventoryCostVoucherUnits ||= emptyItemMap(content, 0);
   market.pricesVoucherPerUnit ||= {};
   market.purchasePricesVoucherPerUnit ||= {};
   market.purchasePriceReferenceVoucherPerUnit ||= {};
-  market.dailyTownAllocationUnits ||= emptyItemMap(0);
-  market.day ||= { intakeUnits: emptyItemMap(0), soldUnits: emptyItemMap(0), townAllocatedUnits: emptyItemMap(0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
-  market.year ||= { intakeUnits: emptyItemMap(0), soldUnits: emptyItemMap(0), townAllocatedUnits: emptyItemMap(0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
-  market.cumulative ||= { intakeUnits: emptyItemMap(0), soldUnits: emptyItemMap(0), townAllocatedUnits: emptyItemMap(0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.dailyTownAllocationUnits ||= emptyItemMap(content, 0);
+  market.day ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.year ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.cumulative ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   // 统购统销累计账：无偿调拨入库与领用的成本价值。
   market.monopoly ||= { allocatedInValueUnits: 0, allocatedInputValueUnits: 0 };
   market.purchaseSpend ||= { day: 0, year: 0, cumulative: 0 };
-  market.purchasePriceIndex ||= emptyItemMap(1);
+  market.purchasePriceIndex ||= emptyItemMap(content, 1);
   // 价值口径流水（小麦斤等价）：无论以粮券还是实物小麦结算，都折算成小麦等值记录。
   market.valueFlow ||= { day: { sales: 0, purchases: 0 }, year: { sales: 0, purchases: 0 }, cumulative: { sales: 0, purchases: 0 } };
-  for (const itemId of WHOLESALE_ITEM_IDS) {
+  for (const itemId of wholesaleMarketItemIds(content)) {
     market.inventory[itemId] = Math.max(0, Math.floor(market.inventory[itemId] || 0));
     market.inventoryCostVoucherUnits[itemId] = Math.max(0, Math.floor(market.inventoryCostVoucherUnits[itemId] || 0));
     market.dailyTownAllocationUnits[itemId] = Math.max(0, Math.floor(market.dailyTownAllocationUnits[itemId] || 0));
@@ -70,15 +77,15 @@ export function ensureWholesaleMarket(state, content) {
     if (!(Number.isFinite(market.pricesVoucherPerUnit[itemId]) && market.pricesVoucherPerUnit[itemId] > 0)) {
       // 0.2.3：批发市场做成市商后有自己的挂价，取做市商默认售价而非全局官价。
       const fallback = itemId === "wheat"
-        ? (content.rules.marketPricesVoucherPerUnit?.[itemId] ?? DEFAULT_SALE_PRICES[itemId] ?? 1)
+        ? (content.rules.marketPricesVoucherPerUnit?.[itemId] ?? content.rules.wholesaleDefaultSalePrices?.[itemId] ?? 1)
         : (content.rules.wholesaleDefaultSalePrices?.[itemId]
-          ?? content.rules.marketPricesVoucherPerUnit?.[itemId] ?? DEFAULT_SALE_PRICES[itemId] ?? 1);
+          ?? content.rules.marketPricesVoucherPerUnit?.[itemId] ?? content.rules.wholesaleDefaultSalePrices?.[itemId] ?? 1);
       market.pricesVoucherPerUnit[itemId] = fallback;
     }
     if (itemId === "wheat") continue;
     if (!(Number.isFinite(market.purchasePricesVoucherPerUnit[itemId]) && market.purchasePricesVoucherPerUnit[itemId] > 0)) {
       market.purchasePricesVoucherPerUnit[itemId] = content.rules.wholesaleDefaultPurchasePrices?.[itemId]
-        ?? DEFAULT_PURCHASE_PRICES[itemId] ?? market.pricesVoucherPerUnit[itemId];
+        ?? content.rules.wholesaleDefaultPurchasePrices?.[itemId] ?? market.pricesVoucherPerUnit[itemId];
     }
     // 收购价基准 = 玩家设定的收购价（价格反馈围绕它波动），旧档补当前值。
     if (!(Number.isFinite(market.purchasePriceReferenceVoucherPerUnit[itemId]) && market.purchasePriceReferenceVoucherPerUnit[itemId] > 0)) {
@@ -92,8 +99,8 @@ export function ensureWholesaleMarket(state, content) {
 }
 
 
-function emptyItemMap(value = 0) {
-  return Object.fromEntries(WHOLESALE_ITEM_IDS.map(itemId => [itemId, value]));
+function emptyItemMap(content, value = 0) {
+  return Object.fromEntries(wholesaleMarketItemIds(content).map(itemId => [itemId, value]));
 }
 
 export function hasWholesaleMarket(state) {
@@ -105,14 +112,14 @@ const addPeriodValue = bookAdd;
 
 export function resetWholesaleDay(state, content) {
   const market = ensureWholesaleMarket(state, content);
-  market.day = { intakeUnits: emptyItemMap(0), soldUnits: emptyItemMap(0), townAllocatedUnits: emptyItemMap(0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.purchaseSpend.day = 0;
   market.valueFlow.day = { sales: 0, purchases: 0 };
 }
 
 export function resetWholesaleYear(state, content) {
   const market = ensureWholesaleMarket(state, content);
-  market.year = { intakeUnits: emptyItemMap(0), soldUnits: emptyItemMap(0), townAllocatedUnits: emptyItemMap(0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.year = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.purchaseSpend.year = 0;
   market.valueFlow.year = { sales: 0, purchases: 0 };
 }
@@ -158,7 +165,7 @@ export function purchasePriceFeedback(market, itemId, content) {
 export function refreshWholesalePurchasePrices(state, content) {
   const market = ensureWholesaleMarket(state, content);
   // 只刷新可买卖商品的收购价：小麦不挂牌，不参与价格反馈。
-  for (const itemId of WHOLESALE_MONOPOLY_ITEM_IDS) {
+  for (const itemId of wholesaleMonopolyItemIds(content)) {
     market.purchasePriceIndex[itemId] = purchasePriceFeedback(market, itemId, content);
     market.purchasePricesVoucherPerUnit[itemId] = wholesalePurchasePrice(state, itemId, content);
   }
@@ -168,7 +175,7 @@ export function refreshWholesalePurchasePrices(state, content) {
 // 玩家命令：设做市售价（沿用旧字段/旧命令语义）。小麦归镇库直管，不在批发市场挂价。
 export function setWholesalePrice(state, itemId, value, content) {
   if (itemId === "wheat") return { ok: false, reason: "小麦归镇库直管，不在批发市场挂价买卖" };
-  if (!WHOLESALE_MONOPOLY_ITEM_IDS.includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
+  if (!wholesaleMonopolyItemIds(content).includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
   const price = Math.round(Number(value) * 1000) / 1000;
   if (!Number.isFinite(price) || price <= 0 || price > 1e6) return { ok: false, reason: "批发价须为正的有限数值" };
   const result = setCurrentUnitPrice(state, itemId, price, content);
@@ -181,7 +188,7 @@ export function setWholesalePrice(state, itemId, value, content) {
 // 玩家命令：设做市收购价（0.2.3 新增）。收购价同时成为价格反馈的基准。小麦归镇库直管，不挂收购价。
 export function setWholesalePurchasePrice(state, itemId, value, content) {
   if (itemId === "wheat") return { ok: false, reason: "小麦归镇库直管，不在批发市场挂价买卖" };
-  if (!WHOLESALE_MONOPOLY_ITEM_IDS.includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
+  if (!wholesaleMonopolyItemIds(content).includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
   const price = Math.round(Number(value) * 1000) / 1000;
   if (!Number.isFinite(price) || price <= 0 || price > 1e6) return { ok: false, reason: "收购价须为正的有限数值" };
   const market = ensureWholesaleMarket(state, content);
@@ -204,7 +211,7 @@ export function wholesalePurchaseQuote(state, itemId, content) {
 }
 
 export function setWholesaleTownAllocation(state, itemId, quantity, content) {
-  if (!WHOLESALE_ITEM_IDS.includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
+  if (!wholesaleMarketItemIds(content).includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
   const physical = Number(quantity);
   if (!Number.isFinite(physical) || physical < 0 || physical > 1e9) return { ok: false, reason: "每日调拨量须为非负有限数值" };
   const market = ensureWholesaleMarket(state, content);
@@ -254,7 +261,7 @@ export function transferTownToWholesale(state, itemId, requestedUnits, content, 
 
 // 用户 0.1.11：单次调运之收储——把批发市场库存一次性收回调入镇库（部分可收，按实际有的收），用来平抑库存。
 export function stockpileWholesale(state, itemId, quantityJin, content) {
-  if (!WHOLESALE_ITEM_IDS.includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
+  if (!wholesaleMarketItemIds(content).includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
   if (!hasWholesaleMarket(state)) return { ok: false, reason: "尚未建成批发市场" };
   const requestedUnits = Math.round(Number(quantityJin) * content.precision.inventoryUnitsPerJin);
   if (!Number.isFinite(requestedUnits) || requestedUnits <= 0) return { ok: false, reason: "收储数量须大于0" };
@@ -271,7 +278,7 @@ export function stockpileWholesale(state, itemId, quantityJin, content) {
 
 // 用户 0.1.11：单次调运之投放——把镇库库存一次性投放至批发市场，用来平抑库存。
 export function releaseWholesale(state, itemId, quantityJin, content) {
-  if (!WHOLESALE_ITEM_IDS.includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
+  if (!wholesaleMarketItemIds(content).includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
   const requestedUnits = Math.round(Number(quantityJin) * content.precision.inventoryUnitsPerJin);
   if (!Number.isFinite(requestedUnits) || requestedUnits <= 0) return { ok: false, reason: "投放数量须大于0" };
   const moved = transferTownToWholesale(state, itemId, requestedUnits, content, "镇库一次性投放至批发市场");
@@ -286,7 +293,7 @@ export function releaseWholesale(state, itemId, quantityJin, content) {
 // 与 transferTownToWholesale 的区别：本函数直接搬运「已生产好、尚未定价」的产成品，
 // 且不会因镇库余额不足而失败——这是统购统销的"无偿"语义。
 export function allocateTownOutputToWholesale(state, itemId, units, content, reason = "镇营产出无偿调拨入批发市场") {
-  if (!WHOLESALE_ITEM_IDS.includes(itemId) || units <= 0) return { ok: false, movedUnits: 0 };
+  if (!wholesaleMarketItemIds(content).includes(itemId) || units <= 0) return { ok: false, movedUnits: 0 };
   if (!hasWholesaleMarket(state)) return { ok: false, movedUnits: 0, reason: "尚未建成批发市场" };
   const market = ensureWholesaleMarket(state, content);
   const available = Math.max(0, state.accounts?.town?.[itemId] || 0);
@@ -340,7 +347,7 @@ export function allocateInputToTown(state, itemId, requestedUnits, content, reas
 
 function buyPrivateOutput(state, householdId, itemId, requestedUnits, content) {
   // 小麦归镇库直管：批发市场不向民营收购小麦。
-  if (itemId === "wheat" || !WHOLESALE_MONOPOLY_ITEM_IDS.includes(itemId)) return 0;
+  if (itemId === "wheat" || !wholesaleMonopolyItemIds(content).includes(itemId)) return 0;
   const household = state.households?.byId?.[householdId];
   const market = ensureWholesaleMarket(state, content);
   if (!household) return 0;
@@ -364,7 +371,7 @@ function buyPrivateOutput(state, householdId, itemId, requestedUnits, content) {
 }
 
 export function depositWholesalePurchasedInventory(state, itemId, units, costVoucherUnits, content) {
-  if (!WHOLESALE_ITEM_IDS.includes(itemId) || units <= 0) return { ok: false, units: 0 };
+  if (!wholesaleMarketItemIds(content).includes(itemId) || units <= 0) return { ok: false, units: 0 };
   const market = ensureWholesaleMarket(state, content);
   addInventory(market, itemId, Math.floor(units), Math.max(0, Math.floor(costVoucherUnits || 0)));
   addPeriodMap(market, "intakeUnits", itemId, Math.floor(units));
@@ -378,7 +385,7 @@ export function depositWholesalePurchasedInventory(state, itemId, units, costVou
 // 只搬货、不付钱（镇里内部，AGENTS.md 钱与货规则）。fromTown=true 表示税货已由原子交易记入镇库，这里从镇库扣回。
 // 无批发市场或非统购品时返回 ok:false，调用方保留原来的镇库入账。
 export function depositProductionTaxToWholesale(state, itemId, units, costVoucherUnits, content, { fromTown = false, source = "town", reason = "实物生产税入批发市场" } = {}) {
-  if (!hasWholesaleMarket(state) || !WHOLESALE_MONOPOLY_ITEM_IDS.includes(itemId)) return { ok: false, movedUnits: 0 };
+  if (!hasWholesaleMarket(state) || !wholesaleMonopolyItemIds(content).includes(itemId)) return { ok: false, movedUnits: 0 };
   const quantity = Math.floor(Number(units) || 0);
   if (quantity <= 0) return { ok: false, movedUnits: 0 };
   const market = ensureWholesaleMarket(state, content);
@@ -396,14 +403,14 @@ export function depositProductionTaxToWholesale(state, itemId, units, costVouche
 
 export function runWholesaleIntake(state, productionRows, privateRows, content, options = {}) {
   const market = ensureWholesaleMarket(state, content);
-  if (!hasWholesaleMarket(state)) return { active: false, intakeUnits: emptyItemMap(0) };
-  const moved = emptyItemMap(0);
+  if (!hasWholesaleMarket(state)) return { active: false, intakeUnits: emptyItemMap(content, 0) };
+  const moved = emptyItemMap(content, 0);
 
   // 镇营统购统销（0.2.3）：镇营生产当日产出「无偿调拨」入市，成本基础随货转移，
   // 不再经过镇库账户、也不再向镇库收取内部价。小麦不在统购之列。
   for (const row of productionRows || []) {
     for (const [itemId, units] of Object.entries(row?.outputUnits || {})) {
-      if (!WHOLESALE_ITEM_IDS.includes(itemId) || units <= 0) continue;
+      if (!wholesaleMarketItemIds(content).includes(itemId) || units <= 0) continue;
       if (itemId === "wheat") {
         // 小麦仍归镇库直管：产出先落镇库，再由玩家/固定调拨投放市场。
         const result = transferTownToWholesale(state, itemId, units, content, "镇营小麦产出暂存镇库后投放批发市场");
@@ -418,7 +425,7 @@ export function runWholesaleIntake(state, productionRows, privateRows, content, 
 
   // 政府额外固定调拨，可把镇库小麦或历史库存持续送入批发市场。
   if (options.includeTownAllocation !== false) {
-    for (const itemId of WHOLESALE_ITEM_IDS) {
+    for (const itemId of wholesaleMarketItemIds(content)) {
       const requested = Math.max(0, market.dailyTownAllocationUnits[itemId] || 0);
       if (requested <= 0) continue;
       const result = transferTownToWholesale(state, itemId, requested, content, "政府每日固定调拨至批发市场");
@@ -434,7 +441,7 @@ export function runWholesaleIntake(state, productionRows, privateRows, content, 
   for (const row of privateRows || []) {
     for (const taxRow of row?.taxRows || []) {
       const itemId = taxRow.itemId;
-      if (!WHOLESALE_ITEM_IDS.includes(itemId)) continue;
+      if (!wholesaleMarketItemIds(content).includes(itemId)) continue;
       const units = buyPrivateOutput(state, taxRow.ownerHouseholdId, itemId, taxRow.residentUnits || 0, content);
       moved[itemId] += units;
     }
@@ -478,7 +485,7 @@ export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, 
   }
   // 小麦归镇库直管：批发市场不做小麦的做市买卖，但公司/民营仍可按镇库价采购小麦当生产原料
   //（0.1.1 面包链既有契约）；镇营磨坊走免费内部调拨，不走这里。
-  if (itemId !== "wheat" && !WHOLESALE_MONOPOLY_ITEM_IDS.includes(itemId)) {
+  if (itemId !== "wheat" && !wholesaleMonopolyItemIds(content).includes(itemId)) {
     return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "批发市场不经营这种商品" };
   }
   // 镇库自己领货走内部调拨，不付钱。
@@ -542,14 +549,14 @@ export function readWholesaleMarket(state, content) {
       cumulative: { ...((source.valueFlow || {}).cumulative || {}) }
     }
   };
-  for (const itemId of WHOLESALE_ITEM_IDS) {
+  for (const itemId of wholesaleMarketItemIds(content)) {
     market.inventory[itemId] = Math.max(0, Math.floor(market.inventory[itemId] || 0));
     if (!(Number.isFinite(market.pricesVoucherPerUnit[itemId]) && market.pricesVoucherPerUnit[itemId] > 0)) {
       market.pricesVoucherPerUnit[itemId] = content.rules.wholesaleDefaultSalePrices?.[itemId]
-        ?? content.rules.marketPricesVoucherPerUnit?.[itemId] ?? DEFAULT_SALE_PRICES[itemId] ?? 1;
+        ?? content.rules.marketPricesVoucherPerUnit?.[itemId] ?? content.rules.wholesaleDefaultSalePrices?.[itemId] ?? 1;
     }
     if (!(Number.isFinite(market.purchasePricesVoucherPerUnit[itemId]) && market.purchasePricesVoucherPerUnit[itemId] > 0)) {
-      market.purchasePricesVoucherPerUnit[itemId] = DEFAULT_PURCHASE_PRICES[itemId] ?? market.pricesVoucherPerUnit[itemId];
+      market.purchasePricesVoucherPerUnit[itemId] = content.rules.wholesaleDefaultPurchasePrices?.[itemId] ?? market.pricesVoucherPerUnit[itemId];
     }
     if (!(Number.isFinite(market.purchasePriceReferenceVoucherPerUnit[itemId]) && market.purchasePriceReferenceVoucherPerUnit[itemId] > 0)) {
       market.purchasePriceReferenceVoucherPerUnit[itemId] = market.purchasePricesVoucherPerUnit[itemId];
@@ -573,7 +580,7 @@ export function wholesaleSummary(state, content) {
   const purchasePrices = {};
   const purchaseIndex = {};
   const purchaseReference = {};
-  for (const itemId of WHOLESALE_ITEM_IDS) {
+  for (const itemId of wholesaleMarketItemIds(content)) {
     purchasePrices[itemId] = readPurchasePrice(market, itemId, content);
     purchaseIndex[itemId] = Number(market.purchasePriceIndex?.[itemId] ?? 1);
     purchaseReference[itemId] = Number(market.purchasePriceReferenceVoucherPerUnit?.[itemId] || 0);
@@ -589,8 +596,8 @@ export function wholesaleSummary(state, content) {
     purchasePricesVoucherPerUnit: purchasePrices,
     purchasePriceReferenceVoucherPerUnit: purchaseReference,
     purchasePriceIndex: purchaseIndex,
-    inventory: Object.fromEntries(WHOLESALE_ITEM_IDS.map(itemId => [itemId, (market.inventory[itemId] || 0) / scale])),
-    dailyTownAllocation: Object.fromEntries(WHOLESALE_ITEM_IDS.map(itemId => [itemId, (market.dailyTownAllocationUnits[itemId] || 0) / scale])),
+    inventory: Object.fromEntries(wholesaleMarketItemIds(content).map(itemId => [itemId, (market.inventory[itemId] || 0) / scale])),
+    dailyTownAllocation: Object.fromEntries(wholesaleMarketItemIds(content).map(itemId => [itemId, (market.dailyTownAllocationUnits[itemId] || 0) / scale])),
     cashflow,
     monopoly: { ...market.monopoly },
     valueFlow: { ...market.valueFlow, day: { ...market.valueFlow.day }, year: { ...market.valueFlow.year }, cumulative: { ...market.valueFlow.cumulative } },
@@ -609,9 +616,9 @@ export function snapshotWholesaleHistory(state, content) {
   const snapshot = {
     year: state.year,
     day: state.day,
-    inventory: Object.fromEntries(WHOLESALE_MONOPOLY_ITEM_IDS.map(itemId => [itemId, market.inventory?.[itemId] || 0])),
-    sold: Object.fromEntries(WHOLESALE_MONOPOLY_ITEM_IDS.map(itemId => [itemId, market.day?.soldUnits?.[itemId] || 0])),
-    price: Object.fromEntries(WHOLESALE_MONOPOLY_ITEM_IDS.map(itemId => [itemId, market.pricesVoucherPerUnit?.[itemId] || 0]))
+    inventory: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.inventory?.[itemId] || 0])),
+    sold: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.soldUnits?.[itemId] || 0])),
+    price: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.pricesVoucherPerUnit?.[itemId] || 0]))
   };
   market.history.push(snapshot);
   if (market.history.length > 30) market.history.splice(0, market.history.length - 30);
@@ -631,7 +638,7 @@ export function wholesaleTrends(state, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   const history = market.history || [];
   const result = {};
-  for (const itemId of WHOLESALE_MONOPOLY_ITEM_IDS) {
+  for (const itemId of wholesaleMonopolyItemIds(content)) {
     const avgSoldJin = wholesaleAvgSoldUnits(state, itemId, content, 7) / scale;
     const stockJin = (market.inventory?.[itemId] || 0) / scale;
     result[itemId] = {

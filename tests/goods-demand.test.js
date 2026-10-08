@@ -27,8 +27,7 @@ test("酒、布按人口产生日需求；家里有就用掉并加舒心值，�
   const household = householdList(state)[0];
   const n = householdPopulation(household);
   assert.equal(goodsComfortPoints(state, household, n, {}, CONTENT), 0, "没有酒和布时没有加成，也不扣分");
-  household.inventory.cloth = 10 * I;
-  household.inventory.wine = 10 * I;
+  for (const itemId of Object.keys(CONTENT.rules.householdGoods)) household.inventory[itemId] = 10 * I;
   consumeGoods(state, CONTENT);
   const life = household.life.day;
   assert.ok(life.clothConsumedUnits > 0 && life.wineConsumedUnits > 0);

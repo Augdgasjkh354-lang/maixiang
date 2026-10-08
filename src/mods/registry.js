@@ -1,5 +1,5 @@
-// 已启用 mod 的行为清单（每日步骤、命令、界面、美术…）。与 content-registry.js 一一对应。
-// 见 MODDING.md。
+// 已启用 mod 的行为（见 MODDING.md）。加 mod：import 一行 + 数组里加一项。
+import tea from "./tea/mod.js";
+import pottery from "./pottery/mod.js";
 
-export const MODS = [
-];
+export const MODS = [tea, pottery];

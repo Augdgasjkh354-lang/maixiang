@@ -59,8 +59,24 @@ test("模板 mod 端到端：开局有 mod 状态，茶园采茶、每日步骤�
   assert.equal(modComfortPoints(state, null, 1, {}, content, [templateMod]), 0);
 });
 
-test("未登记 mod 时游戏照常：mods 状态为空，建筑美术回落到核心", () => {
-  const state = createInitialState({ content: CONTENT });
+test("不含 mod 的核心内容照常开局：mods 状态为空，建筑美术回落到核心", () => {
+  const state = createInitialState({ content: assembleContent(CORE_CONTENT, []) });
   assert.deepEqual(state.mods, {});
   assert.ok(renderBuildingArt("mill", { level: 1 }).length > 0);
+});
+
+test("加 mod 之前的旧存档能读：补出 mod 状态、外镇新商品库存、批发市场新商品", async () => {
+  const { migrateSave } = await import("../src/persistence/migrations.js");
+  const { simulation } = await import("../src/engine.js");
+  const coreOnly = assembleContent(CORE_CONTENT, []);
+  const old = JSON.parse(JSON.stringify(createInitialState({ content: coreOnly, seed: 7 })));
+  delete old.mods;
+  const loaded = migrateSave(old, CONTENT);
+  for (const modContent of Object.values(CONTENT.modStates || {})) assert.ok(modContent);
+  for (const id of Object.keys(CONTENT.modStates || {})) assert.ok(loaded.mods[id], `补出 mods.${id}`);
+  for (const [townId, profile] of Object.entries(CONTENT.outsideTowns)) {
+    for (const itemId of Object.keys(profile.goods)) assert.ok(Number.isFinite(loaded.outsideTowns[townId].stocks[itemId]), `${townId}.${itemId}`);
+  }
+  for (let i = 0; i < 5; i++) simulation.advanceDay(loaded);
+  assert.equal(simulation.validateState(loaded).valid, true, simulation.validateState(loaded).errors.join("；"));
 });
