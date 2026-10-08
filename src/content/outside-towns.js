@@ -24,7 +24,7 @@ export const OUTSIDE_TOWNS = Object.freeze({
     population: 3500,
     landMu: 10000,
     // 每年开垦的新耕地；耕地决定口粮上限，从而决定人口能长多大。
-    landGrowthMuPerYear: 100,
+    landGrowthMuPerYear: 500,
     yieldPerMuJin: 300,
     foodPerPersonDayJin: 2,
     wheatStockJin: 3000000,
@@ -50,7 +50,7 @@ export const OUTSIDE_TOWNS = Object.freeze({
     description: "宗族治理的富庶小镇，讲究衣着、好饮酒；布几乎全靠外购，盐木同样不产。",
     population: 3500,
     landMu: 10000,
-    landGrowthMuPerYear: 100,
+    landGrowthMuPerYear: 500,
     yieldPerMuJin: 300,
     foodPerPersonDayJin: 2,
     wheatStockJin: 3000000,
