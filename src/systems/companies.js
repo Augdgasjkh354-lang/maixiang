@@ -479,7 +479,7 @@ export function previewShareSubscription(state, companyId, content) {
   const affordableShares = householdList(state).filter(household => isActiveHousehold(household) && household.id !== sellerHouseholdId)
     .reduce((sum, household) => sum + householdShareCapacity(paymentState, household, priceUnits, content), 0);
   const residentCash = maximumPayableValueUnits(paymentState, "residents", content);
-  const actualPerformance = companyActualProfitValuation(state, company, content);
+  const actualPerformance = companyActualProfitValuation(state, company, content, content.rules.stockProfitWindowDays);
   const observedDays = actualPerformance.observedDays;
   const realizedProfit = actualPerformance.actualProfitVoucherUnits;
   const annualizedProfit = actualPerformance.annualizedProfitVoucherUnits;
@@ -875,8 +875,8 @@ export function settleAnnualCompanyProfits(state, endingYear, content) {
 
 export const settleAnnualCompanyDividends = settleAnnualCompanyProfits;
 
-export function companyActualProfitValuation(state, company, content) {
-  const horizon = content.rules.operatingRightValuationDays || 365;
+export function companyActualProfitValuation(state, company, content, horizonDays = null) {
+  const horizon = horizonDays || content.rules.operatingRightValuationDays || 365;
   const serialNow = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
   const rows = (company.history || []).filter(row => Number.isInteger(row.serial) && row.serial > serialNow - horizon && row.serial <= serialNow);
   const currentSerial = serialNow;
@@ -956,7 +956,7 @@ export function resetCompanyYear(state, content, closingYear = null) {
 
 export function companySummary(state, company, content) {
   const scale = currencyScale(content);
-  const actualPerformance = companyActualProfitValuation(state, company, content);
+  const actualPerformance = companyActualProfitValuation(state, company, content, content.rules.stockProfitWindowDays);
   const annualizedProfitUnits = actualPerformance.annualizedProfitVoucherUnits;
   const epsUnits = company.totalShares > 0 ? annualizedProfitUnits / company.totalShares : 0;
   const sharePrice = company.shareSale?.sharePriceVoucherUnits || 0;

@@ -146,3 +146,14 @@ test("业绩锚跟着合理价走；观察够了仍不赚钱，锚缓慢下滑",
   settleStockMarketDay(state, CONTENT);
   assert.ok(company.stockMarket.anchorUnits < before, "亏损公司的锚下滑");
 });
+
+test("股票看利润只看最近 60 天：更早的利润不计", () => {
+  const { state, company } = listedState({ price: 2 });
+  state.year = 1; state.day = 200;
+  company.history = [];
+  for (let serial = 1; serial <= 199; serial += 1) company.history.push({ serial, profitVoucherUnits: serial > 140 ? 5 * V : 1000 * V, revenueVoucherUnits: 0, soldUnits: 0 });
+  const performance = stockReference(state, company, CONTENT);
+  assert.equal(performance.observedDays, 60);
+  // 近 60 天每天 5 粮券（含当日 0）→ 折年约 5×59×365/60，早先每天 1000 的利润不算。
+  assert.ok(performance.annualizedProfitVoucherUnits / V < 2500, `折年利润 ${performance.annualizedProfitVoucherUnits / V}`);
+});

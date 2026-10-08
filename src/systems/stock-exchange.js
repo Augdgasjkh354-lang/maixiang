@@ -197,7 +197,7 @@ export function configureListedShareOffer(state, companyId, offeredShares, price
 
 export function stockReference(state, company, content) {
   const scale = currencyScale(content);
-  const profit = companyActualProfitValuation(state, company, content);
+  const profit = companyActualProfitValuation(state, company, content, content.rules.stockProfitWindowDays);
   const basisUnits = stockFairValueUnits(profit, content);
   return {
     ...profit,

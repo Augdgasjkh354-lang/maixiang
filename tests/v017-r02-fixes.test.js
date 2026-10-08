@@ -62,22 +62,22 @@ test("r02 股票认购与界面估值共用日历日实际利润窗口，停工�
   state.year = 1;
   state.day = 364;
   company.history = [];
-  for (let serial = 1; serial <= 30; serial += 1) company.history.push({ serial, profitVoucherUnits: 100 * V, revenueVoucherUnits: 100 * V });
+  // 股票看最近 60 个日历日（305—364）：前 30 天赚钱、后 30 天停工，停工日也计入窗口。
+  for (let serial = 305; serial <= 334; serial += 1) company.history.push({ serial, profitVoucherUnits: 100 * V, revenueVoucherUnits: 100 * V });
   company.accounts.day.profitVoucherUnits = 0;
   company.operatingDays = 30; // 旧口径若仍生效会把3000年化为36500。
 
   const view = simulation.selectDashboard(state);
   const viewCompany = view.companies.find(row => row.id === company.id);
   const preview = simulation.previewShareSubscription(state, company.id);
-  const expectedAnnualized = Math.round(3000 * V * 365 / 364);
-  assert.equal(viewCompany.stockReference.observedDays, 364);
-  assert.equal(preview.observedDays, 364);
+  const expectedAnnualized = Math.round(3000 * V * 365 / 60);
+  assert.equal(viewCompany.stockReference.observedDays, 60);
+  assert.equal(preview.observedDays, 60);
   assert.equal(preview.realizedProfitVoucherUnits, 3000 * V);
   assert.equal(preview.annualizedProfitVoucherUnits, expectedAnnualized);
   assert.equal(preview.referenceCompanyValueVoucherUnits, viewCompany.stockReference.referenceCompanyValueVoucherUnits, "认购预览和交易所必须使用同一估值");
   assert.equal(preview.referencePerShareVoucherUnits, viewCompany.stockReference.referencePerShareVoucherUnits);
   assert.equal(preview.subscribedShares, Math.floor(400 * Math.min(1, preview.referencePerShareVoucherUnits / (100 * V))));
-  assert.notEqual(preview.subscribedShares, 400);
   assert.match(preview.basis, /日历日/);
 
   const executed = simulation.subscribeShares(state, company.id);
