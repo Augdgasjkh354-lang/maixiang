@@ -85,6 +85,11 @@ export const RULES = Object.freeze({
   stallRentDefaultVoucher: 2,
   // 时代广场集市：默认允许摆摊人数。
   stallKeeperDefaultLimit: 50,
+  // 集市补贴：免租时长（天，三个月/半年/一年/三年）；批发特价三档，每斤少收 0.1/0.2/0.4 斤小麦（第 0 档不打折）。
+  stallRentFreeOptionsDays: Object.freeze([90, 182, 365, 1095]),
+  stallWholesaleDiscountTiers: Object.freeze([0, 0.1, 0.2, 0.4]),
+  // 集市售价：比综合商店便宜 3%，不低于进价。
+  stallUndercutPercent: 3,
   shopProfitTaxDefaultPercent: 10,
   shopProfitTaxMaximumPercent: 80,
   shopSettlementDays: 30,
@@ -173,7 +178,8 @@ export const RULES = Object.freeze({
     // 时代广场集市：一座广场一个集体摊位，待业的人自动来摆，人数按销量增减（不超过允许人数）。
     // 从批发市场进少量日用品（不卖主食），每人每日最多卖 25 斤（一摊 2 人 50 斤），按摊交租；每天的利润按人头 ×0.8—1.2 随机分给摆摊家庭。
     stall: Object.freeze({ id: "stall", name: "集市", kind: "stall", hostBuildingTypeId: "times_square", maxClerks: 0,
-      startupVoucher: 200, perKeeperSalesJin: 25, markupPercent: 10, settlementDays: 1, workingCapitalReserveDays: 2 }),
+      startupVoucher: 200, perKeeperSalesJin: 25, markupPercent: 10, // markupPercent 只在镇上没有综合商店时用
+      settlementDays: 1, workingCapitalReserveDays: 2 }),
     // 兼容旧调用；新开店会统一归一为综合商店。
     grain: Object.freeze({ id: "grain", name: "粮店", kind: "legacy_retail", itemId: "wheat", aliasOf: "general" }),
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),

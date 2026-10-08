@@ -23,6 +23,7 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
   const productId = itemId || raw.itemId || def.itemId || def.itemIds?.[0];
   if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
   const wholesale = currentUnitPrice(state, productId, content);
+  if (def.kind === "stall") return stallTradePrices(state, def, content, productId, wholesale);
   const markup = def.id === "general" ? Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
   let retail = wholesale * (1 + markup);
   if (def.id === "general" && shop) {
@@ -36,6 +37,21 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
     retail = Math.max(wholesale, retail);
   }
   return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: wholesale };
+}
+
+// 集市：进价 = 批发价减特价补贴；售价比镇上最便宜的综合商店低一点（stallUndercutPercent），没有商店时按批发价加成，且不低于进价。
+function stallTradePrices(state, def, content, productId, wholesale) {
+  const tiers = content.rules.stallWholesaleDiscountTiers || [0];
+  const tier = Math.max(0, Math.min(tiers.length - 1, Math.floor(state.policy?.stallDiscountTier || 0)));
+  const cost = Math.max(wholesale * 0.1, wholesale - (tiers[tier] || 0));
+  const storePrices = Object.values(state.shops || {})
+    .filter(shop => shop.status === "open" && shop.typeId === "general")
+    .map(shop => shopTradePrices(state, "general", content, productId, shop)?.retailVoucherPerUnit)
+    .filter(price => price > 0);
+  const reference = storePrices.length
+    ? Math.min(...storePrices) * (1 - Math.max(0, content.rules.stallUndercutPercent ?? 3) / 100)
+    : wholesale * (1 + Math.max(0, def.markupPercent ?? 10) / 100);
+  return { ...def, itemId: productId, retailVoucherPerUnit: Math.max(cost, reference), wholesaleVoucherPerUnit: cost, listWholesaleVoucherPerUnit: wholesale };
 }
 
 // 内联版本，避免 operating-plan 反向 import 整个 shop-pricing 模块造成循环依赖。

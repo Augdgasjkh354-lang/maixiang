@@ -214,6 +214,8 @@ export function createInitialState(options) {
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
       stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,
+      stallRentFreeUntilSerial: 0,
+      stallDiscountTier: 0,
       shopProfitTaxPercent: content.rules.shopProfitTaxDefaultPercent ?? 10,
       autosaveMonths: 1,
       agricultureTaxRecent: Array.from({ length: content.rules.agricultureTaxLookbackDays || 30 }, (_, index) => ({

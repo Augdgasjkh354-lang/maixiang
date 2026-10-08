@@ -275,6 +275,24 @@ export function setStallRent(state, voucher) {
   return { ok: true, value: state.policy.stallRentVoucher };
 }
 
+// 集市免租：days 为 0 取消，否则必须是规则里的选项（三个月/半年/一年/三年），从今天起算。
+export function setStallRentFree(state, days, content) {
+  const value = Math.floor(Number(days));
+  const options = content.rules.stallRentFreeOptionsDays || [];
+  if (value !== 0 && !options.includes(value)) return { ok: false, reason: "免租时长只能是三个月、半年、一年或三年" };
+  const serial = (Math.max(1, state.year || 1) - 1) * content.rules.daysPerYear + (state.day || 0);
+  state.policy.stallRentFreeUntilSerial = value === 0 ? 0 : serial + value;
+  return { ok: true, days: value };
+}
+
+export function setStallDiscountTier(state, tier, content) {
+  const value = Math.floor(Number(tier));
+  const max = (content.rules.stallWholesaleDiscountTiers || [0]).length - 1;
+  if (!Number.isFinite(value) || value < 0 || value > max) return { ok: false, reason: `特价等级须为0—${max}` };
+  state.policy.stallDiscountTier = value;
+  return { ok: true, tier: value };
+}
+
 export function setStallKeeperLimit(state, people) {
   const value = Math.floor(Number(people));
   if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "允许摆摊人数须为非负整数" };

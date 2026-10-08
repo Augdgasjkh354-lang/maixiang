@@ -1306,6 +1306,22 @@ export function mountGame(root) {
       changed(true); render(true);
       return;
     }
+    const stallRentFree = closest(target, "[data-stall-rent-free]");
+    if (stallRentFree && state) {
+      const result = simulation.setStallRentFree(state, Number(stallRentFree.dataset.stallRentFree));
+      if (!result.ok) { showToast(result.reason); return; }
+      changed(true); render(true);
+      showToast(result.days ? `集市免租${stallRentFree.dataset.label || result.days + "天"}，从今天起算。` : "已取消集市免租。");
+      return;
+    }
+    const stallDiscount = closest(target, "[data-stall-discount]");
+    if (stallDiscount && state) {
+      const result = simulation.setStallDiscountTier(state, Number(stallDiscount.dataset.stallDiscount));
+      if (!result.ok) { showToast(result.reason); return; }
+      changed(true); render(true);
+      showToast(result.tier ? `集市批发特价改为第${result.tier}档。` : "已取消集市批发特价。");
+      return;
+    }
     const shopClose = closest(target, "[data-shop-close]");
     if (shopClose && state) {
       const result = simulation.closeResidentShop(state, shopClose.dataset.shopClose);

@@ -641,8 +641,10 @@ export function procureShopInventory(state, shop, content) {
     // 综合商店先从养殖场进肉，不够再找批发市场。
     const fromFarms = def?.id === "general" && content.items[row.itemId]?.livestock ? buyFromFarms(state, shop, row.itemId, need, content) : 0;
     const purchase = need - fromFarms > 0
-      ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`)
+      ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`,
+        { discountPerUnit: shop.collective ? stallDiscountPerUnit(state, content) : 0 })
       : { boughtUnits: 0, paidVoucherUnits: 0 };
+    if (purchase.subsidyVoucherUnits > 0) addBookValue(shop, "subsidyVoucherUnits", purchase.subsidyVoucherUnits);
     const bought = (purchase.boughtUnits || 0) + fromFarms;
     const wholesaleBought = purchase.boughtUnits || 0;
     if (wholesaleBought > 0) {
@@ -678,12 +680,14 @@ function accrueDailyLiabilities(state, shop, content) {
   const clerkWage = Math.round(clerkAssignments.reduce((sum, row) => sum + row.count, 0) * clerkRate * scale);
   const wage = merchantWage + clerkWage;
   // 负值保护：租金/工资取max(0)，避免负负债（之前无保护）。
-  const rentVoucher = shopKind(shop, content) === "stall"
+  const rentFree = shop.collective && stallRentFreeDaysLeft(state, content) > 0;
+  const rentVoucher = rentFree ? 0 : shopKind(shop, content) === "stall"
     ? (state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2)
     : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
   // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
   const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
   const rent = Math.max(0, Math.round(rentVoucher * rentUnits * scale));
+  if (rentFree) addBookValue(shop, "rentWaivedVoucherUnits", Math.round((state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2) * rentUnits * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
   if (!shop.collective) accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
   accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
@@ -946,6 +950,18 @@ export function openCollectiveShop(state, building, typeId, content) {
     "collective_shop_advance", `镇库垫付${shop.name}启动资金`, { requireFull: false });
   shop.townAdvanceVoucherUnits = paid.paidValueUnits || 0;
   return shop;
+}
+
+// 集市补贴：免租剩余天数、批发特价（每单位少收多少斤）。
+export function stallRentFreeDaysLeft(state, content) {
+  const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
+  return Math.max(0, (state.policy?.stallRentFreeUntilSerial || 0) - serial);
+}
+
+export function stallDiscountPerUnit(state, content) {
+  const tiers = content.rules.stallWholesaleDiscountTiers || [0];
+  const tier = Math.max(0, Math.min(tiers.length - 1, Math.floor(state.policy?.stallDiscountTier || 0)));
+  return tiers[tier] || 0;
 }
 
 // 集市没钱也没货、垫款已还清时，镇库再垫一次启动资金，避免永久停摆。
@@ -1430,6 +1446,13 @@ export function stallSquareSummaries(state, content, summaries = shopSummaries(s
       distributedTotalVoucher: (source?.accounts?.cumulative?.distributedVoucherUnits || 0) / scale,
       payout: payout ? { households: payout.households, min: payout.minPerKeeperUnits / scale, max: payout.maxPerKeeperUnits / scale, average: payout.averagePerKeeperUnits / scale } : null,
       townAdvanceVoucher: (source?.townAdvanceVoucherUnits || 0) / scale,
+      rentFreeDaysLeft: stallRentFreeDaysLeft(state, content),
+      rentFreeOptionsDays: [...(content.rules.stallRentFreeOptionsDays || [])],
+      discountTier: Math.max(0, Math.floor(state.policy?.stallDiscountTier || 0)),
+      discountTiers: [...(content.rules.stallWholesaleDiscountTiers || [0])],
+      rentWaivedTotalVoucher: (source?.accounts?.cumulative?.rentWaivedVoucherUnits || 0) / scale,
+      subsidyTotalVoucher: (source?.accounts?.cumulative?.subsidyVoucherUnits || 0) / scale,
+      subsidyDayVoucher: (source?.accounts?.day?.subsidyVoucherUnits || 0) / scale,
       inventoryRows: (row?.inventoryRows || []).filter(item => item.stock > 0 || item.averageDailySales > 0),
       statusReason: row?.statusReason || "未开放摆摊",
       stockJin: (row?.inventoryRows || []).reduce((sum, item) => sum + item.stock, 0),

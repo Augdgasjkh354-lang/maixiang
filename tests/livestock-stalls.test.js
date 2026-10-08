@@ -172,3 +172,39 @@ test("拆除时代广场：集市自动结束，余钱和货不凭空消失，�
   simulation.advanceDays(state, 2);
   valid(state);
 });
+
+test("集市免租：三个月/半年/一年/三年，免租期内不交摊租，到期恢复；只能选这四档", () => {
+  const { state } = town(6109);
+  state.wholesaleMarket.inventory.wine = 3000 * I;
+  assert.equal(simulation.setStallRentFree(state, 45).ok, false);
+  assert.equal(simulation.setStallRentFree(state, 90).ok, true);
+  simulation.advanceDays(state, 10);
+  const market = collective(state);
+  assert.equal(market.accounts.cumulative.rentExpenseVoucherUnits || 0, 0, "免租期内不交租");
+  assert.ok((market.accounts.cumulative.rentWaivedVoucherUnits || 0) > 0, "记下免掉的租");
+  assert.equal(simulation.setStallRentFree(state, 0).ok, true, "可以取消");
+  simulation.advanceDays(state, 5);
+  assert.ok((market.accounts.cumulative.rentExpenseVoucherUnits || 0) > 0, "取消后恢复收租");
+  for (const days of [182, 365, 1095]) assert.equal(simulation.setStallRentFree(state, days).ok, true);
+  valid(state);
+});
+
+test("集市批发特价三档：进价每斤少 0.1/0.2/0.4，差价记为补贴；售价比综合商店低一点、不低于进价", () => {
+  const { state } = town(6110);
+  state.wholesaleMarket.inventory.wine = 3000 * I;
+  simulation.advanceDays(state, 2);
+  const market = collective(state);
+  const store = Object.values(state.shops).find(s => s.typeId === "general");
+  const list = shopTradePrices(state, "stall", CONTENT, "wine", market).listWholesaleVoucherPerUnit;
+  for (const [tier, cut] of [[0, 0], [1, 0.1], [2, 0.2], [3, 0.4]]) {
+    assert.equal(simulation.setStallDiscountTier(state, tier).ok, true);
+    const prices = shopTradePrices(state, "stall", CONTENT, "wine", market);
+    assert.ok(Math.abs(prices.wholesaleVoucherPerUnit - (list - cut)) < 1e-9, `第${tier}档进价`);
+    const storePrice = shopTradePrices(state, "general", CONTENT, "wine", store).retailVoucherPerUnit;
+    assert.ok(prices.retailVoucherPerUnit < storePrice && prices.retailVoucherPerUnit >= prices.wholesaleVoucherPerUnit);
+  }
+  assert.equal(simulation.setStallDiscountTier(state, 4).ok, false);
+  simulation.advanceDays(state, 10);
+  assert.ok((market.accounts.cumulative.subsidyVoucherUnits || 0) > 0, "特价进货记了补贴");
+  valid(state);
+});

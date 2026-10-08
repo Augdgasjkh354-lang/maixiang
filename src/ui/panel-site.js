@@ -181,7 +181,7 @@ function timesSquareMarkup(view, building, development) {
   const stallLimit = view.policy?.stallKeeperLimit ?? square.keeperLimit ?? 50;
   const rentVoucher = view.policy?.stallRentVoucher ?? square.rentVoucher ?? 2;
   const payout = square.payout;
-  const goods = (square.inventoryRows || []).map(row => `<div class="row"><span class="label">${escapeHtml(row.itemName)}</span><strong class="value">存${number(row.stock, 1)} · 日均售${number(row.averageDailySales, 1)} · 售${number(row.retailVoucher, 2)}${escapeHtml(unit)}</strong></div>`).join("");
+  const goods = (square.inventoryRows || []).map(row => `<div class="row"><span class="label">${escapeHtml(row.itemName)}</span><strong class="value">存${number(row.stock, 1)} · 日均售${number(row.averageDailySales, 1)} · 进${number(row.wholesaleVoucher, 2)} 售${number(row.retailVoucher, 2)}${escapeHtml(unit)}</strong></div>`).join("");
   const market = `<div class="cardlet"><div class="row"><strong>集市</strong><span class="badge">${escapeHtml(square.statusReason || "未开放摆摊")}</span></div>
     <div class="row"><span class="label">摆摊人数 / 上限</span><strong class="value">${number(square.keepers || 0)} / ${number(square.keeperCap ?? stallLimit)}人</strong></div>
     <div class="row"><span class="label">占用摊位 / 总数</span><strong class="value">${number(square.stallsUsed || 0)} / ${number(slots)}</strong></div>
@@ -198,7 +198,16 @@ function timesSquareMarkup(view, building, development) {
     <div class="cardlet"><div class="setting-title">摆摊政策</div>
       <div class="row"><span class="label">允许摆摊人数（全镇）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-limit:square", kind: "stall-limit", target: "stalls", value: stallLimit, label: "允许摆摊人数", integer: true, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>人</b></div></div>
       <div class="row"><span class="label">摊租（每摊每日）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent:square", kind: "stall-rent", target: "stalls", value: rentVoucher, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${escapeHtml(unit)}</b></div></div>
-      <div class="subtle">待业的人自动来摆，按销量增减人手；只卖日用品不卖主食，每人每日最多卖${number(square.perKeeperSalesJin || 25)}斤（一摊2人），比商店便宜。每天的利润按人头分给摆摊家庭，各户随机多拿少拿两成。</div>
+      <div class="setting-title">免租${(square.rentFreeDaysLeft || 0) > 0 ? `（还剩${number(square.rentFreeDaysLeft)}天）` : ""}</div>
+      <div class="settings-actions">${(square.rentFreeOptionsDays || []).map((days, index) => {
+        const label = ["三个月", "半年", "一年", "三年"][index] || `${days}天`;
+        return `<button class="secondary" data-stall-rent-free="${days}" data-label="${label}">${label}</button>`;
+      }).join("")}${(square.rentFreeDaysLeft || 0) > 0 ? `<button class="secondary" data-stall-rent-free="0">取消免租</button>` : ""}</div>
+      <div class="setting-title">批发特价（集市进货每斤少收）</div>
+      <div class="settings-actions">${(square.discountTiers || [0]).map((cut, tier) =>
+        `<button class="${tier === (square.discountTier || 0) ? "primary" : "secondary"}" data-stall-discount="${tier}">${tier === 0 ? "不打折" : `${["", "一", "二", "三"][tier] || tier}级 −${number(cut, 1)}斤`}</button>`).join("")}</div>
+      <div class="row"><span class="label">累计免掉摊租 / 特价补贴</span><strong class="value">${number(square.rentWaivedTotalVoucher || 0, 1)} / ${number(square.subsidyTotalVoucher || 0, 1)}${escapeHtml(unit)}</strong></div>
+      <div class="subtle">待业的人自动来摆，按销量增减人手；只卖日用品不卖主食，每人每日最多卖${number(square.perKeeperSalesJin || 25)}斤（一摊2人），售价比综合商店低一点（不低于进价）。每天的利润按人头分给摆摊家庭，各户随机多拿少拿两成。</div>
     </div>${developmentMarkup(view, building, development)}`;
 }
 

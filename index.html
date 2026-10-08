@@ -1076,6 +1076,11 @@ const __mxmod2 = (() => {
   stallRentDefaultVoucher: 2,
   // 时代广场集市：默认允许摆摊人数。
   stallKeeperDefaultLimit: 50,
+  // 集市补贴：免租时长（天，三个月/半年/一年/三年）；批发特价三档，每斤少收 0.1/0.2/0.4 斤小麦（第 0 档不打折）。
+  stallRentFreeOptionsDays: Object.freeze([90, 182, 365, 1095]),
+  stallWholesaleDiscountTiers: Object.freeze([0, 0.1, 0.2, 0.4]),
+  // 集市售价：比综合商店便宜 3%，不低于进价。
+  stallUndercutPercent: 3,
   shopProfitTaxDefaultPercent: 10,
   shopProfitTaxMaximumPercent: 80,
   shopSettlementDays: 30,
@@ -1164,7 +1169,8 @@ const __mxmod2 = (() => {
     // 时代广场集市：一座广场一个集体摊位，待业的人自动来摆，人数按销量增减（不超过允许人数）。
     // 从批发市场进少量日用品（不卖主食），每人每日最多卖 25 斤（一摊 2 人 50 斤），按摊交租；每天的利润按人头 ×0.8—1.2 随机分给摆摊家庭。
     stall: Object.freeze({ id: "stall", name: "集市", kind: "stall", hostBuildingTypeId: "times_square", maxClerks: 0,
-      startupVoucher: 200, perKeeperSalesJin: 25, markupPercent: 10, settlementDays: 1, workingCapitalReserveDays: 2 }),
+      startupVoucher: 200, perKeeperSalesJin: 25, markupPercent: 10, // markupPercent 只在镇上没有综合商店时用
+      settlementDays: 1, workingCapitalReserveDays: 2 }),
     // 兼容旧调用；新开店会统一归一为综合商店。
     grain: Object.freeze({ id: "grain", name: "粮店", kind: "legacy_retail", itemId: "wheat", aliasOf: "general" }),
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),
@@ -2512,7 +2518,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod18 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-a6b2ae8";
+       const BUILD_ID = "0203-57a1f6c";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -5184,7 +5190,8 @@ function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, conten
 
 // ---------------------------------------------------------------- 销售（做市商卖出）
 
-       function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, content, reason = "从批发市场采购") {
+// options.discountPerUnit：镇里给的特价补贴（每单位少收多少斤），差价由镇库承担，记在返回的 subsidyVoucherUnits。
+       function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, content, reason = "从批发市场采购", options = {}) {
   const market = ensureWholesaleMarket(state, content);
   if (!hasWholesaleMarket(state)) {
     // 基线清理：无批发市场时回退到镇库直购（0.1.10 契约：生产原料可优先从镇库供应）。
@@ -5209,12 +5216,14 @@ function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, conten
     : Math.max(0, market.inventory[itemId] || 0);
   let units = Math.min(available, Math.max(0, Math.floor(requestedUnits)));
   if (units <= 0) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "批发市场缺货" };
-  const price = wholesaleUnitPrice(state, itemId, content);
+  const listPrice = wholesaleUnitPrice(state, itemId, content);
+  const price = Math.max(listPrice * 0.1, listPrice - Math.max(0, Number(options.discountPerUnit) || 0));
   const maxPayable = maximumPayableValueUnits(state, buyerOwner, content);
   const maxUnitsByCash = price > 0 ? Math.floor(maxPayable * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))) : 0;
   units = Math.min(units, Math.max(0, maxUnitsByCash));
   if (units <= 0) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "采购方资金不足" };
-  const value = priceValueUnits(itemId, units, state, content);
+  const fullValue = priceValueUnits(itemId, units, state, content);
+  const value = price < listPrice ? Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content)) : fullValue;
   const householdId = householdIdOf(buyerOwner);
   const household = householdId ? state.households?.byId?.[householdId] : null;
   const maxWheatUnits = household ? householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) : undefined;
@@ -5235,7 +5244,7 @@ function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, conten
   addValueFlow(market, "sales", value);
   // 售价也随库存回落：卖得越多收购价回升（反馈在 intake 末尾刷新，这里同步一次）。
   refreshWholesalePurchasePrices(state, content);
-  return { ok: true, boughtUnits: removed.units, paidVoucherUnits: value, unitPrice: price };
+  return { ok: true, boughtUnits: removed.units, paidVoucherUnits: value, unitPrice: price, subsidyVoucherUnits: Math.max(0, fullValue - value) };
 }
 
 // 只读视图：把默认值作用在一份浅拷贝上，绝不回写 state（0.1.8 selector 纯度要求）。
@@ -6108,6 +6117,8 @@ function emptyRentPeriod() {
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
       stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,
+      stallRentFreeUntilSerial: 0,
+      stallDiscountTier: 0,
       shopProfitTaxPercent: content.rules.shopProfitTaxDefaultPercent ?? 10,
       autosaveMonths: 1,
       agricultureTaxRecent: Array.from({ length: content.rules.agricultureTaxLookbackDays || 30 }, (_, index) => ({
@@ -8351,6 +8362,7 @@ function daySerial(state, content) {
   const productId = itemId || raw.itemId || def.itemId || def.itemIds?.[0];
   if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
   const wholesale = currentUnitPrice(state, productId, content);
+  if (def.kind === "stall") return stallTradePrices(state, def, content, productId, wholesale);
   const markup = def.id === "general" ? Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
   let retail = wholesale * (1 + markup);
   if (def.id === "general" && shop) {
@@ -8364,6 +8376,21 @@ function daySerial(state, content) {
     retail = Math.max(wholesale, retail);
   }
   return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: wholesale };
+}
+
+// 集市：进价 = 批发价减特价补贴；售价比镇上最便宜的综合商店低一点（stallUndercutPercent），没有商店时按批发价加成，且不低于进价。
+function stallTradePrices(state, def, content, productId, wholesale) {
+  const tiers = content.rules.stallWholesaleDiscountTiers || [0];
+  const tier = Math.max(0, Math.min(tiers.length - 1, Math.floor(state.policy?.stallDiscountTier || 0)));
+  const cost = Math.max(wholesale * 0.1, wholesale - (tiers[tier] || 0));
+  const storePrices = Object.values(state.shops || {})
+    .filter(shop => shop.status === "open" && shop.typeId === "general")
+    .map(shop => shopTradePrices(state, "general", content, productId, shop)?.retailVoucherPerUnit)
+    .filter(price => price > 0);
+  const reference = storePrices.length
+    ? Math.min(...storePrices) * (1 - Math.max(0, content.rules.stallUndercutPercent ?? 3) / 100)
+    : wholesale * (1 + Math.max(0, def.markupPercent ?? 10) / 100);
+  return { ...def, itemId: productId, retailVoucherPerUnit: Math.max(cost, reference), wholesaleVoucherPerUnit: cost, listWholesaleVoucherPerUnit: wholesale };
 }
 
 // 内联版本，避免 operating-plan 反向 import 整个 shop-pricing 模块造成循环依赖。
@@ -9703,8 +9730,10 @@ function removeShopInventoryCost(shop, itemId, units) {
     // 综合商店先从养殖场进肉，不够再找批发市场。
     const fromFarms = def?.id === "general" && content.items[row.itemId]?.livestock ? buyFromFarms(state, shop, row.itemId, need, content) : 0;
     const purchase = need - fromFarms > 0
-      ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`)
+      ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`,
+        { discountPerUnit: shop.collective ? stallDiscountPerUnit(state, content) : 0 })
       : { boughtUnits: 0, paidVoucherUnits: 0 };
+    if (purchase.subsidyVoucherUnits > 0) addBookValue(shop, "subsidyVoucherUnits", purchase.subsidyVoucherUnits);
     const bought = (purchase.boughtUnits || 0) + fromFarms;
     const wholesaleBought = purchase.boughtUnits || 0;
     if (wholesaleBought > 0) {
@@ -9740,12 +9769,14 @@ function accrueDailyLiabilities(state, shop, content) {
   const clerkWage = Math.round(clerkAssignments.reduce((sum, row) => sum + row.count, 0) * clerkRate * scale);
   const wage = merchantWage + clerkWage;
   // 负值保护：租金/工资取max(0)，避免负负债（之前无保护）。
-  const rentVoucher = shopKind(shop, content) === "stall"
+  const rentFree = shop.collective && stallRentFreeDaysLeft(state, content) > 0;
+  const rentVoucher = rentFree ? 0 : shopKind(shop, content) === "stall"
     ? (state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2)
     : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
   // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
   const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
   const rent = Math.max(0, Math.round(rentVoucher * rentUnits * scale));
+  if (rentFree) addBookValue(shop, "rentWaivedVoucherUnits", Math.round((state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2) * rentUnits * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
   if (!shop.collective) accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
   accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
@@ -10008,6 +10039,18 @@ function autoAdjustShopClerks(state, shop, content) {
     "collective_shop_advance", `镇库垫付${shop.name}启动资金`, { requireFull: false });
   shop.townAdvanceVoucherUnits = paid.paidValueUnits || 0;
   return shop;
+}
+
+// 集市补贴：免租剩余天数、批发特价（每单位少收多少斤）。
+       function stallRentFreeDaysLeft(state, content) {
+  const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
+  return Math.max(0, (state.policy?.stallRentFreeUntilSerial || 0) - serial);
+}
+
+       function stallDiscountPerUnit(state, content) {
+  const tiers = content.rules.stallWholesaleDiscountTiers || [0];
+  const tier = Math.max(0, Math.min(tiers.length - 1, Math.floor(state.policy?.stallDiscountTier || 0)));
+  return tiers[tier] || 0;
 }
 
 // 集市没钱也没货、垫款已还清时，镇库再垫一次启动资金，避免永久停摆。
@@ -10492,6 +10535,13 @@ function normalizeShopForSummary(shop, content) {
       distributedTotalVoucher: (source?.accounts?.cumulative?.distributedVoucherUnits || 0) / scale,
       payout: payout ? { households: payout.households, min: payout.minPerKeeperUnits / scale, max: payout.maxPerKeeperUnits / scale, average: payout.averagePerKeeperUnits / scale } : null,
       townAdvanceVoucher: (source?.townAdvanceVoucherUnits || 0) / scale,
+      rentFreeDaysLeft: stallRentFreeDaysLeft(state, content),
+      rentFreeOptionsDays: [...(content.rules.stallRentFreeOptionsDays || [])],
+      discountTier: Math.max(0, Math.floor(state.policy?.stallDiscountTier || 0)),
+      discountTiers: [...(content.rules.stallWholesaleDiscountTiers || [0])],
+      rentWaivedTotalVoucher: (source?.accounts?.cumulative?.rentWaivedVoucherUnits || 0) / scale,
+      subsidyTotalVoucher: (source?.accounts?.cumulative?.subsidyVoucherUnits || 0) / scale,
+      subsidyDayVoucher: (source?.accounts?.day?.subsidyVoucherUnits || 0) / scale,
       inventoryRows: (row?.inventoryRows || []).filter(item => item.stock > 0 || item.averageDailySales > 0),
       statusReason: row?.statusReason || "未开放摆摊",
       stockJin: (row?.inventoryRows || []).reduce((sum, item) => sum + item.stock, 0),
@@ -10499,7 +10549,7 @@ function normalizeShopForSummary(shop, content) {
     };
   });
 }
-return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, shopRetailItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopClerkLimit, shopDailyCustomerCapacity, shopsForStreet, streetShopCapacity, syncShopEmployment, openShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
+return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, shopRetailItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopClerkLimit, shopDailyCustomerCapacity, shopsForStreet, streetShopCapacity, syncShopEmployment, openShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, stallRentFreeDaysLeft, stallDiscountPerUnit, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
 })();
 
 // ===== systems/building-development.js =====
@@ -14355,6 +14405,24 @@ function setWageRate(state, roleId, dailyJin, content) {
   return { ok: true, value: state.policy.stallRentVoucher };
 }
 
+// 集市免租：days 为 0 取消，否则必须是规则里的选项（三个月/半年/一年/三年），从今天起算。
+       function setStallRentFree(state, days, content) {
+  const value = Math.floor(Number(days));
+  const options = content.rules.stallRentFreeOptionsDays || [];
+  if (value !== 0 && !options.includes(value)) return { ok: false, reason: "免租时长只能是三个月、半年、一年或三年" };
+  const serial = (Math.max(1, state.year || 1) - 1) * content.rules.daysPerYear + (state.day || 0);
+  state.policy.stallRentFreeUntilSerial = value === 0 ? 0 : serial + value;
+  return { ok: true, days: value };
+}
+
+       function setStallDiscountTier(state, tier, content) {
+  const value = Math.floor(Number(tier));
+  const max = (content.rules.stallWholesaleDiscountTiers || [0]).length - 1;
+  if (!Number.isFinite(value) || value < 0 || value > max) return { ok: false, reason: `特价等级须为0—${max}` };
+  state.policy.stallDiscountTier = value;
+  return { ok: true, tier: value };
+}
+
        function setStallKeeperLimit(state, people) {
   const value = Math.floor(Number(people));
   if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "允许摆摊人数须为非负整数" };
@@ -14442,7 +14510,7 @@ function setWageRate(state, roleId, dailyJin, content) {
        function reclaimFarmland(state, acres, workers, content) {
   return reclaimFarmlandSystem(state, content, { acres, workers });
 }
-return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland };
+return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallRentFree, setStallDiscountTier, setStallKeeperLimit, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland };
 })();
 
 // ===== mods/api.js =====
@@ -18097,7 +18165,7 @@ const { validateContent } = __mxmod17;
 const { createInitialState } = __mxmod33;
 const { settleOneDay } = __mxmod84;
 const { advanceGameDays: advanceDaysWithClock } = __mxmod19;
-const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod64;
+const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod64;
 const { selectDemolitionPreview, selectUpgradePreview } = __mxmod48;
 const { validateState } = __mxmod69;
 const { selectDashboard } = __mxmod88;
@@ -18235,6 +18303,8 @@ function createSimulation(content) {
     setShopRent: function (state, value) { return setShopRent(state, value); },
     setStallRent: function (state, value) { return setStallRent(state, value); },
     setStallKeeperLimit: function (state, value) { return setStallKeeperLimit(state, value); },
+    setStallRentFree: function (state, days) { return setStallRentFree(state, days, definitions); },
+    setStallDiscountTier: function (state, tier) { return setStallDiscountTier(state, tier, definitions); },
     setShopProfitTax: function (state, value) { return setShopProfitTax(state, value, definitions); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
     configureShopMerchants: function (state, shopId, count) { return configureShopMerchants(state, shopId, count, definitions); },
@@ -22317,7 +22387,7 @@ function timesSquareMarkup(view, building, development) {
   const stallLimit = view.policy?.stallKeeperLimit ?? square.keeperLimit ?? 50;
   const rentVoucher = view.policy?.stallRentVoucher ?? square.rentVoucher ?? 2;
   const payout = square.payout;
-  const goods = (square.inventoryRows || []).map(row => `<div class="row"><span class="label">${escapeHtml(row.itemName)}</span><strong class="value">存${number(row.stock, 1)} · 日均售${number(row.averageDailySales, 1)} · 售${number(row.retailVoucher, 2)}${escapeHtml(unit)}</strong></div>`).join("");
+  const goods = (square.inventoryRows || []).map(row => `<div class="row"><span class="label">${escapeHtml(row.itemName)}</span><strong class="value">存${number(row.stock, 1)} · 日均售${number(row.averageDailySales, 1)} · 进${number(row.wholesaleVoucher, 2)} 售${number(row.retailVoucher, 2)}${escapeHtml(unit)}</strong></div>`).join("");
   const market = `<div class="cardlet"><div class="row"><strong>集市</strong><span class="badge">${escapeHtml(square.statusReason || "未开放摆摊")}</span></div>
     <div class="row"><span class="label">摆摊人数 / 上限</span><strong class="value">${number(square.keepers || 0)} / ${number(square.keeperCap ?? stallLimit)}人</strong></div>
     <div class="row"><span class="label">占用摊位 / 总数</span><strong class="value">${number(square.stallsUsed || 0)} / ${number(slots)}</strong></div>
@@ -22334,7 +22404,16 @@ function timesSquareMarkup(view, building, development) {
     <div class="cardlet"><div class="setting-title">摆摊政策</div>
       <div class="row"><span class="label">允许摆摊人数（全镇）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-limit:square", kind: "stall-limit", target: "stalls", value: stallLimit, label: "允许摆摊人数", integer: true, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>人</b></div></div>
       <div class="row"><span class="label">摊租（每摊每日）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent:square", kind: "stall-rent", target: "stalls", value: rentVoucher, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${escapeHtml(unit)}</b></div></div>
-      <div class="subtle">待业的人自动来摆，按销量增减人手；只卖日用品不卖主食，每人每日最多卖${number(square.perKeeperSalesJin || 25)}斤（一摊2人），比商店便宜。每天的利润按人头分给摆摊家庭，各户随机多拿少拿两成。</div>
+      <div class="setting-title">免租${(square.rentFreeDaysLeft || 0) > 0 ? `（还剩${number(square.rentFreeDaysLeft)}天）` : ""}</div>
+      <div class="settings-actions">${(square.rentFreeOptionsDays || []).map((days, index) => {
+        const label = ["三个月", "半年", "一年", "三年"][index] || `${days}天`;
+        return `<button class="secondary" data-stall-rent-free="${days}" data-label="${label}">${label}</button>`;
+      }).join("")}${(square.rentFreeDaysLeft || 0) > 0 ? `<button class="secondary" data-stall-rent-free="0">取消免租</button>` : ""}</div>
+      <div class="setting-title">批发特价（集市进货每斤少收）</div>
+      <div class="settings-actions">${(square.discountTiers || [0]).map((cut, tier) =>
+        `<button class="${tier === (square.discountTier || 0) ? "primary" : "secondary"}" data-stall-discount="${tier}">${tier === 0 ? "不打折" : `${["", "一", "二", "三"][tier] || tier}级 −${number(cut, 1)}斤`}</button>`).join("")}</div>
+      <div class="row"><span class="label">累计免掉摊租 / 特价补贴</span><strong class="value">${number(square.rentWaivedTotalVoucher || 0, 1)} / ${number(square.subsidyTotalVoucher || 0, 1)}${escapeHtml(unit)}</strong></div>
+      <div class="subtle">待业的人自动来摆，按销量增减人手；只卖日用品不卖主食，每人每日最多卖${number(square.perKeeperSalesJin || 25)}斤（一摊2人），售价比综合商店低一点（不低于进价）。每天的利润按人头分给摆摊家庭，各户随机多拿少拿两成。</div>
     </div>${developmentMarkup(view, building, development)}`;
 }
 
@@ -23992,6 +24071,22 @@ function closest(element, selector) {
       const result = simulation.configureShopMerchants(state, shop.id, shop.merchants + Number(shopMerchant.dataset.step));
       if (!result.ok) { showToast(result.reason); return; }
       changed(true); render(true);
+      return;
+    }
+    const stallRentFree = closest(target, "[data-stall-rent-free]");
+    if (stallRentFree && state) {
+      const result = simulation.setStallRentFree(state, Number(stallRentFree.dataset.stallRentFree));
+      if (!result.ok) { showToast(result.reason); return; }
+      changed(true); render(true);
+      showToast(result.days ? `集市免租${stallRentFree.dataset.label || result.days + "天"}，从今天起算。` : "已取消集市免租。");
+      return;
+    }
+    const stallDiscount = closest(target, "[data-stall-discount]");
+    if (stallDiscount && state) {
+      const result = simulation.setStallDiscountTier(state, Number(stallDiscount.dataset.stallDiscount));
+      if (!result.ok) { showToast(result.reason); return; }
+      changed(true); render(true);
+      showToast(result.tier ? `集市批发特价改为第${result.tier}档。` : "已取消集市批发特价。");
       return;
     }
     const shopClose = closest(target, "[data-shop-close]");

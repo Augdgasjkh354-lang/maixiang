@@ -475,7 +475,8 @@ function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, conten
 
 // ---------------------------------------------------------------- 销售（做市商卖出）
 
-export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, content, reason = "从批发市场采购") {
+// options.discountPerUnit：镇里给的特价补贴（每单位少收多少斤），差价由镇库承担，记在返回的 subsidyVoucherUnits。
+export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, content, reason = "从批发市场采购", options = {}) {
   const market = ensureWholesaleMarket(state, content);
   if (!hasWholesaleMarket(state)) {
     // 基线清理：无批发市场时回退到镇库直购（0.1.10 契约：生产原料可优先从镇库供应）。
@@ -500,12 +501,14 @@ export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, 
     : Math.max(0, market.inventory[itemId] || 0);
   let units = Math.min(available, Math.max(0, Math.floor(requestedUnits)));
   if (units <= 0) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "批发市场缺货" };
-  const price = wholesaleUnitPrice(state, itemId, content);
+  const listPrice = wholesaleUnitPrice(state, itemId, content);
+  const price = Math.max(listPrice * 0.1, listPrice - Math.max(0, Number(options.discountPerUnit) || 0));
   const maxPayable = maximumPayableValueUnits(state, buyerOwner, content);
   const maxUnitsByCash = price > 0 ? Math.floor(maxPayable * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))) : 0;
   units = Math.min(units, Math.max(0, maxUnitsByCash));
   if (units <= 0) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "采购方资金不足" };
-  const value = priceValueUnits(itemId, units, state, content);
+  const fullValue = priceValueUnits(itemId, units, state, content);
+  const value = price < listPrice ? Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content)) : fullValue;
   const householdId = householdIdOf(buyerOwner);
   const household = householdId ? state.households?.byId?.[householdId] : null;
   const maxWheatUnits = household ? householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) : undefined;
@@ -526,7 +529,7 @@ export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, 
   addValueFlow(market, "sales", value);
   // 售价也随库存回落：卖得越多收购价回升（反馈在 intake 末尾刷新，这里同步一次）。
   refreshWholesalePurchasePrices(state, content);
-  return { ok: true, boughtUnits: removed.units, paidVoucherUnits: value, unitPrice: price };
+  return { ok: true, boughtUnits: removed.units, paidVoucherUnits: value, unitPrice: price, subsidyVoucherUnits: Math.max(0, fullValue - value) };
 }
 
 // 只读视图：把默认值作用在一份浅拷贝上，绝不回写 state（0.1.8 selector 纯度要求）。
