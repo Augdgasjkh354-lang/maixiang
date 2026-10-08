@@ -127,4 +127,6 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 - 写清楚要改哪些文件、不许碰哪些文件（并行的子 agent 不改同一个文件）、验收标准（测试、场景数字）。
 - 并行时子 agent 只用精确替换改文件，不整篇重写；默认不提交，由主 agent 审完统一提交。若让子 agent 提交，只能 `git add` 自己改的文件，禁止 `git add -A`。
 - 子 agent 交回后，主 agent 必须看代码 diff、跑全部测试，界面改动要亲自在浏览器里点一遍。
+- 不达标先退回给原子 agent 返工（指出具体问题和验收标准）；同一任务连续两次返工仍不达标，主 agent 亲自接手。
+- 能交给子 agent 的尽量交，主 agent 的精力留给设计判断和审查。
 - 版本历史见 `CHANGELOG.md`，各子系统设计见 `docs/`。
