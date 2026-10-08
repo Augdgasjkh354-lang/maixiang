@@ -77,7 +77,7 @@ export function selectIpoView(state, content) {
       reason,
       valuationVoucher,
       suggestedTotalShares: totalShares,
-      suggestedOfferPercent: content.rules.ipoDefaultOfferPercent ?? 49,
+      suggestedOfferPercent: owner.kind === "household" ? (content.rules.ipoDefaultOfferPercent ?? 49) : (content.rules.ipoTownDefaultOfferPercent ?? 0),
       suggestedPriceVoucherPerShare: valuationVoucher === null ? null : suggestedSharePriceVoucher(valuationVoucher, totalShares)
     };
   });

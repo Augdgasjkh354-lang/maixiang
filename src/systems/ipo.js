@@ -90,8 +90,8 @@ function cooldownActive(state, buildingId, householdId, serial) {
 // 上市（整栋）。建筑的现主人（镇里或某一户）把整栋建筑放进一家新公司，并在交易所挂牌，一步完成。
 // options:
 //   ticker            股票代码（三位数字）；缺省取第一个空闲代码
-//   totalShares       总股本；缺省 10 万股（取最接近且能被建筑级数整除的值）
-//   offerPercent      卖出比例（%）；缺省 rules.ipoDefaultOfferPercent（49）。卖方保留其余股份
+//   totalShares       总股本；缺省 2520 股（取最接近且能被建筑级数整除的值）
+//   offerPercent      卖出比例（%）；缺省：镇里为主人 0（不挂出，镇长上市后自己设），民营业主 rules.ipoDefaultOfferPercent（49）。卖方保留其余股份
 //   priceVoucherPerShare 每股价（粮券）；缺省 整栋估值 ÷ 总股本（不低于 0.001）
 //   name              公司名；缺省 建筑名 + "公司"
 //   operatingCapitalVoucher / initialMaterials / initialMaterialQuantity  仅镇里为主人时可用：镇库投入营运资金与实物
@@ -105,9 +105,11 @@ export function listBuilding(state, buildingId, options, content) {
   // 民营建筑是业主的产业：只能由业主递申请、镇长批准后上市（approveIpoApplication），镇长不能直接拿去上市。
   if (owner.kind === "household" && !options?.fromApplication) return { ok: false, reason: "民营建筑须由业主递交上市申请，镇长批准后才能上市" };
   const levels = Math.max(1, building.level || 1);
+  // 镇长整栋上市不替镇长决定卖多少：不填就是一股都不挂出，之后在交易所自己设；民营业主按默认比例。
+  const defaultOfferPercent = owner.kind === "household" ? content.rules.ipoDefaultOfferPercent : (content.rules.ipoTownDefaultOfferPercent ?? 0);
   const terms = resolveListingTerms(state, {
     buildingId, levels, ticker: options?.ticker, totalShares: options?.totalShares,
-    offerPercent: options?.offerPercent, priceVoucherPerShare: options?.priceVoucherPerShare
+    offerPercent: options?.offerPercent ?? defaultOfferPercent, priceVoucherPerShare: options?.priceVoucherPerShare
   }, content);
   if (!terms.ok) return terms;
   const created = createIndependentCompany(state, buildingId, {

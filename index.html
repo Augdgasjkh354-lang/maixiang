@@ -1074,7 +1074,8 @@ const __mxmod2 = (() => {
   ownerUpgradeReserveWageDays: 60, // 现金须留够 60 天工资
   ownerUpgradeStaffingRatio: 0.9, // 在岗须达到岗位上限的 90%
   // 上市（整栋，docs/OWNERSHIP.md 第 2 条）：挂牌时卖出比例的默认值，镇长可改。
-  ipoDefaultOfferPercent: 49, // 默认卖出 49%，原主人持有其余股份
+  ipoDefaultOfferPercent: 49, // 民营业主申请上市时默认卖出 49%，业主持有其余股份
+  ipoTownDefaultOfferPercent: 0, // 镇长整栋上市默认一股不挂出：卖多少由镇长自己在交易所设，镇库持股不会被居民自动买走
   // 民营业主上市申请：经营好（近 60 天利润为正）但现金不够下一次升级的民营建筑，每隔这么多天检查一次是否递交申请。
   ipoApplicationCheckDays: 30, // 每 30 天检查一次
   ipoReapplyCooldownDays: 180, // 申请被驳回后，同一业主 180 天内不得再申请
@@ -2626,7 +2627,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod18 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-b15e5b0";
+       const BUILD_ID = "0203-2d221ef";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -3773,6 +3774,15 @@ function holdsCashWheat(owner) {
   return content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin;
 }
 
+// 股价一档 = 0.01 粮券；所有股价都是一档的整数倍，最低一档。
+       function shareTick(content) {
+  return Math.max(1, Math.round(currencyScale(content) / 100));
+}
+       function roundToShareTick(units, content) {
+  const tick = shareTick(content);
+  return Math.max(tick, Math.round((Number(units) || 0) / tick) * tick);
+}
+
        function ensureCurrencyState(state) {
   state.currency ||= {
     reserveWheatUnits: 0,
@@ -4105,7 +4115,7 @@ function currencyAccessCheck(state, owner) {
     ? { ok: true, issuedUnits: issue }
     : { ok: false, issuedUnits: issue, reason: `居民粮券不足；今日就业换券额度或${days}日口粮保护限制了换券` };
 }
-return { currencyScale, ensureCurrencyState, voucherBalance, totalVoucherBalances, validateCurrencyInvariant, issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, transferVouchers, maximumResidentAutoExchangeWheatUnits, ensureHouseholdVouchersForEssential, ensureResidentVouchersForEssential };
+return { currencyScale, shareTick, roundToShareTick, ensureCurrencyState, voucherBalance, totalVoucherBalances, validateCurrencyInvariant, issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, transferVouchers, maximumResidentAutoExchangeWheatUnits, ensureHouseholdVouchersForEssential, ensureResidentVouchersForEssential };
 })();
 
 // ===== economy/deposits.js =====
@@ -12082,7 +12092,7 @@ const { householdIdOf } = __mxmod12;
 const { putStock, sellCompanyGoods, takeStock } = __mxmod29;
 const { PERIODS, bookAdd, bookAddMap, ensureBook } = __mxmod21;
 const { recordFundDividend } = __mxmod39;
-const { currencyScale, voucherBalance } = __mxmod26;
+const { currencyScale, roundToShareTick, voucherBalance } = __mxmod26;
 const { createPaymentViewState } = __mxmod55;
 const { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, paymentWheatBalanceUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } = __mxmod28;
 const { voucherUnitsForWheatUnits } = __mxmod25;
@@ -12492,9 +12502,10 @@ function closeCompanyToTown(state, company, building, content) {
   if (state.monetaryReform?.stage !== "voucher") return { ok: false, reason: "股票交易须在货币改革完成后使用粮券" };
   if (!offerSeller(state, company)) return { ok: false, reason: "发行池卖方不明，无法挂牌出售" };
   const shares = Math.floor(Number(offeredShares) || 0);
-  const priceUnits = Math.round(Number(priceVoucherPerShare) * currencyScale(content));
+  const priceInput = Number(priceVoucherPerShare);
   if (shares < 0 || shares > sellerHoldingShares(state, company)) return { ok: false, reason: "出售股数不能超过卖方持股" };
-  if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股售价须大于0" };
+  if (!Number.isFinite(priceInput) || priceInput <= 0) return { ok: false, reason: "每股售价须大于0" };
+  const priceUnits = roundToShareTick(priceInput * currencyScale(content), content);
   company.shareSale.offeredShares = shares;
   company.shareSale.sharePriceVoucherUnits = priceUnits;
   return { ok: true, offeredShares: shares, priceVoucherUnits: priceUnits };
@@ -13733,7 +13744,7 @@ return { HOUSEHOLD_RESERVE_DAYS, DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT, baseDeposi
 
 // ===== systems/stock-exchange.js =====
 const __mxmod62 = (() => {
-const { currencyScale } = __mxmod26;
+const { currencyScale, shareTick, roundToShareTick } = __mxmod26;
 const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod28;
 const { recordEvent } = __mxmod14;
 const { householdList, isActiveHousehold } = __mxmod20;
@@ -13742,12 +13753,30 @@ const { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHold
 const { selectOperatingRightPreview } = __mxmod57;
 const { buildingMaterialValueUnits } = __mxmod45;
 const { nextRandom } = __mxmod24;
-// 上市默认总股本（金融扩展四期）：10 万股，取最接近且能被公司级数整除的值。
-       const DEFAULT_TOTAL_SHARES = 100000;
-// 股价每日波动：向利润锚均值回归系数、噪声幅度、单日涨跌幅钳制。
-       const SHARE_PRICE_REVERSION = 0.08;
-       const SHARE_PRICE_NOISE_DAILY = 0.02;
-       const SHARE_PRICE_DAILY_LIMIT = 0.1;
+// 上市默认总股本：2520 股（1—10 级都能整除）。股价按 0.01 粮券一档报价，股数太多每股价会低到一两档，涨跌就没有层次。
+       const DEFAULT_TOTAL_SHARES = 2520;
+// 股价单日涨跌幅上限（一档价不足 20% 时至少允许动一档）。
+       const SHARE_PRICE_DAILY_LIMIT = 0.2;
+// 股价模型参数：常态向业绩锚缓慢回拢并带惯性；偶发泡沫（脱离业绩持续上涨）→ 破裂后急跌 → 回到常态。
+       const STOCK_MARKET = {
+  reversion: 0.025,        // 常态：每天向业绩锚回拢缺口的比例（慢，泡沫期不回拢）
+  momentumCarry: 0.35,     // 常态：昨日涨跌的惯性
+  momentumDecay: 0.7,      // 惯性的指数平滑
+  noise: 0.022,            // 常态日波动
+  sentimentDrift: 0.0035,  // 市场情绪（-1—1）对日涨跌的推力
+  bubbleStartDaily: 0.0018, // 常态每天进入泡沫的基础概率，情绪高涨时放大
+  bubbleStartMaxGap: 0.35, // 价格已高出业绩锚 e^0.35 倍以上不再新起泡沫
+  bubbleDriftMin: 0.012, bubbleDriftSpan: 0.02, // 泡沫期日均涨幅 1.2%—3.2%
+  bubbleNoise: 0.035,
+  bubbleMinDays: 25, bubbleSpanDays: 50,
+  burstBase: 0.01, burstPerGap: 0.4, burstGapStart: 0.5, // 价格越过业绩锚越多，每天破裂概率越大
+  crashDriftMin: 0.02, crashDriftSpan: 0.03, crashNoise: 0.05, // 破裂期日均跌幅 2%—5%，单日可近 20%
+  crashMinDays: 8, crashSpanDays: 14,
+  crashEndGap: 0.05        // 跌回业绩锚附近即结束
+};
+
+                                                                      
+                                       
 
        function hasStockExchange(state) {
   return (state.buildings || []).some(row => row.typeId === "stock_exchange") || Boolean(state.stockExchange?.legacyAccess);
@@ -13773,10 +13802,10 @@ const { nextRandom } = __mxmod24;
   return null;
 }
 
-// 建议每股价 = 整栋估值 ÷ 总股本（经营权估值口径），单位粮券，保留三位小数，不低于 0.001。
+// 建议每股价 = 整栋估值 ÷ 总股本（经营权估值口径），单位粮券，保留两位小数，不低于 0.01。
        function suggestedSharePriceVoucher(valuationVoucher, totalShares) {
   const perShare = totalShares > 0 ? (Number(valuationVoucher) || 0) / totalShares : 0;
-  return Math.max(0.001, Math.round(perShare * 1000) / 1000);
+  return Math.max(0.01, Math.round(perShare * 100) / 100);
 }
 
 // 整栋估值（粮券）：与经营权选择器同一口径。
@@ -13784,7 +13813,7 @@ const { nextRandom } = __mxmod24;
   if (!buildingId) return 0;
   const value = Number(selectOperatingRightPreview(state, buildingId, content).valuationWheatJin);
   if (Number.isFinite(value) && value > 0) return value;
-  // 新建筑还没有经营记录、估值为 0 时，按建造与升级材料的当前价值估，避免挂牌价落到 0.001。
+  // 新建筑还没有经营记录、估值为 0 时，按建造与升级材料的当前价值估，避免挂牌价落到最低一档。
   const building = (state.buildings || []).find(row => row.id === buildingId);
   return building ? buildingMaterialValueUnits(state, building, content) / currencyScale(content) : 0;
 }
@@ -13806,7 +13835,7 @@ const { nextRandom } = __mxmod24;
 // input: { companyId?, buildingId, levels, ticker?, totalShares?, offerPercent?, offeredShares?, priceVoucherPerShare? }
 // - 代码缺省取第一个空闲代码；总股本缺省 10 万股（取最接近且能被级数整除的值）。
 // - 卖出：offeredShares（绝对股数）优先；否则按 offerPercent（缺省 rules.ipoDefaultOfferPercent，即 49%）。
-// - 每股价缺省 = 整栋估值 ÷ 总股本。
+// - 每股价缺省 = 整栋估值 ÷ 总股本；一律取 0.01 粮券的整数倍。
        function resolveListingTerms(state, input, content) {
   const companyId = input.companyId || null;
   const levels = Math.max(1, Math.floor(Number(input.levels) || 1));
@@ -13823,8 +13852,9 @@ const { nextRandom } = __mxmod24;
   }
   const hasPrice = input.priceVoucherPerShare !== undefined && input.priceVoucherPerShare !== null && input.priceVoucherPerShare !== "";
   const priceVoucher = hasPrice ? Number(input.priceVoucherPerShare) : suggestedSharePriceVoucher(buildingValuationVoucher(state, input.buildingId, content), totalShares);
-  const priceUnits = Math.round(priceVoucher * currencyScale(content));
-  if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股价格必须大于0" };
+  if (!Number.isFinite(priceVoucher) || priceVoucher <= 0) return { ok: false, reason: "每股价格必须大于0" };
+  const priceUnits = roundToShareTick(priceVoucher * currencyScale(content), content);
+  if (!Number.isSafeInteger(priceUnits)) return { ok: false, reason: "每股价格必须大于0" };
   let offeredShares;
   if (input.offeredShares !== undefined && input.offeredShares !== null) {
     offeredShares = Math.floor(Number(input.offeredShares) || 0);
@@ -13860,6 +13890,7 @@ const { nextRandom } = __mxmod24;
   // 实时股价（金融扩展四期）：挂牌价起步，每日向利润锚波动
   company.sharePriceVoucherUnits = priceUnits;
   company.sharePriceHistory = [priceUnits];
+  company.stockMarket = { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: priceUnits };
   company.shareSale ||= {};
   company.shareSale.sellerOwner = seller.kind === "household" ? seller.householdId : "town";
   company.shareSale.offeredShares = offeredShares;
@@ -13880,7 +13911,7 @@ const { nextRandom } = __mxmod24;
   if (company.listing?.listed) return { ok: false, reason: "公司已经上市；再次售股沿用现有总股本" };
   const terms = resolveListingTerms(state, {
     companyId, buildingId: company.buildingId, levels: company.listedLevels,
-    ticker: options?.ticker, totalShares: options?.totalShares, offerPercent: options?.offerPercent,
+    ticker: options?.ticker, totalShares: options?.totalShares, offerPercent: options?.offerPercent ?? content.rules.ipoTownDefaultOfferPercent ?? 0,
     offeredShares: options?.offeredShares, priceVoucherPerShare: options?.priceVoucherPerShare
   }, content);
   if (!terms.ok) return terms;
@@ -13897,9 +13928,10 @@ const { nextRandom } = __mxmod24;
   if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
   if (!offerSeller(state, company)) return { ok: false, reason: "发行池卖方不明，无法挂牌出售" };
   const shares = Math.floor(Number(offeredShares) || 0);
-  const priceUnits = Math.round(Number(priceVoucherPerShare) * currencyScale(content));
+  const priceInput = Number(priceVoucherPerShare);
   if (shares < 0 || shares > sellerHoldingShares(state, company)) return { ok: false, reason: "出售股数不能超过卖方持股" };
-  if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股售价须大于0" };
+  if (!Number.isFinite(priceInput) || priceInput <= 0) return { ok: false, reason: "每股售价须大于0" };
+  const priceUnits = roundToShareTick(priceInput * currencyScale(content), content);
   company.shareSale.offeredShares = shares;
   company.shareSale.sharePriceVoucherUnits = priceUnits;
   return { ok: true, offeredShares: shares, priceVoucherUnits: priceUnits };
@@ -13995,25 +14027,74 @@ const { nextRandom } = __mxmod24;
   return { ok: true, boughtShares, paidVoucherUnits: paid, sellers, preview };
 }
 
-// 每日股价结算（金融扩展四期）：AI 做市商。
-// 每只上市股票的价格每天向利润锚（统一业绩估值）均值回归，叠加 ±2% 噪声，
-// 单日涨跌幅钳制 ±10%，最低 1 单位。用种子随机数保证模拟可复现。
+// 近似标准正态（三个均匀数之和）。
+function gauss(state) {
+  return (nextRandom(state) + nextRandom(state) + nextRandom(state) - 1.5) / 0.5;
+}
+
+// 单只股票一天的价格。纯函数（随机数由 draw 提供），方便单测与调参。
+// market = company.stockMarket：{ regime: "normal"|"bubble"|"crash", daysLeft, drift, momentum, anchorUnits }
+// - 常态：慢慢回拢业绩锚，带惯性、情绪推力与噪声；
+// - 偶发泡沫：持续上涨、不再回拢业绩锚，价格越高越容易破裂（或到期）；
+// - 破裂：连日急跌，单日最多约 20%，回到业绩锚附近结束。
+// 返回新价（一档整数倍）并原地更新 market。涨跌幅 ≤ 20%（价格很低时至少允许动一档）。
+       function stepSharePrice(price, anchorUnits, market, sentiment, draw, content) {
+  const P = STOCK_MARKET;
+  const tick = shareTick(content);
+  const gap = Math.log(price / Math.max(tick, anchorUnits));
+  if (market.regime === "normal") {
+    const chance = P.bubbleStartDaily * (1 + 2.5 * Math.max(0, sentiment)) * (gap < P.bubbleStartMaxGap ? 1 : 0);
+    if (draw.uniform() < chance) {
+      market.regime = "bubble";
+      market.daysLeft = P.bubbleMinDays + Math.floor(draw.uniform() * P.bubbleSpanDays);
+      market.drift = P.bubbleDriftMin + draw.uniform() * P.bubbleDriftSpan;
+    }
+  } else if (market.regime === "bubble") {
+    const burst = P.burstBase + P.burstPerGap * Math.max(0, gap - P.burstGapStart);
+    if (market.daysLeft <= 0 || draw.uniform() < burst) {
+      market.regime = "crash";
+      market.daysLeft = P.crashMinDays + Math.floor(draw.uniform() * P.crashSpanDays);
+      market.drift = -(P.crashDriftMin + draw.uniform() * P.crashDriftSpan);
+    }
+  } else if (market.daysLeft <= 0 || gap <= P.crashEndGap) {
+    market.regime = "normal";
+    market.drift = 0;
+    market.momentum = 0;
+  }
+  let change;
+  if (market.regime === "bubble") change = market.drift + P.bubbleNoise * draw.gauss();
+  else if (market.regime === "crash") change = market.drift + P.crashNoise * draw.gauss();
+  else change = -P.reversion * gap + P.momentumCarry * market.momentum + P.sentimentDrift * sentiment + P.noise * draw.gauss();
+  if (market.regime !== "normal") market.daysLeft -= 1;
+  // 涨跌幅钳制：不超过 ±20%，价格很低时至少允许一档。
+  const maxSteps = Math.max(1, Math.floor(price * SHARE_PRICE_DAILY_LIMIT / tick));
+  const steps = Math.max(-maxSteps, Math.min(maxSteps, Math.round(price * change / tick)));
+  const next = Math.max(tick, price + steps * tick);
+  market.momentum = P.momentumDecay * market.momentum + (1 - P.momentumDecay) * (next / price - 1);
+  return next;
+}
+
+// 每日股价结算：AI 做市商 + 市场情绪。
+// 每只上市股票各有自己的行情（常态/泡沫/破裂，见 stepSharePrice）；市场情绪是全市场共有的慢变量，情绪高涨时更容易起泡沫。
+// 用种子随机数保证模拟可复现；没有上市公司时不消耗随机数。
        function settleStockMarketDay(state, content) {
   if (!hasStockExchange(state)) return null;
+  const listed = Object.values(state.companies || {}).filter(company => company.listing?.listed && company.totalShares > 0);
+  if (!listed.length) return null;
+  const exchange = ensureStockExchangeState(state);
+  exchange.sentiment = Math.max(-1, Math.min(1, 0.96 * (exchange.sentiment || 0) + 0.12 * gauss(state)));
+  const draw = { uniform: () => nextRandom(state), gauss: () => gauss(state) };
   const moved = [];
-  for (const company of Object.values(state.companies || {})) {
-    if (!company.listing?.listed || !(company.totalShares > 0)) continue;
-    // 老存档兼容：没有实时股价时用挂牌价起步
+  for (const company of listed) {
+    // 老存档兼容：没有实时股价时用挂牌价起步；旧价不是一档整数倍时取整到一档。
     company.sharePriceVoucherUnits ||= company.shareSale?.sharePriceVoucherUnits || 0;
-    const current = company.sharePriceVoucherUnits;
-    if (!(current > 0)) continue;
+    if (!(company.sharePriceVoucherUnits > 0)) continue;
+    const current = roundToShareTick(company.sharePriceVoucherUnits, content);
+    const market = company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: current };
     const reference = stockReference(state, company, content).referencePerShareVoucherUnits || 0;
-    const anchor = reference > 0 ? reference : current;
-    const reverted = current + (anchor - current) * SHARE_PRICE_REVERSION;
-    const noised = reverted * (1 + (nextRandom(state) * 2 - 1) * SHARE_PRICE_NOISE_DAILY);
-    const lo = Math.floor(current * (1 - SHARE_PRICE_DAILY_LIMIT));
-    const hi = Math.ceil(current * (1 + SHARE_PRICE_DAILY_LIMIT));
-    const next = Math.min(hi, Math.max(Math.max(1, lo), Math.floor(noised)));
+    // 业绩锚：有业绩估值就用它；还没有业绩（新股、停工）时沿用上一次的锚，从未有过就用挂牌价。
+    if (reference > 0) market.anchorUnits = reference;
+    const next = stepSharePrice(current, market.anchorUnits > 0 ? market.anchorUnits : current, market, exchange.sentiment, draw, content);
     company.sharePriceVoucherUnits = next;
     if (!Array.isArray(company.sharePriceHistory)) company.sharePriceHistory = [];
     company.sharePriceHistory.push(next);
@@ -14024,25 +14105,34 @@ const { nextRandom } = __mxmod24;
 }
 
 // 住户日常股票买入：按投资倾向把本日股票预算分散买入发行池（镇长或业主挂出的）股份。
-// - 买入对象：已上市、发行池有股的公司，按实时股价成交；镇库未挂出的股份不卖
+// - 买入对象：已上市、发行池有股且市价不低于卖方定价的公司，按实时股价成交；镇库未挂出的股份不卖
 // - 预算：household.stockBuyBudgetVoucherUnits（银行分流后写入）或无银行时现算
 // - 付款：住户 → 卖方（镇库或原业主家庭）；付不起就跳过
 // - 股份转移：卖方是镇库则 townShares → residentShares；卖方是家庭则只在居民之间转手
        function settleHouseholdStockBuying(state, content) {
   if (!hasStockExchange(state)) return null;
+  // 发行池是卖方挂出的限价卖单：市价低于卖方定的每股售价时不成交（成交价按市价，卖方不会卖得比自己定的价低）。
   const listed = Object.values(state.companies || {}).filter(company =>
     company.listing?.listed && (company.sharePriceVoucherUnits || 0) > 0 &&
+    company.sharePriceVoucherUnits >= (company.shareSale?.sharePriceVoucherUnits || 0) &&
     offeredPoolShares(state, company) > 0);
   if (!listed.length) return null;
+  // 追涨：近期涨得多、正处泡沫的股票分到更多买入预算，破裂期的股票少人问津。
+  const weights = new Map(listed.map(company => {
+    const market = company.stockMarket || {};
+    const heat = 1 + 6 * (market.momentum || 0) + (market.regime === "bubble" ? 0.5 : market.regime === "crash" ? -0.3 : 0);
+    return [company.id, Math.max(0.25, Math.min(3, heat))];
+  }));
+  const weightTotal = [...weights.values()].reduce((sum, value) => sum + value, 0);
   let totalShares = 0;
   let totalSpentUnits = 0;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
     const budget = consumeHouseholdStockBudget(state, content, household);
     if (budget <= 0) continue;
-    const perCompany = Math.floor(budget / listed.length);
-    if (perCompany <= 0) continue;
     for (const company of listed) {
+      const perCompany = Math.floor(budget * weights.get(company.id) / weightTotal);
+      if (perCompany <= 0) continue;
       const available = offeredPoolShares(state, company);
       if (available <= 0) continue;
       const seller = offerSeller(state, company);
@@ -14079,7 +14169,7 @@ const { nextRandom } = __mxmod24;
   }
   return totalShares > 0 ? { shares: totalShares, spentVoucherUnits: totalSpentUnits } : null;
 }
-return { DEFAULT_TOTAL_SHARES, SHARE_PRICE_REVERSION, SHARE_PRICE_NOISE_DAILY, SHARE_PRICE_DAILY_LIMIT, hasStockExchange, ensureStockExchangeState, nearbyDivisibleShareCounts, listingGate, suggestedSharePriceVoucher, buildingValuationVoucher, freeTicker, resolveListingTerms, applyCompanyListing, listCompanyOnExchange, configureListedShareOffer, stockReference, previewTownBuyback, executeTownBuyback, settleStockMarketDay, settleHouseholdStockBuying, offerSeller, offeredPoolShares, sellerHoldingShares };
+return { DEFAULT_TOTAL_SHARES, SHARE_PRICE_DAILY_LIMIT, STOCK_MARKET, hasStockExchange, ensureStockExchangeState, nearbyDivisibleShareCounts, listingGate, suggestedSharePriceVoucher, buildingValuationVoucher, freeTicker, resolveListingTerms, applyCompanyListing, listCompanyOnExchange, configureListedShareOffer, stockReference, previewTownBuyback, executeTownBuyback, stepSharePrice, settleStockMarketDay, settleHouseholdStockBuying, offerSeller, offeredPoolShares, sellerHoldingShares, shareTick, roundToShareTick };
 })();
 
 // ===== systems/ipo.js =====
@@ -14166,8 +14256,8 @@ function cooldownActive(state, buildingId, householdId, serial) {
 // 上市（整栋）。建筑的现主人（镇里或某一户）把整栋建筑放进一家新公司，并在交易所挂牌，一步完成。
 // options:
 //   ticker            股票代码（三位数字）；缺省取第一个空闲代码
-//   totalShares       总股本；缺省 10 万股（取最接近且能被建筑级数整除的值）
-//   offerPercent      卖出比例（%）；缺省 rules.ipoDefaultOfferPercent（49）。卖方保留其余股份
+//   totalShares       总股本；缺省 2520 股（取最接近且能被建筑级数整除的值）
+//   offerPercent      卖出比例（%）；缺省：镇里为主人 0（不挂出，镇长上市后自己设），民营业主 rules.ipoDefaultOfferPercent（49）。卖方保留其余股份
 //   priceVoucherPerShare 每股价（粮券）；缺省 整栋估值 ÷ 总股本（不低于 0.001）
 //   name              公司名；缺省 建筑名 + "公司"
 //   operatingCapitalVoucher / initialMaterials / initialMaterialQuantity  仅镇里为主人时可用：镇库投入营运资金与实物
@@ -14181,9 +14271,11 @@ function cooldownActive(state, buildingId, householdId, serial) {
   // 民营建筑是业主的产业：只能由业主递申请、镇长批准后上市（approveIpoApplication），镇长不能直接拿去上市。
   if (owner.kind === "household" && !options?.fromApplication) return { ok: false, reason: "民营建筑须由业主递交上市申请，镇长批准后才能上市" };
   const levels = Math.max(1, building.level || 1);
+  // 镇长整栋上市不替镇长决定卖多少：不填就是一股都不挂出，之后在交易所自己设；民营业主按默认比例。
+  const defaultOfferPercent = owner.kind === "household" ? content.rules.ipoDefaultOfferPercent : (content.rules.ipoTownDefaultOfferPercent ?? 0);
   const terms = resolveListingTerms(state, {
     buildingId, levels, ticker: options?.ticker, totalShares: options?.totalShares,
-    offerPercent: options?.offerPercent, priceVoucherPerShare: options?.priceVoucherPerShare
+    offerPercent: options?.offerPercent ?? defaultOfferPercent, priceVoucherPerShare: options?.priceVoucherPerShare
   }, content);
   if (!terms.ok) return terms;
   const created = createIndependentCompany(state, buildingId, {
@@ -19338,7 +19430,7 @@ function suggestedTotalShares(levels) {
       reason,
       valuationVoucher,
       suggestedTotalShares: totalShares,
-      suggestedOfferPercent: content.rules.ipoDefaultOfferPercent ?? 49,
+      suggestedOfferPercent: owner.kind === "household" ? (content.rules.ipoDefaultOfferPercent ?? 49) : (content.rules.ipoTownDefaultOfferPercent ?? 0),
       suggestedPriceVoucherPerShare: valuationVoucher === null ? null : suggestedSharePriceVoucher(valuationVoucher, totalShares)
     };
   });
@@ -19850,6 +19942,7 @@ function industryProductivityRows(state, content) {
       workingCapitalReserveVoucher: reserveUnits / voucherScale,
       lastAnnualSettlement: company.annualSettlement || null,
       sharePriceVoucher: ((company.sharePriceVoucherUnits || company.shareSale?.sharePriceVoucherUnits || 0)) / voucherScale,
+      askPriceVoucher: (company.shareSale?.sharePriceVoucherUnits || 0) / voucherScale,
       shareSaleProceedsVoucher: (company.shareSale?.cumulativeProceedsVoucherUnits || 0) / voucherScale,
       revenueDayVoucher: (company.accounts?.day?.revenueVoucherUnits || 0) / voucherScale,
       cogsDayVoucher: (company.accounts?.day?.cogsVoucherUnits || 0) / voucherScale,
@@ -24155,10 +24248,10 @@ function renderTownListingForm(view, row) {
       <label>股票代码（可空）<input type="text" inputmode="numeric" maxlength="3" autocomplete="off" value="" placeholder="自动" data-ipo-ticker="${id}"></label>
       <label>公司名称<input type="text" maxlength="30" autocomplete="off" value="${escapeHtml(`${row.name}公司`)}" data-ipo-name="${id}"></label>
       <label>总股本${stagedInput(view, { key: key("total"), label: "总股本", value: row.suggestedTotalShares, integer: true, minimum: 1 })}<small>股</small></label>
-      <label>卖出比例${stagedInput(view, { key: key("offer"), label: "卖出比例", value: row.suggestedOfferPercent, positive: true, maximum: 100 })}<small>%</small></label>
+      <label>卖出比例${stagedInput(view, { key: key("offer"), label: "卖出比例", value: row.suggestedOfferPercent, minimum: 0, maximum: 100 })}<small>%</small></label>
       <label>每股价格${stagedInput(view, { key: key("price"), label: "每股价格", value: row.suggestedPriceVoucherPerShare ?? 1, positive: true })}<small>${escapeHtml(unit)}</small></label>
     </div>
-    ${row.reason ? `<div class="shortage-banner visible">${escapeHtml(row.reason)}</div>` : `<div class="subtle">整栋放入新公司挂牌；镇库保留未卖出的股份，股款归镇库。</div>`}
+    ${row.reason ? `<div class="shortage-banner visible">${escapeHtml(row.reason)}</div>` : `<div class="subtle">整栋放入新公司挂牌；镇库保留未卖出的股份，股款归镇库。卖出比例填 0 就是先不卖，之后到交易所自己设出售股数，居民不会自动买走没挂出的股份。</div>`}
     <button class="primary wide" data-ipo-list="${id}" ${row.canList ? "" : "disabled"}>整栋上市</button>
   </div>`;
 }
@@ -24209,9 +24302,9 @@ function renderListing(view, company) {
     return `<h4>交易所上市</h4>
       ${gate ? `<div class="subtle">${escapeHtml(gate)}。公司仍可继续独立经营。</div>` : `<div class="business-form-grid">
         <label>三位代码<input type="text" inputmode="numeric" maxlength="3" autocomplete="off" value="${escapeHtml(preview?.ticker || "001")}" data-stock-ticker="${escapeHtml(company.id)}"></label>
-        <label>总股本${stagedInput(view, { key: sharesKey, label: "总股本", value: Math.max(1000, company.listedLevels * 1000), integer: true, minimum: 1 })}</label>
+        <label>总股本${stagedInput(view, { key: sharesKey, label: "总股本", value: 2520, integer: true, minimum: 1 })}</label>
         <label>每股价格${stagedInput(view, { key: priceKey, label: "每股价格", value: 1, positive: true })}<small>粮券</small></label>
-        <label>本次出售${stagedInput(view, { key: offeredKey, label: "本次出售股数", value: Math.max(1, company.listedLevels * 100), integer: true, minimum: 0 })}</label>
+        <label>本次出售${stagedInput(view, { key: offeredKey, label: "本次出售股数", value: 0, integer: true, minimum: 0 })}</label>
       </div>
       <button class="secondary wide" data-stock-list-preview="${escapeHtml(company.id)}">预览上市</button>
       ${preview ? `<div class="operation-preview"><strong>${escapeHtml(preview.ticker)} · 上市确认</strong>
@@ -24228,6 +24321,7 @@ function renderListing(view, company) {
   const previewOpen = view.sharePreviewCompanyId === company.id;
   const listedShares = company.shareSale?.offeredShares || 0;
   const sharePrice = company.sharePriceVoucher || 0;
+  const askPrice = company.askPriceVoucher || sharePrice;
   const subscribed = sub.subscribedShares || 0;
   const proceeds = (sub.proceedsVoucherUnits || 0) / scale;
   const afterTownShares = company.townShares - subscribed;
@@ -24238,8 +24332,10 @@ function renderListing(view, company) {
     <div class="row"><span class="label">实际累计售股收入</span><strong class="value">${number(company.shareSaleProceedsVoucher, 2)}粮券 · 归镇库</strong></div>
     <div class="business-form-grid two">
       <label>出售股数${stagedInput(view, { key: `share:${company.id}:count`, label: "出售股数", value: listedShares, integer: true, minimum: 0, maximum: company.townShares })}</label>
-      <label>每股价格${stagedInput(view, { key: `share:${company.id}:price`, label: "每股售价", value: sharePrice || 1, positive: true })}<small>粮券</small></label>
+      <label>每股价格${stagedInput(view, { key: `share:${company.id}:price`, label: "每股售价", value: askPrice || 1, positive: true })}<small>粮券</small></label>
     </div>
+    <div class="row"><span class="label">现价 / 你定的售价</span><strong class="value">${number(sharePrice, 2)} / ${number(askPrice, 2)}粮券</strong></div>
+    <div class="subtle">只有你挂出的股数才会被居民买走，且现价不低于你定的售价才成交（按现价）。${listedShares > 0 && sharePrice < askPrice ? "现价低于售价，暂不成交。" : ""}</div>
     <button class="secondary wide" data-share-preview="${escapeHtml(company.id)}">预览居民认购</button>
     ${previewOpen ? `<div class="operation-preview"><strong>本次售股</strong>
       <div class="row"><span class="label">计划收入 / 预计实际收入</span><strong class="value">${number(listedShares * sharePrice, 2)} / ${number(proceeds, 2)}粮券</strong></div>
@@ -25550,7 +25646,7 @@ function closest(element, selector) {
   function readIpoForm(prefix, buildingId, { tickerAttr, nameAttr = null }) {
     const id = CSS.escape(buildingId);
     const totalShares = readStagedNumber(`${prefix}:${buildingId}:total`, { label: "总股本", integer: true, minimum: 1 });
-    const offerPercent = readStagedNumber(`${prefix}:${buildingId}:offer`, { label: "卖出比例", positive: true, maximum: 100 });
+    const offerPercent = readStagedNumber(`${prefix}:${buildingId}:offer`, { label: "卖出比例", minimum: 0, maximum: 100 });
     const priceVoucherPerShare = readStagedNumber(`${prefix}:${buildingId}:price`, { label: "每股价格", positive: true });
     if (totalShares === null || offerPercent === null || priceVoucherPerShare === null) return null;
     const ticker = (root.querySelector(`[${tickerAttr}="${id}"]`)?.value || "").trim();
@@ -26361,7 +26457,9 @@ function closest(element, selector) {
       if (!result.ok) { showToast(ipoFailureText(result)); render(true); return; }
       for (const suffix of ["total", "offer", "price"]) numericDrafts.delete(`ipo:${buildingId}:${suffix}`);
       changed(true); renderedMapSignature = ""; latestMapModel = null; render(true);
-      showToast(`${result.ticker} 已整栋上市：挂牌${number(result.offeredShares)}股，镇库保留${number(result.keptShares)}股。`);
+      showToast(result.offeredShares > 0
+        ? `${result.ticker} 已整栋上市：挂牌${number(result.offeredShares)}股，镇库保留${number(result.keptShares)}股。`
+        : `${result.ticker} 已整栋上市：镇库持有全部${number(result.keptShares)}股，到交易所设置出售股数后居民才会买入。`);
       return;
     }
     const ipoApproveButton = closest(target, "[data-ipo-approve]");

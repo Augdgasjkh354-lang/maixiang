@@ -20,6 +20,15 @@ export function currencyScale(content) {
   return content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin;
 }
 
+// 股价一档 = 0.01 粮券；所有股价都是一档的整数倍，最低一档。
+export function shareTick(content) {
+  return Math.max(1, Math.round(currencyScale(content) / 100));
+}
+export function roundToShareTick(units, content) {
+  const tick = shareTick(content);
+  return Math.max(tick, Math.round((Number(units) || 0) / tick) * tick);
+}
+
 export function ensureCurrencyState(state) {
   state.currency ||= {
     reserveWheatUnits: 0,

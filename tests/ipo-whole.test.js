@@ -17,6 +17,8 @@ import { formCompany } from "./helpers-ipo.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
+const T = 2520; // 默认总股本
+const O = Math.floor(T * 49 / 100); // 49% 的发行池：1234 股
 
 function freePlot(state, feature = null) {
   return state.plots.find(row => (feature ? row.feature === feature : !row.feature) && !state.buildings.some(b => b.plotId === row.id));
@@ -76,7 +78,7 @@ function brokeHousehold(state, index = 0) {
   return household;
 }
 
-test("镇营建筑整栋上市：公司整栋持有；镇库名下全部股份，挂出 49% 为发行池，卖方是镇库", () => {
+test("镇营建筑整栋上市：公司整栋持有；镇库名下全部股份，不填卖出比例就一股不挂出，卖方是镇库", () => {
   const state = exchangeState(7201);
   const salt = addBuilding(state, "saltworks", "ipo-town-salt", { level: 2 });
   const result = simulation.listBuilding(state, salt.id, { ticker: "101", priceVoucherPerShare: 2 });
@@ -87,34 +89,69 @@ test("镇营建筑整栋上市：公司整栋持有；镇库名下全部股份�
   assert.equal(salt.privateOwners, undefined);
   assert.equal(company.listing.listed, true);
   assert.equal(company.listing.ticker, "101");
-  assert.equal(company.totalShares, 100000, "默认总股本 10 万股");
-  assert.equal(company.shareSale.offeredShares, 49000, "默认卖出 49%");
+  assert.equal(company.totalShares, T, "默认总股本 2520 股");
+  assert.equal(company.shareSale.offeredShares, 0, "镇长不填卖出比例就不挂出，镇库持股不会被居民自动买走");
   assert.equal(company.shareSale.sellerOwner, "town");
-  assert.equal(company.townShares, 100000, "挂牌时全部股份记在镇库名下，挂出部分售出后镇库保留 51%");
+  assert.equal(company.townShares, T, "挂牌时全部股份记在镇库名下");
   assert.equal(company.residentShares, 0);
   assert.equal(company.shareSale.sharePriceVoucherUnits, 2 * V);
-  assert.equal(result.keptShares, 51000);
+  assert.equal(result.keptShares, T);
   assert.equal(result.sellerOwner, "town");
   assertValid(state, "镇营整栋上市");
+});
+
+test("镇营上市没挂出股份：居民有钱也买不到，镇库持股原样不动", () => {
+  const state = exchangeState(7220);
+  const salt = addBuilding(state, "saltworks", "ipo-town-nooffer", { level: 1 });
+  const result = simulation.listBuilding(state, salt.id, { ticker: "120", priceVoucherPerShare: 2 });
+  assert.equal(result.ok, true, result.reason);
+  const company = state.companies[result.companyId];
+  const buyer = householdList(state).filter(isActiveHousehold)[0];
+  assert.equal(grantResidentVouchers(state, 300000, CONTENT, buyer.id).ok, true);
+  onlyBudget(state, buyer.id, 100000 * V);
+  assert.equal(settleHouseholdStockBuying(state, CONTENT), null);
+  assert.equal(company.townShares, T);
+  assert.equal(company.residentShares, 0);
+});
+
+test("镇长自己设出售股数后居民才买；市价低于镇长定的售价时不成交", () => {
+  const state = exchangeState(7221);
+  const salt = addBuilding(state, "saltworks", "ipo-town-limit", { level: 1 });
+  const result = simulation.listBuilding(state, salt.id, { ticker: "121", priceVoucherPerShare: 2 });
+  const company = state.companies[result.companyId];
+  const buyer = householdList(state).filter(isActiveHousehold)[0];
+  assert.equal(grantResidentVouchers(state, 300000, CONTENT, buyer.id).ok, true);
+  assert.equal(simulation.configureShareOffer(state, company.id, 100, 2).ok, true);
+  company.sharePriceVoucherUnits = 1.5 * V; // 市价跌到售价以下
+  onlyBudget(state, buyer.id, 100000 * V);
+  assert.equal(settleHouseholdStockBuying(state, CONTENT), null, "市价低于售价，限价卖单不成交");
+  assert.equal(company.townShares, T);
+  company.sharePriceVoucherUnits = 2.5 * V;
+  onlyBudget(state, buyer.id, 100000 * V);
+  const trade = settleHouseholdStockBuying(state, CONTENT);
+  assert.equal(trade.shares, 100, "只卖镇长挂出的 100 股");
+  assert.equal(company.townShares, T - 100);
+  assert.equal(trade.spentVoucherUnits, 100 * 2.5 * V, "按市价成交");
+  assertValid(state, "限价成交后");
 });
 
 test("镇营上市后发行池售出：股款付给镇库，售完镇库保留 51%，居民持有 49%", () => {
   const state = exchangeState(7202);
   const salt = addBuilding(state, "saltworks", "ipo-town-pool", { level: 2 });
-  const result = simulation.listBuilding(state, salt.id, { ticker: "102", priceVoucherPerShare: 2 });
+  const result = simulation.listBuilding(state, salt.id, { ticker: "102", priceVoucherPerShare: 2, offerPercent: 49 });
   assert.equal(result.ok, true, result.reason);
   const company = state.companies[result.companyId];
   const buyer = householdList(state).filter(isActiveHousehold)[0];
   assert.equal(grantResidentVouchers(state, 300000, CONTENT, buyer.id).ok, true);
-  onlyBudget(state, buyer.id, 49000 * 2 * V);
+  onlyBudget(state, buyer.id, O * 2 * V);
   const townBefore = state.currency.balances.town;
   const trade = settleHouseholdStockBuying(state, CONTENT);
-  assert.equal(trade.shares, 49000, "发行池 49000 股全部售出");
-  assert.equal(state.currency.balances.town - townBefore, 49000 * 2 * V, "股款付给镇库（卖方）");
-  assert.equal(company.townShares, 51000, "镇库保留 51%");
-  assert.equal(company.residentShares, 49000);
+  assert.equal(trade.shares, O, "发行池全部售出");
+  assert.equal(state.currency.balances.town - townBefore, O * 2 * V, "股款付给镇库（卖方）");
+  assert.equal(company.townShares, T - O, "镇库保留其余");
+  assert.equal(company.residentShares, O);
   assert.equal(company.shareSale.offeredShares, 0);
-  assert.equal(buyer.shares[company.id], 49000);
+  assert.equal(buyer.shares[company.id], O);
   assert.equal(company.townShares + company.residentShares + (company.fundShares || 0), company.totalShares, "总股本守恒");
   assertValid(state, "镇营发行池售出后");
 });
@@ -149,12 +186,12 @@ test("民营建筑经镇长批准上市：业主家庭保留 51%，卖方是业�
   assert.equal(state.ipoApplications[salt.id], undefined, "批准后申请移除");
   const company = state.companies[result.companyId];
   assert.equal(buildingOwner(state, salt).kind, "company");
-  assert.equal(company.householdShares[owner.id], 100000, "业主名下全部股份，挂出的 49% 售出后保留 51%");
+  assert.equal(company.householdShares[owner.id], T, "业主名下全部股份，挂出的 49% 售出后保留 51%");
   assert.equal(company.townShares, 0);
-  assert.equal(company.residentShares, 100000, "业主家庭持股计入居民持股");
-  assert.equal(owner.shares[company.id], 100000);
+  assert.equal(company.residentShares, T, "业主家庭持股计入居民持股");
+  assert.equal(owner.shares[company.id], T);
   assert.equal(company.shareSale.sellerOwner, owner.id);
-  assert.equal(company.shareSale.offeredShares, 49000);
+  assert.equal(company.shareSale.offeredShares, O);
   assert.equal(company.inventory[itemId], 30 * I, "业主存货随建筑入公司");
   assert.equal(owner.inventory[itemId], 0);
   assert.ok(company.inventoryCostVoucherUnits[itemId] > 0, "存货按收购价计成本");
@@ -162,14 +199,14 @@ test("民营建筑经镇长批准上市：业主家庭保留 51%，卖方是业�
 
   const buyer = householdList(state).filter(row => isActiveHousehold(row) && row.id !== owner.id)[0];
   assert.equal(grantResidentVouchers(state, 300000, CONTENT, buyer.id).ok, true);
-  onlyBudget(state, buyer.id, 49000 * 2 * V);
+  onlyBudget(state, buyer.id, O * 2 * V);
   const ownerBefore = voucherBalance(state, `household:${owner.id}`);
   const trade = settleHouseholdStockBuying(state, CONTENT);
-  assert.equal(trade.shares, 49000);
-  assert.equal(voucherBalance(state, `household:${owner.id}`) - ownerBefore, 49000 * 2 * V, "股款付给业主家庭");
-  assert.equal(company.householdShares[owner.id], 51000, "业主保留 51%");
-  assert.equal(owner.shares[company.id], 51000);
-  assert.equal(company.residentShares, 100000, "居民之间转手，居民总持股不变");
+  assert.equal(trade.shares, O);
+  assert.equal(voucherBalance(state, `household:${owner.id}`) - ownerBefore, O * 2 * V, "股款付给业主家庭");
+  assert.equal(company.householdShares[owner.id], T - O, "业主保留其余");
+  assert.equal(owner.shares[company.id], T - O);
+  assert.equal(company.residentShares, T, "居民之间转手，居民总持股不变");
   assert.equal(company.shareSale.offeredShares, 0);
   assertValid(state, "民营发行池售出后");
 });
@@ -192,9 +229,9 @@ test("民营上市后认购（发行池认购）：股款付给业主家庭，�
   assert.ok(sub.subscribedShares > 0);
   assert.equal(state.currency.balances.town, townBefore, "镇库不收股款");
   assert.equal(voucherBalance(state, `household:${owner.id}`) - ownerBefore, sub.proceedsVoucherUnits, "股款付给业主家庭");
-  assert.equal(company.householdShares[owner.id], 100000 - sub.subscribedShares, "业主减持");
-  assert.equal(company.shareSale.offeredShares, 49000 - sub.subscribedShares);
-  assert.equal(company.residentShares, 100000, "居民之间转手，居民总持股不变");
+  assert.equal(company.householdShares[owner.id], T - sub.subscribedShares, "业主减持");
+  assert.equal(company.shareSale.offeredShares, O - sub.subscribedShares);
+  assert.equal(company.residentShares, T, "居民之间转手，居民总持股不变");
   assertValid(state, "民营认购后");
 });
 
@@ -206,7 +243,7 @@ test("镇长批准时可改卖出比例与每股价，覆盖申请里的默认�
   const result = simulation.approveIpoApplication(state, salt.id, { offerPercent: 30, priceVoucherPerShare: 3, ticker: "205" });
   assert.equal(result.ok, true, result.reason);
   const company = state.companies[result.companyId];
-  assert.equal(company.shareSale.offeredShares, 30000);
+  assert.equal(company.shareSale.offeredShares, Math.floor(T * 30 / 100));
   assert.equal(company.shareSale.sharePriceVoucherUnits, 3 * V);
   assertValid(state, "批准覆盖");
 });
@@ -256,7 +293,7 @@ test("已取消单独成立公司：createCompany / listCompany 只返回原因�
   assert.deepEqual(state.companies, {});
 });
 
-test("老公司（整栋已在公司名下、尚未上市）仍可挂牌；未给出售股数时按 49%", () => {
+test("老公司（整栋已在公司名下、尚未上市）仍可挂牌；未给出售股数时一股不挂出", () => {
   const state = exchangeState(7209);
   const salt = addBuilding(state, "saltworks", "ipo-legacy-salt", { level: 1 });
   const formed = formCompany(state, salt.id, { name: "旧公司", operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
@@ -265,7 +302,7 @@ test("老公司（整栋已在公司名下、尚未上市）仍可挂牌；未�
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker: "401", totalShares: 1000, priceVoucherPerShare: 1 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[formed.companyId];
-  assert.equal(company.shareSale.offeredShares, 490, "未给出售股数时按 49%");
+  assert.equal(company.shareSale.offeredShares, 0, "未给出售股数时不挂出，镇库持股不会被自动买走");
   assert.equal(company.shareSale.sellerOwner, "town");
   assert.equal(company.townShares, 1000);
   assert.equal(simulation.listCompanyShares(state, formed.companyId, { ticker: "402" }).ok, false, "已上市不可重复挂牌");
@@ -280,12 +317,12 @@ test("发行池股数不得超过卖方持股：挂出超量时 validateState �
   const result = simulation.approveIpoApplication(state, salt.id, { ticker: "501" });
   assert.equal(result.ok, true, result.reason);
   const company = state.companies[result.companyId];
-  assert.equal(simulation.configureShareOffer(state, company.id, 100001, 1).ok, false, "出售股数不能超过卖方持股");
-  company.shareSale.offeredShares = 100001;
+  assert.equal(simulation.configureShareOffer(state, company.id, T + 1, 1).ok, false, "出售股数不能超过卖方持股");
+  company.shareSale.offeredShares = T + 1;
   const check = simulation.validateState(state);
   assert.equal(check.valid, false);
   assert.ok(check.errors.some(error => /股份出售记录无效/.test(error)));
-  company.shareSale.offeredShares = 49000;
+  company.shareSale.offeredShares = O;
   assertValid(state, "修正后");
 });
 

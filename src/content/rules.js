@@ -58,7 +58,8 @@ export const RULES = Object.freeze({
   ownerUpgradeReserveWageDays: 60, // 现金须留够 60 天工资
   ownerUpgradeStaffingRatio: 0.9, // 在岗须达到岗位上限的 90%
   // 上市（整栋，docs/OWNERSHIP.md 第 2 条）：挂牌时卖出比例的默认值，镇长可改。
-  ipoDefaultOfferPercent: 49, // 默认卖出 49%，原主人持有其余股份
+  ipoDefaultOfferPercent: 49, // 民营业主申请上市时默认卖出 49%，业主持有其余股份
+  ipoTownDefaultOfferPercent: 0, // 镇长整栋上市默认一股不挂出：卖多少由镇长自己在交易所设，镇库持股不会被居民自动买走
   // 民营业主上市申请：经营好（近 60 天利润为正）但现金不够下一次升级的民营建筑，每隔这么多天检查一次是否递交申请。
   ipoApplicationCheckDays: 30, // 每 30 天检查一次
   ipoReapplyCooldownDays: 180, // 申请被驳回后，同一业主 180 天内不得再申请

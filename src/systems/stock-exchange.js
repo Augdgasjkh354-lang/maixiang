@@ -1,4 +1,4 @@
-import { currencyScale } from "../economy/currency.js";
+import { currencyScale, shareTick, roundToShareTick } from "../economy/currency.js";
 import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
 import { recordEvent } from "../economy/ledger.js";
 import { householdList, isActiveHousehold } from "./households.js";
@@ -11,12 +11,30 @@ import { nextRandom } from "../core/random.js";
 // 发行池的卖方与可售股数口径在 companies.js（offerSeller / sellerHoldingShares / offeredPoolShares），这里转出供本模块与外部使用。
 export { offerSeller, offeredPoolShares, sellerHoldingShares };
 
-// 上市默认总股本（金融扩展四期）：10 万股，取最接近且能被公司级数整除的值。
-export const DEFAULT_TOTAL_SHARES = 100000;
-// 股价每日波动：向利润锚均值回归系数、噪声幅度、单日涨跌幅钳制。
-export const SHARE_PRICE_REVERSION = 0.08;
-export const SHARE_PRICE_NOISE_DAILY = 0.02;
-export const SHARE_PRICE_DAILY_LIMIT = 0.1;
+// 上市默认总股本：2520 股（1—10 级都能整除）。股价按 0.01 粮券一档报价，股数太多每股价会低到一两档，涨跌就没有层次。
+export const DEFAULT_TOTAL_SHARES = 2520;
+// 股价单日涨跌幅上限（一档价不足 20% 时至少允许动一档）。
+export const SHARE_PRICE_DAILY_LIMIT = 0.2;
+// 股价模型参数：常态向业绩锚缓慢回拢并带惯性；偶发泡沫（脱离业绩持续上涨）→ 破裂后急跌 → 回到常态。
+export const STOCK_MARKET = {
+  reversion: 0.025,        // 常态：每天向业绩锚回拢缺口的比例（慢，泡沫期不回拢）
+  momentumCarry: 0.35,     // 常态：昨日涨跌的惯性
+  momentumDecay: 0.7,      // 惯性的指数平滑
+  noise: 0.022,            // 常态日波动
+  sentimentDrift: 0.0035,  // 市场情绪（-1—1）对日涨跌的推力
+  bubbleStartDaily: 0.0018, // 常态每天进入泡沫的基础概率，情绪高涨时放大
+  bubbleStartMaxGap: 0.35, // 价格已高出业绩锚 e^0.35 倍以上不再新起泡沫
+  bubbleDriftMin: 0.012, bubbleDriftSpan: 0.02, // 泡沫期日均涨幅 1.2%—3.2%
+  bubbleNoise: 0.035,
+  bubbleMinDays: 25, bubbleSpanDays: 50,
+  burstBase: 0.01, burstPerGap: 0.4, burstGapStart: 0.5, // 价格越过业绩锚越多，每天破裂概率越大
+  crashDriftMin: 0.02, crashDriftSpan: 0.03, crashNoise: 0.05, // 破裂期日均跌幅 2%—5%，单日可近 20%
+  crashMinDays: 8, crashSpanDays: 14,
+  crashEndGap: 0.05        // 跌回业绩锚附近即结束
+};
+
+// 股价一档 = 0.01 粮券（shareTick / roundToShareTick 在 economy/currency.js）。
+export { shareTick, roundToShareTick };
 
 export function hasStockExchange(state) {
   return (state.buildings || []).some(row => row.typeId === "stock_exchange") || Boolean(state.stockExchange?.legacyAccess);
@@ -42,10 +60,10 @@ export function listingGate(state) {
   return null;
 }
 
-// 建议每股价 = 整栋估值 ÷ 总股本（经营权估值口径），单位粮券，保留三位小数，不低于 0.001。
+// 建议每股价 = 整栋估值 ÷ 总股本（经营权估值口径），单位粮券，保留两位小数，不低于 0.01。
 export function suggestedSharePriceVoucher(valuationVoucher, totalShares) {
   const perShare = totalShares > 0 ? (Number(valuationVoucher) || 0) / totalShares : 0;
-  return Math.max(0.001, Math.round(perShare * 1000) / 1000);
+  return Math.max(0.01, Math.round(perShare * 100) / 100);
 }
 
 // 整栋估值（粮券）：与经营权选择器同一口径。
@@ -53,7 +71,7 @@ export function buildingValuationVoucher(state, buildingId, content) {
   if (!buildingId) return 0;
   const value = Number(selectOperatingRightPreview(state, buildingId, content).valuationWheatJin);
   if (Number.isFinite(value) && value > 0) return value;
-  // 新建筑还没有经营记录、估值为 0 时，按建造与升级材料的当前价值估，避免挂牌价落到 0.001。
+  // 新建筑还没有经营记录、估值为 0 时，按建造与升级材料的当前价值估，避免挂牌价落到最低一档。
   const building = (state.buildings || []).find(row => row.id === buildingId);
   return building ? buildingMaterialValueUnits(state, building, content) / currencyScale(content) : 0;
 }
@@ -75,7 +93,7 @@ export function freeTicker(state, exceptCompanyId = null) {
 // input: { companyId?, buildingId, levels, ticker?, totalShares?, offerPercent?, offeredShares?, priceVoucherPerShare? }
 // - 代码缺省取第一个空闲代码；总股本缺省 10 万股（取最接近且能被级数整除的值）。
 // - 卖出：offeredShares（绝对股数）优先；否则按 offerPercent（缺省 rules.ipoDefaultOfferPercent，即 49%）。
-// - 每股价缺省 = 整栋估值 ÷ 总股本。
+// - 每股价缺省 = 整栋估值 ÷ 总股本；一律取 0.01 粮券的整数倍。
 export function resolveListingTerms(state, input, content) {
   const companyId = input.companyId || null;
   const levels = Math.max(1, Math.floor(Number(input.levels) || 1));
@@ -92,8 +110,9 @@ export function resolveListingTerms(state, input, content) {
   }
   const hasPrice = input.priceVoucherPerShare !== undefined && input.priceVoucherPerShare !== null && input.priceVoucherPerShare !== "";
   const priceVoucher = hasPrice ? Number(input.priceVoucherPerShare) : suggestedSharePriceVoucher(buildingValuationVoucher(state, input.buildingId, content), totalShares);
-  const priceUnits = Math.round(priceVoucher * currencyScale(content));
-  if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股价格必须大于0" };
+  if (!Number.isFinite(priceVoucher) || priceVoucher <= 0) return { ok: false, reason: "每股价格必须大于0" };
+  const priceUnits = roundToShareTick(priceVoucher * currencyScale(content), content);
+  if (!Number.isSafeInteger(priceUnits)) return { ok: false, reason: "每股价格必须大于0" };
   let offeredShares;
   if (input.offeredShares !== undefined && input.offeredShares !== null) {
     offeredShares = Math.floor(Number(input.offeredShares) || 0);
@@ -129,6 +148,7 @@ export function applyCompanyListing(state, company, terms, seller, content) {
   // 实时股价（金融扩展四期）：挂牌价起步，每日向利润锚波动
   company.sharePriceVoucherUnits = priceUnits;
   company.sharePriceHistory = [priceUnits];
+  company.stockMarket = { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: priceUnits };
   company.shareSale ||= {};
   company.shareSale.sellerOwner = seller.kind === "household" ? seller.householdId : "town";
   company.shareSale.offeredShares = offeredShares;
@@ -149,7 +169,7 @@ export function listCompanyOnExchange(state, companyId, options, content) {
   if (company.listing?.listed) return { ok: false, reason: "公司已经上市；再次售股沿用现有总股本" };
   const terms = resolveListingTerms(state, {
     companyId, buildingId: company.buildingId, levels: company.listedLevels,
-    ticker: options?.ticker, totalShares: options?.totalShares, offerPercent: options?.offerPercent,
+    ticker: options?.ticker, totalShares: options?.totalShares, offerPercent: options?.offerPercent ?? content.rules.ipoTownDefaultOfferPercent ?? 0,
     offeredShares: options?.offeredShares, priceVoucherPerShare: options?.priceVoucherPerShare
   }, content);
   if (!terms.ok) return terms;
@@ -166,9 +186,10 @@ export function configureListedShareOffer(state, companyId, offeredShares, price
   if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
   if (!offerSeller(state, company)) return { ok: false, reason: "发行池卖方不明，无法挂牌出售" };
   const shares = Math.floor(Number(offeredShares) || 0);
-  const priceUnits = Math.round(Number(priceVoucherPerShare) * currencyScale(content));
+  const priceInput = Number(priceVoucherPerShare);
   if (shares < 0 || shares > sellerHoldingShares(state, company)) return { ok: false, reason: "出售股数不能超过卖方持股" };
-  if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股售价须大于0" };
+  if (!Number.isFinite(priceInput) || priceInput <= 0) return { ok: false, reason: "每股售价须大于0" };
+  const priceUnits = roundToShareTick(priceInput * currencyScale(content), content);
   company.shareSale.offeredShares = shares;
   company.shareSale.sharePriceVoucherUnits = priceUnits;
   return { ok: true, offeredShares: shares, priceVoucherUnits: priceUnits };
@@ -264,25 +285,74 @@ export function executeTownBuyback(state, companyId, options, content) {
   return { ok: true, boughtShares, paidVoucherUnits: paid, sellers, preview };
 }
 
-// 每日股价结算（金融扩展四期）：AI 做市商。
-// 每只上市股票的价格每天向利润锚（统一业绩估值）均值回归，叠加 ±2% 噪声，
-// 单日涨跌幅钳制 ±10%，最低 1 单位。用种子随机数保证模拟可复现。
+// 近似标准正态（三个均匀数之和）。
+function gauss(state) {
+  return (nextRandom(state) + nextRandom(state) + nextRandom(state) - 1.5) / 0.5;
+}
+
+// 单只股票一天的价格。纯函数（随机数由 draw 提供），方便单测与调参。
+// market = company.stockMarket：{ regime: "normal"|"bubble"|"crash", daysLeft, drift, momentum, anchorUnits }
+// - 常态：慢慢回拢业绩锚，带惯性、情绪推力与噪声；
+// - 偶发泡沫：持续上涨、不再回拢业绩锚，价格越高越容易破裂（或到期）；
+// - 破裂：连日急跌，单日最多约 20%，回到业绩锚附近结束。
+// 返回新价（一档整数倍）并原地更新 market。涨跌幅 ≤ 20%（价格很低时至少允许动一档）。
+export function stepSharePrice(price, anchorUnits, market, sentiment, draw, content) {
+  const P = STOCK_MARKET;
+  const tick = shareTick(content);
+  const gap = Math.log(price / Math.max(tick, anchorUnits));
+  if (market.regime === "normal") {
+    const chance = P.bubbleStartDaily * (1 + 2.5 * Math.max(0, sentiment)) * (gap < P.bubbleStartMaxGap ? 1 : 0);
+    if (draw.uniform() < chance) {
+      market.regime = "bubble";
+      market.daysLeft = P.bubbleMinDays + Math.floor(draw.uniform() * P.bubbleSpanDays);
+      market.drift = P.bubbleDriftMin + draw.uniform() * P.bubbleDriftSpan;
+    }
+  } else if (market.regime === "bubble") {
+    const burst = P.burstBase + P.burstPerGap * Math.max(0, gap - P.burstGapStart);
+    if (market.daysLeft <= 0 || draw.uniform() < burst) {
+      market.regime = "crash";
+      market.daysLeft = P.crashMinDays + Math.floor(draw.uniform() * P.crashSpanDays);
+      market.drift = -(P.crashDriftMin + draw.uniform() * P.crashDriftSpan);
+    }
+  } else if (market.daysLeft <= 0 || gap <= P.crashEndGap) {
+    market.regime = "normal";
+    market.drift = 0;
+    market.momentum = 0;
+  }
+  let change;
+  if (market.regime === "bubble") change = market.drift + P.bubbleNoise * draw.gauss();
+  else if (market.regime === "crash") change = market.drift + P.crashNoise * draw.gauss();
+  else change = -P.reversion * gap + P.momentumCarry * market.momentum + P.sentimentDrift * sentiment + P.noise * draw.gauss();
+  if (market.regime !== "normal") market.daysLeft -= 1;
+  // 涨跌幅钳制：不超过 ±20%，价格很低时至少允许一档。
+  const maxSteps = Math.max(1, Math.floor(price * SHARE_PRICE_DAILY_LIMIT / tick));
+  const steps = Math.max(-maxSteps, Math.min(maxSteps, Math.round(price * change / tick)));
+  const next = Math.max(tick, price + steps * tick);
+  market.momentum = P.momentumDecay * market.momentum + (1 - P.momentumDecay) * (next / price - 1);
+  return next;
+}
+
+// 每日股价结算：AI 做市商 + 市场情绪。
+// 每只上市股票各有自己的行情（常态/泡沫/破裂，见 stepSharePrice）；市场情绪是全市场共有的慢变量，情绪高涨时更容易起泡沫。
+// 用种子随机数保证模拟可复现；没有上市公司时不消耗随机数。
 export function settleStockMarketDay(state, content) {
   if (!hasStockExchange(state)) return null;
+  const listed = Object.values(state.companies || {}).filter(company => company.listing?.listed && company.totalShares > 0);
+  if (!listed.length) return null;
+  const exchange = ensureStockExchangeState(state);
+  exchange.sentiment = Math.max(-1, Math.min(1, 0.96 * (exchange.sentiment || 0) + 0.12 * gauss(state)));
+  const draw = { uniform: () => nextRandom(state), gauss: () => gauss(state) };
   const moved = [];
-  for (const company of Object.values(state.companies || {})) {
-    if (!company.listing?.listed || !(company.totalShares > 0)) continue;
-    // 老存档兼容：没有实时股价时用挂牌价起步
+  for (const company of listed) {
+    // 老存档兼容：没有实时股价时用挂牌价起步；旧价不是一档整数倍时取整到一档。
     company.sharePriceVoucherUnits ||= company.shareSale?.sharePriceVoucherUnits || 0;
-    const current = company.sharePriceVoucherUnits;
-    if (!(current > 0)) continue;
+    if (!(company.sharePriceVoucherUnits > 0)) continue;
+    const current = roundToShareTick(company.sharePriceVoucherUnits, content);
+    const market = company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: current };
     const reference = stockReference(state, company, content).referencePerShareVoucherUnits || 0;
-    const anchor = reference > 0 ? reference : current;
-    const reverted = current + (anchor - current) * SHARE_PRICE_REVERSION;
-    const noised = reverted * (1 + (nextRandom(state) * 2 - 1) * SHARE_PRICE_NOISE_DAILY);
-    const lo = Math.floor(current * (1 - SHARE_PRICE_DAILY_LIMIT));
-    const hi = Math.ceil(current * (1 + SHARE_PRICE_DAILY_LIMIT));
-    const next = Math.min(hi, Math.max(Math.max(1, lo), Math.floor(noised)));
+    // 业绩锚：有业绩估值就用它；还没有业绩（新股、停工）时沿用上一次的锚，从未有过就用挂牌价。
+    if (reference > 0) market.anchorUnits = reference;
+    const next = stepSharePrice(current, market.anchorUnits > 0 ? market.anchorUnits : current, market, exchange.sentiment, draw, content);
     company.sharePriceVoucherUnits = next;
     if (!Array.isArray(company.sharePriceHistory)) company.sharePriceHistory = [];
     company.sharePriceHistory.push(next);
@@ -293,25 +363,34 @@ export function settleStockMarketDay(state, content) {
 }
 
 // 住户日常股票买入：按投资倾向把本日股票预算分散买入发行池（镇长或业主挂出的）股份。
-// - 买入对象：已上市、发行池有股的公司，按实时股价成交；镇库未挂出的股份不卖
+// - 买入对象：已上市、发行池有股且市价不低于卖方定价的公司，按实时股价成交；镇库未挂出的股份不卖
 // - 预算：household.stockBuyBudgetVoucherUnits（银行分流后写入）或无银行时现算
 // - 付款：住户 → 卖方（镇库或原业主家庭）；付不起就跳过
 // - 股份转移：卖方是镇库则 townShares → residentShares；卖方是家庭则只在居民之间转手
 export function settleHouseholdStockBuying(state, content) {
   if (!hasStockExchange(state)) return null;
+  // 发行池是卖方挂出的限价卖单：市价低于卖方定的每股售价时不成交（成交价按市价，卖方不会卖得比自己定的价低）。
   const listed = Object.values(state.companies || {}).filter(company =>
     company.listing?.listed && (company.sharePriceVoucherUnits || 0) > 0 &&
+    company.sharePriceVoucherUnits >= (company.shareSale?.sharePriceVoucherUnits || 0) &&
     offeredPoolShares(state, company) > 0);
   if (!listed.length) return null;
+  // 追涨：近期涨得多、正处泡沫的股票分到更多买入预算，破裂期的股票少人问津。
+  const weights = new Map(listed.map(company => {
+    const market = company.stockMarket || {};
+    const heat = 1 + 6 * (market.momentum || 0) + (market.regime === "bubble" ? 0.5 : market.regime === "crash" ? -0.3 : 0);
+    return [company.id, Math.max(0.25, Math.min(3, heat))];
+  }));
+  const weightTotal = [...weights.values()].reduce((sum, value) => sum + value, 0);
   let totalShares = 0;
   let totalSpentUnits = 0;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
     const budget = consumeHouseholdStockBudget(state, content, household);
     if (budget <= 0) continue;
-    const perCompany = Math.floor(budget / listed.length);
-    if (perCompany <= 0) continue;
     for (const company of listed) {
+      const perCompany = Math.floor(budget * weights.get(company.id) / weightTotal);
+      if (perCompany <= 0) continue;
       const available = offeredPoolShares(state, company);
       if (available <= 0) continue;
       const seller = offerSeller(state, company);

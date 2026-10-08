@@ -349,7 +349,7 @@ export function mountGame(root) {
   function readIpoForm(prefix, buildingId, { tickerAttr, nameAttr = null }) {
     const id = CSS.escape(buildingId);
     const totalShares = readStagedNumber(`${prefix}:${buildingId}:total`, { label: "总股本", integer: true, minimum: 1 });
-    const offerPercent = readStagedNumber(`${prefix}:${buildingId}:offer`, { label: "卖出比例", positive: true, maximum: 100 });
+    const offerPercent = readStagedNumber(`${prefix}:${buildingId}:offer`, { label: "卖出比例", minimum: 0, maximum: 100 });
     const priceVoucherPerShare = readStagedNumber(`${prefix}:${buildingId}:price`, { label: "每股价格", positive: true });
     if (totalShares === null || offerPercent === null || priceVoucherPerShare === null) return null;
     const ticker = (root.querySelector(`[${tickerAttr}="${id}"]`)?.value || "").trim();
@@ -1160,7 +1160,9 @@ export function mountGame(root) {
       if (!result.ok) { showToast(ipoFailureText(result)); render(true); return; }
       for (const suffix of ["total", "offer", "price"]) numericDrafts.delete(`ipo:${buildingId}:${suffix}`);
       changed(true); renderedMapSignature = ""; latestMapModel = null; render(true);
-      showToast(`${result.ticker} 已整栋上市：挂牌${number(result.offeredShares)}股，镇库保留${number(result.keptShares)}股。`);
+      showToast(result.offeredShares > 0
+        ? `${result.ticker} 已整栋上市：挂牌${number(result.offeredShares)}股，镇库保留${number(result.keptShares)}股。`
+        : `${result.ticker} 已整栋上市：镇库持有全部${number(result.keptShares)}股，到交易所设置出售股数后居民才会买入。`);
       return;
     }
     const ipoApproveButton = closest(target, "[data-ipo-approve]");

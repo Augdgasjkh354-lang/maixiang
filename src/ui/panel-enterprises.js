@@ -43,10 +43,10 @@ function renderTownListingForm(view, row) {
       <label>股票代码（可空）<input type="text" inputmode="numeric" maxlength="3" autocomplete="off" value="" placeholder="自动" data-ipo-ticker="${id}"></label>
       <label>公司名称<input type="text" maxlength="30" autocomplete="off" value="${escapeHtml(`${row.name}公司`)}" data-ipo-name="${id}"></label>
       <label>总股本${stagedInput(view, { key: key("total"), label: "总股本", value: row.suggestedTotalShares, integer: true, minimum: 1 })}<small>股</small></label>
-      <label>卖出比例${stagedInput(view, { key: key("offer"), label: "卖出比例", value: row.suggestedOfferPercent, positive: true, maximum: 100 })}<small>%</small></label>
+      <label>卖出比例${stagedInput(view, { key: key("offer"), label: "卖出比例", value: row.suggestedOfferPercent, minimum: 0, maximum: 100 })}<small>%</small></label>
       <label>每股价格${stagedInput(view, { key: key("price"), label: "每股价格", value: row.suggestedPriceVoucherPerShare ?? 1, positive: true })}<small>${escapeHtml(unit)}</small></label>
     </div>
-    ${row.reason ? `<div class="shortage-banner visible">${escapeHtml(row.reason)}</div>` : `<div class="subtle">整栋放入新公司挂牌；镇库保留未卖出的股份，股款归镇库。</div>`}
+    ${row.reason ? `<div class="shortage-banner visible">${escapeHtml(row.reason)}</div>` : `<div class="subtle">整栋放入新公司挂牌；镇库保留未卖出的股份，股款归镇库。卖出比例填 0 就是先不卖，之后到交易所自己设出售股数，居民不会自动买走没挂出的股份。</div>`}
     <button class="primary wide" data-ipo-list="${id}" ${row.canList ? "" : "disabled"}>整栋上市</button>
   </div>`;
 }
@@ -97,9 +97,9 @@ function renderListing(view, company) {
     return `<h4>交易所上市</h4>
       ${gate ? `<div class="subtle">${escapeHtml(gate)}。公司仍可继续独立经营。</div>` : `<div class="business-form-grid">
         <label>三位代码<input type="text" inputmode="numeric" maxlength="3" autocomplete="off" value="${escapeHtml(preview?.ticker || "001")}" data-stock-ticker="${escapeHtml(company.id)}"></label>
-        <label>总股本${stagedInput(view, { key: sharesKey, label: "总股本", value: Math.max(1000, company.listedLevels * 1000), integer: true, minimum: 1 })}</label>
+        <label>总股本${stagedInput(view, { key: sharesKey, label: "总股本", value: 2520, integer: true, minimum: 1 })}</label>
         <label>每股价格${stagedInput(view, { key: priceKey, label: "每股价格", value: 1, positive: true })}<small>粮券</small></label>
-        <label>本次出售${stagedInput(view, { key: offeredKey, label: "本次出售股数", value: Math.max(1, company.listedLevels * 100), integer: true, minimum: 0 })}</label>
+        <label>本次出售${stagedInput(view, { key: offeredKey, label: "本次出售股数", value: 0, integer: true, minimum: 0 })}</label>
       </div>
       <button class="secondary wide" data-stock-list-preview="${escapeHtml(company.id)}">预览上市</button>
       ${preview ? `<div class="operation-preview"><strong>${escapeHtml(preview.ticker)} · 上市确认</strong>
@@ -116,6 +116,7 @@ function renderListing(view, company) {
   const previewOpen = view.sharePreviewCompanyId === company.id;
   const listedShares = company.shareSale?.offeredShares || 0;
   const sharePrice = company.sharePriceVoucher || 0;
+  const askPrice = company.askPriceVoucher || sharePrice;
   const subscribed = sub.subscribedShares || 0;
   const proceeds = (sub.proceedsVoucherUnits || 0) / scale;
   const afterTownShares = company.townShares - subscribed;
@@ -126,8 +127,10 @@ function renderListing(view, company) {
     <div class="row"><span class="label">实际累计售股收入</span><strong class="value">${number(company.shareSaleProceedsVoucher, 2)}粮券 · 归镇库</strong></div>
     <div class="business-form-grid two">
       <label>出售股数${stagedInput(view, { key: `share:${company.id}:count`, label: "出售股数", value: listedShares, integer: true, minimum: 0, maximum: company.townShares })}</label>
-      <label>每股价格${stagedInput(view, { key: `share:${company.id}:price`, label: "每股售价", value: sharePrice || 1, positive: true })}<small>粮券</small></label>
+      <label>每股价格${stagedInput(view, { key: `share:${company.id}:price`, label: "每股售价", value: askPrice || 1, positive: true })}<small>粮券</small></label>
     </div>
+    <div class="row"><span class="label">现价 / 你定的售价</span><strong class="value">${number(sharePrice, 2)} / ${number(askPrice, 2)}粮券</strong></div>
+    <div class="subtle">只有你挂出的股数才会被居民买走，且现价不低于你定的售价才成交（按现价）。${listedShares > 0 && sharePrice < askPrice ? "现价低于售价，暂不成交。" : ""}</div>
     <button class="secondary wide" data-share-preview="${escapeHtml(company.id)}">预览居民认购</button>
     ${previewOpen ? `<div class="operation-preview"><strong>本次售股</strong>
       <div class="row"><span class="label">计划收入 / 预计实际收入</span><strong class="value">${number(listedShares * sharePrice, 2)} / ${number(proceeds, 2)}粮券</strong></div>
