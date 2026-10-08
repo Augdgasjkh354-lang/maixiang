@@ -2628,7 +2628,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod18 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-736bd1b";
+       const BUILD_ID = "0203-9c17672";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -24356,7 +24356,7 @@ function renderListing(view, company) {
       ${sub.reason ? `<div class="shortage-banner visible">${escapeHtml(sub.reason)}</div>` : ""}
       <div class="business-sticky-actions"><button class="secondary" data-share-cancel>取消</button><button class="primary" data-share-confirm="${escapeHtml(company.id)}" ${!sub.available ? "disabled" : ""}>确认售股</button></div>
     </div>` : ""}
-    <div class="business-form-grid two"><label>回购股数${stagedInput(view, { key: `buyback:${company.id}:count`, label: "镇库回购股数", value: 100, integer: true, minimum: 1 })}</label><label>回购价${stagedInput(view, { key: `buyback:${company.id}:price`, label: "镇库回购每股价格", value: Math.max(1, (ref.referencePerShareVoucherUnits || 0) / scale), positive: true })}<small>粮券</small></label></div>
+    <div class="business-form-grid two"><label>回购股数${stagedInput(view, { key: `buyback:${company.id}:count`, label: "镇库回购股数", value: 100, integer: true, minimum: 1 })}</label><label>回购价${stagedInput(view, { key: `buyback:${company.id}:price`, label: "镇库回购每股价格", value: Math.max(0.01, Math.round((ref.referencePerShareVoucherUnits || 0) / scale * 100) / 100), positive: true })}<small>粮券</small></label></div>
     <button class="secondary wide" data-company-buyback-preview="${escapeHtml(company.id)}">预览镇库回购</button>
     ${view.buybackPreview?.companyId === company.id ? `<div class="operation-preview"><strong>回购预览</strong>
       <div class="row"><span class="label">申请 / 居民愿售</span><strong class="value">${number(view.buybackPreview.preview?.requestedShares || 0)} / ${number(view.buybackPreview.preview?.willingShares || 0)}股</strong></div>
@@ -24366,8 +24366,10 @@ function renderListing(view, company) {
       <div class="business-sticky-actions"><button class="secondary" data-company-buyback-cancel>取消</button><button class="primary" data-company-buyback-confirm="${escapeHtml(company.id)}" ${!view.buybackPreview.preview?.available ? "disabled" : ""}>确认回购</button></div>
     </div>` : ""}
     <details class="detail-block" data-detail-key="stock-ref:${escapeHtml(company.id)}"><summary>估值与业绩</summary><div class="detail-body">
-      <div class="row"><span class="label">业绩估值</span><strong class="value">${ref.validProfitMethod ? `${number((ref.referenceCompanyValueVoucherUnits || 0) / scale, 2)}粮券` : (ref.observedDays ? "观察中/暂无正值" : "暂无业绩")}</strong></div>
-      <div class="row"><span class="label">观察 / 年化利润率</span><strong class="value">${number(ref.observedDays || 0)}日 / ${number((ref.annualizedProfitRateBps || 0) / 100, 2)}%</strong></div>
+      <div class="row"><span class="label">近一年利润（折年）</span><strong class="value">${ref.validProfitMethod ? `${number((ref.annualizedProfitVoucherUnits || 0) / scale, 2)}粮券` : (ref.observedDays ? "观察中/暂无正值" : "暂无业绩")}</strong></div>
+      <div class="row"><span class="label">合理价（利润 ÷ 4%）</span><strong class="value">${ref.validProfitMethod ? `${number((ref.referencePerShareVoucherUnits || 0) / scale, 2)}粮券/股` : "暂无"}</strong></div>
+      <div class="row"><span class="label">现价</span><strong class="value">${number(sharePrice, 2)}粮券/股</strong></div>
+      <div class="row"><span class="label">观察</span><strong class="value">${number(ref.observedDays || 0)}日</strong></div>
       <div class="subtle">${escapeHtml(ref.basis || "经营资料待观察")}</div>
     </div></details>`;
 }
