@@ -88,15 +88,15 @@ export function ensureShops(state, content) {
   return state.shops;
 }
 
-function addBookValue(shop, key, units) {
+export function addBookValue(shop, key, units) {
   bookAdd(shop.accounts, key, units);
 }
 
-function addBookMap(shop, key, itemId, units) {
+export function addBookMap(shop, key, itemId, units) {
   bookAddMap(shop.accounts, key, itemId, units);
 }
 
-function applyProfit(shop, delta) {
+export function applyProfit(shop, delta) {
   bookAdd(shop.accounts, "profitVoucherUnits", delta);
   shop.settlement.profitVoucherUnits = (shop.settlement.profitVoucherUnits || 0) + delta;
   shop.retainedEarningsVoucherUnits = (shop.retainedEarningsVoucherUnits || 0) + delta;
@@ -111,12 +111,39 @@ export function shopDefinition(content, typeId) {
 // 店里当前实际经营的商品：后加的商品（optionalRetail，如酒、布）镇上有货或店里有存货才算。
 function activeRetailItemIds(state, shop, content) {
   return shopRetailItemIds(shop, content).filter(itemId => !content.items[itemId]?.optionalRetail
-    || (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (state.accounts?.town?.[itemId] || 0) > 0 || (shop.inventory?.[itemId] || 0) > 0);
+    || (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (state.accounts?.town?.[itemId] || 0) > 0 || (shop.inventory?.[itemId] || 0) > 0
+    || (shopDefinition(content, shop.typeId)?.id === "general" && farmsHaveStock(state, itemId, content)));
+}
+
+function farmsHaveStock(state, itemId, content) {
+  return Object.values(state.shops || {}).some(other => other.status === "open"
+    && shopDefinition(content, other.typeId)?.kind === "farm" && (other.inventory?.[itemId] || 0) > 0);
 }
 
 export function shopRetailItemIds(shop, content) {
   const def = shopDefinition(content, shop?.typeId);
-  return def?.kind === "retail" ? [...(def.itemIds || [])] : [];
+  if (def?.kind === "retail") return [...(def.itemIds || [])];
+  // 摊位只卖日用品（rules.householdGoods），不卖主食。
+  if (def?.kind === "stall") return Object.keys(content.rules.householdGoods || {}).filter(itemId => content.items[itemId]);
+  return [];
+}
+
+export function shopKind(shop, content) {
+  return shopDefinition(content, shop?.typeId)?.kind || null;
+}
+
+// 店铺所在的宿主建筑（商业街、养殖基地、时代广场）：建筑定义带 shopHost。
+export function shopHostTypeId(def) {
+  return def?.hostBuildingTypeId || "commercial_street";
+}
+
+export function shopHostSlots(building, content) {
+  const perLevel = content?.buildings?.[building?.typeId]?.shopHost?.slotsPerLevel ?? 2;
+  return Math.max(0, (building?.level || 1) * perLevel);
+}
+
+export function shopMaxMerchants(shop, content) {
+  return shopDefinition(content, shop?.typeId)?.maxMerchants ?? content.rules.shopMaxMerchants ?? 4;
 }
 
 export function shopIsService(shop, content) {
@@ -143,8 +170,10 @@ function shopSerial(state, content) {
   return (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
 }
 
-function shopClerkLimit(shop, content) {
-  return shopDefinition(content, shop?.typeId)?.id === "general"
+export function shopClerkLimit(shop, content) {
+  const def = shopDefinition(content, shop?.typeId);
+  if (Number.isFinite(def?.maxClerks)) return def.maxClerks;
+  return def?.id === "general"
     ? (content.rules.generalStoreMaxClerks || 50)
     : (content.rules.shopMaxClerks || 20);
 }
@@ -168,6 +197,9 @@ function protectedClerkCount(state, shop, content) {
 export function shopDailyCustomerCapacity(state, shop, content) {
   if (!shop || shop.status !== "open" || !shopMerchantOnDuty(state, shop)) return 0;
   const def = shopDefinition(content, shop.typeId);
+  if (def?.kind === "farm") return 0;
+  // 摊位按卖货量封顶，客流不另设限制。
+  if (def?.kind === "stall") return shopMerchantCount(state, shop) * 1000;
   if (def?.id !== "general") {
     if (shopIsService(shop, content)) return serviceShopCapacityUses(state, shop, content);
     // 非综合商店零售店：按销售能力折算客流（商人60斤/店员120斤，每客2斤），避免恒0导致永远拒售。
@@ -195,8 +227,8 @@ export function shopsForStreet(state, buildingId) {
   return Object.values(state.shops || {}).filter(shop => shop.buildingId === buildingId && shopOccupiesStreet(shop));
 }
 
-export function streetShopCapacity(building) {
-  return Math.max(0, (building?.level || 1) * 2);
+export function streetShopCapacity(building, content = null) {
+  return shopHostSlots(building, content);
 }
 
 export function syncShopEmployment(state, content) {
@@ -227,8 +259,11 @@ function householdStartupReserveUnits(household, content) {
   return Math.round(householdPopulation(household) * perPerson * currencyScale(content));
 }
 
-function chooseMerchantHousehold(state, content, preferredId = null) {
-  const startup = Math.round((content.rules.shopMerchantStartupVoucher || 120) * currencyScale(content));
+function shopStartupUnits(def, content) {
+  return Math.round((def?.startupVoucher ?? content.rules.shopMerchantStartupVoucher ?? 120) * currencyScale(content));
+}
+
+function chooseMerchantHousehold(state, content, preferredId = null, startup = shopStartupUnits(null, content)) {
   const candidates = householdList(state).filter(household => {
     if (!isActiveHousehold(household) || householdIdleWorkers(household) <= 0) return false;
     const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
@@ -243,18 +278,20 @@ function chooseMerchantHousehold(state, content, preferredId = null) {
 export function openShop(state, buildingId, typeId, content, preferredHouseholdId = null) {
   ensureShops(state, content);
   const building = state.buildings.find(row => row.id === buildingId);
-  if (!building || building.typeId !== "commercial_street") return { ok: false, reason: "请选择已建成的商业街" };
   const requestedDefinition = content.rules.shopTypes?.[typeId];
   const normalizedTypeId = requestedDefinition?.aliasOf || typeId;
   const definition = shopDefinition(content, normalizedTypeId);
+  const hostTypeId = shopHostTypeId(definition);
+  const hostName = content.buildings[hostTypeId]?.name || "商业街";
+  if (!building || building.typeId !== hostTypeId) return { ok: false, reason: definition ? `请选择已建成的${hostName}` : "不支持这种店铺" };
   if (!definition) return { ok: false, reason: "不支持这种店铺" };
   const active = shopsForStreet(state, buildingId);
-  if (active.length >= streetShopCapacity(building)) return { ok: false, reason: "商业街没有空铺" };
-  const household = chooseMerchantHousehold(state, content, preferredHouseholdId);
+  if (active.length >= shopHostSlots(building, content)) return { ok: false, reason: `${hostName}没有空位` };
+  const startupUnits = shopStartupUnits(definition, content);
+  const household = chooseMerchantHousehold(state, content, preferredHouseholdId, startupUnits);
   if (!household) return { ok: false, reason: "没有同时满足生活储备、启动资金和空闲劳动力的家庭" };
   if (householdIdleWorkers(household) <= 0) return { ok: false, reason: "该家庭没有可开店的劳动力" };
   const shopId = `shop-${state.nextShopNumber++}`;
-  const startupUnits = Math.round((content.rules.shopMerchantStartupVoucher || 120) * currencyScale(content));
   const shop = {
     id: shopId,
     name: `${household.name}${definition.name}`,
@@ -321,7 +358,7 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
   household.shopIds ||= [];
   household.shopIds.push(shopId);
   syncShopEmployment(state, content);
-  recordEvent(state, `${household.name}在商业街开出${definition.name}。`, content, { day: state.day + 1 });
+  if (definition.kind !== "stall") recordEvent(state, `${household.name}在${hostName}开出${definition.name}。`, content, { day: state.day + 1 });
   return { ok: true, shopId, householdId: household.id, startupVoucher: startupUnits / currencyScale(content) };
 }
 
@@ -330,7 +367,7 @@ export function setShopMerchants(state, shopId, requested, content) {
   if (!shop) return { ok: false, reason: "店铺不存在" };
   syncShopEmployment(state, content);
   if (shop.status !== "open") return { ok: false, reason: "店铺未营业" };
-  const max = content.rules.shopMaxMerchants || 4;
+  const max = shopMaxMerchants(shop, content);
   const target = Math.max(1, Math.min(max, Math.floor(Number(requested) || 1)));
   const before = shopMerchantCount(state, shop);
   const result = setJobCount(state, merchantJobKey(shop), target, content, { type: "shop", id: shopId });
@@ -392,6 +429,13 @@ export function setShopClerks(state, shopId, requested, content) {
 
 export function shopSalesCapacityUnits(state, shop, content) {
   if (!shop || shop.status !== "open" || !shopMerchantOnDuty(state, shop) || shopIsService(shop, content)) return 0;
+  const kind = shopKind(shop, content);
+  if (kind === "farm") return 0;
+  if (kind === "stall") {
+    const def = shopDefinition(content, shop.typeId);
+    const jin = Math.min(def.dailySalesCapJin ?? 50, shopMerchantCount(state, shop) * (def.perKeeperSalesJin ?? 30));
+    return Math.round(jin * content.precision.inventoryUnitsPerJin);
+  }
   if (shopDefinition(content, shop.typeId)?.id === "general") {
     const customers = shopDailyCustomerCapacity(state, shop, content);
     return Math.round(customers * (content.rules.foodPerPersonDay || 2) * content.precision.inventoryUnitsPerJin);
@@ -420,6 +464,13 @@ function shopWorkingCapitalReserve(state, shop, content) {
     const service = content.rules.serviceTypes?.[def.serviceId];
     // 与零售店口径一致：全额日销能力×单价×天数（之前无故打25折）。
     return Math.round(serviceShopCapacityUses(state, shop, content) * (service?.priceVoucher || 0) * days * currencyScale(content));
+  }
+  if (def?.kind === "farm") {
+    // 养殖场留足 7 天饲料钱和饲养员工资。
+    const feedUnits = farmDailyFeedUnits(state, shop, content);
+    const feedVoucher = feedUnits / content.precision.inventoryUnitsPerJin * currentUnitPrice(state, def.feedItemId, content);
+    const wageVoucher = shopClerkCount(state, shop) * shopWage(state, shop, content);
+    return Math.round((feedVoucher + wageVoucher) * days * currencyScale(content));
   }
   const itemIds = activeRetailItemIds(state, shop, content);
   if (!itemIds.length) return 0;
@@ -538,7 +589,10 @@ export function procureShopInventory(state, shop, content) {
   const invScale = content.precision.inventoryUnitsPerJin;
   const def = shopDefinition(content, shop.typeId);
   let itemTargets = [];
-  if (def?.kind === "retail") {
+  if (def?.kind === "farm") {
+    // 养殖场：备 2 天饲料。
+    itemTargets.push({ itemId: def.feedItemId, targetUnits: farmDailyFeedUnits(state, shop, content) * 2 });
+  } else if (def?.kind === "retail" || def?.kind === "stall") {
     const itemIds = activeRetailItemIds(state, shop, content);
     const capacity = shopSalesCapacityUnits(state, shop, content);
     const history = shop.history || [];
@@ -557,6 +611,12 @@ export function procureShopInventory(state, shop, content) {
       const expected = Math.max(avgItemSales, trial);
       itemTargets.push({ itemId, targetUnits: Math.max(trial, Math.round(expected * targetDays)) });
     }
+    // 摊位只进少量货：所有商品合计不超过 2 天的卖货上限。
+    if (def?.kind === "stall") {
+      const cap = capacity * targetDays;
+      const total = itemTargets.reduce((sum, row) => sum + row.targetUnits, 0);
+      if (total > cap) for (const row of itemTargets) row.targetUnits = Math.floor(row.targetUnits * cap / total);
+    }
   } else if (def?.kind === "service") {
     const service = content.rules.serviceTypes?.[def.serviceId];
     for (const row of service?.consumables || []) {
@@ -571,13 +631,18 @@ export function procureShopInventory(state, shop, content) {
     const need = Math.max(0, row.targetUnits - (shop.inventory[row.itemId] || 0));
     if (need <= 0) { purchasedByItem[row.itemId] = 0; continue; }
     hadNeed = true;
-    const purchase = buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need, content, `${shop.name}从批发市场进货`);
-    const bought = purchase.boughtUnits || 0;
-    if (bought > 0) {
-      shop.inventory[row.itemId] = (shop.inventory[row.itemId] || 0) + bought;
+    // 综合商店先从养殖场进肉，不够再找批发市场。
+    const fromFarms = def?.id === "general" && content.items[row.itemId]?.livestock ? buyFromFarms(state, shop, row.itemId, need, content) : 0;
+    const purchase = need - fromFarms > 0
+      ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`)
+      : { boughtUnits: 0, paidVoucherUnits: 0 };
+    const bought = (purchase.boughtUnits || 0) + fromFarms;
+    const wholesaleBought = purchase.boughtUnits || 0;
+    if (wholesaleBought > 0) {
+      shop.inventory[row.itemId] = (shop.inventory[row.itemId] || 0) + wholesaleBought;
       shop.inventoryCostVoucherUnits[row.itemId] = (shop.inventoryCostVoucherUnits[row.itemId] || 0) + (purchase.paidVoucherUnits || 0);
       addBookValue(shop, "purchaseVoucherUnits", purchase.paidVoucherUnits || 0);
-      addBookMap(shop, "purchasedUnits", row.itemId, bought);
+      addBookMap(shop, "purchasedUnits", row.itemId, wholesaleBought);
     }
     purchasedByItem[row.itemId] = bought;
     purchasedTotal += bought;
@@ -605,7 +670,10 @@ function accrueDailyLiabilities(state, shop, content) {
   const clerkWage = Math.round(clerkAssignments.reduce((sum, row) => sum + row.count, 0) * clerkRate * scale);
   const wage = merchantWage + clerkWage;
   // 负值保护：租金/工资取max(0)，避免负负债（之前无保护）。
-  const rent = Math.max(0, Math.round((state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1) * scale));
+  const rentVoucher = shopKind(shop, content) === "stall"
+    ? (state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2)
+    : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
+  const rent = Math.max(0, Math.round(rentVoucher * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
   accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
   accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
@@ -692,7 +760,9 @@ function archiveShopDay(state, shop, content) {
   const soldUnits = Object.values(soldUnitsByItem).reduce((sum, units) => sum + Math.max(0, units || 0), 0);
   const serviceUses = { ...(shop.accounts?.day?.serviceUses || {}) };
   const stockoutUnitsByItem = { ...(shop.accounts?.day?.stockoutUnits || {}) };
-  const row = { serial, soldUnits, soldUnitsByItem, stockoutUnitsByItem, serviceUses,
+  const unmetUnitsByItem = { ...(shop.accounts?.day?.unmetUnits || {}) };
+  const storeSoldUnitsByItem = { ...(shop.accounts?.day?.storeSoldUnits || {}) };
+  const row = { serial, soldUnits, soldUnitsByItem, stockoutUnitsByItem, unmetUnitsByItem, storeSoldUnitsByItem, serviceUses,
     customerCount: shop.accounts?.day?.customerCount || 0,
     rejectedCustomerCount: shop.accounts?.day?.rejectedCustomerCount || 0,
     revenueVoucherUnits: shop.accounts?.day?.revenueVoucherUnits || 0,
@@ -747,13 +817,17 @@ function autoAdjustShopClerks(state, shop, content) {
   shop.plan ||= { lastAdjustedSerial: -1 };
   if (shop.plan.lastAdjustedSerial >= 0 && serial - shop.plan.lastAdjustedSerial < interval) return;
   shop.plan.lastAdjustedSerial = serial;
+  const kind = shopKind(shop, content);
+  if (kind === "stall") return;
   const observation = Math.max(1, content.rules.operatingObservationDays || 7);
   const history = (shop.history || []).slice(-observation);
   const current = shopClerkCount(state, shop);
   const wage = state.employment.wageRates?.shop_clerks ?? content.rules.shopClerkDefaultWageVoucher ?? 10;
   let target = current;
   let expected = 0;
-  if (shopIsService(shop, content)) {
+  if (kind === "farm") {
+    target = farmTargetHands(state, shop, content, history);
+  } else if (shopIsService(shop, content)) {
     const def = shopDefinition(content, shop.typeId);
     const service = content.rules.serviceTypes?.[def?.serviceId];
     if (!service) return;
@@ -835,6 +909,91 @@ function autoAdjustShopClerks(state, shop, content) {
   adjustShopWage(state, shop, content, market);
 }
 
+// ---------------------------------------------------------------- 养殖场（kind: "farm"）
+
+// 在场劳力：养殖户（商人）和饲养员都干活。
+export function farmWorkers(state, shop) {
+  return shopMerchantCount(state, shop) + shopClerkCount(state, shop);
+}
+
+export function farmDailyOutputUnits(state, shop, content) {
+  const def = shopDefinition(content, shop?.typeId);
+  if (def?.kind !== "farm" || shop.status !== "open" || !shopMerchantOnDuty(state, shop)) return 0;
+  return Math.floor(farmWorkers(state, shop) * def.outputPerWorkerDay * content.precision.inventoryUnitsPerJin);
+}
+
+export function farmDailyFeedUnits(state, shop, content) {
+  const def = shopDefinition(content, shop?.typeId);
+  return def?.kind === "farm" ? Math.ceil(farmDailyOutputUnits(state, shop, content) * def.feedPerUnit) : 0;
+}
+
+// 饲养员目标：按近期卖出量排产；存货不足 1 天就加人，超过 4 天就减人（每周期最多 ±2 / −1）。
+function farmTargetHands(state, shop, content, history) {
+  const def = shopDefinition(content, shop.typeId);
+  const current = shopClerkCount(state, shop);
+  const merchants = shopMerchantCount(state, shop);
+  const perWorker = def.outputPerWorkerDay * content.precision.inventoryUnitsPerJin;
+  // 只看卖给商店的量：卖给批发市场的是处理积压，不算需求。
+  const avgSold = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.storeSoldUnitsByItem?.[def.productItemId] || 0), 0) / history.length : 0;
+  const avgUnmet = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.unmetUnitsByItem?.[def.productItemId] || 0), 0) / history.length : 0;
+  const stock = shop.inventory?.[def.productItemId] || 0;
+  // 按比例排产：目标日产 = 商店日均进货 + 一半缺口 + 存货差（目标 2 天销量）分 5 天补；差 10% 以内不动，每周期最多 +2 / −1。
+  const stockGap = avgSold * 2 - stock;
+  const desiredOutput = Math.max(0, avgSold + avgUnmet * 0.5 + stockGap / Math.max(1, content.rules.operatingStockCorrectionDays || 5));
+  const desiredHands = Math.max(0, Math.ceil(desiredOutput / perWorker) - merchants);
+  let target = current;
+  const output = (merchants + current) * perWorker;
+  if (history.length < 3) target = Math.max(current, 1);
+  else if (desiredOutput > output * 1.1) target = Math.min(desiredHands, current + Math.min(2, content.rules.operatingWorkerAdjustMaxPerCycle || 2));
+  else if (desiredOutput < output * 0.9 && current > 0) target = Math.max(desiredHands, current - 1);
+  // 只在多雇一人划算（每人产值减饲料高于日薪）且资金够付 3 天工资时加人。
+  const wage = shopWage(state, shop, content);
+  const marginJin = def.outputPerWorkerDay * (currentUnitPrice(state, def.productItemId, content) - def.feedPerUnit * currentUnitPrice(state, def.feedItemId, content));
+  const fundsVoucher = maximumPayableValueUnits(state, `shop:${shop.id}`, content) / currencyScale(content);
+  if (target > current && (marginJin <= wage || fundsVoucher < (target - current) * wage * 3)) target = current;
+  shop.plan.expectedDailySalesUnits = avgSold;
+  shop.plan.staffingDiagnosis = target > current ? "供不应求，加人" : target < current ? "存货积压，减人" : "产销平衡";
+  return target;
+}
+
+// 综合商店向养殖场进货：按养殖场存货多少依次买，价格取市场价（批发价）。返回买到的库存单位。
+function buyFromFarms(state, store, itemId, wantedUnits, content) {
+  const farms = Object.values(state.shops || {}).filter(shop => shop.status === "open"
+    && shopDefinition(content, shop.typeId)?.kind === "farm" && (shop.inventory?.[itemId] || 0) > 0)
+    .sort((a, b) => (b.inventory[itemId] || 0) - (a.inventory[itemId] || 0) || a.id.localeCompare(b.id));
+  const price = currentUnitPrice(state, itemId, content);
+  if (!(price > 0)) return 0;
+  let bought = 0;
+  for (const farm of farms) {
+    const left = wantedUnits - bought;
+    if (left <= 0) break;
+    const affordable = Math.floor(maximumPayableValueUnits(state, `shop:${store.id}`, content) * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
+    const units = Math.min(left, farm.inventory[itemId] || 0, affordable);
+    if (units <= 0) break;
+    const value = Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content));
+    const payment = settleMonetaryPayment(state, `shop:${store.id}`, `shop:${farm.id}`, currentPaymentComposition(state, value), content,
+      "farm_sale", `${store.name}向${farm.name}进${content.items[itemId]?.name || itemId}`, { requireFull: true });
+    if (!payment.ok) break;
+    const cogs = removeShopInventoryCost(farm, itemId, units);
+    farm.inventory[itemId] -= units;
+    addBookValue(farm, "revenueVoucherUnits", value);
+    addBookValue(farm, "cogsVoucherUnits", cogs);
+    addBookMap(farm, "soldUnits", itemId, units);
+    addBookMap(farm, "storeSoldUnits", itemId, units);
+    applyProfit(farm, value - cogs);
+    store.inventory[itemId] = (store.inventory[itemId] || 0) + units;
+    store.inventoryCostVoucherUnits[itemId] = (store.inventoryCostVoucherUnits[itemId] || 0) + value;
+    addBookValue(store, "purchaseVoucherUnits", value);
+    addBookMap(store, "purchasedUnits", itemId, units);
+    bought += units;
+  }
+  // 商店没买够：把缺口记到经营这种肉的养殖场上，养殖场据此加人。
+  const unmet = wantedUnits - bought;
+  const producers = Object.values(state.shops || {}).filter(shop => shop.status === "open" && shopDefinition(content, shop.typeId)?.productItemId === itemId);
+  if (unmet > 0 && producers.length) for (const farm of producers) addBookMap(farm, "unmetUnits", itemId, Math.floor(unmet / producers.length));
+  return bought;
+}
+
 export function prepareShopsForDay(state, content) {
   ensureShops(state, content);
   syncShopEmployment(state, content);
@@ -886,7 +1045,10 @@ export function finishShopsDay(state, content, forceSettlement = false) {
     const serviceUses = Object.values(shop.accounts.day.serviceUses || {}).reduce((sum, uses) => sum + uses, 0);
     const activity = sold + serviceUses;
     const arrears = (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0);
-    const retailStock = shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
+    const farmDef = shopKind(shop, content) === "farm" ? shopDefinition(content, shop.typeId) : null;
+    const retailStock = farmDef
+      ? (shop.inventory[farmDef.productItemId] || 0) + (shop.inventory[farmDef.feedItemId] || 0)
+      : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
     const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
     if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;

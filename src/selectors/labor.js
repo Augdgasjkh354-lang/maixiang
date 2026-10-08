@@ -27,8 +27,9 @@ export function populationStats(state) {
   return stats;
 }
 
-function shopRoleCount(state, buildingId, roleId, runtime = null) {
-  const suffix = roleId === "merchants" ? ":merchant" : roleId === "shop_clerks" ? ":clerk" : null;
+function shopRoleCount(state, buildingId, job, runtime = null) {
+  const role = job.shopRole || (job.id === "merchants" ? "merchant" : job.id === "shop_clerks" ? "clerk" : null);
+  const suffix = role ? `:${role}` : null;
   if (!suffix) return 0;
   return Object.values(state.shops || {}).filter(shop => shop.buildingId === buildingId && shop.status !== "closed" && shop.status !== "liquidating")
     .reduce((sum, shop) => sum + readJobCount(state, `shop:${shop.id}${suffix}`, runtime), 0);
@@ -69,7 +70,7 @@ export function selectJobRows(state, content, runtime = null) {
       rows.push({
         key: jobKeyForBuilding(building.id, job.id), roleId: job.id, buildingId: building.id,
         buildingName: definition.name, name: job.name, note: job.note || "",
-        count: managedShop ? shopRoleCount(state, building.id, job.id, runtime) : readJobCount(state, jobKeyForBuilding(building.id, job.id), runtime),
+        count: managedShop ? shopRoleCount(state, building.id, job, runtime) : readJobCount(state, jobKeyForBuilding(building.id, job.id), runtime),
         capacity: localCapacity,
         wagePerWorkerDay: state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0,
         releasePriority: job.releasePriority || 0,

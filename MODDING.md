@@ -77,7 +77,7 @@ export const MODS = [tea];
 
 `after` 可用的核心步骤 id（按执行顺序，见 `systems/daily.js` 的 `CORE_DAILY_STEPS`）：
 
-`openDay` `yearStartCompanyDistributions` `villaTax` `staffing` `relief` `wages` `companyWages` `privateWages` `socialContribution` `unemployment` `pension` `construction` `wholesaleTownAllocation` `production` `wholesaleTownOutput` `privateProduction` `wholesalePrivateIntake` `companyProduction` `wholesaleCompanyIntake` `industryExperience` `shopPreparation` `rent` `villaSales` `saltTrade` `trade` `repairWood` `goodsTrade` `services` `meal` `saltMeal` `goodsUsed` `satisfaction` `shops` `farmDay` `finance` `harvest` `annualReport` `outsideTownYear` `wheatLoanYear` `tradeAgreementMonth` `tradeAgreementYear` `outsideTownDay` `history`
+`openDay` `yearStartCompanyDistributions` `villaTax` `staffing` `relief` `wages` `companyWages` `privateWages` `socialContribution` `unemployment` `pension` `construction` `wholesaleTownAllocation` `production` `wholesaleTownOutput` `privateProduction` `wholesalePrivateIntake` `companyProduction` `wholesaleCompanyIntake` `livestock` `industryExperience` `shopPreparation` `rent` `villaSales` `saltTrade` `trade` `repairWood` `goodsTrade` `services` `meal` `saltMeal` `goodsUsed` `satisfaction` `shops` `stalls` `farmDay` `finance` `harvest` `annualReport` `outsideTownYear` `wheatLoanYear` `tradeAgreementMonth` `tradeAgreementYear` `outsideTownDay` `history`
 
 也可以插在别的 mod 的步骤后面（`after: "其他mod:步骤"`），前提是那个 mod 登记在前面。
 

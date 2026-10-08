@@ -21,9 +21,9 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
   const def = raw.aliasOf ? content.rules.shopTypes?.[raw.aliasOf] : raw;
   if (!def || def.kind === "service") return null;
   const productId = itemId || raw.itemId || def.itemId || def.itemIds?.[0];
-  if (!productId || !(def.itemIds || [productId]).includes(productId)) return null;
+  if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
   const wholesale = currentUnitPrice(state, productId, content);
-  const markup = def.id === "general" ? Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100 : 0;
+  const markup = def.id === "general" ? Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
   let retail = wholesale * (1 + markup);
   if (def.id === "general" && shop) {
     const explicit = Number(shop.pricing?.retailPriceVoucherPerUnit?.[productId]);

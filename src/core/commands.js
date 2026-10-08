@@ -268,6 +268,20 @@ export function setShopRent(state, voucher) {
   return { ok: true, value: state.policy.shopRentVoucher };
 }
 
+export function setStallRent(state, voucher) {
+  const value = Number(voucher);
+  if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "摊租须为非负数" };
+  state.policy.stallRentVoucher = Math.round(value * 100) / 100;
+  return { ok: true, value: state.policy.stallRentVoucher };
+}
+
+export function setStallKeeperLimit(state, people) {
+  const value = Math.floor(Number(people));
+  if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "允许摆摊人数须为非负整数" };
+  state.policy.stallKeeperLimit = value;
+  return { ok: true, value };
+}
+
 export function setShopProfitTax(state, percent, content) {
   const value = Number(percent);
   const max = content.rules.shopProfitTaxMaximumPercent ?? 80;

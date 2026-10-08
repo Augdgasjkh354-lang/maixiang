@@ -82,6 +82,12 @@ export const RULES = Object.freeze({
   publicServiceDefaultWageVoucher: 10,
 
   shopRentDefaultVoucher: 1,
+  stallRentDefaultVoucher: 2,
+  // 时代广场摊位：每日最多新开几摊；近 N 日平均日利润低于 0 的摊位收摊。
+  stallKeeperDefaultLimit: 50,
+  stallMaxOpensPerDay: 5,
+  stallReviewDays: 10,
+  stallCooldownDays: 30,
   shopProfitTaxDefaultPercent: 10,
   shopProfitTaxMaximumPercent: 80,
   shopSettlementDays: 30,
@@ -130,7 +136,11 @@ export const RULES = Object.freeze({
   operatingStockCorrectionDays: 5,
   householdGoods: Object.freeze({
     cloth: Object.freeze({ annualPerPerson: 1, minCashVoucherPerCapita: 10, comfortMaximum: 3 }),
-    wine: Object.freeze({ annualPerPerson: 6, minCashVoucherPerCapita: 30, comfortMaximum: 2 })
+    wine: Object.freeze({ annualPerPerson: 6, minCashVoucherPerCapita: 30, comfortMaximum: 2 }),
+    chicken: Object.freeze({ annualPerPerson: 4, minCashVoucherPerCapita: 15, comfortMaximum: 0.6 }),
+    duck: Object.freeze({ annualPerPerson: 3, minCashVoucherPerCapita: 15, comfortMaximum: 0.5 }),
+    goose: Object.freeze({ annualPerPerson: 2, minCashVoucherPerCapita: 20, comfortMaximum: 0.5 }),
+    pork: Object.freeze({ annualPerPerson: 8, minCashVoucherPerCapita: 15, comfortMaximum: 1 })
   }),
   serviceTypes: Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", basis: "person", cycleDays: 20, priceVoucher: 4, merchantCapacity: 24, clerkCapacity: 30, consumables: Object.freeze([]), comfort: 0.8, incomeSensitivity: 0.8 }),
@@ -157,17 +167,26 @@ export const RULES = Object.freeze({
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
     school: Object.freeze({ id: "school", name: "学堂", kind: "service", serviceId: "school" }),
     restaurant: Object.freeze({ id: "restaurant", name: "饭店", kind: "service", serviceId: "restaurant" }),
+    // 养殖场：开在养殖基地。商人和饲养员一起养，每人每日出 outputPerWorkerDay 斤肉，每斤肉吃 feedPerUnit 斤小麦。
+    // 产品直接卖给综合商店，多余的卖给批发市场。
+    chicken_farm: Object.freeze({ id: "chicken_farm", name: "养鸡场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "chicken", feedItemId: "wheat", feedPerUnit: 2.5, outputPerWorkerDay: 5 }),
+    duck_farm: Object.freeze({ id: "duck_farm", name: "养鸭场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "duck", feedItemId: "wheat", feedPerUnit: 2.5, outputPerWorkerDay: 5 }),
+    goose_farm: Object.freeze({ id: "goose_farm", name: "养鹅场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "goose", feedItemId: "wheat", feedPerUnit: 3, outputPerWorkerDay: 4 }),
+    pig_farm: Object.freeze({ id: "pig_farm", name: "养猪场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "pork", feedItemId: "wheat", feedPerUnit: 3, outputPerWorkerDay: 5 }),
+    // 摊位：开在时代广场。待业家庭自动来摆，从批发市场进少量日用品（不卖主食），每摊每日最多卖 50 斤。
+    stall: Object.freeze({ id: "stall", name: "摊位", kind: "stall", hostBuildingTypeId: "times_square", maxMerchants: 2, maxClerks: 0,
+      startupVoucher: 60, dailySalesCapJin: 50, perKeeperSalesJin: 30, markupPercent: 10 }),
     // 兼容旧调用；新开店会统一归一为综合商店。
     grain: Object.freeze({ id: "grain", name: "粮店", kind: "legacy_retail", itemId: "wheat", aliasOf: "general" }),
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),
     salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16 })
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 })
 });
 
 export const AGRICULTURE = Object.freeze({

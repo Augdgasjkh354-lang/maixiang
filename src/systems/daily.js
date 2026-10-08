@@ -1,4 +1,6 @@
 import { totalQeqUnits } from "../economy/inventory.js";
+import { produceLivestock } from "./livestock.js";
+import { manageStalls } from "./stalls.js";
 import { MODS } from "../mods/registry.js";
 import { assembleDailySteps } from "../mods/api.js";
 import { emptyYearTotals, recordEvent } from "../economy/ledger.js";
@@ -157,6 +159,7 @@ export const CORE_DAILY_STEPS = [
   { id: "wholesalePrivateIntake", run: (state, content, day) => runWholesaleIntake(state, [], day.privateProduction, content, { includeTownAllocation: false }) },
   { id: "companyProduction", run: processListedCompanies },
   { id: "wholesaleCompanyIntake", run: sellCompanyOutputsToWholesale },
+  { id: "livestock", run: produceLivestock },
   // 今天在岗的生产工人累计成熟练度（工日），明天起生效。
   { id: "industryExperience", run: accrueIndustryExperience },
 
@@ -193,6 +196,7 @@ export const CORE_DAILY_STEPS = [
 
   // ── 收尾：店铺结账（年末强制结算）、记录消费、农田出工
   { id: "shops", run: (state, content) => finishShopsDay(state, content, yearEndsToday(state, content)) },
+  { id: "stalls", run: manageStalls },
   { id: "farmDay", run: (state, content) => { recordConsumerDay(state, content); accumulateFarmDay(state, content); } },
 
   // ── 金融：流动性 → 银行 → 国债 → 股市 → 住户买股

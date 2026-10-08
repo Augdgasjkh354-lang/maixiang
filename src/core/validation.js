@@ -293,8 +293,9 @@ export function validateState(state, content) {
     errors.push("店铺账结构无效");
   } else {
     for (const shop of Object.values(state.shops)) {
-      const street = state.buildings.find(row => row.id === shop.buildingId && row.typeId === "commercial_street");
-      if (!street) errors.push("店铺引用了无效商业街：" + shop.id);
+      const shopTypeDef = content.rules.shopTypes?.[content.rules.shopTypes?.[shop.typeId]?.aliasOf || shop.typeId];
+      const street = state.buildings.find(row => row.id === shop.buildingId && row.typeId === (shopTypeDef?.hostBuildingTypeId || "commercial_street"));
+      if (!street && shop.status !== "closed") errors.push("店铺引用了无效商业街：" + shop.id);
       const owner = state.households?.byId?.[shop.ownerHouseholdId];
       if (!owner) errors.push("店铺缺少家庭所有者：" + shop.id);
       if (!content.rules.shopTypes?.[shop.typeId]) errors.push("店铺类型无效：" + shop.id);
@@ -308,10 +309,9 @@ export function validateState(state, content) {
       const clerkKey = `shop:${shop.id}:clerk`;
       const merchantCount = jobCount(state, merchantKey);
       const clerkCount = jobCount(state, clerkKey);
-      if (merchantCount > (content.rules.shopMaxMerchants || 4)) errors.push("商人超过上限：" + shop.id);
-      const shopDef = content.rules.shopTypes?.[shop.typeId];
-      const normalizedShopDef = shopDef?.aliasOf ? content.rules.shopTypes?.[shopDef.aliasOf] : shopDef;
-      const shopClerkMax = normalizedShopDef?.id === "general" ? (content.rules.generalStoreMaxClerks || 50) : (content.rules.shopMaxClerks || 20);
+      if (merchantCount > (shopTypeDef?.maxMerchants ?? content.rules.shopMaxMerchants ?? 4)) errors.push("商人超过上限：" + shop.id);
+      const shopClerkMax = Number.isFinite(shopTypeDef?.maxClerks) ? shopTypeDef.maxClerks
+        : shopTypeDef?.id === "general" ? (content.rules.generalStoreMaxClerks || 50) : (content.rules.shopMaxClerks || 20);
       if (clerkCount > shopClerkMax) errors.push("店员超过上限：" + shop.id);
       if (shop.status === "open") {
         if (!owner || !isActiveHousehold(owner) || (owner.jobs?.[merchantKey] || 0) < 1 || merchantCount < 1) errors.push("商人岗位归属无效：" + shop.id);
@@ -319,12 +319,13 @@ export function validateState(state, content) {
         errors.push("非营业店铺仍保留岗位：" + shop.id);
       }
     }
-    for (const street of state.buildings.filter(row => row.typeId === "commercial_street")) {
+    for (const street of state.buildings.filter(row => content.buildings?.[row.typeId]?.shopHost)) {
       const active = Object.values(state.shops).filter(shop => shop.buildingId === street.id && shop.status !== "closed" && shop.status !== "liquidating");
-      if (active.length > (street.level || 1) * 2) errors.push("商业街店铺超过容量：" + street.id);
-      const streetDef = content.buildings?.commercial_street;
-      const merchantCapacity = (streetDef?.jobs?.find(job => job.id === "merchants")?.slots || (content.rules.shopMaxMerchants || 4) * 2) * (street.level || 1);
-      const clerkCapacity = (streetDef?.jobs?.find(job => job.id === "shop_clerks")?.slots || (content.rules.shopMaxClerks || 20) * 2) * (street.level || 1);
+      const streetDef = content.buildings[street.typeId];
+      if (active.length > (street.level || 1) * streetDef.shopHost.slotsPerLevel) errors.push("商业街店铺超过容量：" + street.id);
+      const roleSlots = role => (streetDef.jobs || []).filter(job => (job.shopRole || (job.id === "merchants" ? "merchant" : job.id === "shop_clerks" ? "clerk" : null)) === role).reduce((sum, job) => sum + job.slots, 0);
+      const merchantCapacity = roleSlots("merchant") * (street.level || 1);
+      const clerkCapacity = roleSlots("clerk") * (street.level || 1);
       const merchantCount = active.reduce((sum, shop) => sum + jobCount(state, `shop:${shop.id}:merchant`), 0);
       const clerkCount = active.reduce((sum, shop) => sum + jobCount(state, `shop:${shop.id}:clerk`), 0);
       if (merchantCount > merchantCapacity) errors.push("商业街商人超过容量：" + street.id);

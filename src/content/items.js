@@ -43,5 +43,26 @@ export const ITEMS = Object.freeze({
     wholesale: true, retail: true, storeOnly: true,
     id: "cloth", name: "布", unit: "匹", category: "household",
     edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  // 肉：养殖基地产，日用品（加舒心值，不算口粮）。养殖场直接卖给综合商店，多余的卖给批发市场。
+  chicken: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true, livestock: true,
+    id: "chicken", name: "鸡肉", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  duck: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true, livestock: true,
+    id: "duck", name: "鸭肉", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  goose: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true, livestock: true,
+    id: "goose", name: "鹅肉", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  pork: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true, livestock: true,
+    id: "pork", name: "猪肉", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
   })
 });

@@ -134,7 +134,7 @@ export function selectDemolitionPreview(state, buildingId, content) {
   if (building.typeId === "stock_exchange" && Object.values(state.companies || {}).some(company => company.listing?.listed)) {
     return { available: false, reason: "仍有上市公司，交易所承担挂牌与股权记录，不能拆除" };
   }
-  if (building.typeId === "commercial_street" && Object.values(state.shops || {}).some(shop => shop.buildingId === buildingId && shop.status !== "closed")) return { available: false, reason: "请先关闭商业街内的店铺" };
+  if (content.buildings[building.typeId]?.shopHost && Object.values(state.shops || {}).some(shop => shop.buildingId === buildingId && shop.status !== "closed")) return { available: false, reason: `请先关闭${content.buildings[building.typeId].name}内的店铺` };
   if (["field", "granary", "houses"].includes(building.typeId)) return { available: false, reason: "基础村舍、麦田和粮仓不能拆除" };
   const definition = content.buildings[building.typeId];
   const materials = (building.materialInvestments || []).filter(row => row.quantityUnits > 0)

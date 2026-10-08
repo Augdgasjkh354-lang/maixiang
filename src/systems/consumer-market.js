@@ -56,7 +56,8 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
     const sellsItem = shopRetailItemIds(shop, content).includes(itemId)
       || (def?.kind === "retail" && (shop.inventory?.[itemId] || 0) > 0);
     if (!sellsItem) continue;
-    if (generalStoreOnly && def?.id !== "general") continue;
+    // 只经商店卖的商品：综合商店都能卖；摊位只能卖它经营的日用品。
+    if (generalStoreOnly && def?.id !== "general" && def?.kind !== "stall") continue;
     const prices = shopTradePrices(state, shop.typeId, content, itemId, shop);
     const stock = shop.inventory?.[itemId] || 0;
     const soldToday = Object.values(shop.accounts?.day?.soldUnits || {}).reduce((sum, units) => sum + Math.max(0, units || 0), 0);

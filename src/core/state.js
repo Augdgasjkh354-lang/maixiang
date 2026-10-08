@@ -212,12 +212,15 @@ export function createInitialState(options) {
       ),
       employmentExchangeJin: content.rules.employmentExchangeDefaultJin ?? 2,
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
+      stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
+      stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,
       shopProfitTaxPercent: content.rules.shopProfitTaxDefaultPercent ?? 10,
       autosaveMonths: 1,
       agricultureTaxRecent: Array.from({ length: content.rules.agricultureTaxLookbackDays || 30 }, (_, index) => ({
         year: 0, day: index, rateBps: 5000, baseline: true
       }))
     },
+    stallMarket: { cooldownUntilSerial: 0 },
     wholesaleMarket: {
       inventory: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0])),
       inventoryCostVoucherUnits: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0])),

@@ -18,7 +18,7 @@ import {
   configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice,
   configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares,
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
-  setEmploymentExchangeQuota, setShopRent, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
+  setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
   configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
   startCurrencyReform,
   reclaimFarmland
@@ -159,6 +159,8 @@ export function createSimulation(content) {
     setEmploymentExchangeQuota: function (state, value) { return setEmploymentExchangeQuota(state, value, definitions); },
     startCurrencyReform: function (state) { return startCurrencyReform(state, definitions); },
     setShopRent: function (state, value) { return setShopRent(state, value); },
+    setStallRent: function (state, value) { return setStallRent(state, value); },
+    setStallKeeperLimit: function (state, value) { return setStallKeeperLimit(state, value); },
     setShopProfitTax: function (state, value) { return setShopProfitTax(state, value, definitions); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
     configureShopMerchants: function (state, shopId, count) { return configureShopMerchants(state, shopId, count, definitions); },

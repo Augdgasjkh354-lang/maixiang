@@ -137,13 +137,41 @@ export const BUILDINGS = Object.freeze({
     id: "commercial_street", name: "商业街", icon: "🏬",
     description: "居民开店 · 每级2间铺位",
     maxInstances: 12,
+    shopHost: Object.freeze({ slotsPerLevel: 2 }),
     jobs: Object.freeze([
-      Object.freeze({ id: "merchants", name: "商人", slots: 8, wagePerWorkerDay: 5, note: "每间店最多4名商人，由店铺支付", releasePriority: 60, managedBy: "shops" }),
-      Object.freeze({ id: "shop_clerks", name: "店员", slots: 100, wagePerWorkerDay: 5, note: "综合商店最多50名店员；其他店铺最多20名，由店铺支付", releasePriority: 70, managedBy: "shops" })
+      Object.freeze({ id: "merchants", name: "商人", slots: 8, wagePerWorkerDay: 5, note: "每间店最多4名商人，由店铺支付", releasePriority: 60, managedBy: "shops", shopRole: "merchant" }),
+      Object.freeze({ id: "shop_clerks", name: "店员", slots: 100, wagePerWorkerDay: 5, note: "综合商店最多50名店员；其他店铺最多20名，由店铺支付", releasePriority: 70, managedBy: "shops", shopRole: "clerk" })
     ]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]),
     construction: Object.freeze({ workDays: 800, recommendedWorkers: 16 }),
     upgrade: Object.freeze({ maxLevel: 5, workDays: 800, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]) })
+  }),
+  // 养殖基地：和商业街一样由居民入驻经营，每级 4 个养殖场位（鸡/鸭/鹅/猪）。
+  livestock_base: Object.freeze({
+    id: "livestock_base", name: "养殖基地", icon: "🐖",
+    description: "居民开养殖场 · 每级4个场位",
+    maxInstances: 12,
+    shopHost: Object.freeze({ slotsPerLevel: 4 }),
+    jobs: Object.freeze([
+      Object.freeze({ id: "farm_owners", name: "养殖户", slots: 16, wagePerWorkerDay: 5, note: "每个养殖场最多4名养殖户，店主拿利润", releasePriority: 60, managedBy: "shops", shopRole: "merchant" }),
+      Object.freeze({ id: "farm_hands", name: "饲养员", slots: 80, wagePerWorkerDay: 5, note: "每个养殖场最多20名，由养殖场支付", releasePriority: 70, managedBy: "shops", shopRole: "clerk" })
+    ]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]),
+    construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]) })
+  }),
+  // 时代广场：每级 50 个摊位，每摊最多 2 人；允许摆摊人数和摊租在政策里定。
+  times_square: Object.freeze({
+    id: "times_square", name: "时代广场", icon: "🎪",
+    description: "居民摆摊 · 每级50个摊位",
+    maxInstances: 4,
+    shopHost: Object.freeze({ slotsPerLevel: 50 }),
+    jobs: Object.freeze([
+      Object.freeze({ id: "stall_keepers", name: "摊贩", slots: 100, wagePerWorkerDay: 0, note: "每摊最多2人，自负盈亏", releasePriority: 80, managedBy: "shops", shopRole: "merchant" })
+    ]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
+    construction: Object.freeze({ workDays: 500, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 5, workDays: 500, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
   }),
   town_hall: Object.freeze({
     id: "town_hall", name: "政务厅", icon: "🏛️",

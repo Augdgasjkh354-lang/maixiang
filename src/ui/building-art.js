@@ -19,6 +19,7 @@ export const BUILDING_ART_CATALOG = Object.freeze({
   saltworks:{name:'盐场',connected:true}, wholesale_market:{name:'批发市场',connected:true},
   winery:{name:'酒坊',connected:true}, cotton_field:{name:'棉田',connected:true}, weaving_mill:{name:'织坊',connected:true},
   commercial_street:{name:'商业街',connected:true}, town_hall:{name:'政务厅',connected:true},
+  livestock_base:{name:'养殖基地',connected:true}, times_square:{name:'时代广场',connected:true},
   police_station:{name:'警察局',connected:true}, social_security_office:{name:'社保局',connected:true},
   school:{name:'学堂',connected:false}, clinic:{name:'医馆',connected:false},
   restaurant:{name:'饭馆',connected:false}, granary:{name:'粮仓',connected:false},
@@ -49,6 +50,49 @@ for(const [a,b] of [[L,B],[B,R]]){const top=p=>[p[0],p[1]-7];fence+=`<path d="M$
 return `<path d="M${pt(L)}L${pt(T)}L${pt(R)}L${pt(B)}Z" fill="#dcd3a8" stroke="#b3ad8a"/><g fill="none" stroke="#c2b98f" stroke-width="1.4">${rows}</g>${bushes}<g fill="none" stroke="#8c7657" stroke-width="1.6">${fence}</g>`;}
 function thatchShed(x,y,s){return `<g transform="translate(${x} ${y}) scale(${s})"><path d="M0 0L62 22V-8L0-30Z" fill="#f4f0df"/><path d="M62 22L93 3V-27L62-8Z" fill="#d5dbcc"/><path d="M0-30L62-8 77.5-27.5 15.5-49.5Z" fill="#c9b985"/><path d="M62-8L93-27 77.5-27.5Z" fill="#b3a474"/><path d="M18.6 6.6L34.1 12.1V-5.9L18.6-11.4Z" fill="#967e5d"/><g fill="none" stroke="#8a7a55" stroke-width="1" opacity=".7">${[1,2,3,4].map(k=>{const t=k/5;return `<path d="M${15.5*t} ${-30-19.5*t}L${62+15.5*t} ${-8-19.5*t}"/>`;}).join('')}</g></g>`;}
 function clothRack(){return `<path d="M50 12V46M76 8V42M50 12H76" fill="none" stroke="#8a7456" stroke-width="2.5" stroke-linecap="round"/><g fill="#4f6078" stroke="#33405a" stroke-width=".8"><path d="M55 12h6v24l-3 3-3-3Z"/><path d="M63 12h6v30l-3 3-3-3Z"/><path d="M71 12h6v18l-3 3-3-3Z"/></g><path d="M56 22h4M64 26h4M72 19h4" stroke="#7d8ca3" stroke-width="1" fill="none"/><ellipse cx="60" cy="50" rx="9" ry="3.5" fill="#7d8ca3" stroke="#4a5873"/>`;}
+/* 新增：养殖基地 / 时代广场 所用的小部件 */
+function isoAt(L,T,B,u,v){return [L[0]+u*(T[0]-L[0])+v*(B[0]-L[0]),L[1]+u*(T[1]-L[1])+v*(B[1]-L[1])];}
+function isoGround(L,T,B,fill,stroke){const R=[T[0]+B[0]-L[0],T[1]+B[1]-L[1]];return {R,svg:`<path d="M${L}L${T}L${R}L${B}Z" fill="${fill}" stroke="${stroke}" stroke-width="1.4"/>`};}
+// 沿 a→b 的栅栏：立柱高 h，两道横杆；gap=[t1,t2] 留门洞
+function fenceRun(a,b,n,h,gap){const at=t=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+const segs=gap?[[0,gap[0]],[gap[1],1]]:[[0,1]];let posts='',rails='';
+for(const [s,e] of segs){const p0=at(s),p1=at(e);rails+=`M${p0[0]} ${p0[1]-h}L${p1[0]} ${p1[1]-h}M${p0[0]} ${p0[1]-h*.5}L${p1[0]} ${p1[1]-h*.5}`;
+ for(let k=0;k<=n;k++){const [x,y]=at(s+(e-s)*k/n);posts+=`M${x} ${y-h}V${y}`;}}
+return `<path d="${posts}"/><path d="${rails}" stroke-width="1.6"/>`;}
+function hay(x,y,s=1){return `<g transform="translate(${x} ${y}) scale(${s})"><ellipse cy="1" rx="13" ry="4.5" fill="#8c7a4e" opacity=".3" stroke="none"/><path d="M-12 0Q-13-14 0-16Q13-14 12 0Z" fill="#d7b86a" stroke="#9e8449"/><path d="M-7-12Q-3-5-7 0M0-15Q4-7 0 0M6-12Q9-6 7 0" fill="none" stroke="#b5964f" stroke-width=".8"/></g>`;}
+function pig(x,y,s=1){return `<g transform="translate(${x} ${y}) scale(${s})" stroke="#8f7163" stroke-width=".9"><path d="M-4 2.5V6M3 2.5V6M-1.5 2.5V5.6M1.5 2.5V5.6" fill="none" stroke-width="1.2"/><path d="M-6.4-1Q-8.6-2 -8.8-4" fill="none"/><ellipse rx="6.5" ry="4" fill="#e8c7b4"/><ellipse cx="6" cy="-1" rx="3.4" ry="3" fill="#e8c7b4"/><ellipse cx="9.2" cy="-.6" rx="1.3" ry="1.1" fill="#c99b87"/><path d="M4.4-3L5.4-6.2L7.2-3.2Z" fill="#d8ad98"/><circle cx="7" cy="-2" r=".45" fill="#5d4a40" stroke="none"/></g>`;}
+function chicken(x,y,s=1){return `<g transform="translate(${x} ${y}) scale(${s})" stroke="#8d8a72" stroke-width=".8"><path d="M-.5 2.4V4.6M1.5 2.4V4.6" fill="none"/><ellipse rx="3.4" ry="2.6" fill="#f6f2e2"/><path d="M-3-.6L-6-3L-4.5 1.2Z" fill="#e9e2cb"/><circle cx="3" cy="-3" r="1.8" fill="#f6f2e2"/><circle cx="3" cy="-4.9" r=".8" fill="#b8735a" stroke="none"/><path d="M4.6-3L7-2.3L4.6-1.8Z" fill="#d2a35e" stroke-width=".5"/></g>`;}
+function duck(x,y,s=1){return `<g transform="translate(${x} ${y}) scale(${s})" stroke="#7d8b7c" stroke-width=".8"><ellipse rx="6" ry="1.6" fill="none" stroke="#eef3ea" stroke-width=".6"/><ellipse rx="4" ry="2.4" fill="#f3efdd"/><circle cx="3.2" cy="-2.8" r="1.9" fill="#8ea596"/><path d="M4.8-3L7.6-2.4L4.8-1.8Z" fill="#c99a5b" stroke-width=".5"/></g>`;}
+function pond(x,y){return `<g transform="translate(${x} ${y})" stroke="#7f9188"><ellipse rx="17" ry="6.5" fill="#b8c9bf"/><ellipse cx="2" cy=".5" rx="10" ry="3.4" fill="#cadbd0" stroke="none"/><path d="M-15-2l-2-5M-12-3l0-5M14 3l2-4" fill="none" stroke="#7a8f5e" stroke-width="1.2"/></g>`;}
+function livestockBase(level){
+const L=[-67,10],T=[-9,-22],B=[15,51];const g=isoGround(L,T,B,'#d9d0a1','#a9a27d');
+let dirt='';for(const [x,y,r] of [[-30,4,6],[30,12,5],[-2,36,7],[-44,22,4]])dirt+=`<ellipse cx="${x}" cy="${y}" rx="${r}" ry="${r*.42}" fill="#c6b07c" opacity=".45" stroke="none"/>`;
+const fence=fenceRun(T,g.R,6,7)+fenceRun(g.R,B,7,7)+fenceRun(B,L,8,7,[.44,.58])+fenceRun(L,T,6,7);
+// 猪圈（前右角菱形围栏）
+const Q=[22,36],pen=[Q,[Q[0]+22,Q[1]-12],[Q[0],Q[1]-23],[Q[0]-22,Q[1]-11]];
+const penFence=fenceRun(pen[0],pen[1],3,5)+fenceRun(pen[1],pen[2],3,5)+fenceRun(pen[2],pen[3],3,5)+fenceRun(pen[3],pen[0],3,5);
+let animals='';
+animals+=pig(14,24,.9)+(level>=3?pig(30,26,.85):'')+(level>=4?pig(22,18,.8):'');
+for(const [x,y] of [[-50,10],[-40,20],[-8,12],[-60,6]].slice(0,level+1))animals+=chicken(x,y,1);
+if(level>=4)animals+=chicken(-22,4,1);
+if(level>=2){animals+=pond(-18,20)+duck(-24,18,.9)+duck(-12,22,.9);}else animals+=pond(-18,20);
+if(level>=3)animals+=duck(-16,19,.8);
+const haySt=hay(50,4,1)+(level>=3?hay(60,22,.8):'');
+return `<g fill="none" stroke="#7b7c66">${dirt}</g>${g.svg}<path d="M${pen.map(p=>p.join(' ')).join('L')}Z" fill="#c2a878" opacity=".55" stroke="none"/><g fill="none" stroke="#7b7c66" stroke-width="1.2">${penFence}</g><g fill="none" stroke="#8c7657" stroke-width="1.6">${fence}</g>${house(-6,-16,.66,'牧')}${haySt}${animals}`;}
+function stall(x,y,s,col,dark){return `<g transform="translate(${x} ${y}) scale(${s})"><path d="M-20 14L26 26V34L-20 22Z" fill="#a8865f" stroke="#6e5538" stroke-width="1"/><ellipse cx="-11" cy="13" rx="4" ry="2" fill="#d1b47a" stroke="#8a7050" stroke-width=".6"/><ellipse cx="6" cy="18" rx="4" ry="2" fill="#b8c4a4" stroke="#7a8569" stroke-width=".6"/><ellipse cx="18" cy="21" rx="4" ry="2" fill="#c28f74" stroke="#8a5f4c" stroke-width=".6"/><path d="M-20-6V24M26 6V36" fill="none" stroke="#7a5f45" stroke-width="2"/><path d="M-20-6L26 6V12L-20 0Z" fill="${dark}" stroke="#6e5538" stroke-width=".8"/><path d="M-28-20L18-8L26 6L-20-6Z" fill="${col}" stroke="#6e5538" stroke-width="1"/><path d="M-5-14L3 0" fill="none" stroke="#f4efdc" stroke-width="1.6" opacity=".55"/></g>`;}
+function person(x,y,s,col){return `<g transform="translate(${x} ${y}) scale(${s})" stroke="#6f6a52" stroke-width=".8"><path d="M-1.6 -.5V3.5M1.6 -.5V3.5" fill="none" stroke-width="1.2"/><path d="M-3.4-4.5Q0-6 3.4-4.5L4-.5H-4Z" fill="${col}"/><circle cy="-8" r="2.2" fill="#e6d3bb"/></g>`;}
+function paifang(cx,by){const x=cx;return `<g transform="translate(${x} ${by})"><ellipse cx="-14" cy="3" rx="8" ry="3" fill="#cfcab2" stroke="none"/><ellipse cx="26" cy="3" rx="8" ry="3" fill="#cfcab2" stroke="none"/><path d="M-18-34h8v38h-8Z" fill="#9a5f48" stroke="#6e4534"/><path d="M-10-34l4-3v38l-4 3Z" fill="#7d4b39" stroke="#6e4534" stroke-width=".8"/><path d="M22-34h8v38h-8Z" fill="#9a5f48" stroke="#6e4534"/><path d="M30-34l4-3v38l-4 3Z" fill="#7d4b39" stroke="#6e4534" stroke-width=".8"/><path d="M-26-40h66v7h-66Z" fill="#8a5340" stroke="#6e4534"/><path d="M-6-31h22v17h-22Z" fill="#f1e7c8" stroke="#6e4534"/><text x="5" y="-18" text-anchor="middle" font-size="10" fill="#6e4534" stroke="none" font-family="serif">市</text><path d="M-6-14h22" stroke="#6e4534" stroke-width="2.5"/><path d="M-46-40Q-22-52 4-46Q30-52 56-40L51-33Q30-42 4-38Q-22-42-41-33Z" fill="#596c68" stroke="#3f4d4a"/><path d="M-46-40l-6-6M56-40l6-6" stroke="#3f4d4a" stroke-width="2.5" stroke-linecap="round"/><path d="M-30-41l6 6M-14-45l4 7M6-44v7M22-45l-4 7M40-41l-6 6" stroke="#8f9e98" stroke-width=".8" fill="none"/></g>`;}
+function timesSquare(level){
+const L=[-74,10],T=[-8,-30],B=[16,52];const g=isoGround(L,T,B,'#e6e1cb','#8f8a70');
+let grid='';for(let k=1;k<5;k++){const a=isoAt(L,T,B,k/5,0),b=isoAt(L,T,B,k/5,1),c=isoAt(L,T,B,0,k/5),d=isoAt(L,T,B,1,k/5);grid+=`M${a}L${b}M${c}L${d}`;}
+const palette=[['#9fb1a6','#7f9488'],['#c99a7d','#a37a62'],['#b9a77a','#978457'],['#8f9fb0','#72829a'],['#b8866f','#94685a'],['#d8cba8','#b5a882']];
+const stalls=[[-50,0],[-24,14],[26,8],[44,4],[-2,28],[-38,30]];
+const n=Math.min(stalls.length,level+2);
+let stallSvg='';for(let i=0;i<n;i++){const [x,y]=stalls[i];const [c,d]=palette[i%palette.length];stallSvg+=stall(x,y,.62,c,d);}
+const crowd=[[-30,-6,'#6f7f8e'],[10,-4,'#9c6f5a'],[-6,22,'#7e8a6c'],[36,22,'#b59c71'],[-58,14,'#8a7a6a'],[52,16,'#6f7f8e'],[20,38,'#9c6f5a'],[-18,40,'#7e8a6c'],[64,0,'#b59c71'],[-42,-2,'#9c6f5a']].slice(0,level*2+2);
+const crowdSvg=crowd.map(([x,y,c])=>person(x,y,.8,c)).join('');
+const flag=`<path d="M62-34V20" fill="none" stroke="#79755b" stroke-width="2"/><path d="M62-34l18 5-4 7 4 7-18-5Z" fill="#9a5f48" stroke="#6e4534"/><path d="M60 20h5" stroke="#79755b" stroke-width="2"/>`;
+return `<path d="M${L}L${T}L${g.R}L${B}Z" fill="#e6e1cb" stroke="#8f8a70" stroke-width="1.5"/><path d="${grid}" fill="none" stroke="#bcb697" stroke-width=".8"/>${paifang(4,2)}${flag}${stallSvg}${crowdSvg}`;}
 function renderComplete(type,level){
 switch(type){
 case 'winery':return house(-8,-6,.92,'酒')+wineJars()+wineFlag();
@@ -71,6 +115,8 @@ case 'clinic':return house(0,0,1,'医馆')+awning(-10,8);
 case 'restaurant':return house(0,0,1,'食肆',true)+awning(-10,8);
 case 'tea_house':return house(0,0,1,'茶',true)+awning(-10,8);
 case 'granary':return house(0,0,1.08,'粮')+logs();
+case 'livestock_base':return livestockBase(level);
+case 'times_square':return timesSquare(level);
 default:return house(0,0,1,'',level>=3);
 }}
 export function renderBuildingArt(type,options={}){
