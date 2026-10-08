@@ -3,6 +3,7 @@ import { MODS } from "../mods/registry.js";
 import { wholesaleItemIds } from "../content/assemble.js";
 import { CONTENT } from "../content/index.js";
 import { isIndustryType } from "../content/buildings.js";
+import { villaCapacityOf } from "../systems/villas.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 import { renderShopPricing } from "./panel-shop-pricing.js";
 
@@ -337,6 +338,10 @@ export function renderSite(view) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">入住 / 容量 / 空位</span><strong class="value">${number(home?.occupied || 0)} / ${number(home?.capacity || 1000)} / ${number(home?.vacancies || 0)}人</strong></div><div class="row"><span class="label">租金已收 / 减免</span><strong class="value">${number(view.housing.lastRentDay?.collectedWheatJin || 0)} / ${number(view.housing.lastRentDay?.waivedWheatJin || 0)}${escapeHtml(unit)}</strong></div>${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="residents">查看镇民</button>`;
+  } else if (building?.typeId === "villa_complex") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    const perLevel = CONTENT.buildings.villa_complex.villaCapacity;
+    body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">别墅栋数（本座）</span><strong class="value">${number(villaCapacityOf(building, CONTENT))}栋（每级${number(perLevel)}栋）</strong></div><div class="subtle">购房与房产税在政策页统一结算。</div>${developmentMarkup(view, building, development)}`;
   } else if (building) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const payroll = view.payroll?.lastDay?.workers?.find(row => row.buildingId === building.id);

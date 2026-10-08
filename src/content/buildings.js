@@ -240,15 +240,17 @@ export const BUILDINGS = Object.freeze({
 
   villa_complex: Object.freeze({
     id: "villa_complex", name: "别墅群", icon: "🏰",
-    description: "高档住宅区 · 每座含20栋别墅，富裕家庭可购买",
+    description: "高档住宅区 · 每级20栋别墅，富裕家庭可购买",
     maxInstances: 12,
+    // 每级可售别墅栋数：容量 = villaCapacity × 等级（见 systems/villas.js）。
     villaCapacity: 20,
     // 别墅群没有岗位；显式给空数组，否则建成后 selectDashboard 遍历 jobs 会崩溃导致界面卡死。
     jobs: Object.freeze([]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1500 }]),
     construction: Object.freeze({
       workDays: 1000, recommendedWorkers: 20
-    })
+    }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 1000, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1500 }]) })
   })
 });
 

@@ -10,7 +10,6 @@ import {
 // 别墅群系统：富人购房（购房款全额进入镇库）、年度房产税（1月1日征收）。
 // 购房款经统一支付层 household -> town 流转，不破坏粮券发行恒等式。
 
-export const VILLAS_PER_COMPLEX = 20;
 export const DEFAULT_VILLA_PRICE_WHEAT_JIN = 10000;
 export const DEFAULT_VILLA_TAX_RATE_PERCENT = 0.5;
 
@@ -46,18 +45,27 @@ function villaComplexes(state) {
   return (state.buildings || []).filter(building => building.typeId === "villa_complex");
 }
 
+// 别墅容量随等级增长：每级 villaCapacity 栋（定义在 content/buildings.js），等级封顶 rules.buildingMaxLevel。
+export function villaCapacityOf(building, content) {
+  const perLevel = Number(content.buildings.villa_complex?.villaCapacity) || 20;
+  const cap = content.rules.buildingMaxLevel || 10;
+  const level = Math.max(1, Math.min(cap, Math.floor(building.level || 1)));
+  return perLevel * level;
+}
+
 function soldVillaKeys(villas) {
   const keys = new Set();
   for (const row of villas.sold) keys.add(row.instanceId + ":" + row.villaIndex);
   return keys;
 }
 
-export function selectVillaVacancies(state) {
+export function selectVillaVacancies(state, content) {
   const villas = ensureVillaState(state);
   const soldKeys = soldVillaKeys(villas);
   const vacant = [];
   for (const complex of villaComplexes(state)) {
-    for (let index = 0; index < VILLAS_PER_COMPLEX; index++) {
+    const capacity = villaCapacityOf(complex, content);
+    for (let index = 0; index < capacity; index++) {
       if (!soldKeys.has(complex.id + ":" + index)) vacant.push({ instanceId: complex.id, villaIndex: index });
     }
   }
@@ -69,11 +77,11 @@ export function selectVillaStats(state, content) {
   const policy = villaPolicy(state, content);
   const scale = currencyScale(content);
   const complexes = villaComplexes(state);
-  const vacant = selectVillaVacancies(state).length;
+  const vacant = selectVillaVacancies(state, content).length;
   const sold = villas.sold.length;
   return {
     complexes: complexes.length,
-    capacity: complexes.length * VILLAS_PER_COMPLEX,
+    capacity: complexes.reduce((sum, complex) => sum + villaCapacityOf(complex, content), 0),
     sold,
     vacant,
     priceWheatJin: policy.priceWheatJin,
@@ -91,7 +99,7 @@ export function settleVillaPurchases(state, content) {
   const scale = currencyScale(content);
   const priceUnits = Math.round(Math.max(0, Number(policy.priceWheatJin) || 0) * scale);
   if (priceUnits <= 0) return { sold: 0, reason: "别墅定价无效" };
-  const vacant = selectVillaVacancies(state);
+  const vacant = selectVillaVacancies(state, content);
   if (!vacant.length) return { sold: 0 };
   const owners = new Set(villas.sold.map(row => row.householdId));
   // 生活困难线以下的部分不计入可动用购房资金，避免掏空穷人。

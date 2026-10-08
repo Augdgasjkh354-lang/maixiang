@@ -960,15 +960,17 @@ const BUILDINGS = Object.freeze({
 
   villa_complex: Object.freeze({
     id: "villa_complex", name: "别墅群", icon: "🏰",
-    description: "高档住宅区 · 每座含20栋别墅，富裕家庭可购买",
+    description: "高档住宅区 · 每级20栋别墅，富裕家庭可购买",
     maxInstances: 12,
+    // 每级可售别墅栋数：容量 = villaCapacity × 等级（见 systems/villas.js）。
     villaCapacity: 20,
     // 别墅群没有岗位；显式给空数组，否则建成后 selectDashboard 遍历 jobs 会崩溃导致界面卡死。
     jobs: Object.freeze([]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1500 }]),
     construction: Object.freeze({
       workDays: 1000, recommendedWorkers: 20
-    })
+    }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 1000, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1500 }]) })
   })
 });
 
@@ -2548,7 +2550,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod18 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-87b2bcc";
+       const BUILD_ID = "0203-576e84c";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -13305,8 +13307,7 @@ const { currentPaymentComposition, settleMonetaryPayment } = __mxmod27;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
 const { voucherUnitsForWheatUnits } = __mxmod25;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } = __mxmod20;
-const VILLAS_PER_COMPLEX = 20;
-       const DEFAULT_VILLA_PRICE_WHEAT_JIN = 10000;
+const DEFAULT_VILLA_PRICE_WHEAT_JIN = 10000;
        const DEFAULT_VILLA_TAX_RATE_PERCENT = 0.5;
 
        function ensureVillaState(state) {
@@ -13341,18 +13342,27 @@ function villaComplexes(state) {
   return (state.buildings || []).filter(building => building.typeId === "villa_complex");
 }
 
+// 别墅容量随等级增长：每级 villaCapacity 栋（定义在 content/buildings.js），等级封顶 rules.buildingMaxLevel。
+       function villaCapacityOf(building, content) {
+  const perLevel = Number(content.buildings.villa_complex?.villaCapacity) || 20;
+  const cap = content.rules.buildingMaxLevel || 10;
+  const level = Math.max(1, Math.min(cap, Math.floor(building.level || 1)));
+  return perLevel * level;
+}
+
 function soldVillaKeys(villas) {
   const keys = new Set();
   for (const row of villas.sold) keys.add(row.instanceId + ":" + row.villaIndex);
   return keys;
 }
 
-       function selectVillaVacancies(state) {
+       function selectVillaVacancies(state, content) {
   const villas = ensureVillaState(state);
   const soldKeys = soldVillaKeys(villas);
   const vacant = [];
   for (const complex of villaComplexes(state)) {
-    for (let index = 0; index < VILLAS_PER_COMPLEX; index++) {
+    const capacity = villaCapacityOf(complex, content);
+    for (let index = 0; index < capacity; index++) {
       if (!soldKeys.has(complex.id + ":" + index)) vacant.push({ instanceId: complex.id, villaIndex: index });
     }
   }
@@ -13364,11 +13374,11 @@ function soldVillaKeys(villas) {
   const policy = villaPolicy(state, content);
   const scale = currencyScale(content);
   const complexes = villaComplexes(state);
-  const vacant = selectVillaVacancies(state).length;
+  const vacant = selectVillaVacancies(state, content).length;
   const sold = villas.sold.length;
   return {
     complexes: complexes.length,
-    capacity: complexes.length * VILLAS_PER_COMPLEX,
+    capacity: complexes.reduce((sum, complex) => sum + villaCapacityOf(complex, content), 0),
     sold,
     vacant,
     priceWheatJin: policy.priceWheatJin,
@@ -13386,7 +13396,7 @@ function soldVillaKeys(villas) {
   const scale = currencyScale(content);
   const priceUnits = Math.round(Math.max(0, Number(policy.priceWheatJin) || 0) * scale);
   if (priceUnits <= 0) return { sold: 0, reason: "别墅定价无效" };
-  const vacant = selectVillaVacancies(state);
+  const vacant = selectVillaVacancies(state, content);
   if (!vacant.length) return { sold: 0 };
   const owners = new Set(villas.sold.map(row => row.householdId));
   // 生活困难线以下的部分不计入可动用购房资金，避免掏空穷人。
@@ -13521,7 +13531,7 @@ function soldVillaKeys(villas) {
   }
   return { ok: true, policy: { ...policy } };
 }
-return { VILLAS_PER_COMPLEX, DEFAULT_VILLA_PRICE_WHEAT_JIN, DEFAULT_VILLA_TAX_RATE_PERCENT, ensureVillaState, villaPolicy, selectVillaVacancies, selectVillaStats, settleVillaPurchases, settleVillaPropertyTax, setVillaPolicy };
+return { DEFAULT_VILLA_PRICE_WHEAT_JIN, DEFAULT_VILLA_TAX_RATE_PERCENT, ensureVillaState, villaPolicy, villaCapacityOf, selectVillaVacancies, selectVillaStats, settleVillaPurchases, settleVillaPropertyTax, setVillaPolicy };
 })();
 
 // ===== systems/bank.js =====
@@ -22518,6 +22528,7 @@ const { MODS } = __mxmod69;
 const { wholesaleItemIds } = __mxmod0;
 const { CONTENT } = __mxmod11;
 const { isIndustryType } = __mxmod1;
+const { villaCapacityOf } = __mxmod61;
 const { renderNumericInput } = __mxmod110;
 const { renderShopPricing } = __mxmod126;
 function humanizePlotLabel(view, building) {
@@ -22850,6 +22861,10 @@ function timesSquareMarkup(view, building, development) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">入住 / 容量 / 空位</span><strong class="value">${number(home?.occupied || 0)} / ${number(home?.capacity || 1000)} / ${number(home?.vacancies || 0)}人</strong></div><div class="row"><span class="label">租金已收 / 减免</span><strong class="value">${number(view.housing.lastRentDay?.collectedWheatJin || 0)} / ${number(view.housing.lastRentDay?.waivedWheatJin || 0)}${escapeHtml(unit)}</strong></div>${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="residents">查看镇民</button>`;
+  } else if (building?.typeId === "villa_complex") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    const perLevel = CONTENT.buildings.villa_complex.villaCapacity;
+    body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">别墅栋数（本座）</span><strong class="value">${number(villaCapacityOf(building, CONTENT))}栋（每级${number(perLevel)}栋）</strong></div><div class="subtle">购房与房产税在政策页统一结算。</div>${developmentMarkup(view, building, development)}`;
   } else if (building) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const payroll = view.payroll?.lastDay?.workers?.find(row => row.buildingId === building.id);
