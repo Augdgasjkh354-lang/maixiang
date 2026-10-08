@@ -1,9 +1,11 @@
 import { currentUnitPrice } from "./prices.js";
-import { productivityFactor } from "./productivity.js";
+import { laborBatches, productivityFactor } from "./productivity.js";
 import { voucherBalance } from "./currency.js";
 import { maximumFullyPayableValueUnits, maximumPayableValueUnits } from "./payment.js";
-import { populationStats, readJobCount, privateJobKeyForBuilding, listedJobKeyForBuilding } from "../selectors/labor.js";
+import { populationStats, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } from "../selectors/labor.js";
+import { townOutputGate } from "../selectors/production.js";
 import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from "../systems/households.js";
+import { targetBatchCap } from "../systems/production.js";
 import { industryTypeIds } from "../content/buildings.js";
 import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
 
@@ -201,6 +203,27 @@ function producerRows(state, typeId, content) {
   return rows.sort((a, b) => a.key.localeCompare(b.key));
 }
 
+// 镇营产业（ownership.townLevels > 0）不由计划派工：投产靠镇里人手和产出闸门（production.js）。
+// 但它的投入需求与产出是真实的，计划要看见：投入计入上游的 downstreamUnits（否则民营磨坊看不到镇营面包房的面粉需求），
+// 产出计入 plannedOutputUnits（否则下游民营面包房以为没有面粉）。
+// 预计批次 = 在岗人手能做的批次 ∧ 目标日产量封顶 ∧ 镇营产出闸门（市场余量、口粮储备）。
+// 不因原料库存封顶：缺料的镇营作坊同样在向上游发出需求。
+function townExpectedBatches(state, typeId, content) {
+  const definition = content.buildings[typeId];
+  const recipe = content.recipes[definition?.recipeId];
+  const role = (definition?.jobs || []).find(job => job.id === definition.productionRoleId);
+  if (!recipe || !role) return 0;
+  let batches = 0;
+  for (const building of state.buildings || []) {
+    if (building.typeId !== typeId || !(building.ownership?.townLevels > 0)) continue;
+    const workers = readJobCount(state, jobKeyForBuilding(building.id, role.id));
+    const labor = laborBatches(state, typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry).batches;
+    const wanted = Math.min(labor, targetBatchCap(building, recipe));
+    batches += townOutputGate(state, recipe, wanted, content).batches;
+  }
+  return batches;
+}
+
 // 处理型产业的原料（单位/日）：镇库小麦；其他原料取批发市场库存（没有市场则镇库），
 // 加上本产业自有生产者手里的库存（公司库存、民营业主家庭库存），再加上上游本周期的计划日产量。
 // 只读：不调用会改 state 的函数（如 privateOwners）。
@@ -336,15 +359,16 @@ export function refreshOperatingPlan(state, content, force = false) {
     const producers = producerRows(state, typeId, content);
     if (totalBatches <= 0 && producers.some(row => row.ageDays < (content.rules.newBusinessTrialDays || 6))) totalBatches = 1;
     const rotation = plan.rotation[typeId] || 0;
-    const demandBatches = Object.values(distributeBatches(totalBatches, producers, rotation)).reduce((sum, value) => sum + value, 0);
+    const townBatches = townExpectedBatches(state, typeId, content);
+    const demandBatches = Object.values(distributeBatches(totalBatches, producers, rotation)).reduce((sum, value) => sum + value, 0) + townBatches;
     for (const input of content.recipes[content.buildings[typeId]?.recipeId]?.inputs || []) {
       downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(demandBatches * input.quantity * scale);
     }
-    drafts[typeId] = { target, totalBatches, producers, rotation };
+    drafts[typeId] = { target, totalBatches, producers, rotation, townBatches };
   }
   // 第二遍，从上游往下游：上游本周期能真正产出多少（受实际能招到的人限制）+ 现货，决定下游最多做多少批。
   for (const typeId of order) {
-    const { target, producers, rotation } = drafts[typeId];
+    const { target, producers, rotation, townBatches } = drafts[typeId];
     let { totalBatches } = drafts[typeId];
     const inputCap = inputBatchCap(state, typeId, content, plan.plannedOutputUnits);
     if (inputCap !== null && inputCap < totalBatches) {
@@ -369,10 +393,10 @@ export function refreshOperatingPlan(state, content, force = false) {
         state.privateEconomy.plans[row.buildingId] = { ...old, ...entry, ageDays: (old.ageDays || 0) + interval, updatedSerial: serial };
       }
     }
-    plan.demand[typeId] = { ...target, inputLimitedBatches: inputCap };
-    // 下游能指望的上游日产量：计划批次，但不超过本周期实际能招到的人做得完的量。
+    plan.demand[typeId] = { ...target, inputLimitedBatches: inputCap, townBatches };
+    // 下游能指望的上游日产量：计划批次，但不超过本周期实际能招到的人做得完的量；镇营产出按预计批次计入。
     for (const output of content.recipes[content.buildings[typeId]?.recipeId]?.outputs || []) {
-      plan.plannedOutputUnits[output.itemId] = (plan.plannedOutputUnits[output.itemId] || 0) + Math.round(effectiveBatches * output.quantity * scale);
+      plan.plannedOutputUnits[output.itemId] = (plan.plannedOutputUnits[output.itemId] || 0) + Math.round((effectiveBatches + townBatches) * output.quantity * scale);
     }
   }
   return plan;

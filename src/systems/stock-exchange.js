@@ -212,15 +212,36 @@ export function settleStockMarketDay(state, content) {
   return moved.length ? { moved } : null;
 }
 
-// 住户日常股票买入：按投资倾向把本日股票预算分散买入镇库做市的股份。
-// - 买入对象：已上市、镇库有可售股份（扣除 IPO 发行池）的公司，按实时股价成交
+// 发行池的卖方：shareSale.sellerOwner 缺省或 "town" 为镇库；否则为某户家庭 id（须存在）。
+// 卖方不明时返回 null，该公司不参与二级市场。
+export function offerSeller(state, company) {
+  const owner = company.shareSale?.sellerOwner;
+  if (!owner || owner === "town") return { kind: "town" };
+  if (state.households?.byId?.[owner]) return { kind: "household", householdId: owner };
+  return null;
+}
+
+// 可供住户买入的发行池股数：卖方挂出的股数（shareSale.offeredShares），封顶于卖方实际持股。
+// 镇库未挂出的股份不在此列；镇里不会因此自动卖股或回购。
+export function offeredPoolShares(state, company) {
+  const seller = offerSeller(state, company);
+  if (!seller) return 0;
+  const held = seller.kind === "town"
+    ? (company.townShares || 0)
+    : (company.householdShares?.[seller.householdId] || 0);
+  return Math.max(0, Math.min(company.shareSale?.offeredShares || 0, held));
+}
+
+// 住户日常股票买入：按投资倾向把本日股票预算分散买入发行池（镇长或业主挂出的）股份。
+// - 买入对象：已上市、发行池有股的公司，按实时股价成交；镇库未挂出的股份不卖
 // - 预算：household.stockBuyBudgetVoucherUnits（银行分流后写入）或无银行时现算
-// - 付款：住户 → 镇库（镇库做市），沿用认购的支付口径；付不起就跳过
+// - 付款：住户 → 卖方（镇库或原业主家庭）；付不起就跳过
+// - 股份转移：卖方是镇库则 townShares → residentShares；卖方是家庭则只在居民之间转手
 export function settleHouseholdStockBuying(state, content) {
   if (!hasStockExchange(state)) return null;
   const listed = Object.values(state.companies || {}).filter(company =>
     company.listing?.listed && (company.sharePriceVoucherUnits || 0) > 0 &&
-    (company.townShares || 0) - (company.shareSale?.offeredShares || 0) > 0);
+    offeredPoolShares(state, company) > 0);
   if (!listed.length) return null;
   let totalShares = 0;
   let totalSpentUnits = 0;
@@ -231,18 +252,32 @@ export function settleHouseholdStockBuying(state, content) {
     const perCompany = Math.floor(budget / listed.length);
     if (perCompany <= 0) continue;
     for (const company of listed) {
-      const available = (company.townShares || 0) - (company.shareSale?.offeredShares || 0);
+      const available = offeredPoolShares(state, company);
       if (available <= 0) continue;
+      const seller = offerSeller(state, company);
+      if (!seller || (seller.kind === "household" && seller.householdId === household.id)) continue;
       const priceUnits = company.sharePriceVoucherUnits;
       const shares = Math.min(available, Math.floor(perCompany / priceUnits));
       if (shares <= 0) continue;
       const cost = shares * priceUnits;
-      const payment = settleMonetaryPayment(state, `household:${household.id}`, "town",
+      const payee = seller.kind === "town" ? "town" : `household:${seller.householdId}`;
+      const payment = settleMonetaryPayment(state, `household:${household.id}`, payee,
         currentPaymentComposition(state, cost), content, "share_market_buy",
         `${household.name}二级市场买入${company.name}${shares}股`, { requireFull: true });
       if (!payment.ok) continue;
-      company.townShares -= shares;
-      company.residentShares = (company.residentShares || 0) + shares;
+      company.shareSale.offeredShares = Math.max(0, (company.shareSale.offeredShares || 0) - shares);
+      if (seller.kind === "town") {
+        company.townShares -= shares;
+        company.residentShares = (company.residentShares || 0) + shares;
+      } else {
+        const sellerId = seller.householdId;
+        company.householdShares[sellerId] = (company.householdShares[sellerId] || 0) - shares;
+        if (company.householdShares[sellerId] <= 0) delete company.householdShares[sellerId];
+        const sellerHousehold = state.households.byId[sellerId];
+        sellerHousehold.shares ||= {};
+        sellerHousehold.shares[company.id] = Math.max(0, (sellerHousehold.shares[company.id] || 0) - shares);
+        if (sellerHousehold.shares[company.id] <= 0) delete sellerHousehold.shares[company.id];
+      }
       company.householdShares ||= {};
       company.householdShares[household.id] = (company.householdShares[household.id] || 0) + shares;
       household.shares ||= {};
