@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { householdIdleWorkers, householdList, jobAssignments, jobCount, releaseJobFromHousehold, setJobCount, syncResidentAggregates } from "../src/systems/households.js";
 import { simulation, CONTENT } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { initializeBuildingJobs } from "../src/systems/employment.js";
 import { buyInputForCompany } from "../src/systems/companies.js";
 import { purchaseItemForResidents } from "../src/systems/consumer-market.js";
@@ -191,7 +192,7 @@ test("r03 镇库销售统一同步移除库存成本：企业连续采购、店�
   const companyState = legacyVoucherState({ seed: 120304 });
   const mill = addBuilding(companyState, "mill", "r03-company-mill");
   assert.equal(simulation.issueGrainVouchers(companyState, "town", 50000).ok, true);
-  const listed = simulation.listCompany(companyState, mill.id, { levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
+  const listed = formCompany(companyState, mill.id, { levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
   for (const household of householdList(companyState)) household.inventory.wheat = 0;
   syncResidentAggregates(companyState, CONTENT);

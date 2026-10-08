@@ -75,11 +75,9 @@ export function mountGame(root) {
   let demolitionPreviewId = null;
   let rightSalePreviewId = null;
   let currencyPreview = null;
-  let listingPreview = null;
   let stockListingPreview = null;
   let sharePreviewCompanyId = null;
   let buybackPreview = null;
-  let companyLevelPreview = null;
   let lastBuildPreviewPlotId = null;
   let latestView = null;
   let latestMapModel = null;
@@ -183,12 +181,28 @@ export function mountGame(root) {
       demolitionPreviewId,
       rightSalePreviewId,
       currencyPreview,
-      listingPreview,
       stockListingPreview,
       sharePreviewCompanyId,
       buybackPreview,
-      companyLevelPreview,
+      ownershipExtras: ownershipExtras(),
     };
+  }
+
+  // 民营建筑的业主、欠薪（dashboard 行不带 arrears，这里从存档读）。欠薪连续天数来自所有制监视。
+  function ownershipExtras() {
+    const extras = {};
+    const scale = simulation.content.precision.currencyUnitsPerVoucher;
+    for (const building of state?.buildings || []) {
+      if (!((building.ownership?.privateLevels || 0) > 0)) continue;
+      const arrearsUnits = state.privateEconomy?.payrollByBuilding?.[building.id]?.arrearsVoucherUnits || 0;
+      extras[building.id] = {
+        ownerName: state.households?.byId?.[(building.privateOwners || [])[0]]?.name || "业主",
+        arrears: arrearsUnits > 0,
+        arrearsVoucher: arrearsUnits / scale,
+        arrearsDays: state.ownershipWatch?.arrearsDaysByBuilding?.[building.id] || 0
+      };
+    }
+    return extras;
   }
 
   function renderHeader(view) {
@@ -329,6 +343,26 @@ export function mountGame(root) {
       return null;
     }
     return parsed.value;
+  }
+
+  // 整栋上市表单：总股本、卖出比例、每股价读暂存草稿；代码与公司名读文本框（留空=引擎缺省）。
+  function readIpoForm(prefix, buildingId, { tickerAttr, nameAttr = null }) {
+    const id = CSS.escape(buildingId);
+    const totalShares = readStagedNumber(`${prefix}:${buildingId}:total`, { label: "总股本", integer: true, minimum: 1 });
+    const offerPercent = readStagedNumber(`${prefix}:${buildingId}:offer`, { label: "卖出比例", positive: true, maximum: 100 });
+    const priceVoucherPerShare = readStagedNumber(`${prefix}:${buildingId}:price`, { label: "每股价格", positive: true });
+    if (totalShares === null || offerPercent === null || priceVoucherPerShare === null) return null;
+    const ticker = (root.querySelector(`[${tickerAttr}="${id}"]`)?.value || "").trim();
+    const name = nameAttr ? (root.querySelector(`[${nameAttr}="${id}"]`)?.value || "").trim().slice(0, 30) : "";
+    return {
+      totalShares, offerPercent, priceVoucherPerShare,
+      ...(ticker ? { ticker } : {}),
+      ...(name ? { name } : {})
+    };
+  }
+
+  function ipoFailureText(result) {
+    return (result.reason || "上市未能完成") + (result.nearby?.length ? `；可选${result.nearby.join("、")}股` : "");
   }
 
   function commitNumericDraft(key, preferredInput = null) {
@@ -574,7 +608,7 @@ export function mountGame(root) {
     persistenceIssue = null;
     numericDrafts.clear();
     upgradePreviewId = null; demolitionPreviewId = null; rightSalePreviewId = null;
-    currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null;
+    currencyPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null;
     lastBuildPreviewPlotId = null;
     startupError = null;
     saveWarning = entry.recovered ? "此局从自动备份读取；请保存以修复当前存档。" : null;
@@ -855,7 +889,7 @@ export function mountGame(root) {
             clock.pause();
             numericDrafts.clear();
             upgradePreviewId = null; demolitionPreviewId = null; rightSalePreviewId = null;
-            currencyPreview = null; listingPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null; companyLevelPreview = null;
+            currencyPreview = null; stockListingPreview = null; sharePreviewCompanyId = null; buybackPreview = null;
             navigation.resetView();
             navigation.openPanel("settings");
             managerOpen = true;
@@ -1115,31 +1149,41 @@ export function mountGame(root) {
       showToast(`${{ flour: "面粉", bread: "面包", wood: "木材" }[itemId] || itemId}价格已设为${number(result.value, 3)}小麦等值/${itemId === "wood" ? "单位" : "斤"}。`);
       return;
     }
-    const companyPreviewButton = closest(target, "[data-company-preview]");
-    if (companyPreviewButton && state) {
-      const buildingId = companyPreviewButton.dataset.companyPreview;
-      const building = buildView().buildings.find(row => row.id === buildingId);
-      if (!building) return;
-      const levels = readStagedNumber(`company-form:${buildingId}:levels`, { label: "划入公司等级", integer: true, minimum: 1, maximum: building.ownership.townLevels });
-      const capital = readStagedNumber(`company-form:${buildingId}:capital`, { label: "初始经营资金（小麦等值）", minimum: 0 });
-      const material = readStagedNumber(`company-form:${buildingId}:material`, { label: "初始原料数量", minimum: 0 });
-      const name = (root.querySelector(`[data-company-name="${CSS.escape(buildingId)}"]`)?.value || `${building.name}公司`).trim().slice(0, 30);
-      if (levels === null || capital === null || material === null || !name) return;
-      listingPreview = { buildingId, name, levels, capital, material };
-      render(true); return;
+    // 整栋上市（镇营建筑，镇长直接上市）：表单草稿在 ipo:<建筑>:* 下，留空代码由引擎分配。
+    const ipoListButton = closest(target, "[data-ipo-list]");
+    if (ipoListButton && state) {
+      const buildingId = ipoListButton.dataset.ipoList;
+      const options = readIpoForm("ipo", buildingId, { tickerAttr: "data-ipo-ticker", nameAttr: "data-ipo-name" });
+      if (!options) return;
+      if (!window.confirm("确认整栋上市？建筑将划入新公司并在交易所挂牌，股款归镇库。")) return;
+      const result = simulation.listBuilding(state, buildingId, options);
+      if (!result.ok) { showToast(ipoFailureText(result)); render(true); return; }
+      for (const suffix of ["total", "offer", "price"]) numericDrafts.delete(`ipo:${buildingId}:${suffix}`);
+      changed(true); renderedMapSignature = ""; latestMapModel = null; render(true);
+      showToast(`${result.ticker} 已整栋上市：挂牌${number(result.offeredShares)}股，镇库保留${number(result.keptShares)}股。`);
+      return;
     }
-    if (closest(target, "[data-company-preview-cancel]")) { listingPreview = null; render(true); return; }
-    const companyCreate = closest(target, "[data-company-create]");
-    if (companyCreate && state && listingPreview?.buildingId === companyCreate.dataset.companyCreate) {
-      const result = simulation.createCompany(state, listingPreview.buildingId, {
-        name: listingPreview.name, levels: listingPreview.levels,
-        operatingCapitalVoucher: listingPreview.capital, initialMaterialQuantity: listingPreview.material
-      });
-      if (!result.ok) { showToast(result.reason); render(true); return; }
-      const id = listingPreview.buildingId;
-      for (const suffix of ["levels", "capital", "material"]) numericDrafts.delete(`company-form:${id}:${suffix}`);
-      listingPreview = null; changed(true); renderedMapSignature = ""; render(true);
-      showToast(`公司已成立，${number(result.levels)}级产能由公司独立经营；尚未上市。`);
+    const ipoApproveButton = closest(target, "[data-ipo-approve]");
+    if (ipoApproveButton && state) {
+      const buildingId = ipoApproveButton.dataset.ipoApprove;
+      const options = readIpoForm("ipo-app", buildingId, { tickerAttr: "data-ipo-app-ticker" });
+      if (!options) return;
+      const result = simulation.approveIpoApplication(state, buildingId, options);
+      if (!result.ok) { showToast(ipoFailureText(result)); render(true); return; }
+      for (const suffix of ["total", "offer", "price"]) numericDrafts.delete(`ipo-app:${buildingId}:${suffix}`);
+      changed(true); renderedMapSignature = ""; latestMapModel = null; render(true);
+      showToast(`已批准上市：${result.ticker}，挂牌${number(result.offeredShares)}股，业主保留${number(result.keptShares)}股。`);
+      return;
+    }
+    const ipoRejectButton = closest(target, "[data-ipo-reject]");
+    if (ipoRejectButton && state) {
+      const buildingId = ipoRejectButton.dataset.ipoReject;
+      const cooldownDays = buildView().ipo?.reapplyCooldownDays ?? 180;
+      if (!window.confirm(`驳回上市申请？业主${cooldownDays}天内不得再就这栋建筑申请。`)) return;
+      const result = simulation.rejectIpoApplication(state, buildingId);
+      if (!result.ok) { showToast(ipoFailureText(result)); render(true); return; }
+      changed(true); render(true);
+      showToast(`已驳回上市申请，业主${cooldownDays}天内不得再申请。`);
       return;
     }
     const stockListPreviewButton = closest(target, "[data-stock-list-preview]");
@@ -1228,34 +1272,6 @@ export function mountGame(root) {
       const result = simulation.configureCompanySalePrice(state, companyId, itemId, value);
       if (!result.ok) { showToast(result.reason); return; }
       numericDrafts.delete(`company:${companyId}:price:${itemId}`); changed(true); render(true); return;
-    }
-    const levelPreviewButton = closest(target, "[data-company-level-preview]");
-    if (levelPreviewButton && state) {
-      const companyId = levelPreviewButton.dataset.companyLevelPreview;
-      const direction = levelPreviewButton.dataset.direction;
-      const preview = simulation.previewCompanyLevelChange(state, companyId, direction);
-      companyLevelPreview = { companyId, direction, preview };
-      render(true); return;
-    }
-    if (closest(target, "[data-company-level-cancel]")) { companyLevelPreview = null; render(true); return; }
-    const levelConfirm = closest(target, "[data-company-level-confirm]");
-    if (levelConfirm && state && companyLevelPreview?.companyId === levelConfirm.dataset.companyLevelConfirm) {
-      const { companyId, direction, preview: shown } = companyLevelPreview;
-      const current = simulation.previewCompanyLevelChange(state, companyId, direction);
-      const signature = row => JSON.stringify([row?.available, row?.reason || null, row?.levelsBefore, row?.levelsAfter, row?.issuedShares || 0, row?.cancelledShares || 0, row?.totalSharesBefore || 0, row?.totalSharesAfter || 0, row?.townSharesBefore || 0, row?.townSharesAfter || 0, Math.round((row?.townPercentBefore || 0) * 1e6), Math.round((row?.townPercentAfter || 0) * 1e6)]);
-      if (signature(current) !== signature(shown)) {
-        companyLevelPreview = { companyId, direction, preview: current };
-        render(true); showToast("等级与股权条件已变化，预览已更新，请再次确认。"); return;
-      }
-      const result = direction === "remove"
-        ? simulation.removeCompanyOperatingLevel(state, companyId)
-        : simulation.addCompanyOperatingLevel(state, companyId);
-      if (!result.ok) { companyLevelPreview = { companyId, direction, preview: simulation.previewCompanyLevelChange(state, companyId, direction) }; showToast(result.reason); render(true); return; }
-      companyLevelPreview = null; changed(true); render(true);
-      showToast(direction === "remove"
-        ? (result.cancelledShares ? `已划回1级并注销镇库${number(result.cancelledShares)}股。` : "已划回1级。")
-        : (result.issuedShares ? `已划入1级并向镇库增发${number(result.issuedShares)}股。` : "已划入1级镇营产能。"));
-      return;
     }
     const liquidate = closest(target, "[data-company-liquidate]");
     if (liquidate && state) {
@@ -1443,12 +1459,23 @@ export function mountGame(root) {
     }
     if (closest(target, "[data-right-confirm]") && state) {
       const buildingId = target.dataset.rightConfirm;
-      const result = simulation.sellOperatingLevel(state, buildingId);
-      if (!result.ok) { showToast(result.reason || result.preview?.reason || "经营权未成交"); render(); return; }
+      const result = simulation.sellBuildingToPrivate(state, buildingId);
+      if (!result.ok) { showToast(result.reason || result.preview?.reason || "整栋未成交"); render(); return; }
       rightSalePreviewId = null;
       changed(true);
       render();
-      showToast(`居民共同购入一级经营权；${result.transferredWorkers}名原镇营工人转入民营岗位。`);
+      showToast(`${result.preview?.buyer?.householdName || "一户"}整栋购入；${number(result.movedWorkers)}名原镇营工人转入民营岗位。`);
+      return;
+    }
+    // 镇里按估值收回民营建筑（整栋回镇营，钱由镇库付给业主）。
+    const buybackButton = closest(target, "[data-buyback]");
+    if (buybackButton && state) {
+      const buildingId = buybackButton.dataset.buyback;
+      if (!window.confirm("镇库按整栋估值付给业主，建筑整栋回镇营。确认收回？")) return;
+      const result = simulation.buyBuildingBackFromPrivate(state, buildingId);
+      if (!result.ok) { showToast(result.reason || "收回未成交"); render(); return; }
+      changed(true); renderedMapSignature = ""; latestMapModel = null; render();
+      showToast("已按估值收回，整栋回镇营。");
       return;
     }
     const plot = closest(target, "[data-plot]");

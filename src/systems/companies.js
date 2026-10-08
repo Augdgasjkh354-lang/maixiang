@@ -1,4 +1,4 @@
-import { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
+import { populationStats, readJobCount, jobKeyForBuilding, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
 import { isIndustryType } from "../content/buildings.js";
 import { householdIdOf } from "../economy/accounts.js";
@@ -16,7 +16,9 @@ import { householdConvertibleWheatUnits, householdList, householdPopulation, isA
 import { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } from "../economy/operating-plan.js";
 
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
-import { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } from "./wholesale-market.js";
+import { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, readWholesalePurchasePrice, wholesaleUnitPrice } from "./wholesale-market.js";
+import { buildingOwner, companyOfBuilding, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
+import { offsetWageClaims, transferWageClaimsToTown } from "./employer.js";
 
 function blankPeriod() {
   return {
@@ -117,19 +119,27 @@ export function buyInputForCompany(state, company, itemId, wantedUnits, content)
   return { boughtUnits: purchase.boughtUnits || 0, paidVoucherUnits: purchase.paidVoucherUnits || 0, missingUnits: Math.max(0, wantedUnits - (purchase.boughtUnits || 0)), reason: purchase.reason };
 }
 
+// 建立公司的内部步骤（只由 ipo.js 的 listBuilding 调用；对外已取消“单独成立公司”）。
+// 整栋建筑划入新公司，岗位人数搬到公司键；公司建立后尚未挂牌（listing.listed=false），挂牌由 applyCompanyListing 完成。
+// 主人是镇里：营运资金与实物投入可由镇库提供（options.operatingCapitalVoucher / initialMaterials）。
+// 主人是一户：该户存货中本建筑的配方原料与产品随建筑入公司，按收购价计作投入资本，不另付钱。
 export function createIndependentCompany(state, buildingId, options, content) {
   ensureCompanies(state, content);
   const building = state.buildings.find(row => row.id === buildingId);
   if (!building) return { ok: false, reason: "建筑不存在" };
   if (!isIndustryType(content, building.typeId)) return { ok: false, reason: "此建筑暂不支持成立独立公司" };
-  if (Object.values(state.companies).some(company => company.buildingId === buildingId)) {
+  if (companyOfBuilding(state, buildingId)) {
     return { ok: false, reason: "同一建筑最多对应一家公司" };
   }
   building.ownership ||= { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
   building.ownership.listedLevels ||= 0;
-  const levels = Math.floor(Number(options?.levels) || 0);
-  if (levels <= 0 || levels > (building.ownership.townLevels || 0)) return { ok: false, reason: "公司等级必须来自尚属镇营的等级" };
-  const cashUnits = Math.round(Math.max(0, Number(options?.operatingCapitalVoucher || 0)) * currencyScale(content));
+  const owner = buildingOwner(state, building);
+  if (owner.kind === "company") return { ok: false, reason: "这栋建筑已有公司主人" };
+  const fromTown = owner.kind === "town";
+  const household = owner.kind === "household" ? state.households?.byId?.[owner.id] : null;
+  if (owner.kind === "household" && !household) return { ok: false, reason: "业主家庭不存在" };
+  const levels = Math.max(1, building.level || 1);
+  const cashUnits = fromTown ? Math.round(Math.max(0, Number(options?.operatingCapitalVoucher || 0)) * currencyScale(content)) : 0;
   if (cashUnits > 0) {
     const quote = quoteMonetaryPayment(state, "town", currentPaymentComposition(state, cashUnits), content);
     if (!quote.full) return { ok: false, reason: "镇库可支付资产不足，无法投入所设营运资金" };
@@ -140,11 +150,19 @@ export function createIndependentCompany(state, buildingId, options, content) {
     ? options.initialMaterials
     : Object.fromEntries((recipe?.inputs || []).slice(0, 1).map(row => [row.itemId, Math.max(0, Number(options?.initialMaterialQuantity || 0))]));
   const materialRows = [];
-  for (const input of recipe?.inputs || []) {
+  for (const input of (fromTown ? recipe?.inputs || [] : [])) {
     const quantity = Math.max(0, Number(requestedMaterials[input.itemId] || 0));
     const units = Math.round(quantity * content.precision.inventoryUnitsPerJin);
     if (units > (state.accounts.town[input.itemId] || 0)) return { ok: false, reason: `镇库${content.items[input.itemId]?.name || input.itemId}不足，不能作为企业初始投入` };
     if (units > 0) materialRows.push({ itemId: input.itemId, units });
+  }
+  // 业主是一户：本建筑配方里的原料与产品，该户持有多少就随建筑划入（按收购价计成本）。
+  const householdStockRows = [];
+  if (household) {
+    for (const itemId of [...new Set([...(recipe?.inputs || []), ...(recipe?.outputs || [])].map(row => row.itemId))]) {
+      const units = Math.max(0, household.inventory?.[itemId] || 0);
+      if (units > 0) householdStockRows.push({ itemId, units });
+    }
   }
   const id = "company-" + (state.nextCompanyNumber || 1);
   state.nextCompanyNumber = (state.nextCompanyNumber || 1) + 1;
@@ -163,18 +181,7 @@ export function createIndependentCompany(state, buildingId, options, content) {
     settings: { wagePerWorkerDay: defaultWage, targetWorkers: Math.min(levels * (definition.jobs?.[0]?.slots || 0), levels * (definition.jobs?.[0]?.slots || 0)), salePricesVoucherPerUnit: {} }
   });
   state.companies[id] = company;
-  building.ownership.townLevels -= levels;
-  building.ownership.listedLevels += levels;
-  const job = definition.jobs?.[0];
-  if (job) {
-    const townKey = buildingId + "::" + job.id;
-    const companyKey = listedJobKeyForBuilding(buildingId, job.id);
-    const townWorkers = readJobCount(state, townKey);
-    const townCapacity = job.slots * building.ownership.townLevels;
-    const transferable = Math.max(0, townWorkers - townCapacity);
-    setJobCount(state, townKey, Math.min(townWorkers, townCapacity), content);
-    setJobCount(state, companyKey, Math.min(transferable, job.slots * levels), content, { type: "company", id });
-  }
+  transferBuildingOwnership(state, building, { kind: "company", id }, content);
   if (cashUnits > 0) {
     const transfer = settleMonetaryPayment(state, "town", "company:" + id, currentPaymentComposition(state, cashUnits), content,
       "enterprise_capital_injection", `镇库向${company.name}投入营运资金`, { requireFull: true });
@@ -189,12 +196,20 @@ export function createIndependentCompany(state, buildingId, options, content) {
     company.initialInvestment.materials.push({ itemId: row.itemId, quantityUnits: row.units, referenceVoucherUnits: referenceValue, costBasisVoucherUnits: transferredCostBasis });
     recordLedger(state, { type: "enterprise_material_contribution", transactionId: makeTransactionId(state), source: "town", destination: "company:" + id, itemId: row.itemId, quantityUnits: row.units, qeqUnits: 0, reason: `${company.name}设立时的实物资本投入；不计经营收入` }, content);
   }
+  for (const row of householdStockRows) {
+    const price = readWholesalePurchasePrice(state, row.itemId, content) || marketUnitPrice(state, row.itemId, content);
+    const costUnits = valueUnitsOfGoods(row.units, price, content);
+    household.inventory[row.itemId] -= row.units;
+    addInventory(company, row.itemId, row.units, costUnits);
+    company.initialInvestment.materials.push({ itemId: row.itemId, quantityUnits: row.units, referenceVoucherUnits: costUnits, costBasisVoucherUnits: costUnits, sourceHouseholdId: household.id });
+    recordLedger(state, { type: "enterprise_material_contribution", transactionId: makeTransactionId(state), source: "household:" + household.id, destination: "company:" + id, itemId: row.itemId, quantityUnits: row.units, qeqUnits: 0, reason: `${company.name}设立时由业主以存货投入（按收购价计成本）；不计经营收入` }, content);
+  }
+  if (householdStockRows.length) syncResidentAggregates(state, content);
   if (state.market?.operatingPlan) state.market.operatingPlan.updatedSerial = -1;
-  recordEvent(state, `${company.name}成立：${levels}级产能划归公司，由镇库100%持有；成立不等于上市。`, content, { day: state.day + 1 });
-  return { ok: true, companyId: id, levels };
+  return { ok: true, companyId: id, levels, ownerKind: owner.kind };
 }
 
-// 兼容旧内部调用名；0.1.7 语义已改为“成立公司”，不会自动上市。
+// 兼容旧内部调用名（内部步骤，已不对外提供“成立公司”）。
 export const createListedCompany = createIndependentCompany;
 
 export function setCompanyWage(state, companyId, value, content) {
@@ -233,98 +248,39 @@ export function companySalePrice(state, company, itemId, content) {
   return Number.isFinite(value) && value > 0 ? value : marketUnitPrice(state, itemId, content);
 }
 
+// 整栋归公司：不再按级划入/划回。保留函数与导出，供旧调用方平稳返回。
+const WHOLE_BUILDING_REASON = "整栋归公司，不再按级划转";
+
 export function previewCompanyLevelChange(state, companyId, direction, content) {
-  const company = state.companies?.[companyId];
-  if (!company) return { available: false, reason: "企业不存在", direction };
-  const building = state.buildings.find(row => row.id === company.buildingId);
-  if (!building) return { available: false, reason: "公司建筑不存在", direction };
-  const listed = Boolean(company.listing?.listed);
-  const levelsBefore = company.listedLevels;
-  const totalSharesBefore = company.totalShares || 0;
-  const townSharesBefore = company.townShares || 0;
-  const townPercentBefore = totalSharesBefore > 0 ? townSharesBefore / totalSharesBefore * 100 : 0;
-
-  if (direction === "add") {
-    if ((building.ownership?.townLevels || 0) <= 0) return { available: false, reason: "没有可划入的镇营等级", direction, levelsBefore };
-    let issuedShares = 0;
-    if (listed) {
-      if (totalSharesBefore <= 0 || totalSharesBefore % levelsBefore !== 0) return { available: false, reason: "当前总股本不能按每级等量股份划分", direction, levelsBefore };
-      issuedShares = totalSharesBefore / levelsBefore;
-    }
-    const totalSharesAfter = totalSharesBefore + issuedShares;
-    const townSharesAfter = townSharesBefore + issuedShares;
-    return {
-      available: true, direction, listed, levelDelta: 1, levelsBefore, levelsAfter: levelsBefore + 1,
-      issuedShares, cancelledShares: 0, totalSharesBefore, totalSharesAfter, townSharesBefore, townSharesAfter,
-      townPercentBefore, townPercentAfter: totalSharesAfter > 0 ? townSharesAfter / totalSharesAfter * 100 : 0
-    };
-  }
-
-  if (direction === "remove") {
-    if (levelsBefore <= 1) return { available: false, reason: "全部等级划回须先完成居民股权回购与公司清算", direction, levelsBefore };
-    let cancelledShares = 0;
-    if (listed) {
-      if (totalSharesBefore <= 0 || totalSharesBefore % levelsBefore !== 0) return { available: false, reason: "当前总股本不能按每级等量股份划分", direction, levelsBefore };
-      cancelledShares = totalSharesBefore / levelsBefore;
-      if (townSharesBefore < cancelledShares) return {
-        available: false, reason: `镇库还缺${cancelledShares - townSharesBefore}股；须先由镇库回购居民股份`, direction, listed, levelsBefore,
-        cancelledShares, requiredTownShares: cancelledShares, totalSharesBefore, townSharesBefore, townPercentBefore
-      };
-    }
-    const totalSharesAfter = totalSharesBefore - cancelledShares;
-    const townSharesAfter = townSharesBefore - cancelledShares;
-    return {
-      available: true, direction, listed, levelDelta: -1, levelsBefore, levelsAfter: levelsBefore - 1,
-      issuedShares: 0, cancelledShares, totalSharesBefore, totalSharesAfter, townSharesBefore, townSharesAfter,
-      townPercentBefore, townPercentAfter: totalSharesAfter > 0 ? townSharesAfter / totalSharesAfter * 100 : 0
-    };
-  }
-
-  return { available: false, reason: "未知等级变动", direction, levelsBefore };
+  return { available: false, reason: WHOLE_BUILDING_REASON, direction, levelsBefore: state.companies?.[companyId]?.listedLevels ?? 0 };
 }
 
+// 公司回到镇营的共同收尾：股份作废（居民与社保基金一并注销，不补偿）、公司对象删除、建筑整栋回镇营。
+function closeCompanyToTown(state, company, building, content) {
+  for (const household of householdList(state)) if (household.shares) delete household.shares[company.id];
+  company.fundShares = 0;
+  company.householdShares = {};
+  company.totalShares = 0;
+  company.townShares = 0;
+  company.residentShares = 0;
+  company.shareSale = { ...(company.shareSale || {}), offeredShares: 0, sharePriceVoucherUnits: 0 };
+  company.listing = { listed: false, ticker: null, listedAt: null };
+  const levels = building.ownership?.listedLevels || company.listedLevels || 0;
+  delete state.companies[company.id];
+  transferBuildingOwnership(state, building, { kind: "town", id: null }, content);
+  return levels;
+}
+
+// 按级划入/划回已废止（整栋归公司）：保留导出，直接返回不可用原因。
 export function addCompanyLevel(state, companyId, content) {
-  const preview = previewCompanyLevelChange(state, companyId, "add", content);
-  if (!preview.available) return { ok: false, reason: preview.reason, preview };
-  const company = state.companies[companyId];
-  const building = state.buildings.find(row => row.id === company.buildingId);
-  if (preview.listed) {
-    company.totalShares = preview.totalSharesAfter;
-    company.townShares = preview.townSharesAfter;
-  }
-  company.listedLevels = preview.levelsAfter;
-  building.ownership.townLevels -= 1;
-  building.ownership.listedLevels += 1;
-  const job = content.buildings[company.typeId]?.jobs?.[0];
-  if (job) company.settings.targetWorkers = Math.min(company.settings.targetWorkers ?? 0, job.slots * company.listedLevels);
-  if (state.market?.operatingPlan) state.market.operatingPlan.updatedSerial = -1;
-  return { ok: true, issuedShares: preview.issuedShares, levels: company.listedLevels, totalShares: company.totalShares, townShares: company.townShares, preview };
+  return { ok: false, reason: WHOLE_BUILDING_REASON, preview: previewCompanyLevelChange(state, companyId, "add", content) };
 }
 
 export function removeCompanyLevel(state, companyId, content) {
-  const preview = previewCompanyLevelChange(state, companyId, "remove", content);
-  if (!preview.available) return { ok: false, reason: preview.reason, requiredTownShares: preview.requiredTownShares, preview };
-  const company = state.companies[companyId];
-  const building = state.buildings.find(row => row.id === company.buildingId);
-  if (preview.listed) {
-    company.totalShares = preview.totalSharesAfter;
-    company.townShares = preview.townSharesAfter;
-    if (company.shareSale) company.shareSale.offeredShares = Math.min(company.shareSale.offeredShares || 0, company.townShares);
-  }
-  company.listedLevels = preview.levelsAfter;
-  building.ownership.townLevels += 1;
-  building.ownership.listedLevels -= 1;
-  const job = content.buildings[company.typeId]?.jobs?.[0];
-  if (job) {
-    const key = listedJobKeyForBuilding(company.buildingId, job.id);
-    const cap = job.slots * company.listedLevels;
-    if (readJobCount(state, key) > cap) setJobCount(state, key, cap, content, { type: "company", id: company.id });
-    company.settings.targetWorkers = Math.min(company.settings.targetWorkers ?? cap, cap);
-  }
-  if (state.market?.operatingPlan) state.market.operatingPlan.updatedSerial = -1;
-  return { ok: true, cancelledShares: preview.cancelledShares, levels: company.listedLevels, totalShares: company.totalShares, townShares: company.townShares, preview };
+  return { ok: false, reason: WHOLE_BUILDING_REASON, preview: previewCompanyLevelChange(state, companyId, "remove", content) };
 }
 
+// 手动清算（镇长操作）：要求没有欠薪、居民与基金不持股，现金与存货先交镇库。
 export function liquidateCompanyToTown(state, companyId, content) {
   const company = state.companies?.[companyId];
   if (!company) return { ok: false, reason: "企业不存在" };
@@ -346,16 +302,70 @@ export function liquidateCompanyToTown(state, companyId, content) {
     state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + qty;
     addTownCostBasis(state, itemId, cost);
   }
-  const levels = company.listedLevels;
-  building.ownership.townLevels += levels;
-  building.ownership.listedLevels -= levels;
-  const job = content.buildings[company.typeId]?.jobs?.[0];
-  if (job) setJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id), 0, content, { type: "company", id: company.id });
-  for (const household of householdList(state)) if (household.shares) delete household.shares[company.id];
-  delete state.companies[company.id];
-  if (state.market?.operatingPlan) state.market.operatingPlan.updatedSerial = -1;
-  recordEvent(state, `${company.name}完成债务优先清算，全部等级划回镇营。`, content, { day: state.day + 1 });
+  const levels = closeCompanyToTown(state, company, building, content);
+  recordEvent(state, `${company.name}完成债务优先清算，整栋建筑划回镇营。`, content, { day: state.day + 1 });
   return { ok: true, levelsReturned: levels };
+}
+
+// 欠薪超过宽限天数后的强制清算（docs/OWNERSHIP.md 第 3 条）：
+// 现金先还欠薪 → 存货按收购价抵欠薪（只算有收购口径的商品）→ 余下存货与现金归镇库 → 镇库垫付余额 → 股份作废、建筑回镇营。
+// 股东（居民、社保基金）不补偿。
+export function liquidateCompanyForArrears(state, companyId, content) {
+  const company = state.companies?.[companyId];
+  if (!company) return { ok: false, reason: "企业不存在" };
+  const building = state.buildings.find(row => row.id === company.buildingId);
+  if (!building) return { ok: false, reason: "公司建筑不存在" };
+  const payerId = "company:" + company.id;
+  const book = wageBook(company.payroll ||= { arrearsVoucherUnits: 0, cumulativePaidVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0 });
+  const arrearsBefore = wageArrears(book);
+  const scale = content.precision.inventoryUnitsPerJin;
+  // 1. 现金先还欠薪。
+  payWages(state, book, payerId, content, "enterprise_liquidation_wage_payment", `${company.name}清算先偿付欠薪`);
+  // 2. 存货按收购价抵欠薪。
+  let inKindValueUnits = 0;
+  for (const itemId of Object.keys(content.items)) {
+    if (wageArrears(book) <= 0) break;
+    const qty = company.inventory?.[itemId] || 0;
+    const price = readWholesalePurchasePrice(state, itemId, content);
+    if (qty <= 0 || price <= 0) continue;
+    const remaining = wageArrears(book);
+    const unitsNeeded = Math.ceil(remaining * scale / (price * currencyScale(content)));
+    const take = Math.min(qty, unitsNeeded);
+    if (take <= 0) continue;
+    const value = valueUnitsOfGoods(take, price, content);
+    removeInventoryWithCost(company, itemId, take);
+    depositWholesalePurchasedInventory(state, itemId, take, value, content);
+    inKindValueUnits += offsetWageClaims(state, book, value, content);
+  }
+  // 3. 余下存货归镇库（成本随货），余下现金归镇库。
+  for (const itemId of Object.keys(content.items)) {
+    const qty = company.inventory?.[itemId] || 0;
+    if (qty <= 0) continue;
+    const cost = removeInventoryWithCost(company, itemId, qty);
+    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + qty;
+    addTownCostBasis(state, itemId, cost);
+  }
+  const cash = maximumFullyPayableValueUnits(state, payerId, maximumPayableValueUnits(state, payerId, content), content);
+  if (cash > 0) {
+    const payment = settleMonetaryPayment(state, payerId, "town", currentPaymentComposition(state, cash), content, "enterprise_liquidation", `${company.name}清算余款返还镇库`, { requireFull: true });
+    if (!payment.ok) throw new Error("公司清算余款转账预检后失败：" + (payment.reason || "未知"));
+  }
+  // 4. 镇库垫付余额：经镇库支付；仍付不起的部分转入镇库的历史工资债权表。
+  let townAdvanceUnits = 0;
+  if (wageArrears(book) > 0) {
+    const before = wageArrears(book);
+    payWages(state, book, "town", content, "enterprise_arrears_town_advance", `${company.name}欠薪由镇库垫付`);
+    townAdvanceUnits = before - wageArrears(book);
+  }
+  const job = content.buildings[company.typeId]?.jobs?.[0];
+  const transferredClaimsUnits = job ? transferWageClaimsToTown(state, book, jobKeyForBuilding(company.buildingId, job.id)) : 0;
+  company.payroll.arrearsVoucherUnits = wageArrears(book);
+  // 5. 股份作废、建筑回镇营。
+  const cancelledResidentShares = company.residentShares || 0;
+  const cancelledFundShares = company.fundShares || 0;
+  const levels = closeCompanyToTown(state, company, building, content);
+  recordEvent(state, `${company.name}连续欠薪超过${content.rules.ownershipTakeoverArrearsDays || 30}天，债务清算：存货抵欠薪${Math.round(inKindValueUnits / content.precision.currencyUnitsPerVoucher)}券，镇库垫付${Math.round(townAdvanceUnits / content.precision.currencyUnitsPerVoucher)}券；居民股份${cancelledResidentShares}股、基金股份${cancelledFundShares}股作废，整栋建筑收回镇营。`, content, { day: state.day + 1 });
+  return { ok: true, companyId, arrearsBeforeUnits: arrearsBefore, inKindValueUnits, townAdvanceUnits, transferredClaimsUnits, cancelledResidentShares, cancelledFundShares, levelsReturned: levels };
 }
 
 // v14/v15 command/save compatibility only. 0.1.7 annual settlement and share valuation do not multiply by this field.
@@ -375,14 +385,40 @@ export function setIntermediatePrice(state, itemId, price, content) {
   return setCurrentUnitPrice(state, itemId, value, content);
 }
 
+// 发行池的卖方：shareSale.sellerOwner 缺省或 "town" 为镇库；否则为某户家庭 id（须存在）。
+// 卖方不明时返回 null，该公司不参与二级市场。
+export function offerSeller(state, company) {
+  const owner = company.shareSale?.sellerOwner;
+  if (!owner || owner === "town") return { kind: "town" };
+  if (state.households?.byId?.[owner]) return { kind: "household", householdId: owner };
+  return null;
+}
+
+// 卖方在本公司的持股：镇库持股，或该户持股。
+export function sellerHoldingShares(state, company) {
+  const seller = offerSeller(state, company);
+  if (!seller) return 0;
+  return seller.kind === "town"
+    ? (company.townShares || 0)
+    : (company.householdShares?.[seller.householdId] || 0);
+}
+
+// 可供住户买入的发行池股数：卖方挂出的股数（shareSale.offeredShares），封顶于卖方实际持股。
+// 卖方未挂出的股份不在此列；镇里不会因此自动卖股或回购。
+export function offeredPoolShares(state, company) {
+  if (!offerSeller(state, company)) return 0;
+  return Math.max(0, Math.min(company.shareSale?.offeredShares || 0, sellerHoldingShares(state, company)));
+}
+
 export function setShareOffer(state, companyId, offeredShares, priceVoucherPerShare, content) {
   const company = state.companies?.[companyId];
   if (!company) return { ok: false, reason: "企业不存在" };
   if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
   if (state.monetaryReform?.stage !== "voucher") return { ok: false, reason: "股票交易须在货币改革完成后使用粮券" };
+  if (!offerSeller(state, company)) return { ok: false, reason: "发行池卖方不明，无法挂牌出售" };
   const shares = Math.floor(Number(offeredShares) || 0);
   const priceUnits = Math.round(Number(priceVoucherPerShare) * currencyScale(content));
-  if (shares < 0 || shares > company.townShares) return { ok: false, reason: "出售股数不能超过镇库持股" };
+  if (shares < 0 || shares > sellerHoldingShares(state, company)) return { ok: false, reason: "出售股数不能超过卖方持股" };
   if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股售价须大于0" };
   company.shareSale.offeredShares = shares;
   company.shareSale.sharePriceVoucherUnits = priceUnits;
@@ -427,7 +463,9 @@ export function previewShareSubscription(state, companyId, content) {
   if (!(state.buildings || []).some(row => row.typeId === "stock_exchange") && !state.stockExchange?.legacyAccess) return { available: false, reason: "尚未建成交易所" };
   const scale = currencyScale(content);
   const shareSale = company.shareSale || {};
-  const offered = Math.min(shareSale.offeredShares || 0, company.townShares || 0);
+  const seller = offerSeller(state, company);
+  if (!seller) return { available: false, reason: "发行池卖方不明，无法认购" };
+  const offered = offeredPoolShares(state, company);
   const priceUnits = shareSale.sharePriceVoucherUnits || 0;
   if (offered <= 0 || priceUnits <= 0) return { available: false, reason: "请先设置出售股数和每股售价", offeredShares: offered };
   const people = populationStats(state).total;
@@ -435,7 +473,9 @@ export function previewShareSubscription(state, companyId, content) {
   const foodReserveOk = residentsFoodReserveQeq(state, content) >= foodNeedQeq;
   const livingVoucherReserve = Math.round(people * content.rules.foodPerPersonDay *
     (content.rules.shareLivingVoucherReserveDays || 30) * scale);
-  const affordableShares = householdList(state).filter(isActiveHousehold)
+  // 卖方家庭不能买自己挂出的股份。
+  const sellerHouseholdId = seller.kind === "household" ? seller.householdId : null;
+  const affordableShares = householdList(state).filter(household => isActiveHousehold(household) && household.id !== sellerHouseholdId)
     .reduce((sum, household) => sum + householdShareCapacity(paymentState, household, priceUnits, content), 0);
   const residentCash = maximumPayableValueUnits(paymentState, "residents", content);
   const actualPerformance = companyActualProfitValuation(state, company, content);
@@ -470,6 +510,7 @@ export function previewShareSubscription(state, companyId, content) {
       affordableShares <= 0 ? "居民可投资资产不足" :
       demandShares <= 0 ? "当前售价相对实际经营表现缺乏认购吸引力" : null,
     offeredShares: offered,
+    sellerOwner: sellerHouseholdId || "town",
     subscribedShares,
     proceedsVoucherUnits: proceedsUnits,
     priceVoucherUnits: priceUnits,
@@ -497,20 +538,34 @@ export function executeShareSubscription(state, companyId, content) {
   if (!company || !preview.available) return { ok: false, reason: preview.reason || "当前无认购成交", preview };
   const priceUnits = company.shareSale.sharePriceVoucherUnits || 0;
   const scale = currencyScale(content);
+  // 股款付给卖方（镇库或原业主家庭）；股份从卖方名下转出。
+  const seller = offerSeller(state, company);
+  const sellerHousehold = seller.kind === "household" ? state.households.byId[seller.householdId] : null;
+  const payee = sellerHousehold ? `household:${sellerHousehold.id}` : "town";
   let sharesLeft = preview.subscribedShares;
   let proceeds = 0;
   const buyers = [];
-  const households = householdList(state).filter(isActiveHousehold).slice().sort((a, b) =>
+  const households = householdList(state).filter(household => isActiveHousehold(household) && household.id !== sellerHousehold?.id).slice().sort((a, b) =>
     householdShareCapacity(state, b, priceUnits, content) - householdShareCapacity(state, a, priceUnits, content) || a.id.localeCompare(b.id));
   for (const household of households) {
     if (sharesLeft <= 0) break;
     const shares = Math.min(sharesLeft, householdShareCapacity(state, household, priceUnits, content));
     if (shares <= 0) continue;
     const cost = shares * priceUnits;
-    const payment = settleMonetaryPayment(state, `household:${household.id}`, "town", currentPaymentComposition(state, cost), content,
+    const payment = settleMonetaryPayment(state, `household:${household.id}`, payee, currentPaymentComposition(state, cost), content,
       "share_subscription", `${household.name}认购${company.name}股份`,
       { requireFull: true, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.shareFoodReserveDays || 90) });
     if (!payment.ok) continue;
+    if (sellerHousehold) {
+      company.householdShares[sellerHousehold.id] = (company.householdShares[sellerHousehold.id] || 0) - shares;
+      if (company.householdShares[sellerHousehold.id] <= 0) delete company.householdShares[sellerHousehold.id];
+      sellerHousehold.shares ||= {};
+      sellerHousehold.shares[company.id] = Math.max(0, (sellerHousehold.shares[company.id] || 0) - shares);
+      if (sellerHousehold.shares[company.id] <= 0) delete sellerHousehold.shares[company.id];
+    } else {
+      company.townShares -= shares;
+      company.residentShares += shares;
+    }
     company.householdShares[household.id] = (company.householdShares[household.id] || 0) + shares;
     household.shares ||= {};
     household.shares[company.id] = (household.shares[company.id] || 0) + shares;
@@ -520,14 +575,13 @@ export function executeShareSubscription(state, companyId, content) {
   }
   const subscribedShares = preview.subscribedShares - sharesLeft;
   if (subscribedShares <= 0) return { ok: false, reason: "没有家庭具备足够的可投资资产", preview };
-  company.townShares -= subscribedShares;
-  company.residentShares += subscribedShares;
   company.shareSale.cumulativeProceedsVoucherUnits += proceeds;
   company.shareSale.lastSaleVoucherUnits = proceeds;
   company.shareSale.lastSoldShares = subscribedShares;
   company.shareSale.offeredShares = Math.max(0, company.shareSale.offeredShares - subscribedShares);
-  recordEvent(state, `居民家庭认购${company.name}${subscribedShares.toLocaleString("zh-CN")}股；售股收入归镇库。`, content, { day: state.day + 1 });
-  return { ok: true, ...preview, subscribedShares, proceedsVoucherUnits: proceeds, buyers };
+  const payeeName = sellerHousehold ? sellerHousehold.name : "镇库";
+  recordEvent(state, `居民家庭认购${company.name}${subscribedShares.toLocaleString("zh-CN")}股；售股收入归${payeeName}。`, content, { day: state.day + 1 });
+  return { ok: true, ...preview, subscribedShares, proceedsVoucherUnits: proceeds, buyers, sellerOwner: sellerHousehold?.id || "town" };
 }
 
 export function injectCompanyCapital(state, companyId, amountVoucher, content) {

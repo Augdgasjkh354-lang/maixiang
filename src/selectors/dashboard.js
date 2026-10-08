@@ -15,6 +15,7 @@ import { selectDemolitionPreview, selectUpgradePreview } from "../systems/buildi
 import { selectOperatingRightPreview } from "./operating-rights.js";
 import { companySummary, previewShareSubscription, companyWorkingCapitalReserve } from "../systems/companies.js";
 import { hasStockExchange, stockReference } from "../systems/stock-exchange.js";
+import { selectIpoView } from "./ipo.js";
 import { previewTownMaterialProcurement, selectPublicProcurementDemand } from "../systems/public-procurement.js";
 import { currentPriceMap, currentUnitPrice } from "../economy/prices.js";
 import { computeLaborMarket } from "../systems/labor-market.js";
@@ -476,6 +477,7 @@ export function selectDashboard(state, content, selection) {
     stallSquares,
     wholesaleMarket: (needBusiness || needSite) ? wholesaleSummary(state, content) : null,
     wholesaleTrends: (needBusiness || needSite) ? wholesaleTrends(state, content) : null,
+    ipo: (needBusiness || needSite) ? selectIpoView(state, content) : null,
     servicePricesVoucherPerUse: (needBusiness || needSite) ? { ...(state.services?.pricesVoucherPerUse || {}) } : {},
     residentFoodDays: selectFoodDays(state, content, false),
     totalFoodDays: needBusiness ? selectFoodDays(state, content, true) : 0,

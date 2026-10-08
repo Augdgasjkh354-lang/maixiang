@@ -159,12 +159,29 @@ export function validateState(state, content) {
     if (!Number.isFinite(rate) || rate < 0 || rate > 80) errors.push("民营生产税率无效：" + typeId);
   }
   for (const building of state.buildings || []) {
+    const level = building.level || 1;
     const townLevels = building.ownership?.townLevels;
     const privateLevels = building.ownership?.privateLevels;
     const listedLevels = building.ownership?.listedLevels ?? 0;
     if (!Number.isInteger(townLevels) || townLevels < 0 || !Number.isInteger(privateLevels) || privateLevels < 0 ||
-        !Number.isInteger(listedLevels) || listedLevels < 0 || townLevels + privateLevels + listedLevels !== (building.level || 1)) {
+        !Number.isInteger(listedLevels) || listedLevels < 0) {
       errors.push("建筑经营权等级无效：" + building.id);
+      continue;
+    }
+    // 所有制（docs/OWNERSHIP.md）：整栋只有一个主人——三者恰好一个等于 level，其余为 0。
+    const levelsAtLevel = [townLevels, privateLevels, listedLevels].filter(value => value === level).length;
+    if (townLevels + privateLevels + listedLevels !== level || levelsAtLevel !== 1) {
+      errors.push("建筑整栋须只有一个主人：" + building.id);
+    }
+    if (privateLevels > 0) {
+      const owners = building.privateOwners;
+      if (!Array.isArray(owners) || owners.length !== 1 || !state.households?.byId?.[owners[0]]) {
+        errors.push("民营建筑须恰好一户业主：" + building.id);
+      }
+    }
+    if (listedLevels > 0) {
+      const company = Object.values(state.companies || {}).find(row => row.buildingId === building.id);
+      if (!company || company.listedLevels !== listedLevels) errors.push("公司建筑须有对应公司且等级一致：" + building.id);
     }
   }
   if (!Array.isArray(state.agriculture?.taxDays) || state.agriculture.taxDays.some(row => !Number.isInteger(row.rateBps) || row.rateBps < 0 || row.rateBps > 8000)) errors.push("农业税日记录无效");
@@ -271,7 +288,12 @@ export function validateState(state, content) {
       }
       if (!Number.isSafeInteger(company.payroll?.arrearsVoucherUnits) || company.payroll.arrearsVoucherUnits < 0) errors.push("企业欠薪无效：" + companyId);
       if (!Number.isSafeInteger(company.retainedEarningsVoucherUnits)) errors.push("企业未分配利润无效：" + companyId);
-      if (!Number.isInteger(company.shareSale?.offeredShares) || company.shareSale.offeredShares < 0 || company.shareSale.offeredShares > company.townShares ||
+      // 发行池卖方：镇库（缺省）或某户家庭；挂出股数不得超过卖方实际持股（卖方持股含尚未售出的挂牌股份）。
+      const shareSeller = company.shareSale?.sellerOwner;
+      const sellerIsHousehold = Boolean(shareSeller) && shareSeller !== "town";
+      if (sellerIsHousehold && !state.households?.byId?.[shareSeller]) errors.push("发行池卖方家庭不存在：" + companyId);
+      const sellerHolding = sellerIsHousehold ? (company.householdShares?.[shareSeller] || 0) : (company.townShares || 0);
+      if (!Number.isInteger(company.shareSale?.offeredShares) || company.shareSale.offeredShares < 0 || company.shareSale.offeredShares > sellerHolding ||
           !Number.isSafeInteger(company.shareSale?.sharePriceVoucherUnits || 0) || (company.shareSale?.sharePriceVoucherUnits || 0) < 0 ||
           !Number.isSafeInteger(company.shareSale?.cumulativeProceedsVoucherUnits || 0) || (company.shareSale?.cumulativeProceedsVoucherUnits || 0) < 0) {
         errors.push("企业股份出售记录无效：" + companyId);
@@ -281,6 +303,16 @@ export function validateState(state, content) {
         if (!account || ["revenueVoucherUnits", "cogsVoucherUnits", "wageExpenseVoucherUnits", "wagesPaidVoucherUnits", "inputPurchaseVoucherUnits", "taxCostVoucherUnits", "processingLossVoucherUnits", "profitVoucherUnits"]
           .some(key => !Number.isSafeInteger(account[key] || 0))) errors.push("企业核算账无效：" + companyId + "/" + period);
       }
+    }
+    // 上市申请与驳回冷却（docs/OWNERSHIP.md 第 2 条）：只查结构；业主变更后的失效申请由日结清理，不算非法。
+    for (const [buildingId, application] of Object.entries(state.ipoApplications || {})) {
+      if (!state.buildings.some(row => row.id === buildingId)) errors.push("上市申请引用了不存在的建筑：" + buildingId);
+      if (!state.households?.byId?.[application?.householdId]) errors.push("上市申请的业主家庭不存在：" + buildingId);
+      if (!(Number.isFinite(application?.offerPercent) && application.offerPercent > 0 && application.offerPercent <= 100)) errors.push("上市申请的卖出比例无效：" + buildingId);
+      if (!(Number.isFinite(application?.priceVoucherPerShare) && application.priceVoucherPerShare > 0)) errors.push("上市申请的每股价无效：" + buildingId);
+    }
+    for (const [buildingId, cooldown] of Object.entries(state.ipoCooldowns || {})) {
+      if (!Number.isInteger(cooldown?.untilSerial) || cooldown.untilSerial < 0) errors.push("上市冷却记录无效：" + buildingId);
     }
     const tickers = new Set();
     for (const company of Object.values(state.companies || {})) if (company.listing?.listed) {

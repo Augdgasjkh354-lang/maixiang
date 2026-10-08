@@ -270,6 +270,9 @@ export function createInitialState(options) {
     monetaryReform: { stage: "wheat", legacyBankAccess: false, started: null, completed: null },
     companies: {},
     nextCompanyNumber: 1,
+    // 民营业主上市申请（按建筑 id）与驳回后的冷却（按建筑 id，记业主家庭与解禁日序）。
+    ipoApplications: {},
+    ipoCooldowns: {},
     stockExchange: { legacyAccess: false, rotation: 0 },
     shops: {},
     nextShopNumber: 1,

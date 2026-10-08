@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { jobCount, setJobCount, householdList, householdIdleWorkers } from "../src/systems/households.js";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { CONTENT } from "../src/content/index.js";
 import { refreshOperatingPlan, shopTradePrices } from "../src/economy/operating-plan.js";
 import { theoreticalFullSaleProfitPerWorker } from "../src/economy/prices.js";
@@ -33,7 +34,7 @@ function fundTown(state, amount = 100000) {
 }
 
 function list(state, buildingId, capital = 20000) {
-  const result = simulation.listCompany(state, buildingId, { levels: 1, operatingCapitalVoucher: capital, initialMaterialQuantity: 0 });
+  const result = formCompany(state, buildingId, { levels: 1, operatingCapitalVoucher: capital, initialMaterialQuantity: 0 });
   assert.equal(result.ok, true, result.reason);
   return state.companies[result.companyId];
 }

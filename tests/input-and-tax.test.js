@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { CONTENT } from "../src/content/index.js";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { setJobCount } from "../src/systems/households.js";
 import { refreshOperatingPlan } from "../src/economy/operating-plan.js";
 import { processListedCompany } from "../src/systems/companies.js";
@@ -42,7 +43,7 @@ function bakeryCompanyState({ marketFlourJin = null, seed = 8101 } = {}) {
   simulation.issueGrainVouchers(state, "town", 200000);
   addBuilding(state, "wholesale_market", "bk-market", { level: 1, townLevels: 1 });
   addBuilding(state, "bakery", "bk-co", { level: 1, townLevels: 1 });
-  const result = simulation.listCompany(state, "bk-co", { levels: 1, operatingCapitalVoucher: 20000, initialMaterialQuantity: 0 });
+  const result = formCompany(state, "bk-co", { levels: 1, operatingCapitalVoucher: 20000, initialMaterialQuantity: 0 });
   assert.equal(result.ok, true, result.reason);
   const company = state.companies[result.companyId];
   company.plan = { ageDays: 30 };
@@ -117,7 +118,7 @@ test("公司实物税入批发市场（成本随货带入），无批发市场�
   simulation.issueGrainVouchers(state, "town", 200000);
     if (withMarket) addBuilding(state, "wholesale_market", "cs-market", { level: 1, townLevels: 1 });
     addBuilding(state, "saltworks", "cs-salt", { level: 1, townLevels: 1 });
-    const result = simulation.listCompany(state, "cs-salt", { levels: 1, operatingCapitalVoucher: 20000, initialMaterialQuantity: 0 });
+    const result = formCompany(state, "cs-salt", { levels: 1, operatingCapitalVoucher: 20000, initialMaterialQuantity: 0 });
     assert.equal(result.ok, true, result.reason);
     setJobCount(state, listedJobKeyForBuilding("cs-salt", SALT_JOB), 2, CONTENT);
     refreshOperatingPlan(state, CONTENT, true);
@@ -150,7 +151,7 @@ test("含民营、公司与批发市场的多日推进后，结构校验与货�
   addBuilding(state, "wholesale_market", "inv-market", { level: 1, townLevels: 1 });
   addBuilding(state, "saltworks", "inv-salt-priv", { level: 2, townLevels: 0, privateLevels: 2 });
   addBuilding(state, "bakery", "inv-bakery-co", { level: 1, townLevels: 1 });
-  const bakery = simulation.listCompany(state, "inv-bakery-co", { levels: 1, operatingCapitalVoucher: 20000, initialMaterialQuantity: 0 });
+  const bakery = formCompany(state, "inv-bakery-co", { levels: 1, operatingCapitalVoucher: 20000, initialMaterialQuantity: 0 });
   assert.equal(bakery.ok, true, bakery.reason);
   setJobCount(state, privateJobKeyForBuilding("inv-salt-priv", SALT_JOB), 2, CONTENT);
   setJobCount(state, listedJobKeyForBuilding("inv-bakery-co", BAKERY_JOB), 4, CONTENT);

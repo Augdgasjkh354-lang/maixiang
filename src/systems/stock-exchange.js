@@ -3,8 +3,13 @@ import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPaym
 import { recordEvent } from "../economy/ledger.js";
 import { householdList, isActiveHousehold } from "./households.js";
 import { consumeHouseholdStockBudget } from "./investment-preference.js";
-import { companyActualProfitValuation } from "./companies.js";
+import { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHoldingShares } from "./companies.js";
+import { selectOperatingRightPreview } from "../selectors/operating-rights.js";
+import { buildingMaterialValueUnits } from "./ownership.js";
 import { nextRandom } from "../core/random.js";
+
+// 发行池的卖方与可售股数口径在 companies.js（offerSeller / sellerHoldingShares / offeredPoolShares），这里转出供本模块与外部使用。
+export { offerSeller, offeredPoolShares, sellerHoldingShares };
 
 // 上市默认总股本（金融扩展四期）：10 万股，取最接近且能被公司级数整除的值。
 export const DEFAULT_TOTAL_SHARES = 100000;
@@ -31,12 +36,110 @@ export function nearbyDivisibleShareCounts(levels, requested) {
   return [...new Set([lower, upper, Math.max(n, lower - n), upper + n])].sort((a, b) => Math.abs(a - value) - Math.abs(b - value) || a - b).slice(0, 3);
 }
 
-function listingGate(state) {
+export function listingGate(state) {
   if (!hasStockExchange(state)) return "尚未建成交易所";
   if (state.monetaryReform?.stage !== "voucher") return "须先完成货币改革，上市与股票交易只使用粮券";
   return null;
 }
 
+// 建议每股价 = 整栋估值 ÷ 总股本（经营权估值口径），单位粮券，保留三位小数，不低于 0.001。
+export function suggestedSharePriceVoucher(valuationVoucher, totalShares) {
+  const perShare = totalShares > 0 ? (Number(valuationVoucher) || 0) / totalShares : 0;
+  return Math.max(0.001, Math.round(perShare * 1000) / 1000);
+}
+
+// 整栋估值（粮券）：与经营权选择器同一口径。
+export function buildingValuationVoucher(state, buildingId, content) {
+  if (!buildingId) return 0;
+  const value = Number(selectOperatingRightPreview(state, buildingId, content).valuationWheatJin);
+  if (Number.isFinite(value) && value > 0) return value;
+  // 新建筑还没有经营记录、估值为 0 时，按建造与升级材料的当前价值估，避免挂牌价落到 0.001。
+  const building = (state.buildings || []).find(row => row.id === buildingId);
+  return building ? buildingMaterialValueUnits(state, building, content) / currencyScale(content) : 0;
+}
+
+// 下一个空闲股票代码（001 起，已被其他上市公司占用的跳过）。
+export function freeTicker(state, exceptCompanyId = null) {
+  const used = new Set(Object.values(state.companies || {})
+    .filter(company => company.id !== exceptCompanyId)
+    .map(company => company.listing?.ticker)
+    .filter(Boolean));
+  for (let n = 1; n <= 999; n += 1) {
+    const ticker = String(n).padStart(3, "0");
+    if (!used.has(ticker)) return ticker;
+  }
+  return null;
+}
+
+// 挂牌条款（整栋上市与老公司挂牌共用）：代码、总股本、卖出股数、每股价。只校验，不改状态。
+// input: { companyId?, buildingId, levels, ticker?, totalShares?, offerPercent?, offeredShares?, priceVoucherPerShare? }
+// - 代码缺省取第一个空闲代码；总股本缺省 10 万股（取最接近且能被级数整除的值）。
+// - 卖出：offeredShares（绝对股数）优先；否则按 offerPercent（缺省 rules.ipoDefaultOfferPercent，即 49%）。
+// - 每股价缺省 = 整栋估值 ÷ 总股本。
+export function resolveListingTerms(state, input, content) {
+  const companyId = input.companyId || null;
+  const levels = Math.max(1, Math.floor(Number(input.levels) || 1));
+  const tickerInput = input.ticker == null ? "" : String(input.ticker).trim();
+  const ticker = tickerInput || freeTicker(state, companyId);
+  if (!ticker) return { ok: false, reason: "没有空闲的股票代码" };
+  if (!/^\d{3}$/.test(ticker)) return { ok: false, reason: "股票代码必须是三位数字，可保留前导零" };
+  if (Object.values(state.companies || {}).some(other => other.id !== companyId && other.listing?.ticker === ticker)) return { ok: false, reason: "股票代码已被使用" };
+  const requestedShares = Math.floor(Number(input.totalShares) || 0);
+  const totalShares = requestedShares > 0 ? requestedShares : nearbyDivisibleShareCounts(levels, DEFAULT_TOTAL_SHARES)[0];
+  if (!Number.isSafeInteger(totalShares) || totalShares <= 0) return { ok: false, reason: "总股本必须为正整数" };
+  if (totalShares % levels !== 0) {
+    return { ok: false, reason: `总股本必须能被公司${levels}级整除`, nearby: nearbyDivisibleShareCounts(levels, totalShares) };
+  }
+  const hasPrice = input.priceVoucherPerShare !== undefined && input.priceVoucherPerShare !== null && input.priceVoucherPerShare !== "";
+  const priceVoucher = hasPrice ? Number(input.priceVoucherPerShare) : suggestedSharePriceVoucher(buildingValuationVoucher(state, input.buildingId, content), totalShares);
+  const priceUnits = Math.round(priceVoucher * currencyScale(content));
+  if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股价格必须大于0" };
+  let offeredShares;
+  if (input.offeredShares !== undefined && input.offeredShares !== null) {
+    offeredShares = Math.floor(Number(input.offeredShares) || 0);
+  } else {
+    const percent = Number(input.offerPercent ?? content.rules.ipoDefaultOfferPercent ?? 49);
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) return { ok: false, reason: "卖出比例须在0%—100%之间" };
+    offeredShares = Math.floor(totalShares * percent / 100);
+  }
+  if (!Number.isSafeInteger(offeredShares) || offeredShares < 0 || offeredShares > totalShares) return { ok: false, reason: "本次出售股数不能超过总股本" };
+  return { ok: true, ticker, totalShares, offeredShares, priceUnits };
+}
+
+// 挂牌的共同写入：全部股份先记在卖方名下（镇库或业主家庭）；发行池 offeredShares 是其中挂出的部分。
+// 售出后卖方保留其余股份（例如 49% 卖出后镇库或业主保留 51%）。
+// seller = { kind: "town" } 或 { kind: "household", householdId }。调用前须已通过 resolveListingTerms。
+export function applyCompanyListing(state, company, terms, seller, content) {
+  const { ticker, totalShares, offeredShares, priceUnits } = terms;
+  company.totalShares = totalShares;
+  company.fundShares = 0;
+  company.townShares = 0;
+  company.residentShares = 0;
+  company.householdShares = {};
+  if (seller.kind === "household") {
+    const household = state.households.byId[seller.householdId];
+    company.householdShares = { [seller.householdId]: totalShares };
+    company.residentShares = totalShares;
+    household.shares ||= {};
+    household.shares[company.id] = totalShares;
+  } else {
+    company.townShares = totalShares;
+  }
+  company.listing = { listed: true, ticker, listedAt: { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) } };
+  // 实时股价（金融扩展四期）：挂牌价起步，每日向利润锚波动
+  company.sharePriceVoucherUnits = priceUnits;
+  company.sharePriceHistory = [priceUnits];
+  company.shareSale ||= {};
+  company.shareSale.sellerOwner = seller.kind === "household" ? seller.householdId : "town";
+  company.shareSale.offeredShares = offeredShares;
+  company.shareSale.sharePriceVoucherUnits = priceUnits;
+  company.shareSale.cumulativeProceedsVoucherUnits ||= 0;
+  company.shareSale.lastSaleVoucherUnits ||= 0;
+  company.shareSale.lastSoldShares ||= 0;
+  return company;
+}
+
+// 老公司挂牌（整栋已在公司名下、尚未上市，多见于旧存档）：卖方为镇库。
 export function listCompanyOnExchange(state, companyId, options, content) {
   ensureStockExchangeState(state);
   const company = state.companies?.[companyId];
@@ -44,41 +147,15 @@ export function listCompanyOnExchange(state, companyId, options, content) {
   const gate = listingGate(state);
   if (gate) return { ok: false, reason: gate };
   if (company.listing?.listed) return { ok: false, reason: "公司已经上市；再次售股沿用现有总股本" };
-  const ticker = String(options?.ticker ?? "").trim();
-  if (!/^\d{3}$/.test(ticker)) return { ok: false, reason: "股票代码必须是三位数字，可保留前导零" };
-  if (Object.values(state.companies || {}).some(other => other.id !== companyId && other.listing?.ticker === ticker)) return { ok: false, reason: "股票代码已被使用" };
-  const requestedShares = Math.floor(Number(options?.totalShares) || 0);
-  const levels = company.listedLevels;
-  // 未指定时默认 10 万股（取最接近且能被级数整除的值）
-  const totalShares = requestedShares > 0
-    ? requestedShares
-    : nearbyDivisibleShareCounts(levels, DEFAULT_TOTAL_SHARES)[0];
-  if (!Number.isSafeInteger(totalShares) || totalShares <= 0) return { ok: false, reason: "总股本必须为正整数" };
-  if (totalShares % levels !== 0) {
-    return { ok: false, reason: `总股本必须能被公司${levels}级整除`, nearby: nearbyDivisibleShareCounts(levels, totalShares) };
-  }
-  const priceUnits = Math.round(Number(options?.priceVoucherPerShare) * currencyScale(content));
-  const offeredShares = Math.floor(Number(options?.offeredShares) || 0);
-  if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股价格必须大于0" };
-  if (!Number.isSafeInteger(offeredShares) || offeredShares < 0 || offeredShares > totalShares) return { ok: false, reason: "本次出售股数不能超过镇库持股" };
-
-  company.totalShares = totalShares;
-  company.townShares = totalShares;
-  company.residentShares = 0;
-  company.fundShares = 0;
-  company.householdShares = {};
-  company.listing = { listed: true, ticker, listedAt: { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) } };
-  // 实时股价（金融扩展四期）：挂牌价起步，每日向利润锚波动
-  company.sharePriceVoucherUnits = priceUnits;
-  company.sharePriceHistory = [priceUnits];
-  company.shareSale ||= {};
-  company.shareSale.offeredShares = offeredShares;
-  company.shareSale.sharePriceVoucherUnits = priceUnits;
-  company.shareSale.cumulativeProceedsVoucherUnits ||= 0;
-  company.shareSale.lastSaleVoucherUnits ||= 0;
-  company.shareSale.lastSoldShares ||= 0;
-  recordEvent(state, `${company.name}（${ticker}）在交易所挂牌，总股本${totalShares.toLocaleString("zh-CN")}股；挂牌不代表已全部售出。`, content, { day: state.day + 1 });
-  return { ok: true, ticker, totalShares, offeredShares, priceVoucherUnits: priceUnits, townShares: totalShares };
+  const terms = resolveListingTerms(state, {
+    companyId, buildingId: company.buildingId, levels: company.listedLevels,
+    ticker: options?.ticker, totalShares: options?.totalShares, offerPercent: options?.offerPercent,
+    offeredShares: options?.offeredShares, priceVoucherPerShare: options?.priceVoucherPerShare
+  }, content);
+  if (!terms.ok) return terms;
+  applyCompanyListing(state, company, terms, { kind: "town" }, content);
+  recordEvent(state, `${company.name}（${terms.ticker}）在交易所挂牌，总股本${terms.totalShares.toLocaleString("zh-CN")}股；挂牌不代表已全部售出。`, content, { day: state.day + 1 });
+  return { ok: true, ticker: terms.ticker, totalShares: terms.totalShares, offeredShares: terms.offeredShares, priceVoucherUnits: terms.priceUnits, townShares: terms.totalShares, sellerOwner: "town" };
 }
 
 export function configureListedShareOffer(state, companyId, offeredShares, priceVoucherPerShare, content) {
@@ -87,9 +164,10 @@ export function configureListedShareOffer(state, companyId, offeredShares, price
   const gate = listingGate(state);
   if (gate) return { ok: false, reason: gate };
   if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
+  if (!offerSeller(state, company)) return { ok: false, reason: "发行池卖方不明，无法挂牌出售" };
   const shares = Math.floor(Number(offeredShares) || 0);
   const priceUnits = Math.round(Number(priceVoucherPerShare) * currencyScale(content));
-  if (shares < 0 || shares > company.townShares) return { ok: false, reason: "出售股数不能超过镇库持股" };
+  if (shares < 0 || shares > sellerHoldingShares(state, company)) return { ok: false, reason: "出售股数不能超过卖方持股" };
   if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) return { ok: false, reason: "每股售价须大于0" };
   company.shareSale.offeredShares = shares;
   company.shareSale.sharePriceVoucherUnits = priceUnits;
@@ -180,6 +258,8 @@ export function executeTownBuyback(state, companyId, options, content) {
   ensureStockExchangeState(state).rotation = rows.length ? (start + 1) % rows.length : 0;
   const boughtShares = preview.executableShares - left;
   if (boughtShares <= 0) return { ok: false, reason: "回购未成交", preview };
+  // 回购可能减少业主家庭的持股，发行池股数不得超过卖方实际持股。
+  company.shareSale.offeredShares = Math.min(company.shareSale.offeredShares || 0, sellerHoldingShares(state, company));
   recordEvent(state, `镇库以玩家定价回购${company.name}${boughtShares.toLocaleString("zh-CN")}股。`, content, { day: state.day + 1 });
   return { ok: true, boughtShares, paidVoucherUnits: paid, sellers, preview };
 }
@@ -210,26 +290,6 @@ export function settleStockMarketDay(state, content) {
     if (next !== current) moved.push({ companyId: company.id, from: current, to: next });
   }
   return moved.length ? { moved } : null;
-}
-
-// 发行池的卖方：shareSale.sellerOwner 缺省或 "town" 为镇库；否则为某户家庭 id（须存在）。
-// 卖方不明时返回 null，该公司不参与二级市场。
-export function offerSeller(state, company) {
-  const owner = company.shareSale?.sellerOwner;
-  if (!owner || owner === "town") return { kind: "town" };
-  if (state.households?.byId?.[owner]) return { kind: "household", householdId: owner };
-  return null;
-}
-
-// 可供住户买入的发行池股数：卖方挂出的股数（shareSale.offeredShares），封顶于卖方实际持股。
-// 镇库未挂出的股份不在此列；镇里不会因此自动卖股或回购。
-export function offeredPoolShares(state, company) {
-  const seller = offerSeller(state, company);
-  if (!seller) return 0;
-  const held = seller.kind === "town"
-    ? (company.townShares || 0)
-    : (company.householdShares?.[seller.householdId] || 0);
-  return Math.max(0, Math.min(company.shareSale?.offeredShares || 0, held));
 }
 
 // 住户日常股票买入：按投资倾向把本日股票预算分散买入发行池（镇长或业主挂出的）股份。

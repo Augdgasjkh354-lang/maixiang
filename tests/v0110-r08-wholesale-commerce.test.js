@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
 import { grantResidentVouchers } from "./helpers-v16.js";
 import { initializeBuildingJobs } from "../src/systems/employment.js";
@@ -153,7 +154,7 @@ test("民营、公司与综合商店的原料采购统一经过批发市场", ()
   assert.ok(privateIntake.intakeUnits.flour > 0, "民营磨坊产出应被批发市场吸纳");
 
   const bakery = addBuilding(state, "bakery", "r08-company-bakery");
-  const created = simulation.listCompany(state, bakery.id, { levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
+  const created = formCompany(state, bakery.id, { levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
   assert.equal(created.ok, true, created.reason);
   const company = state.companies[created.companyId];
   const bakeryJob = listedJobKeyForBuilding(bakery.id, CONTENT.buildings.bakery.jobs[0].id);

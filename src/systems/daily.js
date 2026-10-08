@@ -41,6 +41,9 @@ import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-d
 import { accrueIndustryExperience } from "./productivity.js";
 import { resetWholesaleDay, resetWholesaleYear, reviewWholesaleAutoPricing, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
+import { settleOwnershipTakeovers } from "./ownership-takeover.js";
+import { settleIpoApplications } from "./ipo.js";
+import { settleOwnerUpgrades } from "./building-development.js";
 
 // ---------------------------------------------------------------- 账本翻页
 
@@ -145,18 +148,23 @@ export const CORE_DAILY_STEPS = [
   { id: "wages", run: (state, content, day) => payDailyWages(state, day.laborAtStart, content) },
   { id: "companyWages", run: payListedCompanyWages },
   { id: "privateWages", run: payPrivateIndustryWages },
+  // 所有制：民营/公司欠薪连续超过宽限天数 → 整栋收回镇营 / 公司清算（docs/OWNERSHIP.md 第 3 条）。
+  { id: "ownershipTakeover", run: settleOwnershipTakeovers },
+  // 民营/公司业主每 30 天自主升级（付钱给镇库，工程照常由镇里施工）。
+  { id: "ownerUpgrades", run: settleOwnerUpgrades },
+  // 民营业主经营好、现金不够升级 → 递交上市申请（镇长批准才上市）；失效申请在此清理。
+  { id: "ipoApplications", run: settleIpoApplications },
   // 各雇主发完工资后统一收社保（按在岗人数，所有岗位都算）。
   { id: "socialContribution", run: collectSocialContributions },
   { id: "unemployment", run: (state, content, day) => payUnemploymentBenefit(state, day.laborAtStart, content) },
   { id: "pension", run: payPensions },
 
-  // ── 生产：施工 → 镇营（原料从批发市场领，产品交回）→ 民营 → 公司，产品都进批发市场
+  // ── 生产：施工 → 镇营（原料从批发市场领，产品交回）→ 民营（每栋产出后立即入市）→ 公司，产品都进批发市场
   { id: "construction", run: advanceConstruction },
   { id: "wholesaleTownAllocation", run: (state, content) => runWholesaleIntake(state, [], [], content, { includeTownAllocation: true }) },
   { id: "production", run: processAllBuildings },
   { id: "wholesaleTownOutput", run: (state, content, day) => runWholesaleIntake(state, day.production, [], content, { includeTownAllocation: false }) },
   { id: "privateProduction", run: processPrivateIndustries },
-  { id: "wholesalePrivateIntake", run: (state, content, day) => runWholesaleIntake(state, [], day.privateProduction, content, { includeTownAllocation: false }) },
   { id: "companyProduction", run: processListedCompanies },
   { id: "wholesaleCompanyIntake", run: sellCompanyOutputsToWholesale },
   { id: "livestock", run: produceLivestock },
@@ -252,6 +260,15 @@ export function settleOneDay(state, content) {
   return runDay(state, content, DAILY_STEPS);
 }
 
+// 民营产出入市按建筑即时发生（processPrivateIndustries），这里只把各栋的入市量汇总成日结记录。
+function privateIntakeSummary(rows) {
+  const intakeUnits = {};
+  for (const row of rows || []) {
+    for (const [itemId, units] of Object.entries(row?.intake || {})) intakeUnits[itemId] = (intakeUnits[itemId] || 0) + units;
+  }
+  return { active: true, intakeUnits };
+}
+
 // 按给定步骤表跑一天（测试可传入带自定义 mod 步骤的表）。
 export function runDay(state, content, steps) {
   const beforeTotal = totalQeqUnits(state, content);
@@ -261,7 +278,7 @@ export function runDay(state, content, steps) {
   }
   return {
     ...day,
-    wholesaleIntake: { allocation: day.wholesaleTownAllocation, town: day.wholesaleTownOutput, private: day.wholesalePrivateIntake, company: day.wholesaleCompanyIntake },
+    wholesaleIntake: { allocation: day.wholesaleTownAllocation, town: day.wholesaleTownOutput, private: privateIntakeSummary(day.privateProduction), company: day.wholesaleCompanyIntake },
     shortageQeq: day.meal.missingQeqUnits,
     totalChangeQeqUnits: totalQeqUnits(state, content) - beforeTotal,
     population: populationStats(state)

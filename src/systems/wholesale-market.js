@@ -153,6 +153,17 @@ export function wholesalePurchasePrice(state, itemId, content) {
   return Math.max(floor, reference * feedback);
 }
 
+// 只读版收购价（selector 与估值用）：不调用 ensureWholesaleMarket；没有批发市场建筑时返回 0（与 runWholesaleIntake 一致）。
+// 民营/公司业主实际拿到的就是这个价（减去实物生产税之前的口径）。
+export function readWholesalePurchasePrice(state, itemId, content) {
+  const market = state.wholesaleMarket;
+  if (!market || !hasWholesaleMarket(state) || !wholesaleMonopolyItemIds(content).includes(itemId)) return 0;
+  const reference = Number(market.purchasePriceReferenceVoucherPerUnit?.[itemId]
+    || market.purchasePricesVoucherPerUnit?.[itemId] || 0);
+  if (!(reference > 0)) return 0;
+  return Math.max(reference * PURCHASE_PRICE_FLOOR_RATIO, reference * purchasePriceFeedback(market, itemId, content));
+}
+
 // 反馈系数 ∈ [PURCHASE_PRICE_FLOOR_RATIO..1]：库存 ≤ 参考库存时不打折；超出后按
 // 1/(1+e·ratio) 递减，ratio = 库存/参考库存 − 1。
 export function purchasePriceFeedback(market, itemId, content) {

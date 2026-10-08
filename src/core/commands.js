@@ -3,15 +3,16 @@ import { isIndustryType } from "../content/buildings.js";
 import { startConstruction, setProjectWorkers as setProjectWorkersSystem } from "../systems/construction.js";
 import { setAutomaticRelief } from "../systems/finance.js";
 import { demolishBuilding, startBuildingUpgrade } from "../systems/building-development.js";
-import { sellOperatingLevel as sellOperatingLevelSystem } from "../systems/operating-rights.js";
+import { sellBuildingToPrivate, buyBuildingBackFromPrivate, sellOperatingLevel as sellOperatingLevelSystem } from "../systems/operating-rights.js";
 import { issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, currencyScale } from "../economy/currency.js";
 import { startMonetaryReform } from "../economy/payment.js";
 import {
-  createIndependentCompany, executeShareSubscription, injectCompanyCapital,
+  executeShareSubscription, injectCompanyCapital,
   setCompanyDividendPercent, setIntermediatePrice, setShareOffer, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice,
   addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown
 } from "../systems/companies.js";
 import { listCompanyOnExchange, configureListedShareOffer, executeTownBuyback } from "../systems/stock-exchange.js";
+import { listBuilding as listBuildingSystem, approveIpoApplication as approveIpoApplicationSystem, rejectIpoApplication as rejectIpoApplicationSystem } from "../systems/ipo.js";
 import { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndustryPrices } from "../economy/prices.js";
 import { setPublicProcurementIntent as setPublicProcurementIntentSystem, clearPublicProcurementIntent as clearPublicProcurementIntentSystem } from "../systems/public-procurement.js";
 import { openShop, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } from "../systems/shops.js";
@@ -169,6 +170,17 @@ export function demolishAt(state, buildingId, content) {
   return demolishBuilding(state, buildingId, content);
 }
 
+// 整栋卖给民营（要价 options.priceVoucher 可省，默认用预览价）。
+export function sellBuildingToPrivateCommand(state, buildingId, options, content) {
+  return sellBuildingToPrivate(state, buildingId, options, content);
+}
+
+// 镇里按估值回购民营整栋。
+export function buyBuildingBackFromPrivateCommand(state, buildingId, content) {
+  return buyBuildingBackFromPrivate(state, buildingId, content);
+}
+
+// 旧命令名：等同整栋出售（旧版按级出售已废止）。
 export function sellOperatingLevel(state, buildingId, content) {
   return sellOperatingLevelSystem(state, buildingId, content);
 }
@@ -195,15 +207,31 @@ export function redeemGrainVouchers(state, owner, amountVoucher, content) {
   return redeemVouchersForWheat(state, owner, units, content);
 }
 
+// 已取消单独成立公司（docs/OWNERSHIP.md 第 2 条）：整栋上市一步完成。旧命令名保留，只返回原因。
+const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋上市";
 export function createCompany(state, buildingId, options, content) {
-  return createIndependentCompany(state, buildingId, options, content);
+  return { ok: false, reason: FOUNDING_REMOVED_REASON };
 }
 
-// 旧内部命令名保留，但语义自0.1.7起为“成立公司”，不会自动上市。
 export function listCompany(state, buildingId, options, content) {
-  return createIndependentCompany(state, buildingId, options, content);
+  return { ok: false, reason: FOUNDING_REMOVED_REASON };
 }
 
+// 整栋上市（建筑现主人 → 新公司 → 交易所挂牌，一步完成）。
+export function listBuilding(state, buildingId, options, content) {
+  return listBuildingSystem(state, buildingId, options, content);
+}
+
+// 镇长批准 / 驳回民营业主的上市申请。
+export function approveIpoApplication(state, buildingId, options, content) {
+  return approveIpoApplicationSystem(state, buildingId, options, content);
+}
+
+export function rejectIpoApplication(state, buildingId, content) {
+  return rejectIpoApplicationSystem(state, buildingId, content);
+}
+
+// 老公司（整栋已在公司名下、尚未上市，多见于旧存档）挂牌。
 export function listCompanyShares(state, companyId, options, content) {
   return listCompanyOnExchange(state, companyId, options, content);
 }

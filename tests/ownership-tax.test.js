@@ -43,8 +43,10 @@ test("农业税0%、50%、80%与年中调税按农事日平均分粮", () => {
   assert.equal(harvest.townUnits + harvest.residentUnits, harvest.totalUnits);
 });
 
-test("经营权成交守恒、保留总等级与总就业，镇营工资继续只按镇营工人支付", () => {
+test("整栋卖给家底最多的能付一户：钱付镇库，整栋与岗位人数转民营，总就业与货物守恒", () => {
   const state = simulation.createInitialState();
+  // 估值按批发收购价，需要有批发市场建筑才有口径。
+  addBuilding(state, "wholesale_market", "wm-sale", 1, 1, 0);
   const salt = addBuilding(state, "saltworks", "salt-works-A", 2, 2, 0);
   assert.equal(simulation.setEmployment(state, `${salt.id}::salt_workers`, 10).assigned, 10);
   const buyer = richestHousehold(state);
@@ -57,31 +59,35 @@ test("经营权成交守恒、保留总等级与总就业，镇营工资继续�
   assert.equal(simulation.setOperatingRightPrice(state, salt.id, Math.min(quote.maximumPriceWheatJin / 2, quote.maxHouseholdPayVoucher / 2)).ok, true);
   const priced = simulation.selectOperatingRightPreview(state, salt.id);
   assert.equal(priced.available, true, priced.reason);
-  const sale = simulation.sellOperatingLevel(state, salt.id);
+  const townBefore = state.currency.balances.town;
+  const sale = simulation.sellBuildingToPrivate(state, salt.id);
   assert.equal(sale.ok, true, sale.reason);
   assert.equal(salt.level, 2);
-  assert.equal(salt.ownership.townLevels, 1);
-  assert.equal(salt.ownership.privateLevels, 1);
+  assert.deepEqual(salt.ownership, { townLevels: 0, privateLevels: 2, listedLevels: 0 });
+  assert.equal(salt.privateOwners.length, 1);
+  assert.equal(salt.privateOwners[0], priced.buyer.householdId, "买家是能付整栋价的家底最多的一户");
+  assert.ok(state.currency.balances.town > townBefore, "钱付给镇库");
   assert.equal(state.accounts.residents.wheat + state.accounts.town.wheat, beforeGoods);
   assert.ok(state.financialFlows.year.residents.operatingRightWheatUnits > 0);
   assert.equal(state.financialFlows.year.town.operatingRightWheatUnits, state.financialFlows.year.residents.operatingRightWheatUnits);
   assert.equal(selectJobRows(state, CONTENT).employed, beforeJobs);
-  assert.equal(jobCount(state, `${salt.id}::salt_workers`), 10);
-  assert.equal(jobCount(state, `${salt.id}::salt_workers::private`), 0);
-  assert.equal(salt.ownership.townLevels + salt.ownership.privateLevels, salt.level);
+  assert.equal(jobCount(state, `${salt.id}::salt_workers`), 0);
+  assert.equal(jobCount(state, `${salt.id}::salt_workers::private`), 10);
+  assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
 test("无正估值、超过接受价或居民90天口粮储备不足时拒绝经营权交易", () => {
   const state = simulation.createInitialState();
   const wood = addBuilding(state, "lumberyard", "wood-no-market", 1, 1, 0);
   assert.equal(simulation.selectOperatingRightPreview(state, wood.id).available, false);
+  addBuilding(state, "wholesale_market", "wm-priced", 1, 1, 0);
   const salt = addBuilding(state, "saltworks", "salt-priced", 2, 2, 0);
   const buyer = richestHousehold(state);
   assert.equal(grantResidentVouchers(state, 100000, CONTENT, buyer.id).ok, true);
   const quote = simulation.selectOperatingRightPreview(state, salt.id);
   assert.ok(quote.referencePriceWheatJin > 0);
   simulation.setOperatingRightPrice(state, salt.id, quote.maximumPriceWheatJin + 1);
-  assert.equal(simulation.sellOperatingLevel(state, salt.id).ok, false);
+  assert.equal(simulation.sellBuildingToPrivate(state, salt.id).ok, false);
   simulation.setOperatingRightPrice(state, salt.id, Math.min(quote.maximumPriceWheatJin / 2, quote.maxHouseholdPayVoucher / 2));
   setResidentInventoryJin(state, "wheat", 1000 * 2 * 30 / 6, CONTENT);
   assert.equal(simulation.selectOperatingRightPreview(state, salt.id).available, false);
@@ -121,17 +127,16 @@ test("民营盐场按需求渐进用工并按实物税分账，工资债务不�
   assert.ok(state.policy.lastDay.eligible > 0);
 });
 
-test("同一盐场部分镇营、部分民营共享居民需求池且不重复成交", () => {
+test("整栋民营的盐场产出进入居民需求池，由综合商店统一零售且不重复成交", () => {
   // 基线清理：0.1.10-r08 起面粉/面包/盐只经综合商店零售
   // （consumer-market.js generalStoreOnly 把镇库/公司/家庭直售全部排除），
-  // 因此补齐"商业街 + 综合商店 + 店员 + 铺货"，才能验证同一个盐场
-  // 镇营与民营两部分的产出汇入同一份居民需求池且不重复成交。
+  // 因此补齐"商业街 + 综合商店 + 店员 + 铺货"，才能验证整栋民营盐场的产出汇入居民需求池且不重复成交。
+  // 所有制改为整栋一个主人（docs/OWNERSHIP.md）：原"部分镇营、部分民营"的拆分已废止。
   const state = legacyVoucherState({ seed: 909 });
   addBuilding(state, "wholesale_market", "salt-mixed-market", 1, 1, 0);
   const street = addBuilding(state, "commercial_street", "salt-mixed-street", 2, 2, 0);
-  const salt = addBuilding(state, "saltworks", "salt-mixed", 2, 1, 1);
+  const salt = addBuilding(state, "saltworks", "salt-mixed", 2, 0, 2);
   state.policy.unemploymentBenefit.enabled = false;
-  simulation.setEmployment(state, `${salt.id}::salt_workers`, 1);
   state.accounts.town.salt = 1000 * CONTENT.precision.inventoryUnitsPerJin;
 
   const scale = CONTENT.precision.inventoryUnitsPerJin;
@@ -153,8 +158,8 @@ test("同一盐场部分镇营、部分民营共享居民需求池且不重复�
   assert.equal(competitionPreview.demandFactor, 0,
     "镇库已有大量同类商品时，经营权竞争/估值仍应看到这部分库存");
 
-  const townProducedBefore = state.industries.salt.cumulative.producedUnits.salt || 0;
   const privateProducedBefore = state.privateEconomy.cumulative.producedUnits.salt || 0;
+  const townProducedBefore = state.industries.salt?.cumulative?.producedUnits?.salt || 0;
   let privateBatches = 0;
   let residentPurchased = 0;
   const sellersSeen = new Set();
@@ -164,19 +169,18 @@ test("同一盐场部分镇营、部分民营共享居民需求池且不重复�
     privateBatches += privateRow?.batches || 0;
     residentPurchased += outcome.saltTrade.purchasedUnits || 0;
     for (const row of outcome.saltTrade.sellerRows || []) sellersSeen.add(row.seller);
-    assert.equal(salt.ownership.townLevels, 1);
-    assert.equal(salt.ownership.privateLevels, 1);
-    assert.equal(jobCount(state, `${salt.id}::salt_workers`), 1);
-    assert.ok(jobCount(state, `${salt.id}::salt_workers::private`) <= 10);
+    assert.equal(salt.ownership.townLevels, 0);
+    assert.equal(salt.ownership.privateLevels, 2);
+    assert.ok(jobCount(state, `${salt.id}::salt_workers::private`) <= 20);
+    assert.equal(jobCount(state, `${salt.id}::salt_workers`), 0);
   }
 
-  const townProduced = (state.industries.salt.cumulative.producedUnits.salt || 0) - townProducedBefore;
   const privateProduced = (state.privateEconomy.cumulative.producedUnits.salt || 0) - privateProducedBefore;
-  // 盐场为 2 级：等级加成 +10%（熟练度一个月内几乎不变），1 名镇营盐工 30 天约产 165 斤。
-  assert.ok(townProduced / scale >= 160 && townProduced / scale <= 170, `镇营应连续按自己的工人生产，实际${townProduced / scale}`);
+  const townProduced = (state.industries.salt?.cumulative?.producedUnits?.salt || 0) - townProducedBefore;
+  assert.equal(townProduced, 0, "整栋民营后镇营不再生产盐");
   assert.ok(privateProduced > 0, "民营部分应持续生产并参与市场");
   assert.ok(privateBatches > 0);
-  assert.ok(residentPurchased > 0, "镇营与民营产出的盐都进入同一份居民需求池，由综合商店统一零售");
+  assert.ok(residentPurchased > 0, "民营产出的盐进入同一份居民需求池，由综合商店统一零售");
   assert.ok([...sellersSeen].every(seller => seller.startsWith("shop:")),
     "0.1.10-r08 起盐只能由综合商店零售，镇库/民营/家庭不得直售");
   assert.ok(residentPurchased <= state.salt.lifetime.demandUnits, "成交总量不得超过累计居民需求");
@@ -220,10 +224,10 @@ test("v5旧存档不再自动迁移", () => {
 });
 test("政策与建筑详情展示税率、经营权预览及民营经营状态", () => {
   const state = simulation.createInitialState();
-  const salt = addBuilding(state, "saltworks", "ui-salt", 2, 1, 1);
+  const salt = addBuilding(state, "saltworks", "ui-salt", 2, 2, 0);
   const view = simulation.selectDashboard(state, { site: `building:${salt.id}` });
   assert.match(renderPolicy(view), /农业税/);
   assert.match(renderPolicy(view), /民营生产税/);
-  assert.match(renderSite(view), /民营/);
+  assert.match(renderSite(view), /整栋卖给民营/);
   assert.match(renderSite(view), /预览出售/);
 });

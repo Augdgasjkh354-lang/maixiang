@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { payDailyWages } from "../src/systems/payroll.js";
 import { householdList, householdIdleWorkers, isActiveHousehold } from "../src/systems/households.js";
 import { initializeBuildingJobs } from "../src/systems/employment.js";
@@ -30,7 +31,7 @@ test("r07 人口归零家庭持有的上市股份仍必须可由镇库回购，�
   addBuilding(state, "stock_exchange", "r07-stock-exchange", 1);
   const mill = addBuilding(state, "mill", "r07-share-mill", 1);
   assert.equal(simulation.issueGrainVouchers(state, "town", 10000).ok, true);
-  const formed = simulation.createCompany(state, mill.id, { name: "遗产股份测试公司", levels: 1, operatingCapitalVoucher: 0, initialMaterials: {} });
+  const formed = formCompany(state, mill.id, { name: "遗产股份测试公司", levels: 1, operatingCapitalVoucher: 0, initialMaterials: {} });
   assert.equal(formed.ok, true, formed.reason);
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker: "707", totalShares: 1000, offeredShares: 0, priceVoucherPerShare: 1 });
   assert.equal(listed.ok, true, listed.reason);

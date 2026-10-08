@@ -131,7 +131,7 @@ export function resetFailingSubsystems(state, base, validate, report) {
 }
 
 export function emptyLoadReport() {
-  return { renamed: [], repaired: [], reset: [] };
+  return { renamed: [], repaired: [], reset: [], ownership: [] };
 }
 
 export function describeLoadReport(report) {
@@ -140,5 +140,6 @@ export function describeLoadReport(report) {
   if (report.renamed.length) parts.push(`迁移字段 ${report.renamed.length} 处`);
   if (report.repaired.length) parts.push(`修复坏数据 ${report.repaired.length} 处`);
   if (report.reset.length) parts.push(`重置子系统：${report.reset.join("、")}`);
+  if (report.ownership?.length) parts.push(`整栋归属换算 ${report.ownership.length} 栋：${report.ownership.join("；")}`);
   return parts.length ? `存档来自旧版本，已自动处理（${parts.join("；")}），其余进度保留。` : null;
 }

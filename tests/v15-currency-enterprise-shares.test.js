@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { jobCount, setJobCount, householdList } from "../src/systems/households.js";
 import fs from "node:fs";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { CONTENT } from "../src/content/index.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { exportState, importState } from "../src/persistence/storage.js";
@@ -33,7 +34,7 @@ function addBuilding(state, typeId, id, level = 1, townLevels = level, privateLe
 }
 
 function listForShareTest(state, buildingId, options, ticker = "001", totalShares = 1000) {
-  const formed = simulation.createCompany(state, buildingId, options);
+  const formed = formCompany(state, buildingId, options);
   assert.equal(formed.ok, true, formed.reason);
   state.stockExchange ||= { legacyAccess: true, rotation: 0 };
   state.stockExchange.legacyAccess = true;
@@ -80,11 +81,12 @@ test("公司等级、工人与产能只归属一个经营部分，升级前后�
   const salt = addBuilding(state, "saltworks", "salt-listed", 2, 2, 0);
   simulation.setEmployment(state, `${salt.id}::salt_workers`, 15);
   assert.equal(simulation.issueGrainVouchers(state, "town", 50000).ok, true);
-  const listed = simulation.listCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
+  const listed = formCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
-  assert.deepEqual(salt.ownership, { townLevels: 1, privateLevels: 0, listedLevels: 1 });
-  assert.equal(jobCount(state, `${salt.id}::salt_workers`), 10);
-  assert.equal(jobCount(state, `${salt.id}::salt_workers::listed`), 5);
+  // 整栋归公司（docs/OWNERSHIP.md）：2 级盐场整栋划入公司，工人整体转到公司岗位键。
+  assert.deepEqual(salt.ownership, { townLevels: 0, privateLevels: 0, listedLevels: 2 });
+  assert.equal(jobCount(state, `${salt.id}::salt_workers`), 0);
+  assert.equal(jobCount(state, `${salt.id}::salt_workers::listed`), 15);
   const rows = simulation.selectJobRows(state).rows.filter(row => row.buildingId === salt.id);
   assert.equal(rows.reduce((sum, row) => sum + row.count, 0), 15);
   assert.equal(rows.reduce((sum, row) => sum + row.capacity, 0), 20);
@@ -105,8 +107,8 @@ test("磨坊企业采购居民小麦、向面包房企业供粉、面包销售�
   addBuilding(state, "mill", "listed-mill");
   addBuilding(state, "bakery", "listed-bakery");
   assert.equal(simulation.issueGrainVouchers(state, "town", 100000).ok, true);
-  const mill = simulation.listCompany(state, "listed-mill", { levels: 1, operatingCapitalVoucher: 25000, initialMaterialQuantity: 0 });
-  const bakery = simulation.listCompany(state, "listed-bakery", { levels: 1, operatingCapitalVoucher: 25000, initialMaterialQuantity: 0 });
+  const mill = formCompany(state, "listed-mill", { levels: 1, operatingCapitalVoucher: 25000, initialMaterialQuantity: 0 });
+  const bakery = formCompany(state, "listed-bakery", { levels: 1, operatingCapitalVoucher: 25000, initialMaterialQuantity: 0 });
   assert.equal(mill.ok, true, mill.reason);
   assert.equal(bakery.ok, true, bakery.reason);
   const millCompany = state.companies[mill.companyId];
@@ -213,7 +215,7 @@ test("经营面板分开公司成立与交易所上市，并保留安全区固�
   addBuilding(state, "saltworks", "ui-listed");
   const html = renderEconomy(blankUiView(state));
   assert.match(html, /新交易以粮券结算/);
-  assert.match(html, /预览成立公司/);
+  assert.match(html, /整栋上市/);
   assert.match(html, /交易所/);
   const css = fs.readFileSync(new URL("../src/styles/main.css", import.meta.url), "utf8");
   assert.match(css, /business-sticky-actions/);
@@ -225,7 +227,7 @@ test("镇库可用粮券时可从上市伐木企业采购施工木材，成交�
   const state = legacyVoucherState();
   const lumber = addBuilding(state, "lumberyard", "listed-lumberyard");
   assert.equal(simulation.issueGrainVouchers(state, "town", 40000).ok, true);
-  const listed = simulation.listCompany(state, lumber.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const listed = formCompany(state, lumber.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   company.inventory.wood = 2000 * I;
@@ -293,7 +295,7 @@ test("多个同价卖家共享同一居民需求池，成交总量不重复且�
 test("上市企业缺工停摆日不计入经营观察天数", () => {
   const state = legacyVoucherState();
   const salt = addBuilding(state, "saltworks", "opday-no-workers");
-  const listed = simulation.listCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const listed = formCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   setJobCount(state, `${salt.id}::salt_workers::listed`, 0, CONTENT);
@@ -306,7 +308,7 @@ test("上市企业缺工停摆日不计入经营观察天数", () => {
 test("上市企业缺料停摆日不计入经营观察天数", () => {
   const state = legacyVoucherState();
   const mill = addBuilding(state, "mill", "opday-no-materials");
-  const listed = simulation.listCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const listed = formCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   setJobCount(state, `${mill.id}::millers::listed`, 1, CONTENT);
@@ -322,7 +324,7 @@ test("上市企业缺料停摆日不计入经营观察天数", () => {
 test("上市企业正常生产日才累计经营观察天数", () => {
   const state = legacyVoucherState();
   const salt = addBuilding(state, "saltworks", "opday-producing");
-  const listed = simulation.listCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const listed = formCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   setJobCount(state, `${salt.id}::salt_workers::listed`, 1, CONTENT);
@@ -342,7 +344,7 @@ test("企业初始材料投入同步转移镇库库存成本基数", () => {
   const townBasisBefore = state.business.inventoryCostWheatUnits.town.wheat;
   const expectedTransferredBasis = Math.floor(townBasisBefore * materialUnits / townUnitsBefore);
 
-  const listed = simulation.listCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 100 });
+  const listed = formCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 100 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   assert.equal(state.accounts.town.wheat, townUnitsBefore - materialUnits);
@@ -358,7 +360,7 @@ test("上市企业实物生产税入镇库时同步转入对应库存成本基�
   const state = legacyVoucherState();
   const mill = addBuilding(state, "mill", "tax-cost-basis");
   state.policy.privateProductionTaxPercent.mill = 50;
-  const listed = simulation.listCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 80 });
+  const listed = formCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 80 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   setJobCount(state, `${mill.id}::millers::listed`, 1, CONTENT);

@@ -1,4 +1,4 @@
-import { privateJobKeyForBuilding, listedJobKeyForBuilding, populationStats, readJobCount, selectJobRows } from "./labor.js";
+import { privateJobKeyForBuilding, listedJobKeyForBuilding, jobKeyForBuilding, populationStats, readJobCount, selectJobRows } from "./labor.js";
 import { isIndustryType } from "../content/buildings.js";
 import { accountQeqUnits } from "../economy/inventory.js";
 import { voucherBalance } from "../economy/currency.js";
@@ -8,6 +8,8 @@ import { currentUnitPrice, theoreticalFullSaleProfitPerWorker } from "../economy
 import { selectPublicProcurementDemand } from "../systems/public-procurement.js";
 import { companyActualProfitValuation } from "../systems/companies.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
+import { buildingOwner, companyOfBuilding } from "../systems/ownership.js";
+import { readWholesalePurchasePrice, wholesaleMonopolyItemIds } from "../systems/wholesale-market.js";
 
 
 function outputCompetitionStock(state, itemId) {
@@ -52,12 +54,14 @@ function saltDemand(state, content) {
 function millDemand(state, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   const flourPrice = currentUnitPrice(state, "flour", content);
+  // 下游面包房需求：民营面包房 + 镇营面包房（镇里自己的面包房也要面粉，按镇营岗位人数算）。
   let privateDemandUnits = 0;
-  for (const building of state.buildings.filter(row => row.typeId === "bakery" && (row.ownership?.privateLevels || 0) > 0)) {
+  for (const building of state.buildings.filter(row => row.typeId === "bakery" && ((row.ownership?.privateLevels || 0) > 0 || (row.ownership?.townLevels || 0) > 0))) {
     const definition = content.buildings.bakery;
     const recipe = content.recipes[definition.recipeId];
     const job = definition.jobs[0];
-    const workers = readJobCount(state, privateJobKeyForBuilding(building.id, job.id));
+    const ownerKey = (building.ownership?.privateLevels || 0) > 0 ? privateJobKeyForBuilding(building.id, job.id) : jobKeyForBuilding(building.id, job.id);
+    const workers = readJobCount(state, ownerKey);
     privateDemandUnits += Math.round(workers * recipe.batchesPerWorkerDay * recipe.inputs[0].quantity * scale);
   }
   privateDemandUnits = Math.max(0, privateDemandUnits - (state.accounts.residents.flour || 0));
@@ -115,38 +119,50 @@ function demandForType(state, typeId, content) {
   return { demandUnits, competitionUnits, opportunityUnits, reason: demandUnits <= 0 ? "暂无需求" : opportunityUnits <= 0 ? "现有库存已覆盖需求" : "存在未满足需求" };
 }
 
+// 整栋经营权预览（docs/OWNERSHIP.md 第 1 条）。
+// 价值口径：民营/公司业主实际拿到的是批发收购价减去实物生产税，所以产出按收购价折算；
+// 产出受限于原料能否领到（镇库小麦 / 批发市场现有库存），不假设无限原料。
+// 整栋价格 = 整栋估值（不再按级）；买家 = 付得起整栋价的家底最多的一户（不合资）。
+// 字段名沿用旧版（priceWheatJin、buyerGroup 等），界面不必同步改名。
 export function selectOperatingRightPreview(state, buildingId, content, requestedPrice) {
   const paymentState = createPaymentViewState(state);
   const building = state.buildings.find(row => row.id === buildingId);
   if (!building) return { available: false, reason: "建筑不存在" };
   if (!isIndustryType(content, building.typeId)) return { available: false, reason: "该建筑不开放经营权出售" };
-  if ((state.projects || []).some(project => project.buildingId === buildingId || project.plotId === building.plotId)) {
-    return { available: false, reason: "施工或升级期间不能出售经营权" };
-  }
-  const townLevels = building.ownership?.townLevels ?? building.level ?? 1;
-  const privateLevels = building.ownership?.privateLevels || 0;
-  if (townLevels <= 0) return { available: false, reason: "没有可出售的镇营等级" };
+  const hasProject = (state.projects || []).some(project => project.buildingId === buildingId || project.plotId === building.plotId);
+  const level = Math.max(1, building.level || 1);
+  const owner = buildingOwner(state, building);
   const definition = content.buildings[building.typeId];
   const job = definition.jobs[0];
   const recipe = content.recipes[definition.recipeId];
   const taxPercent = state.policy.privateProductionTaxPercent?.[building.typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
   const output = recipe.outputs[0];
-  const outputPrice = currentUnitPrice(state, output.itemId, content);
+  const sellPrice = currentUnitPrice(state, output.itemId, content);
+  // 业主拿到的是收购价（无批发市场时为 0，即没有可成交的产品口径）。
+  const outputPrice = readWholesalePurchasePrice(state, output.itemId, content);
   const demand = demandForType(paymentState, building.typeId, content);
   const scale = content.precision.inventoryUnitsPerJin;
   const moneyScale = content.precision.currencyUnitsPerVoucher || scale;
   const rows = selectJobRows(state, content);
-  const publicJobKey = building.id + "::" + job.id;
-  const publicWorkers = readJobCount(state, publicJobKey);
-  const publicCapacityAfter = job.slots * Math.max(0, townLevels - 1);
-  const transferable = Math.max(0, publicWorkers - publicCapacityAfter);
-  const availableLabor = Math.min(job.slots, transferable + rows.idle);
+  const townKey = building.id + "::" + job.id;
+  const publicWorkers = readJobCount(state, townKey);
+  const availableLabor = Math.min(job.slots * level, publicWorkers + rows.idle);
   const outputUnitsPerBatch = Math.round(output.quantity * scale);
   const taxKeep = Math.max(0, 1 - taxPercent / 100);
   const netOutputUnitsPerBatch = Math.max(0, Math.floor(outputUnitsPerBatch * taxKeep));
+  // 原料可得性：小麦在镇库；其余原料看批发市场现有库存。
+  const market = state.wholesaleMarket || {};
+  const inputBatchLimits = recipe.inputs.map(row => {
+    const stock = row.itemId === "wheat"
+      ? Math.max(0, state.accounts?.town?.wheat || 0)
+      : (wholesaleMonopolyItemIds(content).includes(row.itemId) ? Math.max(0, market.inventory?.[row.itemId] || 0) : 0);
+    const perBatchUnits = row.quantity * scale;
+    return perBatchUnits > 0 ? Math.floor(stock / perBatchUnits) : Number.POSITIVE_INFINITY;
+  });
+  const inputBatchCap = inputBatchLimits.length ? Math.min(...inputBatchLimits) : Number.POSITIVE_INFINITY;
   const maxDailyBatchesByLabor = availableLabor * recipe.batchesPerWorkerDay;
   const maxDailyBatchesByDemand = netOutputUnitsPerBatch > 0 ? Math.floor(demand.opportunityUnits / netOutputUnitsPerBatch) : 0;
-  const maxBatches = Math.max(0, Math.min(maxDailyBatchesByLabor, maxDailyBatchesByDemand));
+  const maxBatches = Math.max(0, Math.min(maxDailyBatchesByLabor, maxDailyBatchesByDemand, inputBatchCap));
   const effectiveWorkers = maxBatches > 0 ? Math.ceil(maxBatches / recipe.batchesPerWorkerDay) : 0;
   const outputValue = maxBatches * output.quantity * outputPrice * (1 - taxPercent / 100);
   const inputCost = recipe.inputs.reduce((sum, row) => sum + maxBatches * row.quantity * currentUnitPrice(state, row.itemId, content), 0);
@@ -155,8 +171,8 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const dailyNetWheatJin = outputValue - inputCost - wageCost;
   const theoreticalAnnual = Number.isFinite(dailyNetWheatJin) ? dailyNetWheatJin * content.rules.daysPerYear : 0;
 
-  // 优先使用同一建筑公司最近365个日历日的实际净利润；零产出/停工日也处于观察窗口。
-  const company = Object.values(state.companies || {}).find(row => row.buildingId === buildingId) || null;
+  // 优先使用同一建筑公司最近365个日历日的实际净利润（公司即整栋，无需再按级折算）。
+  const company = companyOfBuilding(state, buildingId);
   const actual = company ? companyActualProfitValuation(state, company, content) : null;
   let referencePriceWheatJin = 0;
   let valuationBasis = "利润法资料不足；理论满产估算单独列示。";
@@ -165,10 +181,10 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   let annualizedEstimateWheatJin = 0;
   if (actual && actual.observedDays > 0) {
     actualAnnualProfitWheatJin = actual.actualProfitVoucherUnits / moneyScale;
-    annualizedEstimateWheatJin = actual.annualizedProfitVoucherUnits / moneyScale / Math.max(1, company.listedLevels || 1);
+    annualizedEstimateWheatJin = actual.annualizedProfitVoucherUnits / moneyScale;
     if (actual.validProfitMethod) {
       referencePriceWheatJin = Math.max(0, annualizedEstimateWheatJin * 5);
-      valuationBasis = `最近${actual.observedDays}个日历日实际净利润（含停工日）年化后×5年；按公司每级平均折算。`;
+      valuationBasis = `最近${actual.observedDays}个日历日实际净利润（含停工日）年化后×5年；整栋估值。`;
     } else {
       valuationBasis = `已观察${actual.observedDays}个日历日，实际净利润未形成正的利润法参考价；理论估算仅作旁注。`;
     }
@@ -190,44 +206,46 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
     const totalValue = spendableVoucherUnits(state, `household:${household.id}`) + Math.floor(maxWheatUnits * moneyScale / scale);
     const livingReserve = Math.round((household.ageBands?.children || 0) + (household.ageBands?.workers || 0) + (household.ageBands?.elders || 0)) * minimumPerCapita * moneyScale;
     const investableValue = Math.max(0, totalValue - livingReserve);
-    const canPayPrice = investableValue >= costUnits && quoteMonetaryPayment(paymentState, `household:${household.id}`, currentPaymentComposition(paymentState, costUnits), content, { maxWheatUnits }).full;
-    return { household, maxWheatUnits, roughValue: investableValue, canPayPrice };
+    const canPayPrice = investableValue >= costUnits && costUnits > 0 && quoteMonetaryPayment(paymentState, `household:${household.id}`, currentPaymentComposition(paymentState, costUnits), content, { maxWheatUnits }).full;
+    return { household, maxWheatUnits, totalValue, roughValue: investableValue, canPayPrice };
   });
-  const canPay = investmentRows.some(row => row.canPayPrice);
-  // 合资购买：一户买不起就多户凑——按可出资额从高到低凑单，每户保留生活储备。
-  // 私有老板 privateOwners 本就是数组，多人成交天然支持。
-  const sortedInvestable = investmentRows
-    .filter(row => row.roughValue > 0)
-    .sort((a, b) => b.roughValue - a.roughValue);
-  const buyerGroup = [];
-  let gatheredVoucherUnits = 0;
-  for (const row of sortedInvestable) {
-    if (gatheredVoucherUnits >= costUnits) break;
-    const take = Math.min(row.roughValue, costUnits - gatheredVoucherUnits);
-    buyerGroup.push({
-      householdId: row.household.id,
-      householdName: row.household.name || `居民户${row.household.id}`,
-      contributionVoucherUnits: Math.round(take)
-    });
-    gatheredVoucherUnits += take;
-  }
-  const groupCanPay = buyerGroup.length > 0 && gatheredVoucherUnits >= costUnits;
+  // 买家：付得起整栋价格的家庭里，家底（粮券 + 可换小麦）最多的一户。
+  const buyerRow = investmentRows.filter(row => row.canPayPrice)
+    .sort((a, b) => b.totalValue - a.totalValue || a.household.id.localeCompare(b.household.id))[0] || null;
+  const buyerCandidate = buyerRow ? {
+    householdId: buyerRow.household.id,
+    householdName: buyerRow.household.name || `居民户${buyerRow.household.id}`,
+    totalValueVoucher: buyerRow.totalValue / moneyScale
+  } : null;
+  const buyerGroup = buyerCandidate ? [{ ...buyerCandidate, contributionVoucherUnits: costUnits }] : [];
+  const canPay = Boolean(buyerCandidate);
   const totalInvestableVoucher = investmentRows.reduce((sum, row) => sum + row.roughValue, 0) / moneyScale;
   const maxHouseholdPayVoucher = investmentRows.reduce((max, row) => Math.max(max, row.roughValue), 0) / moneyScale;
   const keepsReserve = currentResidentQeq >= residentReserveUnits;
   const attractive = referencePriceWheatJin > 0 && priceWheatJin <= referencePriceWheatJin;
-  const reason = !groupCanPay && priceWheatJin > 0 ? "即使多户合资也买不起经营权" : !keepsReserve ? "居民基本口粮不足90天储备" : !attractive ? "预期收益缺乏吸引力" : null;
+  const isTownOwned = owner.kind === "town";
+  const ownerBlocked = !isTownOwned ? (owner.kind === "household" ? "这栋建筑已归民营，不能再整栋出售" : "这栋建筑已归公司，不能整栋出售") : null;
+  const reason = ownerBlocked
+    || (hasProject ? "施工或升级期间不能出售" : null)
+    || (!canPay && priceWheatJin > 0 ? "即使家底最多的一户也付不起整栋价格" : null)
+    || (!keepsReserve ? "居民基本口粮不足90天储备" : null)
+    || (!attractive ? "预期收益缺乏吸引力" : null);
   const demandFactor = demand.demandUnits > 0 ? Math.max(0, Math.min(1, demand.opportunityUnits / demand.demandUnits)) : 0;
   const theoretical = theoreticalFullSaleProfitPerWorker(state, building.typeId, content);
+  const privateWorkers = readJobCount(state, privateJobKeyForBuilding(buildingId, job.id));
+  const listedWorkers = readJobCount(state, listedJobKeyForBuilding(buildingId, job.id));
   return {
-    available: priceWheatJin > 0 && groupCanPay && keepsReserve && attractive,
+    available: isTownOwned && !hasProject && priceWheatJin > 0 && canPay && keepsReserve && attractive,
     reason,
-    buildingId, typeId: building.typeId, level: building.level || 1,
-    townLevels, privateLevels, townCapacityBefore: townLevels * job.slots,
-    townCapacityAfter: Math.max(0, townLevels - 1) * job.slots,
-    privateCapacityBefore: privateLevels * job.slots, privateCapacityAfter: (privateLevels + 1) * job.slots,
-    publicWorkers, transferableWorkers: transferable, privateWorkers: readJobCount(state, privateJobKeyForBuilding(buildingId, job.id)),
-    workersAvailable: availableLabor, priceWheatJin, maximumPriceWheatJin: referencePriceWheatJin,
+    buildingId, typeId: building.typeId, level,
+    owner,
+    townLevels: building.ownership?.townLevels ?? level, privateLevels: building.ownership?.privateLevels || 0, listedLevels: building.ownership?.listedLevels || 0,
+    townCapacityBefore: isTownOwned ? level * job.slots : 0,
+    townCapacityAfter: 0,
+    publicWorkers, transferableWorkers: publicWorkers, privateWorkers, listedWorkers,
+    workersAvailable: availableLabor,
+    priceWheatJin, maximumPriceWheatJin: referencePriceWheatJin,
+    valuationWheatJin: referencePriceWheatJin,
     referencePriceWheatJin,
     actualObservedDays,
     actualProfitObservedWheatJin: actualAnnualProfitWheatJin,
@@ -237,15 +255,18 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
     dailyNetWheatJin: Number.isFinite(dailyNetWheatJin) ? dailyNetWheatJin : 0,
     annualReferenceNetWheatJin: annualizedEstimateWheatJin || theoreticalAnnual,
     estimatedAnnualReferenceReturn: annualizedEstimateWheatJin || theoreticalAnnual,
-    outputItemId: output.itemId, outputPriceVoucherPerUnit: outputPrice, itemPriceVoucher: outputPrice,
+    outputItemId: output.itemId,
+    outputPriceVoucherPerUnit: outputPrice, itemPriceVoucher: outputPrice,
+    sellPriceVoucherPerUnit: sellPrice,
     inputPricesVoucherPerUnit: Object.fromEntries(recipe.inputs.map(row => [row.itemId, currentUnitPrice(state, row.itemId, content)])),
     inputPricesVoucher: Object.fromEntries(recipe.inputs.map(row => [row.itemId, currentUnitPrice(state, row.itemId, content)])),
+    inputBatchCap: Number.isFinite(inputBatchCap) ? inputBatchCap : null,
     taxPercent, wageRateVoucher: wageRate,
     demandFactor, demandUnits: demand.demandUnits, competitionUnits: demand.competitionUnits, opportunityUnits: demand.opportunityUnits,
     dailyDemandJin: demand.demandUnits / scale, competitionStockJin: demand.competitionUnits / scale, unmetDemandJin: demand.opportunityUnits / scale,
     demandReason: demand.reason, demandBasis: valuationBasis, valuationBasis,
     theoreticalFullSaleProfitPerWorkerVoucher: theoretical?.profitVoucher ?? 0,
-    canPay, groupCanPay, buyerGroup,
+    canPay, groupCanPay: canPay, buyer: buyerCandidate, buyerGroup,
     keepsReserve, attractive,
     residentInvestableFundsVoucher: totalInvestableVoucher,
     maxHouseholdPayVoucher,

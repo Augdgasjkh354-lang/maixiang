@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { CONTENT } from "../src/content/index.js";
 import { settleHouseholdStockBuying, offeredPoolShares } from "../src/systems/stock-exchange.js";
 import { voucherBalance } from "../src/economy/currency.js";
@@ -25,7 +26,7 @@ function listedState({ offer = 0, price = 2, seed = 4101 } = {}) {
   addBuilding(state, "saltworks", "pool-salt", 1);
   assert.equal(simulation.issueGrainVouchers(state, "town", 50000).ok, true);
   state.stockExchange = { legacyAccess: true, rotation: 0 };
-  const formed = simulation.createCompany(state, "pool-salt", { name: "盐业公司", levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, "pool-salt", { name: "盐业公司", levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
   assert.equal(formed.ok, true, formed.reason);
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker: "041", totalShares: 1000, priceVoucherPerShare: price, offeredShares: offer });
   assert.equal(listed.ok, true, listed.reason);

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { initializeBuildingJobs } from "../src/systems/employment.js";
 import {
   householdList, householdIdleWorkers, householdReserveQeqUnits, syncResidentAggregates
@@ -57,7 +58,7 @@ test("r06 过渡期家庭从公司直购也必须保护基本口粮", () => {
   assert.equal(transferVouchers(state, "town", `household:${household.id}`, 5 * V, CONTENT, "r06_test_fund", "测试购买资金").ok, true);
 
   const mill = addBuilding(state, "mill", "r06-company-mill", 1);
-  const created = simulation.createCompany(state, mill.id, { name: "口粮约束公司", levels: 1, operatingCapitalVoucher: 0, initialMaterials: {} });
+  const created = formCompany(state, mill.id, { name: "口粮约束公司", levels: 1, operatingCapitalVoucher: 0, initialMaterials: {} });
   assert.equal(created.ok, true, created.reason);
   const company = state.companies[created.companyId];
   company.inventory.flour = I;
@@ -92,23 +93,3 @@ test("r06 合法的4商人20店员商业街状态必须能通过存档校验并�
   assert.doesNotThrow(() => saveState(memoryStorage(), state, CONTENT));
 });
 
-test("r06 上市公司划回一级后必须同步收缩未售出报价，不能制造不可保存状态", () => {
-  const state = legacyVoucherState({ seed: 110603 });
-  addBuilding(state, "stock_exchange", "r06-stock-exchange", 1);
-  const mill = addBuilding(state, "mill", "r06-listed-mill", 2);
-  const created = simulation.createCompany(state, mill.id, { name: "缩股测试公司", levels: 2, operatingCapitalVoucher: 0, initialMaterials: {} });
-  assert.equal(created.ok, true, created.reason);
-  const listed = simulation.listCompanyShares(state, created.companyId, {
-    ticker: "603", totalShares: 2000, offeredShares: 2000, priceVoucherPerShare: 1
-  });
-  assert.equal(listed.ok, true, listed.reason);
-
-  const removed = simulation.removeCompanyOperatingLevel(state, created.companyId);
-  assert.equal(removed.ok, true, removed.reason);
-  const company = state.companies[created.companyId];
-  assert.equal(company.townShares, 1000);
-  assert.equal(company.shareSale.offeredShares, 1000, "未售出报价不能超过缩股后的镇库持股");
-  const validation = simulation.validateState(state);
-  assert.equal(validation.valid, true, validation.errors?.join("；"));
-  assert.doesNotThrow(() => saveState(memoryStorage(), state, CONTENT));
-});

@@ -32,7 +32,7 @@ test("round trip: a current save loads back to the same JSON with no load report
   const loaded = migrateSave(JSON.parse(original), simulation.content);
   assert.equal(JSON.stringify(loaded), original);
   assert.equal(loadReportMessage(loaded), null);
-  assert.deepEqual(loaded._loadReport, { renamed: [], repaired: [], reset: [] });
+  assert.deepEqual(loaded._loadReport, { renamed: [], repaired: [], reset: [], ownership: [] });
 });
 
 test("missing new systems come back with defaults while progress is kept", () => {

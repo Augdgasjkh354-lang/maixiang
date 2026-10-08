@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { simulation, CONTENT } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { renderResidents } from "../src/ui/panel-residents.js";
 import { renderEconomy } from "../src/ui/panel-economy.js";
 import { renderPolicy } from "../src/ui/panel-policy.js";
@@ -48,7 +49,7 @@ function activeTown(seed = 1801) {
   assert.equal(simulation.issueGrainVouchers(state, "town", 100000).ok, true);
   let ticker = 1;
   for (const buildingId of ["mill-0", "bakery-0", "lumberyard-0", "saltworks-0"]) {
-    const formed = simulation.createCompany(state, buildingId, {
+    const formed = formCompany(state, buildingId, {
       name: `${buildingId}公司`, levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0
     });
     assert.equal(formed.ok, true, formed.reason);

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { CONTENT } from "../src/content/index.js";
 import { payDailyWages } from "../src/systems/payroll.js";
 import { employmentSnapshot } from "../src/systems/employment.js";
@@ -29,7 +30,7 @@ function openExchange(state) {
 }
 
 function listedCompany(state, buildingId, { levels = 1, capital = 10000, ticker = "171", shares = 1000, offer = 0, price = 1 } = {}) {
-  const formed = simulation.createCompany(state, buildingId, { name: `${buildingId}公司`, levels, operatingCapitalVoucher: capital, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, buildingId, { name: `${buildingId}公司`, levels, operatingCapitalVoucher: capital, initialMaterialQuantity: 0 });
   assert.equal(formed.ok, true, formed.reason);
   openExchange(state);
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker, totalShares: shares, priceVoucherPerShare: price, offeredShares: offer });
@@ -102,13 +103,13 @@ test("r02 360日周转金尊重显式0人目标，目标3人即使缺料停工�
   const salt = addBuilding(state, "saltworks", "zero-reserve", 1);
   const mill = addBuilding(state, "mill", "planned-reserve", 1);
   assert.equal(simulation.issueGrainVouchers(state, "town", 100000).ok, true);
-  const saltFormed = simulation.createCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 5000, initialMaterialQuantity: 0 });
+  const saltFormed = formCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 5000, initialMaterialQuantity: 0 });
   const saltCompany = state.companies[saltFormed.companyId];
   simulation.configureCompanyTargetWorkers(state, saltCompany.id, 0);
   simulation.configureCompanyWage(state, saltCompany.id, 10);
   assert.equal(companyWorkingCapitalReserve(saltCompany, state, CONTENT), 0);
 
-  const millFormed = simulation.createCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 5000, initialMaterialQuantity: 0 });
+  const millFormed = formCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 5000, initialMaterialQuantity: 0 });
   const millCompany = state.companies[millFormed.companyId];
   simulation.configureCompanyTargetWorkers(state, millCompany.id, 3);
   simulation.configureCompanyWage(state, millCompany.id, 10);
@@ -188,14 +189,11 @@ test("r02 回购与上市公司等级变动预览不改状态，并给出执行�
   addBuilding(state, "mill", "preview-company", 5);
   assert.equal(simulation.issueGrainVouchers(state, "town", 200000).ok, true);
   const company = listedCompany(state, "preview-company", { levels: 4, capital: 10000, ticker: "175", shares: 10000, offer: 0, price: 1 });
+  // 整栋归公司：按级划入的预览已废止，返回不可用原因且不改状态。
   const addPreview = simulation.previewCompanyLevelChange(state, company.id, "add");
-  assert.equal(addPreview.available, true);
-  assert.equal(addPreview.levelsBefore, 4);
-  assert.equal(addPreview.levelsAfter, 5);
-  assert.equal(addPreview.issuedShares, 2500);
-  assert.equal(addPreview.totalSharesBefore, 10000);
-  assert.equal(addPreview.totalSharesAfter, 12500);
-  assert.equal(company.listedLevels, 4, "预览不得直接改变公司等级");
+  assert.equal(addPreview.available, false);
+  assert.match(addPreview.reason, /整栋归公司/);
+  assert.equal(company.listedLevels, 5, "预览不得直接改变公司等级");
   assert.equal(company.totalShares, 10000, "预览不得直接增发股份");
 
   const owner = householdList(state)[0];
@@ -223,13 +221,13 @@ test("r02 操作面板使用预览确认并在确认前重算；沿用移动端4
   assert.match(panel, /data-company-buyback-preview/);
   assert.match(panel, /申请 \/ 居民愿售/);
   assert.match(panel, /镇库可负担 \/ 预计成交/);
-  assert.match(panel, /data-company-level-preview/);
+  assert.doesNotMatch(panel, /data-company-level-preview/);
+  assert.match(panel, /data-ipo-list/);
   assert.match(panel, /总股本/);
-  assert.match(panel, /镇库持股比例/);
+  assert.match(panel, /成交后镇库持股/);
   assert.match(app, /previewTownBuyback\(state, companyId/);
   assert.match(app, /回购条件已变化，成交数量或成本已更新，请再次确认/);
-  assert.match(app, /previewCompanyLevelChange\(state, companyId, direction\)/);
-  assert.match(app, /等级与股权条件已变化，预览已更新，请再次确认/);
+  assert.match(app, /simulation\.approveIpoApplication\(state, buildingId, options\)/);
   assert.match(css, /\.primary, \.secondary, \.danger-button \{ min-height: 44px/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
 });

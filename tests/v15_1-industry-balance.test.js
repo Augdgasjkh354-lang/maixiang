@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { jobCount, setJobCount } from "../src/systems/households.js";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { CONTENT } from "../src/content/index.js";
 import { theoreticalFullSaleProfitPerWorker, currentUnitPrice } from "../src/economy/prices.js";
 import { buyInputForCompany } from "../src/systems/companies.js";
@@ -35,12 +36,14 @@ function assertFinitePreview(preview) {
   }
 }
 
-test("新版默认价下四行业满产满销人均日利润符合校验值", () => {
+test("新版默认价下四行业满产满销人均日利润符合校验值（产出按批发收购价、扣生产税）", () => {
   const state = legacyVoucherState();
-  // 0.2.3 流通改革：批发市场做成市商后默认挂价改为面包 2.6 / 木材 16 / 盐 12，
-  // 四行业人均日利润校验值随之上调（小麦/面粉价不变）。
-  // 默认日薪 10→5 斤（8cf03ae）：四个岗位成本各降 5 斤/工日 → 人均日利润各 +5。
-  const expected = { mill: 18.68, bakery: 75.64, lumberyard: 9.4, saltworks: 49 };
+  // 所有制（docs/OWNERSHIP.md）：民营业主拿到的是批发收购价减生产税，不是批发售价。
+  // 校验值按收购价：磨坊 4 批×16 斤面粉×1.6×0.9 − 4 批×20 斤小麦 − 工资 5 = 7.16；
+  // 面包房 16 批×6 斤×2.0×0.9 − 16 批×5 斤面粉×1.8 − 5 = 23.8；伐木 1×12×0.9 − 5 = 5.8；盐 5×8×0.9 − 5 = 31。
+  // 没有批发市场建筑时无收购口径，产出按 0 计（下一测试）。
+  addBuilding(state, "wholesale_market", "wm-industry", 1, 1, 0);
+  const expected = { mill: 7.16, bakery: 23.8, lumberyard: 5.8, saltworks: 31 };
   assert.deepEqual(state.market.pricesVoucherPerUnit, { ...CONTENT.rules.marketPricesVoucherPerUnit });
   for (const [itemId, price] of Object.entries({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10 })) assert.equal(state.market.pricesVoucherPerUnit[itemId], price);
   for (const [typeId, profit] of Object.entries(expected)) {
@@ -50,12 +53,12 @@ test("新版默认价下四行业满产满销人均日利润符合校验值", ()
   }
 });
 
-test("面粉调价后企业真实采购与磨坊经营权估值读取同一当前价", () => {
+test("面粉调价后企业真实采购按售价，磨坊经营权估值按收购价（两者口径分开）", () => {
   const state = legacyVoucherState();
   const bakery = addBuilding(state, "bakery", "price-bakery");
   const mill = addBuilding(state, "mill", "price-mill");
   assert.equal(simulation.issueGrainVouchers(state, "town", 5000).ok, true);
-  const listed = simulation.listCompany(state, bakery.id, { levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
+  const listed = formCompany(state, bakery.id, { levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   setJobCount(state, `${bakery.id}::bakers::listed`, 1, CONTENT);
@@ -79,13 +82,16 @@ test("面粉调价后企业真实采购与磨坊经营权估值读取同一当�
   assert.equal(purchase.boughtUnits, 5 * I);
   assert.equal(purchase.paidVoucherUnits, 11 * V);
   const preview = simulation.selectOperatingRightPreview(state, mill.id);
-  assert.equal(preview.outputPriceVoucherPerUnit, 2.2);
+  // 业主拿到的是收购价（库存口径），与售价调价脱钩；售价 2.2 只影响企业买入与展示。
+  assert.equal(preview.outputPriceVoucherPerUnit, state.wholesaleMarket.purchasePricesVoucherPerUnit.flour);
+  assert.equal(preview.sellPriceVoucherPerUnit, 2.2);
   assert.equal(preview.inputPricesVoucherPerUnit.wheat, 1);
   assert.equal(currentUnitPrice(state, "flour", CONTENT), 2.2);
 });
 
 test("木材无需求、有需求、库存不足和资金不足均为有限估值并给出明确原因", () => {
   const state = legacyVoucherState();
+  addBuilding(state, "wholesale_market", "wm-wood-value", 1, 1, 0);
   const lumber = addBuilding(state, "lumberyard", "wood-value");
   let preview = simulation.selectOperatingRightPreview(state, lumber.id);
   assertFinitePreview(preview);
@@ -97,8 +103,9 @@ test("木材无需求、有需求、库存不足和资金不足均为有限估�
   assert.equal(simulation.setPublicProcurementIntent(state, { kind: "build", typeId: "public_housing" }).ok, true);
   preview = simulation.selectOperatingRightPreview(state, lumber.id);
   assertFinitePreview(preview);
-  // 0.2.3 流通改革：批发市场做市商默认木材售价为 16。
-  assert.equal(preview.outputPriceVoucherPerUnit, 16);
+  // 估值按批发收购价（默认 12），售价 16 只是展示口径。
+  assert.equal(preview.outputPriceVoucherPerUnit, state.wholesaleMarket.purchasePricesVoucherPerUnit.wood);
+  assert.equal(preview.sellPriceVoucherPerUnit, 16);
   assert.ok(preview.maximumPriceWheatJin > 0);
   assert.match(preview.demandReason, /公共建设|公租住宅区建设|采购/);
 
@@ -121,11 +128,12 @@ test("木材无需求、有需求、库存不足和资金不足均为有限估�
   assert.match(preview.demandReason, /可支付资产不足/);
 });
 
-test("木材调价后公共建设采购与经营权估值同价，民营和上市卖家共享同一需求", () => {
+test("木材调价后公共建设采购按售价，经营权估值按收购价，两者不再同价", () => {
   const state = legacyVoucherState();
+  addBuilding(state, "wholesale_market", "wm-wood-shared", 1, 1, 0);
   const lumber = addBuilding(state, "lumberyard", "wood-shared", 2, 2, 0);
   assert.equal(simulation.issueGrainVouchers(state, "town", 50000).ok, true);
-  const listed = simulation.listCompany(state, lumber.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const listed = formCompany(state, lumber.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   setResidentInventoryJin(state, "wood", 1000, CONTENT);
@@ -134,7 +142,8 @@ test("木材调价后公共建设采购与经营权估值同价，民营和上�
   assert.equal(simulation.configureIntermediatePrice(state, "wood", 17).ok, true);
   assert.equal(simulation.setPublicProcurementIntent(state, { kind: "build", typeId: "public_housing" }).ok, true);
   const valuation = simulation.selectOperatingRightPreview(state, lumber.id);
-  assert.equal(valuation.outputPriceVoucherPerUnit, 17);
+  assert.equal(valuation.sellPriceVoucherPerUnit, 17);
+  assert.equal(valuation.outputPriceVoucherPerUnit, state.wholesaleMarket.purchasePricesVoucherPerUnit.wood);
 
   const plot = state.plots.find(row => !row.feature && !state.buildings.some(building => building.plotId === row.id));
   assert.ok(plot);

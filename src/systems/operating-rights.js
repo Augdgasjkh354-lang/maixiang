@@ -1,75 +1,72 @@
-import { createPaymentCapabilityContext, currentPaymentComposition, maximumFullyPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
+import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { recordEvent } from "../economy/ledger.js";
 import { selectOperatingRightPreview } from "../selectors/operating-rights.js";
-import { householdConvertibleWheatUnits, setJobCount } from "./households.js";
-import { readJobCount, jobKeyForBuilding, privateJobKeyForBuilding } from "../selectors/labor.js";
+import { householdConvertibleWheatUnits } from "./households.js";
+import { buildingOwner, transferBuildingOwnership } from "./ownership.js";
 
-export function sellOperatingLevel(state, buildingId, content) {
-  const preview = selectOperatingRightPreview(state, buildingId, content);
+// 整栋卖给民营（镇长操作，docs/OWNERSHIP.md 第 1 条）。
+// 要价 = options.priceVoucher（镇长改过的价）；未给时用预览价（已存的要价，或整栋估值）。
+// 买家 = 付得起整栋价格的家庭中家底（粮券 + 可换小麦）最多的一户，不合资。钱付给镇库。
+export function sellBuildingToPrivate(state, buildingId, options = {}, content) {
+  const requested = options?.priceVoucher;
+  if (requested !== undefined && !(Number.isFinite(Number(requested)) && Number(requested) > 0)) {
+    return { ok: false, reason: "要价须为正的有限数值" };
+  }
+  const preview = selectOperatingRightPreview(state, buildingId, content, requested === undefined ? undefined : Number(requested));
   if (!preview.available) return { ok: false, reason: preview.reason, preview };
   const building = state.buildings.find(row => row.id === buildingId);
   const definition = content.buildings[building.typeId];
-  const job = definition.jobs[0];
-  const priceUnits = Math.round(preview.priceWheatJin * content.precision.currencyUnitsPerVoucher);
-  // 合资购买：preview 已按出资能力凑好买家团；成交时按精确可付额度逐户落实，
-  // 某户精确额度不足就由后序户补上；全部精确额度加总仍不够则交易失败（不扣任何一户的钱）。
-  const buyerGroup = preview.buyerGroup || [];
-  if (!preview.groupCanPay || buyerGroup.length === 0) {
-    return { ok: false, reason: "即使多户合资也买不起经营权", preview };
-  }
-  const householdById = state.households?.byId || {};
-  const finalMembers = [];
-  let remaining = priceUnits;
-  for (const member of buyerGroup) {
-    if (remaining <= 0) break;
-    const household = householdById[member.householdId];
-    if (!household) return { ok: false, reason: `${member.householdName}已不存在，合资失败`, preview };
-    const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-    // 保守预检：不依赖镇库共享券池（多人结算时前一户可能耗掉券池，导致后一户预检通过但实扣失败、
-    // 钱扣一半交易却失败）。实际结算时券池是 bonus，只会比预检更宽松。
-    const conservativeCtx = createPaymentCapabilityContext(state, `household:${member.householdId}`, content, { maxWheatUnits });
-    conservativeCtx.exchangeVoucherPoolUnits = 0;
-    const preciseMax = maximumFullyPayableValueUnits(state, `household:${member.householdId}`, remaining, content, { paymentContext: conservativeCtx });
-    const contribution = Math.min(preciseMax, remaining);
-    if (contribution <= 0) continue;
-    finalMembers.push({ household, householdId: member.householdId, householdName: member.householdName, contribution, maxWheatUnits });
-    remaining -= contribution;
-  }
-  if (remaining > 0 || finalMembers.length === 0) {
-    return { ok: false, reason: "合资各户精确出资额度不足，经营权未成交", preview };
-  }
-  const buyerNames = [];
-  let firstTransactionId = null;
-  for (const member of finalMembers) {
-    const exchange = settleMonetaryPayment(state, `household:${member.householdId}`, "town",
-      currentPaymentComposition(state, member.contribution), content,
-      "operating_right_sale", `${member.householdName}合资购买${definition.name}一级经营权`,
-      { requireFull: true, maxWheatUnits: member.maxWheatUnits });
-    if (!exchange.ok) return { ok: false, reason: exchange.reason, preview };
-    if (!firstTransactionId) firstTransactionId = exchange.transactionId;
-    buyerNames.push(member.householdName);
-    building.privateOwners ||= [];
-    building.privateOwners.push(member.householdId);
-    member.household.operatingRights ||= [];
-    member.household.operatingRights.push({ buildingId, level: building.privateOwners.length });
-  }
-  const publicKey = jobKeyForBuilding(buildingId, job.id);
-  const privateKey = privateJobKeyForBuilding(buildingId, job.id);
-  const publicWorkers = readJobCount(state, publicKey);
-  const publicCapacity = Math.max(0, (building.ownership?.townLevels || 1) - 1) * job.slots;
-  const transferred = Math.max(0, publicWorkers - publicCapacity);
-  setJobCount(state, publicKey, Math.min(publicWorkers, publicCapacity), content);
-  const priorPrivate = readJobCount(state, privateKey);
-  setJobCount(state, privateKey, Math.min(priorPrivate + transferred, ((building.ownership?.privateLevels || 0) + 1) * job.slots), content, { type: "private", id: buildingId });
-  building.ownership ||= { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
-  building.ownership.townLevels -= 1;
-  building.ownership.privateLevels += 1;
+  const moneyScale = content.precision.currencyUnitsPerVoucher;
+  const priceUnits = Math.round(preview.priceWheatJin * moneyScale);
+  const buyer = preview.buyer;
+  if (!buyer) return { ok: false, reason: "即使家底最多的一户也付不起整栋价格", preview };
+  const household = state.households?.byId?.[buyer.householdId];
+  if (!household) return { ok: false, reason: `${buyer.householdName}已不存在，成交失败`, preview };
+  const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
+  const payment = settleMonetaryPayment(state, `household:${household.id}`, "town",
+    currentPaymentComposition(state, priceUnits), content,
+    "operating_right_sale", `${household.name}整栋购入${definition.name}（民营经营）`,
+    { requireFull: true, maxWheatUnits });
+  if (!payment.ok) return { ok: false, reason: payment.reason || "买家付款失败", preview };
+  const moved = transferBuildingOwnership(state, building, { kind: "household", id: household.id }, content);
   const period = state.privateEconomy.rightSales;
   period.dayWheatUnits += priceUnits;
   period.yearWheatUnits += priceUnits;
   period.cumulativeWheatUnits += priceUnits;
-  if (state.market?.operatingPlan) state.market.operatingPlan.updatedSerial = -1;
-  const buyerText = buyerNames.length <= 3 ? buyerNames.join("、") : `${buyerNames.slice(0, 3).join("、")}等${buyerNames.length}户`;
-  recordEvent(state, `${buyerText}合资以${preview.priceWheatJin.toLocaleString("zh-CN")}斤小麦等值购入${definition.name}一级经营权。`, content, { day: state.day + 1 });
-  return { ok: true, preview, ownerHouseholdIds: finalMembers.map(m => m.householdId), transferredWorkers: transferred, transactionId: firstTransactionId };
+  if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
+  recordEvent(state, `${household.name}以${preview.priceWheatJin.toLocaleString("zh-CN")}斤小麦等值整栋购入${definition.name}（${building.level}级），由民营经营。`, content, { day: state.day + 1 });
+  return {
+    ok: true, preview, buildingId, ownerHouseholdId: household.id, priceVoucherUnits: priceUnits,
+    transactionId: payment.transactionId, movedWorkers: moved.movedWorkers
+  };
+}
+
+// 旧命令名保留：整栋出售的别名（旧版按级出售已废止）。
+export function sellOperatingLevel(state, buildingId, content) {
+  return sellBuildingToPrivate(state, buildingId, {}, content);
+}
+
+// 镇里收购（镇长操作，可选）：按整栋估值向民营业主买回，钱由镇库付给业主。
+export function buyBuildingBackFromPrivate(state, buildingId, content) {
+  const building = state.buildings.find(row => row.id === buildingId);
+  if (!building) return { ok: false, reason: "建筑不存在" };
+  const owner = buildingOwner(state, building);
+  if (owner.kind !== "household" || !owner.id) return { ok: false, reason: "这栋建筑不是民营经营，无需回购" };
+  if ((state.projects || []).some(project => project.buildingId === buildingId || project.plotId === building.plotId)) {
+    return { ok: false, reason: "施工或升级期间不能回购" };
+  }
+  const preview = selectOperatingRightPreview(state, buildingId, content);
+  const moneyScale = content.precision.currencyUnitsPerVoucher;
+  const priceUnits = Math.round(preview.valuationWheatJin * moneyScale);
+  if (!(priceUnits > 0)) return { ok: false, reason: "整栋没有正估值，无法回购", preview };
+  const definition = content.buildings[building.typeId];
+  const household = state.households?.byId?.[owner.id];
+  const payment = settleMonetaryPayment(state, "town", `household:${owner.id}`,
+    currentPaymentComposition(state, priceUnits), content,
+    "operating_right_buyback", `镇库按估值回购${definition.name}经营权`, { requireFull: true });
+  if (!payment.ok) return { ok: false, reason: payment.reason || "镇库资金不足，无法回购", preview };
+  const moved = transferBuildingOwnership(state, building, { kind: "town", id: null }, content);
+  if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
+  recordEvent(state, `镇库以${preview.valuationWheatJin.toLocaleString("zh-CN")}斤小麦等值向${household?.name || "业主"}回购${definition.name}，整栋收回镇营。`, content, { day: state.day + 1 });
+  return { ok: true, buildingId, priceVoucherUnits: priceUnits, transactionId: payment.transactionId, movedWorkers: moved.movedWorkers };
 }

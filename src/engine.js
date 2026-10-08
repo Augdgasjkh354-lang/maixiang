@@ -14,9 +14,10 @@ import {
   setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax,
   setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers,
   setAutosaveMonths,
-  sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares,
+  sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares,
   configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice,
   configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares,
+  listBuilding, approveIpoApplication, rejectIpoApplication,
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
   setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
   configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
@@ -31,6 +32,7 @@ import { populationStats, selectJobRows } from "./selectors/labor.js";
 import { accountQeqUnits, totalQeqUnits } from "./economy/inventory.js";
 import { previewShareSubscription, previewCompanyLevelChange } from "./systems/companies.js";
 import { previewTownBuyback } from "./systems/stock-exchange.js";
+import { selectIpoView } from "./selectors/ipo.js";
 import { validateCurrencyInvariant } from "./economy/currency.js";
 
 export function createSimulation(content) {
@@ -132,11 +134,18 @@ export function createSimulation(content) {
     setOperatingRightPrice: function (state, buildingId, price) { return setOperatingRightPrice(state, buildingId, price); },
     selectOperatingRightPreview: function (state, buildingId, price) { return selectOperatingRightPreview(state, buildingId, definitions, price); },
     sellOperatingLevel: function (state, buildingId) { return sellOperatingLevel(state, buildingId, definitions); },
+    sellBuildingToPrivate: function (state, buildingId, options) { return sellBuildingToPrivateCommand(state, buildingId, options || {}, definitions); },
+    buyBuildingBackFromPrivate: function (state, buildingId) { return buyBuildingBackFromPrivateCommand(state, buildingId, definitions); },
     issueGrainVouchers: function (state, owner, amount) { return issueGrainVouchers(state, owner, amount, definitions); },
     redeemGrainVouchers: function (state, owner, amount) { return redeemGrainVouchers(state, owner, amount, definitions); },
     listCompany: function (state, buildingId, options) { return listCompany(state, buildingId, options, definitions); },
     createCompany: function (state, buildingId, options) { return createCompany(state, buildingId, options, definitions); },
     listCompanyShares: function (state, companyId, options) { return listCompanyShares(state, companyId, options, definitions); },
+    // 整栋上市（一步完成）与民营业主上市申请；“成立公司”已取消，createCompany / listCompany 只返回原因。
+    listBuilding: function (state, buildingId, options) { return listBuilding(state, buildingId, options, definitions); },
+    approveIpoApplication: function (state, buildingId, options) { return approveIpoApplication(state, buildingId, options, definitions); },
+    rejectIpoApplication: function (state, buildingId) { return rejectIpoApplication(state, buildingId, definitions); },
+    selectIpoView: function (state) { return selectIpoView(state, definitions); },
     configureCompanyWage: function (state, companyId, value) { return configureCompanyWage(state, companyId, value, definitions); },
     configureCompanyTargetWorkers: function (state, companyId, value) { return configureCompanyTargetWorkers(state, companyId, value, definitions); },
     configureCompanySalePrice: function (state, companyId, itemId, value) { return configureCompanySalePrice(state, companyId, itemId, value, definitions); },

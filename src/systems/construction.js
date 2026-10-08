@@ -4,6 +4,7 @@ import { atomicInventoryTransaction, quantityToUnits } from "../economy/inventor
 import { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcurementIntent, checkTownMaterialShortfall } from "./public-procurement.js";
 import { readJobCount } from "../selectors/labor.js";
 import { setJobCount } from "./households.js";
+import { syncOwnershipLevels } from "./ownership.js";
 
 // 建筑工总量即各工程投入人数之和；不再有“一次一个工程”的人为上限。
 export function totalProjectWorkers(state) {
@@ -195,9 +196,8 @@ function finishProject(state, project, content, results) {
     const upgraded = state.buildings.find(row => row.id === project.buildingId);
     if (!upgraded) throw new Error("升级工程关联的建筑实例不存在");
     upgraded.level = project.targetLevel;
-    upgraded.ownership ||= { townLevels: (upgraded.level || 1) - 1, privateLevels: 0, listedLevels: 0 };
-    upgraded.ownership.listedLevels ||= 0;
-    upgraded.ownership.townLevels = (upgraded.ownership.townLevels || 0) + 1;
+    // 新等级归当前主人：镇营、民营业主或公司（整栋一个主人，见 systems/ownership.js）。
+    syncOwnershipLevels(state, upgraded);
     upgraded.materialInvestments ||= [];
     for (const row of project.materialsConsumed || []) {
       upgraded.materialInvestments.push({

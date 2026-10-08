@@ -9,8 +9,11 @@ import { addTownCostBasis } from "../economy/business.js";
 import { currencyScale } from "../economy/currency.js";
 import { plannedBatchesForProducer, plannedWorkersForProducer } from "../economy/operating-plan.js";
 import { currentUnitPrice } from "../economy/prices.js";
-import { buyWholesaleForOwner, depositProductionTaxToWholesale } from "./wholesale-market.js";
+import { buyWholesaleForOwner, depositProductionTaxToWholesale, readWholesalePurchasePrice, runWholesaleIntake } from "./wholesale-market.js";
 import { householdConvertibleWheatUnits, householdFoodQeqUnits, householdList, householdReserveQeqUnits, syncResidentAggregates, jobAssignments, isActiveHousehold, creditHouseholdInventory } from "./households.js";
+import { spendableVoucherUnits } from "../economy/payment.js";
+import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
+import { valueUnitsOfGoods, daySerialOf } from "./ownership.js";
 
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
 
@@ -60,16 +63,32 @@ function buyMissingPrivateInputs(state, household, definition, recipe, batches, 
         `${household.name}为经营${definition.name}从批发市场采购${content.items[input.itemId]?.name || input.itemId}`
       );
       if (purchase.boughtUnits > 0) creditHouseholdInventory(state, household.id, input.itemId, purchase.boughtUnits, content);
-      purchases.push({ itemId: input.itemId, requestedUnits: missingUnits, purchasedUnits: purchase.boughtUnits || 0, paidVoucherUnits: purchase.paidVoucherUnits || 0, reason: purchase.reason, sellerRows: purchase.sellerRows || [] });
+      const purchaseReason = purchase.reason || "批发市场可售量不足";
+      purchases.push({ itemId: input.itemId, requestedUnits: missingUnits, purchasedUnits: purchase.boughtUnits || 0, paidVoucherUnits: purchase.paidVoucherUnits || 0, reason: purchaseReason, sellerRows: purchase.sellerRows || [] });
       availableUnits = productionAvailableUnits(state, household, input.itemId, content);
       if (availableUnits < wantedUnits) shortages.push({
-        itemId: input.itemId, missingUnits: wantedUnits - availableUnits, reason: purchase.reason
+        itemId: input.itemId, missingUnits: wantedUnits - availableUnits, reason: purchaseReason
       });
     }
   }
   return { purchases, shortages };
 }
 
+
+// 民营招工不能超过业主付得起的工资：日工资总额 ≤ 业主可动用资金 / 7。
+// 可动用资金 = 粮券（含存款取回）+ 可换小麦折算的粮券（与付款口径一致）。
+export function privateHireCapByOwnerMoney(state, building, role, content) {
+  const ownerId = privateOwners(building, state)[0];
+  const owner = ownerId ? state.households?.byId?.[ownerId] : null;
+  if (!owner || !isActiveHousehold(owner)) return 0;
+  const owners = `household:${ownerId}`;
+  const maxWheat = householdConvertibleWheatUnits(state, owner, content, content.rules.householdFoodReserveDays ?? 30);
+  const money = spendableVoucherUnits(state, owners) + voucherUnitsForWheatUnits(maxWheat, content, "floor");
+  const rate = state.employment.wageRates?.[role.id] ?? role.wagePerWorkerDay ?? 5;
+  const perWorkerDayUnits = rate * currencyScale(content);
+  if (!(perWorkerDayUnits > 0)) return Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.floor(money / 7 / perWorkerDayUnits));
+}
 
 export function arrangePrivateWorkers(state, content) {
   // 下游先招工：经营计划按下游需求倒推上游。
@@ -84,7 +103,8 @@ export function arrangePrivateWorkers(state, content) {
     const key = privateJobKeyForBuilding(building.id, role.id);
     const cap = role.slots * building.ownership.privateLevels;
     const plannedWorkers = plannedWorkersForProducer(state, `private:${building.id}`);
-    const desired = Math.min(cap, plannedWorkers == null ? readJobCount(state, key) : plannedWorkers);
+    const ownerCap = privateHireCapByOwnerMoney(state, building, role, content);
+    const desired = Math.min(cap, ownerCap, plannedWorkers == null ? readJobCount(state, key) : plannedWorkers);
     idle = hireToward(desired, idle, () => readJobCount(state, key), next => setPrivateWorkers(state, building.id, role.id, next, content));
   }
 }
@@ -94,16 +114,17 @@ function qeqReserveForOwner(state, ownerHouseholdId, content) {
   return household ? householdReserveQeqUnits(state, household, content, content.rules.breadBasicReserveDays || 30) : 0;
 }
 
+// 整栋民营只有一个业主家庭（docs/OWNERSHIP.md）：privateOwners 长度恰好为 1；缺失时按户号补一户。
 function privateOwners(building, state) {
-  const levels = Math.max(0, building.ownership?.privateLevels || 0);
+  const hasOwnerLevels = Math.max(0, building.ownership?.privateLevels || 0) > 0;
   building.privateOwners ||= [];
-  while (building.privateOwners.length < levels) {
+  if (!hasOwnerLevels) return [];
+  if (building.privateOwners.length > 1) building.privateOwners.length = 1;
+  if (building.privateOwners.length === 0) {
     const candidates = householdList(state).filter(isActiveHousehold).sort((a, b) => a.id.localeCompare(b.id));
-    const fallback = candidates[building.privateOwners.length % Math.max(1, candidates.length)];
-    if (!fallback) break;
-    building.privateOwners.push(fallback.id);
+    const fallback = candidates[0];
+    if (fallback) building.privateOwners.push(fallback.id);
   }
-  if (building.privateOwners.length > levels) building.privateOwners.length = levels;
   return building.privateOwners.slice();
 }
 
@@ -133,9 +154,15 @@ export function payPrivateIndustryWages(state, content) {
     }));
     const paid = payWages(state, payroll, payers, content, "private_wage_payment", `${definition.name}民营业主偿付具体债权家庭工资`).paid;
     payroll.arrearsVoucherUnits = wageArrears(payroll); payroll.cumulativePaidVoucherUnits += paid;
+    payroll.lastDueVoucherUnits = due;
     results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
   }
   return results;
+}
+
+// 欠薪旁路标记：只表示"这栋还欠工人工资"，不改变生产状态。
+function arrearsFlag(state, buildingId) {
+  return (state.privateEconomy?.payrollByBuilding?.[buildingId]?.arrearsVoucherUnits || 0) > 0;
 }
 
 export function processPrivateBuilding(state, building, content) {
@@ -144,9 +171,9 @@ export function processPrivateBuilding(state, building, content) {
   const { workers, batches: capacity, exact: laborExact } = ownerCapacity(state, building, content);
   const target = targetBatches(state, building);
   const planned = Math.min(capacity, target == null ? capacity : target);
-  if (workers <= 0 || planned <= 0) return { buildingId: building.id, status: workers <= 0 ? "no_workers" : "no_demand", batches: 0 };
+  if (workers <= 0 || planned <= 0) return { buildingId: building.id, status: workers <= 0 ? "no_workers" : "no_demand", arrears: arrearsFlag(state, building.id), batches: 0 };
   const owners = privateOwners(building, state);
-  if (!owners.length) return { buildingId: building.id, status: "no_owner", batches: 0, reason: "缺少家庭所有者" };
+  if (!owners.length) return { buildingId: building.id, status: "no_owner", arrears: arrearsFlag(state, building.id), batches: 0, reason: "缺少家庭所有者" };
   const ownerLevels = new Map();
   for (const id of owners) ownerLevels.set(id, (ownerLevels.get(id) || 0) + 1);
   let batchesLeft = planned;
@@ -222,7 +249,7 @@ export function processPrivateBuilding(state, building, content) {
   if (completed <= 0) {
     const first = inputShortages[0];
     const itemName = first ? (content.items[first.itemId]?.name || first.itemId) : "原料";
-    return { buildingId: building.id, status: "no_materials", batches: 0,
+    return { buildingId: building.id, status: "no_materials", arrears: arrearsFlag(state, building.id), batches: 0,
       reason: first ? `缺${itemName}：${first.reason}` : "经营家庭没有可用于生产的原料", inputPurchases, inputShortages };
   }
   const internalLaborCostWheatUnits = Math.round(workers * (state.employment.wageRates[definition.productionRoleId] || 0) * content.precision.inventoryUnitsPerJin);
@@ -230,18 +257,42 @@ export function processPrivateBuilding(state, building, content) {
   const arrears = state.privateEconomy?.payrollByBuilding?.[building.id]?.arrearsVoucherUnits || 0;
   const firstShortage = inputShortages[0];
   const shortageReason = firstShortage ? `缺${content.items[firstShortage.itemId]?.name || firstShortage.itemId}：${firstShortage.reason}` : null;
-  return { buildingId: building.id, status: arrears > 0 ? "wage_arrears" : completed < planned ? "limited_materials" : (planned < capacity ? "limited_demand" : "ready"),
+  // 欠薪只作为旁路标记 arrears，不覆盖真实生产状态（界面要同时看到"缺料"与"欠薪"）。
+  const status = completed < planned ? "limited_materials" : (planned < capacity ? "limited_demand" : "ready");
+  return { buildingId: building.id, status, arrears: arrears > 0,
     reason: completed < planned ? shortageReason : null, workers, batches: completed, plannedBatches: planned, transactionIds, taxRows, inputPurchases, inputShortages, wageArrearsVoucherUnits: arrears };
+}
+
+// 民营业主的日利润（估算）：产出按收购价计入（扣税后）－ 当日原料采购 － 当日应计工资。
+// 只为"每 30 天自主升级"的盈利判断服务；保留最近 ownerUpgradeProfitDays 天。
+function recordPrivateDayProfit(state, building, row, content) {
+  const income = (row.taxRows || []).reduce((sum, taxRow) => {
+    const price = readWholesalePurchasePrice(state, taxRow.itemId, content);
+    return sum + valueUnitsOfGoods(taxRow.residentUnits || 0, price, content);
+  }, 0);
+  const inputCost = (row.inputPurchases || []).reduce((sum, purchase) => sum + (purchase.paidVoucherUnits || 0), 0);
+  const wages = state.privateEconomy?.payrollByBuilding?.[building.id]?.lastDueVoucherUnits || 0;
+  const profitVoucherUnits = Math.round(income - inputCost - wages);
+  const serial = daySerialOf(state, content);
+  building.privateProfitHistory ||= [];
+  if (building.privateProfitHistory.at(-1)?.serial === serial) building.privateProfitHistory.pop();
+  building.privateProfitHistory.push({ serial, profitVoucherUnits, workers: row.workers || 0 });
+  const keep = Math.max(60, content.rules.ownerUpgradeProfitDays || 60) + 2;
+  if (building.privateProfitHistory.length > keep) building.privateProfitHistory.splice(0, building.privateProfitHistory.length - keep);
 }
 
 export function processPrivateIndustries(state, content) {
   const rows = [];
   // 上游先生产，下游才买得到原料。
+  // 每栋民营建筑产出后立即按收购价入批发市场（同镇营统购的时点），下游同日就能买到上游民营产出。
   const order = industryTypeIds(content);
   const ordered = state.buildings.slice().sort((a, b) => order.indexOf(a.typeId) - order.indexOf(b.typeId));
   for (const building of ordered) {
     if (!isIndustryType(content, building.typeId) || !(building.ownership?.privateLevels || 0)) continue;
-    rows.push(processPrivateBuilding(state, building, content));
+    const row = processPrivateBuilding(state, building, content);
+    row.intake = runWholesaleIntake(state, [], [row], content, { includeTownAllocation: false }).intakeUnits;
+    recordPrivateDayProfit(state, building, row, content);
+    rows.push(row);
   }
   state.privateEconomy.lastDay = rows;
   return rows;

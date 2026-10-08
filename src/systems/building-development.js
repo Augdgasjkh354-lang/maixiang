@@ -7,6 +7,12 @@ import { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcure
 import { householdList, releaseJobFromHousehold } from "./households.js";
 import { staffProject } from "./construction.js";
 import { windUpCollectiveShop } from "./shops.js";
+import { currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
+import { currentUnitPrice } from "../economy/prices.js";
+import { allocateInputToTown } from "./wholesale-market.js";
+import { buildingOwner, companyOfBuilding, daySerialOf, jobKeyForOwner, valueUnitsOfGoods } from "./ownership.js";
+import { householdConvertibleWheatUnits } from "./households.js";
+import { readJobCount } from "../selectors/labor.js";
 
 function materialLines(rows, content) {
   return (rows || []).map(row => ({
@@ -93,6 +99,12 @@ export function startBuildingUpgrade(state, buildingId, content, options = {}) {
       if (bought.boughtUnits < wantedUnits) return { ok: false, reason: `采购${row.name}未完整成交，升级未开工` };
     }
   }
+  return openUpgradeProject(state, building, definition, preview, lines, content, options, null);
+}
+
+// 开工一个升级工程：材料从镇库扣（开工时一次性入工程），建立工程并招募建筑工。
+// prepaid（业主自主升级）= { payer, valueUnits, transactionId }：材料与费用已由业主付给镇库，工程照常由镇里施工。
+function openUpgradeProject(state, building, definition, preview, lines, content, options = {}, prepaid = null) {
   if (lines.length) {
     const charged = atomicInventoryTransaction(state, {
       inputs: lines.map(({ owner, itemId, quantityUnits }) => ({ owner, itemId, quantityUnits })),
@@ -112,13 +124,101 @@ export function startBuildingUpgrade(state, buildingId, content, options = {}) {
     materialsConsumed: lines.map(row => ({ itemId: row.itemId, quantityUnits: row.quantityUnits, sourceOwner: row.sourceOwner, transactionId: row.transactionId })),
     started: { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) }
   };
+  if (prepaid) project.prepaid = { payer: prepaid.payer, valueUnits: prepaid.valueUnits, transactionId: prepaid.transactionId || null };
   state.projects.push(project);
   const requested = Number.isFinite(options.workers)
     ? options.workers : project.recommendedWorkers;
   const staffing = staffProject(state, project, requested, content);
-  recordEvent(state, `${definition.name}开始原地扩建至${preview.nextLevel}级；原有岗位与产能在施工期间保持不变。`, content, { day: state.day + 1 });
+  const payerText = prepaid ? `，业主已一次性付给镇库${Math.round(prepaid.valueUnits / content.precision.currencyUnitsPerVoucher)}券` : "";
+  recordEvent(state, `${definition.name}开始原地扩建至${preview.nextLevel}级；原有岗位与产能在施工期间保持不变${payerText}。`, content, { day: state.day + 1 });
   clearPublicProcurementIntent(state, "wood");
   return { ok: true, projectId: instanceId, assignedBuilders: staffing.assigned, workers: staffing.assigned, preview };
+}
+
+// ---------------------------------------------------------------- 民营/公司业主自主升级（docs/OWNERSHIP.md 第 4 条）
+// 镇营由镇长手动升级；民营与公司每 ownerUpgradeCheckDays 天检查一次：
+//   近 ownerUpgradeProfitDays 天利润 > 0；在岗 ≥ 岗位上限 × ownerUpgradeStaffingRatio；
+//   现金 ≥ 升级花费 + ownerUpgradeReserveWageDays 天工资。
+// 升级花费 = 材料按批发价折算 + 工日 × 建筑工工资，一次性付给镇库；之后工程照常由镇里施工（材料不再由镇库付钱）。
+
+function ownerWageRate(state, building, owner, job) {
+  if (owner.kind === "company") {
+    const company = companyOfBuilding(state, building.id);
+    if (Number.isFinite(company?.settings?.wagePerWorkerDay)) return company.settings.wagePerWorkerDay;
+  }
+  return state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5;
+}
+
+function ownerRecentProfitUnits(state, building, owner, content) {
+  const days = content.rules.ownerUpgradeProfitDays ?? 60;
+  const serial = daySerialOf(state, content);
+  const rows = owner.kind === "household"
+    ? (building.privateProfitHistory || [])
+    : (companyOfBuilding(state, building.id)?.history || []);
+  return rows.filter(row => Number.isInteger(row.serial) && row.serial > serial - days && row.serial <= serial)
+    .reduce((sum, row) => sum + (row.profitVoucherUnits || 0), 0);
+}
+
+function tryOwnerUpgrade(state, building, owner, content) {
+  const definition = content.buildings[building.typeId];
+  const config = definition?.upgrade;
+  const job = definition?.jobs?.[0];
+  if (!config || !job || !owner.id) return null;
+  const level = Math.max(1, building.level || 1);
+  const base = { buildingId: building.id, ownerKind: owner.kind, ownerId: owner.id, nextLevel: level + 1 };
+  if (level >= (config.maxLevel || content.rules.buildingMaxLevel || 10)) return null;
+  if (projectsForBuilding(state, building).length) return null;
+  const moneyScale = content.precision.currencyUnitsPerVoucher;
+  const workers = readJobCount(state, jobKeyForOwner(owner.kind, building.id, job.id));
+  const staffNeeded = Math.ceil(job.slots * level * (content.rules.ownerUpgradeStaffingRatio ?? 0.9));
+  if (workers < staffNeeded) return { ...base, status: "skipped", reason: "在岗人数不足岗位上限的九成" };
+  if (ownerRecentProfitUnits(state, building, owner, content) <= 0) return { ...base, status: "skipped", reason: "近期利润不为正" };
+  const lines = materialLines(config.materialRequirements, content);
+  for (const line of lines) {
+    const available = (state.accounts.town[line.itemId] || 0) + (state.wholesaleMarket?.inventory?.[line.itemId] || 0);
+    if (available < line.quantityUnits) return { ...base, status: "skipped", reason: `${content.items[line.itemId]?.name || line.itemId}不足` };
+  }
+  const materialCostUnits = lines.reduce((sum, line) =>
+    sum + valueUnitsOfGoods(line.quantityUnits, currentUnitPrice(state, line.itemId, content), content), 0);
+  const builderWage = state.employment.wageRates?.builders ?? 10;
+  const labourCostUnits = Math.round(config.workDays * builderWage * moneyScale);
+  const costUnits = materialCostUnits + labourCostUnits;
+  const dailyWageUnits = Math.round(workers * ownerWageRate(state, building, owner, job) * moneyScale);
+  const reserveUnits = dailyWageUnits * (content.rules.ownerUpgradeReserveWageDays ?? 60);
+  const payer = owner.kind === "household" ? `household:${owner.id}` : `company:${owner.id}`;
+  const household = owner.kind === "household" ? state.households?.byId?.[owner.id] : null;
+  const payOptions = household ? { maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) } : {};
+  const payable = maximumPayableValueUnits(state, payer, content, payOptions);
+  if (payable < costUnits + reserveUnits) return { ...base, status: "skipped", reason: "现金不足（需另留60天工资）", costVoucher: costUnits / moneyScale };
+  const quote = quoteMonetaryPayment(state, payer, currentPaymentComposition(state, costUnits), content, payOptions);
+  if (!quote.full) return { ...base, status: "skipped", reason: "现金不足（需另留60天工资）", costVoucher: costUnits / moneyScale };
+  // 先在镇内把缺的材料从批发市场调到镇库（内部无偿，不付钱），再收款；收款失败则货留在镇库，不丢钱。
+  for (const line of lines) {
+    const short = Math.max(0, line.quantityUnits - (state.accounts.town[line.itemId] || 0));
+    if (short > 0) allocateInputToTown(state, line.itemId, short, content, `${definition.name}业主升级：批发市场调拨材料`);
+  }
+  const payment = settleMonetaryPayment(state, payer, "town", currentPaymentComposition(state, costUnits), content,
+    "owner_upgrade_payment", `${owner.kind === "company" ? "公司" : "民营业主"}出资升级${definition.name}至${level + 1}级`,
+    { requireFull: true, ...payOptions });
+  if (!payment.ok) return { ...base, status: "skipped", reason: payment.reason || "付款失败", costVoucher: costUnits / moneyScale };
+  const opened = openUpgradeProject(state, building, definition, { nextLevel: level + 1 }, lines, content, {},
+    { payer, valueUnits: costUnits, transactionId: payment.transactionId });
+  if (!opened.ok) return { ...base, status: "failed", reason: opened.reason };
+  return { ...base, status: "started", costVoucher: costUnits / moneyScale, materialCostVoucher: materialCostUnits / moneyScale, labourCostVoucher: labourCostUnits / moneyScale, projectId: opened.projectId };
+}
+
+// 日结步骤 ownerUpgrades：按检查周期扫描民营与公司建筑，满足条件的业主自主升级。
+export function settleOwnerUpgrades(state, content) {
+  const checkDays = Math.max(1, content.rules.ownerUpgradeCheckDays || 30);
+  if (daySerialOf(state, content) % checkDays !== 0) return [];
+  const rows = [];
+  for (const building of state.buildings.slice()) {
+    const owner = buildingOwner(state, building);
+    if (owner.kind === "town") continue;
+    const row = tryOwnerUpgrade(state, building, owner, content);
+    if (row) rows.push(row);
+  }
+  return rows;
 }
 
 export function selectDemolitionPreview(state, buildingId, content) {
@@ -127,8 +227,8 @@ export function selectDemolitionPreview(state, buildingId, content) {
   if (projectsForBuilding(state, building).length) {
     return { available: false, reason: "这座建筑仍在施工或升级，请工程完成后再拆除" };
   }
-  if ((building.ownership?.listedLevels || 0) > 0) return { available: false, reason: "建筑仍有公司经营等级，请先划回或完成公司清算" };
-  if ((building.ownership?.privateLevels || 0) > 0) return { available: false, reason: "建筑含有民营经营权，本轮暂不能拆除或回购" };
+  if ((building.ownership?.listedLevels || 0) > 0) return { available: false, reason: "建筑归公司所有，须先完成公司清算" };
+  if ((building.ownership?.privateLevels || 0) > 0) return { available: false, reason: "建筑归民营业主所有，须先按估值收回" };
   if (building.typeId === "bank" && (state.monetaryReform?.stage || "wheat") !== "wheat") {
     return { available: false, reason: "货币改革进行中或已完成，银行承担粮券印制与换券，不能拆除" };
   }

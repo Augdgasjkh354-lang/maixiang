@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { CONTENT } from "../src/content/index.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { exportState, parseSaveFile } from "../src/persistence/storage.js";
@@ -26,7 +27,7 @@ function openExchange(state) {
 }
 
 function listedCompany(state, buildingId, { levels = 1, capital = 10000, ticker = "001", shares = 1000, offer = 0, price = 1 } = {}) {
-  const formed = simulation.createCompany(state, buildingId, { name: `${buildingId}公司`, levels, operatingCapitalVoucher: capital, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, buildingId, { name: `${buildingId}公司`, levels, operatingCapitalVoucher: capital, initialMaterialQuantity: 0 });
   assert.equal(formed.ok, true, formed.reason);
   openExchange(state);
   state.monetaryReform.stage = "voucher";
@@ -35,19 +36,16 @@ function listedCompany(state, buildingId, { levels = 1, capital = 10000, ticker 
   return state.companies[formed.companyId];
 }
 
-test("成立公司与上市彻底分离，未上市公司可在粮食阶段独立持有资金并经营", () => {
+test("已取消单独成立公司：createCompany / listCompany 只返回原因，建筑与公司都不变", () => {
   const state = simulation.createInitialState({ seed: 1701 });
   const mill = addBuilding(state, "mill", "company-mill", 2);
-  state.accounts.town.wheat += 5000 * I;
-  const result = simulation.createCompany(state, mill.id, { name: "麦香磨坊", levels: 1, operatingCapitalVoucher: 100, initialMaterialQuantity: 50 });
-  assert.equal(result.ok, true, result.reason);
-  const company = state.companies[result.companyId];
-  assert.equal(company.name, "麦香磨坊");
-  assert.equal(company.listing.listed, false);
-  assert.equal(company.totalShares, 0);
-  assert.equal(mill.ownership.townLevels, 1);
-  assert.equal(mill.ownership.listedLevels, 1);
-  assert.ok(company.cashWheatUnits > 0, "粮食结算阶段公司经营资金应以小麦进入独立账户");
+  const before = { ownership: { ...mill.ownership } };
+  for (const result of [simulation.createCompany(state, mill.id, { name: "麦香磨坊", levels: 1 }), simulation.listCompany(state, mill.id, { levels: 1 })]) {
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /已取消单独成立公司：请直接整栋上市/);
+  }
+  assert.deepEqual(mill.ownership, before.ownership, "建筑归属不变");
+  assert.deepEqual(Object.keys(state.companies), []);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
@@ -55,7 +53,7 @@ test("没有交易所或未完成货币改革时不能上市；完成后代码�
   const state = legacyVoucherState();
   const salt = addBuilding(state, "saltworks", "gate-salt", 2);
   assert.equal(simulation.issueGrainVouchers(state, "town", 50000).ok, true);
-  const formed = simulation.createCompany(state, salt.id, { levels: 2, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, salt.id, { levels: 2, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 });
   assert.equal(formed.ok, true, formed.reason);
   state.stockExchange = { legacyAccess: false, rotation: 0 };
   assert.match(simulation.listCompanyShares(state, formed.companyId, { ticker: "007", totalShares: 1000, priceVoucherPerShare: 1, offeredShares: 100 }).reason, /交易所/);
@@ -91,44 +89,11 @@ test("部分认购可分批出售，售股款只进镇库且总股本守恒", ()
   assert.ok(company.shareSale.cumulativeProceedsVoucherUnits >= first.proceedsVoucherUnits + second.proceedsVoucherUnits);
 });
 
-test("每级等量股份：划入增发给镇库，镇库股份不足时禁止划回，回购后可划回", () => {
-  const state = legacyVoucherState();
-  const mill = addBuilding(state, "mill", "level-mill", 5);
-  assert.equal(simulation.issueGrainVouchers(state, "town", 200000).ok, true);
-  const company = listedCompany(state, mill.id, { levels: 4, capital: 10000, ticker: "031", shares: 10000, price: 1 });
-  const added = simulation.addCompanyOperatingLevel(state, company.id);
-  assert.equal(added.ok, true, added.reason);
-  assert.equal(added.issuedShares, 2500);
-  assert.equal(company.totalShares, 12500);
-  assert.equal(company.townShares, 12500);
-
-  const owner = richestHousehold(state);
-  company.townShares = 1500;
-  company.residentShares = 11000;
-  company.householdShares = { [owner.id]: 11000 };
-  owner.shares ||= {}; owner.shares[company.id] = 11000;
-  const blocked = simulation.removeCompanyOperatingLevel(state, company.id);
-  assert.equal(blocked.ok, false);
-  assert.match(blocked.reason, /回购/);
-
-  assert.equal(grantResidentVouchers(state, 1000, CONTENT).ok, true);
-  // 镇库已有足够粮券；用高于账面参考的报价确保居民愿意卖出。
-  const buyback = simulation.buybackCompanyShares(state, company.id, { shares: 2000, priceVoucherPerShare: 10 });
-  assert.equal(buyback.ok, true, buyback.reason);
-  assert.ok(company.townShares >= 2500);
-  const removed = simulation.removeCompanyOperatingLevel(state, company.id);
-  assert.equal(removed.ok, true, removed.reason);
-  assert.equal(removed.cancelledShares, 2500);
-  assert.equal(company.totalShares, 10000);
-  assert.equal(company.listedLevels, 4);
-  assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
-});
-
 test("360日周转金按目标经营规模计算，停工不会把储备目标压成零", () => {
   const state = legacyVoucherState();
   const salt = addBuilding(state, "saltworks", "reserve-salt", 1);
   assert.equal(simulation.issueGrainVouchers(state, "town", 100000).ok, true);
-  const formed = simulation.createCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 50000, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, salt.id, { levels: 1, operatingCapitalVoucher: 50000, initialMaterialQuantity: 0 });
   const company = state.companies[formed.companyId];
   assert.equal(simulation.configureCompanyTargetWorkers(state, company.id, 3).ok, true);
   assert.equal(simulation.configureCompanyWage(state, company.id, 20).ok, true);
@@ -141,7 +106,7 @@ test("年度利润只在新年首日结算上一年，保存恢复不会重复�
   const state = legacyVoucherState();
   addBuilding(state, "saltworks", "annual-salt", 1);
   assert.equal(simulation.issueGrainVouchers(state, "town", 200000).ok, true);
-  const formed = simulation.createCompany(state, "annual-salt", { levels: 1, operatingCapitalVoucher: 100000, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, "annual-salt", { levels: 1, operatingCapitalVoucher: 100000, initialMaterialQuantity: 0 });
   const company = state.companies[formed.companyId];
   simulation.configureCompanyTargetWorkers(state, company.id, 0);
   company.retainedEarningsVoucherUnits = 5000 * V;
@@ -172,7 +137,7 @@ test("年度利润只在新年首日结算上一年，保存恢复不会重复�
 test("365日实际利润估值包含停工日，不只按有生产日期年化", () => {
   const state = legacyVoucherState();
   addBuilding(state, "saltworks", "valuation-salt", 1);
-  const formed = simulation.createCompany(state, "valuation-salt", { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, "valuation-salt", { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
   const company = state.companies[formed.companyId];
   state.year = 2; state.day = 100;
   company.history = [];
@@ -192,7 +157,7 @@ test("有上市公司时交易所禁止拆除", () => {
   addBuilding(state, "saltworks", "exchange-company", 1);
   const exchange = addBuilding(state, "stock_exchange", "exchange-1", 1);
   assert.equal(simulation.issueGrainVouchers(state, "town", 20000).ok, true);
-  const formed = simulation.createCompany(state, "exchange-company", { levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
+  const formed = formCompany(state, "exchange-company", { levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
   state.monetaryReform.stage = "voucher";
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker: "088", totalShares: 1000, priceVoucherPerShare: 1, offeredShares: 0 });
   assert.equal(listed.ok, true, listed.reason);

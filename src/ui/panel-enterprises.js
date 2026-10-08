@@ -33,26 +33,39 @@ function renderPrices(view) {
   </div></section>`;
 }
 
-function renderCompanyCandidate(view, building) {
+// 整栋上市表单：镇营产业整栋放入新公司挂牌（docs/OWNERSHIP.md 第 2 条）。数值走暂存草稿，按钮提交。
+function renderTownListingForm(view, row) {
   const unit = moneyUnit(view);
-  const preview = view.listingPreview?.buildingId === building.id ? view.listingPreview : null;
-  const levelsKey = `company-form:${building.id}:levels`;
-  const capitalKey = `company-form:${building.id}:capital`;
-  const materialKey = `company-form:${building.id}:material`;
-  return `<div class="cardlet"><div class="row"><strong>${escapeHtml(building.name)} · ${escapeHtml(building.id)}</strong><span class="badge">镇营${number(building.ownership.townLevels)}级</span></div>
+  const id = escapeHtml(row.buildingId);
+  const key = suffix => `ipo:${row.buildingId}:${suffix}`;
+  return `<div class="cardlet"><div class="row"><strong>${escapeHtml(row.name)} · ${id}</strong><span class="badge">镇营${number(row.level)}级</span></div>
     <div class="business-form-grid">
-      <label>公司名称<input type="text" maxlength="30" autocomplete="off" value="${escapeHtml(preview?.name || `${building.name}公司`)}" data-company-name="${escapeHtml(building.id)}"></label>
-      <label>划入等级${stagedInput(view, { key: levelsKey, label: "划入公司等级", value: 1, integer: true, minimum: 1, maximum: building.ownership.townLevels })}</label>
-      <label>初始经营资金${stagedInput(view, { key: capitalKey, label: "初始经营资金（小麦等值）", value: 1000, minimum: 0 })}<small>${escapeHtml(unit)}</small></label>
-      <label>首批主要原料${stagedInput(view, { key: materialKey, label: "首批主要原料数量", value: 0, minimum: 0 })}<small>斤；无原料填0</small></label>
+      <label>股票代码（可空）<input type="text" inputmode="numeric" maxlength="3" autocomplete="off" value="" placeholder="自动" data-ipo-ticker="${id}"></label>
+      <label>公司名称<input type="text" maxlength="30" autocomplete="off" value="${escapeHtml(`${row.name}公司`)}" data-ipo-name="${id}"></label>
+      <label>总股本${stagedInput(view, { key: key("total"), label: "总股本", value: row.suggestedTotalShares, integer: true, minimum: 1 })}<small>股</small></label>
+      <label>卖出比例${stagedInput(view, { key: key("offer"), label: "卖出比例", value: row.suggestedOfferPercent, positive: true, maximum: 100 })}<small>%</small></label>
+      <label>每股价格${stagedInput(view, { key: key("price"), label: "每股价格", value: row.suggestedPriceVoucherPerShare ?? 1, positive: true })}<small>${escapeHtml(unit)}</small></label>
     </div>
-    <button class="secondary wide" data-company-preview="${escapeHtml(building.id)}">预览成立公司</button>
-    ${preview ? `<div class="operation-preview"><strong>成立确认</strong>
-      <div class="row"><span class="label">公司 / 划入等级</span><strong class="value">${escapeHtml(preview.name)} · ${number(preview.levels)}级</strong></div>
-      <div class="row"><span class="label">镇库投入</span><strong class="value">${number(preview.capital, 2)}${escapeHtml(unit)} · ${number(preview.material, 2)}斤主要原料</strong></div>
-      <div class="subtle">镇库全资持有，无需交易所。</div>
-      <div class="business-sticky-actions"><button class="secondary" data-company-preview-cancel>取消</button><button class="primary" data-company-create="${escapeHtml(building.id)}">确认成立</button></div>
-    </div>` : ""}
+    ${row.reason ? `<div class="shortage-banner visible">${escapeHtml(row.reason)}</div>` : `<div class="subtle">整栋放入新公司挂牌；镇库保留未卖出的股份，股款归镇库。</div>`}
+    <button class="primary wide" data-ipo-list="${id}" ${row.canList ? "" : "disabled"}>整栋上市</button>
+  </div>`;
+}
+
+// 民营业主的上市申请：镇长可改卖出比例与每股价后批准，或驳回（驳回后业主有冷却期）。
+function renderIpoApplication(view, row) {
+  const unit = moneyUnit(view);
+  const id = escapeHtml(row.buildingId);
+  const key = suffix => `ipo-app:${row.buildingId}:${suffix}`;
+  return `<div class="cardlet"><div class="row"><strong>${escapeHtml(row.buildingName)} · ${escapeHtml(row.householdName)}</strong><span class="badge">已等待${number(row.daysPending)}日</span></div>
+    <div class="row"><span class="label">整栋估值</span><strong class="value">${number(row.valuationVoucher, 2)}${escapeHtml(unit)}</strong></div>
+    <div class="business-form-grid">
+      <label>股票代码（可空）<input type="text" inputmode="numeric" maxlength="3" autocomplete="off" value="" placeholder="自动" data-ipo-app-ticker="${id}"></label>
+      <label>总股本${stagedInput(view, { key: key("total"), label: "总股本", value: row.suggestedTotalShares, integer: true, minimum: 1 })}<small>股</small></label>
+      <label>卖出比例${stagedInput(view, { key: key("offer"), label: "卖出比例", value: row.suggestedOfferPercent, positive: true, maximum: 100 })}<small>%</small></label>
+      <label>每股价格${stagedInput(view, { key: key("price"), label: "每股价格", value: row.suggestedPriceVoucherPerShare ?? 1, positive: true })}<small>${escapeHtml(unit)}</small></label>
+    </div>
+    ${row.blockedReason ? `<div class="shortage-banner visible">${escapeHtml(row.blockedReason)}</div>` : ""}
+    <div class="business-sticky-actions"><button class="secondary" data-ipo-reject="${id}">驳回</button><button class="primary" data-ipo-approve="${id}" ${row.valid && !row.blockedReason ? "" : "disabled"}>批准上市</button></div>
   </div>`;
 }
 
@@ -62,12 +75,6 @@ function renderOperationControls(view, company) {
   const targetKey = `company:${company.id}:target`;
   const capitalKey = `company:${company.id}:capital`;
   const products = company.productRows || [];
-  const levelPreview = view.companyLevelPreview?.companyId === company.id ? view.companyLevelPreview : null;
-  const levelResult = levelPreview?.preview || null;
-  const levelAction = levelPreview?.direction === "remove" ? "划回1级" : "划入1级";
-  const shareAction = levelResult?.listed
-    ? (levelPreview.direction === "remove" ? `注销镇库 ${number(levelResult.cancelledShares || 0)} 股` : `向镇库增发 ${number(levelResult.issuedShares || 0)} 股`)
-    : "未上市，不变更股本";
   return `<h4>独立经营</h4>
     <div class="business-form-grid">
       <label>日薪${stagedInput(view, { key: wageKey, label: "公司日薪", value: company.settings?.wagePerWorkerDay ?? 5, minimum: 0 })}<small>${escapeHtml(unit)}/人日</small></label>
@@ -76,15 +83,7 @@ function renderOperationControls(view, company) {
     <div class="business-sticky-actions"><button class="secondary" data-company-wage="${escapeHtml(company.id)}">设置工资</button><button class="secondary" data-company-target="${escapeHtml(company.id)}">设置用工</button></div>
     ${products.map(row => `<div class="business-form-row"><label>${escapeHtml(row.name)}售价${stagedInput(view, { key: `company:${company.id}:price:${row.itemId}`, label: `${row.name}售价`, value: row.salePrice, positive: true })}<small>${escapeHtml(unit)}/斤</small></label><button class="secondary" data-company-price="${escapeHtml(company.id)}" data-item-id="${escapeHtml(row.itemId)}">设置</button></div>`).join("")}
     <div class="business-form-row"><label>追加注资${stagedInput(view, { key: capitalKey, label: "追加经营资金（小麦等值）", value: 1000, positive: true })}</label><button class="secondary" data-company-capital="${escapeHtml(company.id)}">注资</button></div>
-    <div class="business-sticky-actions"><button class="secondary" data-company-level-preview="${escapeHtml(company.id)}" data-direction="add">划入1级镇营产能</button><button class="secondary" data-company-level-preview="${escapeHtml(company.id)}" data-direction="remove">划回1级</button><button class="secondary danger" data-company-liquidate="${escapeHtml(company.id)}">全部划回并清算</button></div>
-    ${levelPreview ? `<div class="operation-preview"><strong>${escapeHtml(levelAction)} · 变动预览</strong>
-      <div class="row"><span class="label">变动等级</span><strong class="value">${number(levelResult?.levelsBefore ?? company.listedLevels)} → ${number(levelResult?.levelsAfter ?? company.listedLevels)}级</strong></div>
-      <div class="row"><span class="label">股份变动</span><strong class="value">${escapeHtml(shareAction)}</strong></div>
-      ${levelResult?.listed ? `<div class="row"><span class="label">总股本</span><strong class="value">${number(levelResult.totalSharesBefore || 0)} → ${number(levelResult.totalSharesAfter ?? levelResult.totalSharesBefore ?? 0)}股</strong></div>
-      <div class="row"><span class="label">镇库持股比例</span><strong class="value">${number(levelResult.townPercentBefore || 0, 2)}% → ${number(levelResult.townPercentAfter ?? levelResult.townPercentBefore ?? 0, 2)}%</strong></div>` : ""}
-      ${levelResult?.reason ? `<div class="shortage-banner visible">${escapeHtml(levelResult.reason)}</div>` : ""}
-      <div class="business-sticky-actions"><button class="secondary" data-company-level-cancel>取消</button><button class="primary" data-company-level-confirm="${escapeHtml(company.id)}" data-direction="${escapeHtml(levelPreview.direction)}" ${!levelResult?.available ? "disabled" : ""}>确认${escapeHtml(levelAction)}</button></div>
-    </div>` : ""}`;
+    <div class="business-sticky-actions"><button class="secondary danger" data-company-liquidate="${escapeHtml(company.id)}">全部划回并清算</button></div>`;
 }
 
 function renderListing(view, company) {
@@ -177,16 +176,23 @@ function renderCompany(view, company) {
 }
 
 export function renderEnterpriseFinance(view) {
-  const candidates = view.listableBuildings || [];
+  const ipo = view.ipo || null;
   const companies = view.companies || [];
-  const formation = candidates.length ? candidates.map(building => renderCompanyCandidate(view, building)).join("") : `<div class="subtle">暂无可划入公司的镇营等级。</div>`;
+  const townRows = (ipo?.buildings || []).filter(row => row.owner === "town" && !row.companyId);
+  const applications = ipo?.applications || [];
+  const cooldowns = (ipo?.cooldowns || []).filter(row => row.active);
   const exchangeState = view.stockExchange?.available
     ? (view.stockExchange.physical ? "交易所已建成" : "旧档兼容交易所入口")
     : "尚未建成交易所";
   return `${renderPrices(view)}
+    <section class="enterprise-section"><h2>整栋上市</h2>
+      ${ipo?.gateReason ? `<div class="subtle">${escapeHtml(ipo.gateReason)}；建成交易所并完成货币改革后可上市。</div>` : ""}
+      ${townRows.length ? townRows.map(row => renderTownListingForm(view, row)).join("") : `<div class="cardlet subtle">暂无镇营产业可整栋上市。</div>`}
+      ${applications.length ? `<h3>民营上市申请</h3>${applications.map(row => renderIpoApplication(view, row)).join("")}` : ""}
+      ${cooldowns.length ? `<div class="subtle">冷却中：${cooldowns.map(row => `${escapeHtml(row.householdName)}约${number(Math.max(0, row.untilSerial - (ipo.serial || 0)))}日后可再申请`).join("；")}。</div>` : ""}
+    </section>
     <section class="enterprise-section"><h2>独立公司</h2>
       ${companies.length ? companies.map(company => renderCompany(view, company)).join("") : `<div class="cardlet subtle">暂无独立公司。</div>`}
-      <details class="detail-block" data-detail-key="company-formation"><summary>从镇营等级成立公司${candidates.length ? ` · ${number(candidates.length)}处可选` : ""}</summary><div class="detail-body">${formation}</div></details>
     </section>
     <section class="enterprise-section"><h2>交易所</h2><div class="cardlet"><div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div><div class="row"><span class="label">新上市条件</span><strong class="value">${view.stockExchange?.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div></div></section>`;
 }

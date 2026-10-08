@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation } from "../src/engine.js";
+import { formCompany } from "./helpers-ipo.js";
 import { CONTENT } from "../src/content/index.js";
 import { BUILD_ID } from "../src/content/version.js";
 import { selectJobRows, listedJobKeyForBuilding } from "../src/selectors/labor.js";
@@ -113,8 +114,8 @@ test("0.1.10-r02 就业面板的公司岗位读取公司工资，并只提交到
   const state = simulation.createInitialState({ seed: 110201 });
   addBuilding(state, "mill", "mill-a", 1);
   addBuilding(state, "mill", "mill-b", 1);
-  const a = simulation.createCompany(state, "mill-a", { name: "甲磨坊", levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
-  const b = simulation.createCompany(state, "mill-b", { name: "乙磨坊", levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const a = formCompany(state, "mill-a", { name: "甲磨坊", levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
+  const b = formCompany(state, "mill-b", { name: "乙磨坊", levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
   assert.equal(a.ok && b.ok, true);
   simulation.setWageRate(state, "millers", 10);
   simulation.configureCompanyWage(state, a.companyId, 20);

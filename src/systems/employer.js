@@ -71,6 +71,50 @@ export function payWages(state, book, payers, content, type, reason) {
   return { paid, rows };
 }
 
+// 实物抵欠薪（民营收回、公司清算）：按户先到先抵，从债权上扣减 valueUnits，返回实际抵掉的价值。
+export function offsetWageClaims(state, book, valueUnits, content) {
+  wageBook(book);
+  const start = Math.max(0, Math.floor(valueUnits || 0));
+  let left = start;
+  for (const householdId of Object.keys(book.claimsVoucherUnits).sort()) {
+    if (left <= 0) break;
+    const due = book.claimsVoucherUnits[householdId] || 0;
+    const cut = Math.min(Math.max(0, due), left);
+    const next = due - cut;
+    left -= cut;
+    if (next > 0) {
+      book.claimsVoucherUnits[householdId] = next;
+      book.claimsPayment[householdId] = currentPaymentComposition(state, next);
+    } else {
+      delete book.claimsVoucherUnits[householdId];
+      delete book.claimsPayment[householdId];
+    }
+  }
+  return start - left;
+}
+
+// 把剩余债权整体转给镇营：记入镇库的历史债权表（按岗位键），之后由镇库经既有工资流程偿付。
+export function transferWageClaimsToTown(state, book, payrollKey) {
+  wageBook(book);
+  const payroll = state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
+  payroll.creditorClaims ||= {};
+  payroll.creditorPaymentClaims ||= {};
+  payroll.arrearsVoucherUnits ||= {};
+  const claims = payroll.creditorClaims[payrollKey] ||= {};
+  const claimPayments = payroll.creditorPaymentClaims[payrollKey] ||= {};
+  let total = 0;
+  for (const [householdId, due] of Object.entries(book.claimsVoucherUnits)) {
+    if (!(due > 0)) continue;
+    claims[householdId] = (claims[householdId] || 0) + due;
+    claimPayments[householdId] = addPaymentObligation(claimPayments[householdId], book.claimsPayment[householdId] || currentPaymentComposition(state, due));
+    total += due;
+  }
+  book.claimsVoucherUnits = {};
+  book.claimsPayment = {};
+  if (total > 0) payroll.arrearsVoucherUnits[payrollKey] = (payroll.arrearsVoucherUnits[payrollKey] || 0) + total;
+  return total;
+}
+
 // ---------------------------------------------------------------- 生产共用
 
 // 行业生产税（实物）：按税率从产出里扣，零头记在 carry[carryKey] 里下次累计。

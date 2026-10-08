@@ -7,6 +7,7 @@ import { validateState } from "../core/validation.js";
 import { createInitialState, ensureProjectAccessor } from "../core/state.js";
 import { syncShopEmployment } from "../systems/shops.js";
 import { syncResidentAggregates } from "../systems/households.js";
+import { convertSplitOwnership } from "../systems/ownership-migrate.js";
 import {
   ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers
 } from "./save-compat.js";
@@ -43,6 +44,9 @@ export function migrateSave(raw, content) {
   state.version = current;
   state.schemaVersion = current;
   sanitizeNumbers(state, report);
+  rehydrate(state, definitions);
+  // 旧存档里按等级拆开的建筑整栋换主人（docs/OWNERSHIP.md 旧存档换算）；必须在校验之前，整栋已是空操作。
+  convertSplitOwnership(state, definitions, report);
   rehydrate(state, definitions);
 
   const validate = candidate => validateState(rehydrate(candidate, definitions), definitions).errors;

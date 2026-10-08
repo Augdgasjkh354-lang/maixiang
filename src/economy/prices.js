@@ -106,8 +106,10 @@ export function theoreticalFullSaleProfitPerWorker(state, typeId, content) {
   // 估值按全镇当前熟练度折算人均产出（不含具体建筑的等级加成）。
   const batches = (recipe.batchesPerWorkerDay || 0) * experienceBonus(state, typeId);
   const taxPercent = state.policy?.privateProductionTaxPercent?.[typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
+  // 民营业主拿到的是批发收购价（减实物生产税），不是批发售价；没有批发市场时无收购口径，产出按 0 计。
+  const hasMarket = (state.buildings || []).some(row => row.typeId === "wholesale_market");
   const grossRevenue = (recipe.outputs || []).reduce((sum, row) =>
-    sum + row.quantity * batches * currentUnitPrice(state, row.itemId, content) * (1 - taxPercent / 100), 0);
+    sum + row.quantity * batches * (hasMarket ? Number(state.wholesaleMarket?.purchasePricesVoucherPerUnit?.[row.itemId]) || 0 : 0) * (1 - taxPercent / 100), 0);
   const inputCost = (recipe.inputs || []).reduce((sum, row) =>
     sum + row.quantity * batches * currentUnitPrice(state, row.itemId, content), 0);
   const wage = state.employment?.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5;
