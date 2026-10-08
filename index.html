@@ -1075,6 +1075,7 @@ const __mxmod2 = (() => {
   ownerUpgradeStaffingRatio: 0.9, // 在岗须达到岗位上限的 90%
   // 上市（整栋，docs/OWNERSHIP.md 第 2 条）：挂牌时卖出比例的默认值，镇长可改。
   ipoDefaultOfferPercent: 49, // 民营业主申请上市时默认卖出 49%，业主持有其余股份
+  stockFairYieldPercent: 4, // 股票合理价：年利润 ÷ 总股本 ÷ 4%（市盈率 25）；股价对应的利润率跌到 3%、2%、1% 以下就是泡沫
   ipoTownDefaultOfferPercent: 0, // 镇长整栋上市默认一股不挂出：卖多少由镇长自己在交易所设，镇库持股不会被居民自动买走
   // 民营业主上市申请：经营好（近 60 天利润为正）但现金不够下一次升级的民营建筑，每隔这么多天检查一次是否递交申请。
   ipoApplicationCheckDays: 30, // 每 30 天检查一次
@@ -2627,7 +2628,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod18 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-2d221ef";
+       const BUILD_ID = "0203-736bd1b";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -12568,7 +12569,7 @@ function residentsFoodReserveQeq(state, content) {
   const observedDays = actualPerformance.observedDays;
   const realizedProfit = actualPerformance.actualProfitVoucherUnits;
   const annualizedProfit = actualPerformance.annualizedProfitVoucherUnits;
-  const referenceCompanyValue = actualPerformance.referenceCompanyValueVoucherUnits || 0;
+  const referenceCompanyValue = stockFairValueUnits(actualPerformance, content);
   const referencePerShare = company.totalShares > 0 ? Math.floor(referenceCompanyValue / company.totalShares) : 0;
   const epsUnits = company.totalShares > 0 ? annualizedProfit / company.totalShares : 0;
   const annualProfitPerShareUnits = Math.max(0, epsUnits);
@@ -12999,6 +13000,12 @@ function planTaxUnits(state, company, outputItemId, outputUnits, content) {
   };
 }
 
+// 股票合理总价 = 年化净利润 ÷ 合理利润率（rules.stockFairYieldPercent，默认 4%，即市盈率 25）。没有有效业绩时为 0。
+       function stockFairValueUnits(performance, content) {
+  const yieldPercent = Math.max(0.1, Number(content.rules.stockFairYieldPercent) || 4);
+  return performance.validProfitMethod ? Math.max(0, Math.round(performance.annualizedProfitVoucherUnits * 100 / yieldPercent)) : 0;
+}
+
 function archiveCompanyDay(state, company, content) {
   const serial = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
   if (serial <= 0 || company.plan?.lastArchivedSerial === serial) return;
@@ -13092,7 +13099,7 @@ function archiveCompanyDay(state, company, content) {
     residentSharePercent: company.totalShares ? company.residentShares / company.totalShares : 0
   };
 }
-return { ensureCompanies, buyInputForCompany, createIndependentCompany, createListedCompany, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice, companySalePrice, previewCompanyLevelChange, addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown, liquidateCompanyForArrears, setCompanyDividendPercent, setIntermediatePrice, offerSeller, sellerHoldingShares, offeredPoolShares, setShareOffer, previewShareSubscription, executeShareSubscription, injectCompanyCapital, arrangeListedWorkers, payListedCompanyWages, processListedCompany, processListedCompanies, sellCompanyProduct, sellCompanyOutputsToWholesale, companyWorkingCapitalReserve, settleAnnualCompanyProfits, settleAnnualCompanyDividends, companyActualProfitValuation, resetCompanyDaily, resetCompanyYear, companySummary };
+return { ensureCompanies, buyInputForCompany, createIndependentCompany, createListedCompany, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice, companySalePrice, previewCompanyLevelChange, addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown, liquidateCompanyForArrears, setCompanyDividendPercent, setIntermediatePrice, offerSeller, sellerHoldingShares, offeredPoolShares, setShareOffer, previewShareSubscription, executeShareSubscription, injectCompanyCapital, arrangeListedWorkers, payListedCompanyWages, processListedCompany, processListedCompanies, sellCompanyProduct, sellCompanyOutputsToWholesale, companyWorkingCapitalReserve, settleAnnualCompanyProfits, settleAnnualCompanyDividends, companyActualProfitValuation, stockFairValueUnits, resetCompanyDaily, resetCompanyYear, companySummary };
 })();
 
 // ===== selectors/operating-rights.js =====
@@ -13749,7 +13756,7 @@ const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayme
 const { recordEvent } = __mxmod14;
 const { householdList, isActiveHousehold } = __mxmod20;
 const { consumeHouseholdStockBudget } = __mxmod61;
-const { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHoldingShares } = __mxmod56;
+const { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHoldingShares, stockFairValueUnits } = __mxmod56;
 const { selectOperatingRightPreview } = __mxmod57;
 const { buildingMaterialValueUnits } = __mxmod45;
 const { nextRandom } = __mxmod24;
@@ -13940,14 +13947,14 @@ const { nextRandom } = __mxmod24;
        function stockReference(state, company, content) {
   const scale = currencyScale(content);
   const profit = companyActualProfitValuation(state, company, content);
-  const basisUnits = profit.referenceCompanyValueVoucherUnits || 0;
+  const basisUnits = stockFairValueUnits(profit, content);
   return {
     ...profit,
     bookAssetsVoucherUnits: 0,
     referenceCompanyValueVoucherUnits: basisUnits,
     referencePerShareVoucherUnits: company.totalShares > 0 ? Math.floor(basisUnits / company.totalShares) : 0,
     basis: profit.validProfitMethod
-      ? `最近${profit.observedDays}个日历日真实净利润与投入资本利润率统一估值；停工日计入观察窗口`
+      ? `最近${profit.observedDays}个日历日净利润折年，按${content.rules.stockFairYieldPercent || 4}%利润率估值（市盈率${Math.round(100 / (content.rules.stockFairYieldPercent || 4))}）；停工日计入观察窗口`
       : (profit.observedDays > 0 ? `${profit.performanceStatus || "观察中"}；库存不计入公司估值` : "暂无业绩；库存不计入公司估值"),
     scale
   };
@@ -14091,9 +14098,11 @@ function gauss(state) {
     if (!(company.sharePriceVoucherUnits > 0)) continue;
     const current = roundToShareTick(company.sharePriceVoucherUnits, content);
     const market = company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: current };
-    const reference = stockReference(state, company, content).referencePerShareVoucherUnits || 0;
-    // 业绩锚：有业绩估值就用它；还没有业绩（新股、停工）时沿用上一次的锚，从未有过就用挂牌价。
+    // 业绩锚 = 合理价（年利润 ÷ 4%）：有业绩就用它；观察够了仍不赚钱，锚每天缓慢下滑；还没有业绩（新股）沿用上一次的锚，从未有过就用挂牌价。
+    const performance = stockReference(state, company, content);
+    const reference = performance.referencePerShareVoucherUnits || 0;
     if (reference > 0) market.anchorUnits = reference;
+    else if (performance.observedDays >= (content.rules.sharePerformanceObservationDays || 30)) market.anchorUnits = Math.max(shareTick(content), Math.floor((market.anchorUnits || current) * 0.99));
     const next = stepSharePrice(current, market.anchorUnits > 0 ? market.anchorUnits : current, market, exchange.sentiment, draw, content);
     company.sharePriceVoucherUnits = next;
     if (!Array.isArray(company.sharePriceHistory)) company.sharePriceHistory = [];
@@ -19942,6 +19951,8 @@ function industryProductivityRows(state, content) {
       workingCapitalReserveVoucher: reserveUnits / voucherScale,
       lastAnnualSettlement: company.annualSettlement || null,
       sharePriceVoucher: ((company.sharePriceVoucherUnits || company.shareSale?.sharePriceVoucherUnits || 0)) / voucherScale,
+      priceYieldPercent: (company.sharePriceVoucherUnits || 0) > 0 && company.totalShares > 0
+        ? Math.max(0, reference.annualizedProfitVoucherUnits || 0) / company.totalShares / company.sharePriceVoucherUnits * 100 : 0,
       askPriceVoucher: (company.shareSale?.sharePriceVoucherUnits || 0) / voucherScale,
       shareSaleProceedsVoucher: (company.shareSale?.cumulativeProceedsVoucherUnits || 0) / voucherScale,
       revenueDayVoucher: (company.accounts?.day?.revenueVoucherUnits || 0) / voucherScale,
@@ -24334,6 +24345,8 @@ function renderListing(view, company) {
       <label>出售股数${stagedInput(view, { key: `share:${company.id}:count`, label: "出售股数", value: listedShares, integer: true, minimum: 0, maximum: company.townShares })}</label>
       <label>每股价格${stagedInput(view, { key: `share:${company.id}:price`, label: "每股售价", value: askPrice || 1, positive: true })}<small>粮券</small></label>
     </div>
+    <div class="row"><span class="label">按现价的年利润率</span><strong class="value">${number(company.priceYieldPercent || 0, 2)}%${(company.priceYieldPercent || 0) > 0 && company.priceYieldPercent < 3 ? " · 偏贵" : ""}</strong></div>
+    <div class="subtle">年利润÷现价；4%左右算合理，跌到3%、2%、1%越低泡沫越大。</div>
     <div class="row"><span class="label">现价 / 你定的售价</span><strong class="value">${number(sharePrice, 2)} / ${number(askPrice, 2)}粮券</strong></div>
     <div class="subtle">只有你挂出的股数才会被居民买走，且现价不低于你定的售价才成交（按现价）。${listedShares > 0 && sharePrice < askPrice ? "现价低于售价，暂不成交。" : ""}</div>
     <button class="secondary wide" data-share-preview="${escapeHtml(company.id)}">预览居民认购</button>

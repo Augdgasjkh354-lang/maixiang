@@ -3,7 +3,7 @@ import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPaym
 import { recordEvent } from "../economy/ledger.js";
 import { householdList, isActiveHousehold } from "./households.js";
 import { consumeHouseholdStockBudget } from "./investment-preference.js";
-import { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHoldingShares } from "./companies.js";
+import { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHoldingShares, stockFairValueUnits } from "./companies.js";
 import { selectOperatingRightPreview } from "../selectors/operating-rights.js";
 import { buildingMaterialValueUnits } from "./ownership.js";
 import { nextRandom } from "../core/random.js";
@@ -198,14 +198,14 @@ export function configureListedShareOffer(state, companyId, offeredShares, price
 export function stockReference(state, company, content) {
   const scale = currencyScale(content);
   const profit = companyActualProfitValuation(state, company, content);
-  const basisUnits = profit.referenceCompanyValueVoucherUnits || 0;
+  const basisUnits = stockFairValueUnits(profit, content);
   return {
     ...profit,
     bookAssetsVoucherUnits: 0,
     referenceCompanyValueVoucherUnits: basisUnits,
     referencePerShareVoucherUnits: company.totalShares > 0 ? Math.floor(basisUnits / company.totalShares) : 0,
     basis: profit.validProfitMethod
-      ? `最近${profit.observedDays}个日历日真实净利润与投入资本利润率统一估值；停工日计入观察窗口`
+      ? `最近${profit.observedDays}个日历日净利润折年，按${content.rules.stockFairYieldPercent || 4}%利润率估值（市盈率${Math.round(100 / (content.rules.stockFairYieldPercent || 4))}）；停工日计入观察窗口`
       : (profit.observedDays > 0 ? `${profit.performanceStatus || "观察中"}；库存不计入公司估值` : "暂无业绩；库存不计入公司估值"),
     scale
   };
@@ -349,9 +349,11 @@ export function settleStockMarketDay(state, content) {
     if (!(company.sharePriceVoucherUnits > 0)) continue;
     const current = roundToShareTick(company.sharePriceVoucherUnits, content);
     const market = company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: current };
-    const reference = stockReference(state, company, content).referencePerShareVoucherUnits || 0;
-    // 业绩锚：有业绩估值就用它；还没有业绩（新股、停工）时沿用上一次的锚，从未有过就用挂牌价。
+    // 业绩锚 = 合理价（年利润 ÷ 4%）：有业绩就用它；观察够了仍不赚钱，锚每天缓慢下滑；还没有业绩（新股）沿用上一次的锚，从未有过就用挂牌价。
+    const performance = stockReference(state, company, content);
+    const reference = performance.referencePerShareVoucherUnits || 0;
     if (reference > 0) market.anchorUnits = reference;
+    else if (performance.observedDays >= (content.rules.sharePerformanceObservationDays || 30)) market.anchorUnits = Math.max(shareTick(content), Math.floor((market.anchorUnits || current) * 0.99));
     const next = stepSharePrice(current, market.anchorUnits > 0 ? market.anchorUnits : current, market, exchange.sentiment, draw, content);
     company.sharePriceVoucherUnits = next;
     if (!Array.isArray(company.sharePriceHistory)) company.sharePriceHistory = [];

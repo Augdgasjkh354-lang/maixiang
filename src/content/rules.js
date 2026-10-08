@@ -59,6 +59,7 @@ export const RULES = Object.freeze({
   ownerUpgradeStaffingRatio: 0.9, // 在岗须达到岗位上限的 90%
   // 上市（整栋，docs/OWNERSHIP.md 第 2 条）：挂牌时卖出比例的默认值，镇长可改。
   ipoDefaultOfferPercent: 49, // 民营业主申请上市时默认卖出 49%，业主持有其余股份
+  stockFairYieldPercent: 4, // 股票合理价：年利润 ÷ 总股本 ÷ 4%（市盈率 25）；股价对应的利润率跌到 3%、2%、1% 以下就是泡沫
   ipoTownDefaultOfferPercent: 0, // 镇长整栋上市默认一股不挂出：卖多少由镇长自己在交易所设，镇库持股不会被居民自动买走
   // 民营业主上市申请：经营好（近 60 天利润为正）但现金不够下一次升级的民营建筑，每隔这么多天检查一次是否递交申请。
   ipoApplicationCheckDays: 30, // 每 30 天检查一次

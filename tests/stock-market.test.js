@@ -5,7 +5,7 @@ import { CONTENT } from "../src/content/index.js";
 import { formCompany } from "./helpers-ipo.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
 import {
-  settleStockMarketDay, stepSharePrice, shareTick, suggestedSharePriceVoucher, SHARE_PRICE_DAILY_LIMIT
+  settleStockMarketDay, stepSharePrice, shareTick, stockReference, suggestedSharePriceVoucher, SHARE_PRICE_DAILY_LIMIT
 } from "../src/systems/stock-exchange.js";
 
 // 股价模型：0.01 粮券一档、单日涨跌 ≤ 20%、偶发泡沫→破裂；没有上市公司时不消耗随机数。
@@ -120,4 +120,29 @@ test("没有上市公司时股市结算不消耗随机数", () => {
   const before = state.rng.state;
   assert.equal(settleStockMarketDay(state, CONTENT), null);
   assert.equal(state.rng.state, before);
+});
+
+test("合理价 = 年利润 ÷ 4%：按现价的年利润率 4% 算合理", () => {
+  const { state, company } = listedState({ price: 2 });
+  state.year = 1; state.day = 60;
+  company.history = [];
+  for (let serial = 1; serial <= 59; serial += 1) company.history.push({ serial, profitVoucherUnits: 10 * V, revenueVoucherUnits: 20 * V, soldUnits: 0 });
+  const performance = stockReference(state, company, CONTENT);
+  // 60 个观察日内每天 10 粮券 → 年化约 3650 粮券；合理总价 = 年利润 ÷ 4%。
+  assert.equal(performance.validProfitMethod, true);
+  assert.equal(performance.referenceCompanyValueVoucherUnits, Math.round(performance.annualizedProfitVoucherUnits * 100 / 4));
+  assert.equal(performance.referencePerShareVoucherUnits, Math.floor(performance.referenceCompanyValueVoucherUnits / company.totalShares));
+});
+
+test("业绩锚跟着合理价走；观察够了仍不赚钱，锚缓慢下滑", () => {
+  const { state, company } = listedState({ price: 2 });
+  state.year = 1; state.day = 60;
+  company.history = [];
+  for (let serial = 1; serial <= 59; serial += 1) company.history.push({ serial, profitVoucherUnits: 10 * V, revenueVoucherUnits: 20 * V, soldUnits: 0 });
+  settleStockMarketDay(state, CONTENT);
+  assert.equal(company.stockMarket.anchorUnits, stockReference(state, company, CONTENT).referencePerShareVoucherUnits);
+  company.history = company.history.map(row => ({ ...row, profitVoucherUnits: -V }));
+  const before = company.stockMarket.anchorUnits;
+  settleStockMarketDay(state, CONTENT);
+  assert.ok(company.stockMarket.anchorUnits < before, "亏损公司的锚下滑");
 });

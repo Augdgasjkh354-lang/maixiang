@@ -405,6 +405,8 @@ export function selectDashboard(state, content, selection) {
       workingCapitalReserveVoucher: reserveUnits / voucherScale,
       lastAnnualSettlement: company.annualSettlement || null,
       sharePriceVoucher: ((company.sharePriceVoucherUnits || company.shareSale?.sharePriceVoucherUnits || 0)) / voucherScale,
+      priceYieldPercent: (company.sharePriceVoucherUnits || 0) > 0 && company.totalShares > 0
+        ? Math.max(0, reference.annualizedProfitVoucherUnits || 0) / company.totalShares / company.sharePriceVoucherUnits * 100 : 0,
       askPriceVoucher: (company.shareSale?.sharePriceVoucherUnits || 0) / voucherScale,
       shareSaleProceedsVoucher: (company.shareSale?.cumulativeProceedsVoucherUnits || 0) / voucherScale,
       revenueDayVoucher: (company.accounts?.day?.revenueVoucherUnits || 0) / voucherScale,

@@ -129,6 +129,8 @@ function renderListing(view, company) {
       <label>出售股数${stagedInput(view, { key: `share:${company.id}:count`, label: "出售股数", value: listedShares, integer: true, minimum: 0, maximum: company.townShares })}</label>
       <label>每股价格${stagedInput(view, { key: `share:${company.id}:price`, label: "每股售价", value: askPrice || 1, positive: true })}<small>粮券</small></label>
     </div>
+    <div class="row"><span class="label">按现价的年利润率</span><strong class="value">${number(company.priceYieldPercent || 0, 2)}%${(company.priceYieldPercent || 0) > 0 && company.priceYieldPercent < 3 ? " · 偏贵" : ""}</strong></div>
+    <div class="subtle">年利润÷现价；4%左右算合理，跌到3%、2%、1%越低泡沫越大。</div>
     <div class="row"><span class="label">现价 / 你定的售价</span><strong class="value">${number(sharePrice, 2)} / ${number(askPrice, 2)}粮券</strong></div>
     <div class="subtle">只有你挂出的股数才会被居民买走，且现价不低于你定的售价才成交（按现价）。${listedShares > 0 && sharePrice < askPrice ? "现价低于售价，暂不成交。" : ""}</div>
     <button class="secondary wide" data-share-preview="${escapeHtml(company.id)}">预览居民认购</button>

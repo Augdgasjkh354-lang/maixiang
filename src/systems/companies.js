@@ -483,7 +483,7 @@ export function previewShareSubscription(state, companyId, content) {
   const observedDays = actualPerformance.observedDays;
   const realizedProfit = actualPerformance.actualProfitVoucherUnits;
   const annualizedProfit = actualPerformance.annualizedProfitVoucherUnits;
-  const referenceCompanyValue = actualPerformance.referenceCompanyValueVoucherUnits || 0;
+  const referenceCompanyValue = stockFairValueUnits(actualPerformance, content);
   const referencePerShare = company.totalShares > 0 ? Math.floor(referenceCompanyValue / company.totalShares) : 0;
   const epsUnits = company.totalShares > 0 ? annualizedProfit / company.totalShares : 0;
   const annualProfitPerShareUnits = Math.max(0, epsUnits);
@@ -912,6 +912,12 @@ export function companyActualProfitValuation(state, company, content) {
     referenceCompanyValueVoucherUnits: reference, fiveYearReferenceVoucherUnits: reference,
     validProfitMethod, performanceStatus: observedDays < minDays ? "观察中" : (annualized > 0 ? "已有业绩" : "暂无正收益")
   };
+}
+
+// 股票合理总价 = 年化净利润 ÷ 合理利润率（rules.stockFairYieldPercent，默认 4%，即市盈率 25）。没有有效业绩时为 0。
+export function stockFairValueUnits(performance, content) {
+  const yieldPercent = Math.max(0.1, Number(content.rules.stockFairYieldPercent) || 4);
+  return performance.validProfitMethod ? Math.max(0, Math.round(performance.annualizedProfitVoucherUnits * 100 / yieldPercent)) : 0;
 }
 
 function archiveCompanyDay(state, company, content) {
