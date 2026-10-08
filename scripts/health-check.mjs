@@ -49,11 +49,15 @@ const PRICE_ITEMS = ["flour", "bread", "salt", "wood", "wine", "cloth", "pork"];
 const OUTSIDE_TOWN_IDS = Object.keys(CONTENT.outsideTowns || {});
 
 function parseArgs(argv) {
-  const opts = { years: 10, seed: 91, json: null };
+  const opts = { years: 10, seed: 91, json: null, wealthTax: null, inheritance: null, employerShare: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--seed") opts.seed = Number(argv[++i]);
     else if (a === "--json") opts.json = argv[++i];
+    // 再分配政策（docs/REDISTRIBUTION.md）：--wealth-tax 1,3,5（三档年税率%）、--inheritance 30、--employer-share 100
+    else if (a === "--wealth-tax") opts.wealthTax = argv[++i].split(",").map(Number);
+    else if (a === "--inheritance") opts.inheritance = Number(argv[++i]);
+    else if (a === "--employer-share") opts.employerShare = Number(argv[++i]);
     else if (/^\d+$/.test(a)) opts.years = Number(a);
     else throw new Error(`未知参数：${a}`);
   }
@@ -246,6 +250,15 @@ function snapshot(state, { year, day, report, acc, label, prevShopStatus, policy
     wealthSum += wealth; peopleInHs += p;
   }
   pcs.sort((a, b) => a.v - b.v);
+  // 基尼系数与最富 10% 占比（按人口加权，口径同上面的家底）。
+  const totalW = pcs.reduce((sum, row) => sum + row.w, 0);
+  const totalV = pcs.reduce((sum, row) => sum + row.v * row.w, 0);
+  let cumW = 0, cumV = 0, area = 0;
+  for (const row of pcs) { const prevV = cumV; cumW += row.w; cumV += row.v * row.w; area += row.w / totalW * ((prevV + cumV) / 2 / (totalV || 1)); }
+  let topV = 0, topW = 0;
+  for (let i = pcs.length - 1; i >= 0 && topW < totalW * 0.1; i--) { const take = Math.min(pcs[i].w, totalW * 0.1 - topW); topW += take; topV += pcs[i].v * take; }
+  out.inequality = { gini: totalV > 0 ? r2(1 - 2 * area) : null, top10Share: totalV > 0 ? Math.round(topV / totalV * 1000) / 10 : null,
+    wealthTaxJin: r1((state.redistribution?.cumulative?.wealthTaxUnits || 0) / V), inheritanceJin: r1((state.redistribution?.cumulative?.inheritanceTaxUnits || 0) / V) };
   out.wealth = {
     p10: r1(weightedPercentile(pcs, 0.1)), p50: r1(weightedPercentile(pcs, 0.5)), p90: r1(weightedPercentile(pcs, 0.9)),
     meanPerCapita: peopleInHs ? r1(wealthSum / peopleInHs) : null
@@ -405,9 +418,9 @@ function printTables(rows, meta) {
 
   const tag = r => (r.mid ? "Y1D180*" : `${r.year}`);
   L("【一】人口、满意、家底");
-  L([pad("年", 8), pad("人口", 7), pad("户", 5), pad("满意", 7), pad("缺粮天", 8), pad("家底p10", 9), pad("p50", 7), pad("p90", 7), pad("人均均值", 9), pad("富裕度", 7)].join(""));
+  L([pad("年", 8), pad("人口", 7), pad("户", 5), pad("满意", 7), pad("缺粮天", 8), pad("家底p10", 9), pad("p50", 7), pad("p90", 7), pad("人均均值", 9), pad("富裕度", 7), pad("基尼", 6), pad("富10%占%", 9), pad("累计富人税", 11), pad("累计遗产税", 10)].join(""));
   for (const r of rows) L([pad(tag(r), 8), pad(r.population, 7), pad(r.households, 5), pad(r.satisfaction, 7), pad(r.shortageDays, 8),
-    pad(r.wealth.p10, 9), pad(r.wealth.p50, 7), pad(r.wealth.p90, 7), pad(r.wealth.meanPerCapita, 9), pad(r.affluence, 7)].join(""));
+    pad(r.wealth.p10, 9), pad(r.wealth.p50, 7), pad(r.wealth.p90, 7), pad(r.wealth.meanPerCapita, 9), pad(r.affluence, 7), pad(r.inequality?.gini, 6), pad(r.inequality?.top10Share, 9), pad(r.inequality?.wealthTaxJin, 11), pad(r.inequality?.inheritanceJin, 10)].join(""));
 
   L("\n【二】货币存量（粮券，万）与镇库");
   L([pad("年", 8), pad("总券", 9), pad("镇库", 9), pad("居民", 9), pad("店铺", 9), pad("公司", 9), pad("社保", 9), pad("银行", 9), pad("镇库麦(斤)", 12), pad("镇库收(斤)", 11), pad("镇库支(斤)", 11), pad("其中加工投入", 13), pad("市场面包(斤)", 14)].join(""));
@@ -465,6 +478,15 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const started = Date.now();
   const state = buildTown(opts.seed);
+  if (opts.wealthTax) {
+    const r = simulation.setWealthTax(state, { thresholds: state.policy.wealthTax.thresholds, ratesPercent: opts.wealthTax });
+    if (!r.ok) throw new Error("富人税设置失败：" + r.reason);
+  }
+  if (opts.inheritance != null) {
+    const r = simulation.setInheritanceTax(state, opts.inheritance);
+    if (!r.ok) throw new Error("遗产税设置失败：" + r.reason);
+  }
+  if (opts.employerShare != null) state.socialSecurity.employerSharePercent = opts.employerShare;
   const plan = initPlan(state);
   const levelSeen = {};
   const rows = [];
