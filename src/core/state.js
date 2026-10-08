@@ -298,14 +298,14 @@ export function createInitialState(options) {
     business: emptyBusinessState(content),
     industries: emptyIndustryState(content),
     fiscal: emptyFiscalState(),
-    housing: { villageCapacity: content.rules.housingCapacity },
+    housing: { villageCapacity: content.rules.housingCapacity, repairWoodCarry: 0 },
     villas: { sold: [], taxArrearsValueUnits: {}, stats: { soldTotal: 0, revenueValueUnits: 0, taxCollectedValueUnits: 0, taxArrearsValueUnits: 0 } },
     socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
     outsideTowns: createOutsideTowns(content),
     // 长期贸易协定：外贸房签约，每月从批发市场交货。
     tradeAgreements: [],
     laborCompetition: { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] },
-    goodsDemand: { carry: {}, todayDemandUnits: {}, day: {}, year: {} },
+    goodsDemand: { todayDemandUnits: {}, day: {}, year: {} },
     industryExperience: {},
     // 各 mod 自己的状态（初值来自 mod 的 content.js initialState）。
     mods: structuredClone(content.modStates || {}),

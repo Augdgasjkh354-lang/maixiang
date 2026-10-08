@@ -1,12 +1,15 @@
 import test from "node:test";
+import { householdAffluence, householdWealthUnits, daysUntilHarvest } from "../src/systems/household-budget.js";
+
 import assert from "node:assert/strict";
 import { CONTENT } from "../src/content/index.js";
 import { simulation } from "../src/engine.js";
-import { householdList, householdPopulation } from "../src/systems/households.js";
-import { accrueGoodsDemand, consumeGoods, goodsComfortPoints } from "../src/systems/goods-demand.js";
+import { householdList, householdPopulation, syncResidentAggregates } from "../src/systems/households.js";
+import { accrueGoodsDemand, consumeGoods, goodsComfortPoints, standardDailyUnits } from "../src/systems/goods-demand.js";
 import { isIndustryType, industryTypeIds } from "../src/content/buildings.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
+const V = CONTENT.precision.currencyUnitsPerVoucher;
 
 test("新产业由建筑定义推导：酒坊、棉田、织坊与原四产业同等可民营/成立公司", () => {
   for (const typeId of ["mill", "bakery", "lumberyard", "saltworks", "winery", "cotton_field", "weaving_mill"]) {
@@ -17,23 +20,47 @@ test("新产业由建筑定义推导：酒坊、棉田、织坊与原四产业�
   assert.ok(order.indexOf("mill") < order.indexOf("bakery"));
 });
 
-test("酒、布按人口产生日需求；家里有就用掉并加舒心值，没有不扣分", () => {
+test("日用品需求跟家底走：没家底的不买，越宽裕买得越多；用够标准量满额加成，多用边际递减", () => {
   const state = simulation.createInitialState({ seed: 5501 });
-  const people = householdList(state).reduce((sum, h) => sum + householdPopulation(h), 0);
-  accrueGoodsDemand(state, people, CONTENT);
-  const expectedCloth = Math.floor(people * CONTENT.rules.householdGoods.cloth.annualPerPerson * I / CONTENT.rules.daysPerYear);
-  assert.equal(state.goodsDemand.todayDemandUnits.cloth, expectedCloth);
+  const [poor, normal, rich] = householdList(state);
+  for (const h of householdList(state)) h.voucherUnits = 0;
+  const ref = CONTENT.rules.householdBudget.referenceWealthPerCapita;
+  normal.voucherUnits = Math.round(ref * householdPopulation(normal) * V);
+  rich.voucherUnits = Math.round(ref * 9 * householdPopulation(rich) * V);
+  for (const h of [poor, normal, rich]) h.inventory.wheat = 0;
+  syncResidentAggregates(state, CONTENT);
+  assert.equal(householdAffluence(state, poor, CONTENT), 0);
+  assert.ok(Math.abs(householdAffluence(state, normal, CONTENT) - 1) < 1e-6, "人均家底等于参照值时宽裕度为 1");
+  assert.ok(Math.abs(householdAffluence(state, rich, CONTENT) - 3) < 1e-6, "9 倍参照值 → √9 = 3");
 
-  const household = householdList(state)[0];
-  const n = householdPopulation(household);
-  assert.equal(goodsComfortPoints(state, household, n, {}, CONTENT), 0, "没有酒和布时没有加成，也不扣分");
-  for (const itemId of Object.keys(CONTENT.rules.householdGoods)) household.inventory[itemId] = 10 * I;
+  accrueGoodsDemand(state, 0, CONTENT);
+  for (const h of [poor, normal, rich]) for (const itemId of Object.keys(CONTENT.rules.householdGoods)) h.inventory[itemId] = 1000 * I;
   consumeGoods(state, CONTENT);
-  const life = household.life.day;
-  assert.ok(life.clothConsumedUnits > 0 && life.wineConsumedUnits > 0);
-  const points = goodsComfortPoints(state, household, n, life, CONTENT);
+  const cfg = CONTENT.rules.householdGoods.wine;
+  const standard = h => standardDailyUnits(householdPopulation(h), cfg, CONTENT);
+  assert.equal(poor.life?.day?.wineConsumedUnits || 0, 0, "没家底不喝酒");
+  assert.equal(normal.life.day.wineConsumedUnits, Math.floor(standard(normal)));
+  assert.equal(rich.life.day.wineConsumedUnits, Math.floor(standard(rich) * Math.pow(3, cfg.incomeElasticity)), "富户按 3^弹性 倍消费");
+
   const max = Object.values(CONTENT.rules.householdGoods).reduce((sum, row) => sum + row.comfortMaximum, 0);
-  assert.ok(points > max * 0.9 && points <= max + 1e-9, `满足当日份额应接近满额加成，实际${points}`);
+  assert.equal(goodsComfortPoints(state, poor, householdPopulation(poor), poor.life?.day || {}, CONTENT), 0, "没有日用品不加分也不扣分");
+  const normalPoints = goodsComfortPoints(state, normal, householdPopulation(normal), normal.life.day, CONTENT);
+  assert.ok(normalPoints > max * 0.95 && normalPoints <= max * 1.01, `标准量接近满额，实际${normalPoints}`);
+  const richPoints = goodsComfortPoints(state, rich, householdPopulation(rich), rich.life.day, CONTENT);
+  assert.ok(richPoints > normalPoints && richPoints <= max * 1.5 + 1e-9, "多用多加，但最多 1.5 倍");
+});
+
+test("家底不算秋收前的口粮：存粮只够吃到秋收的人家不算宽裕", () => {
+  const state = simulation.createInitialState({ seed: 5503 });
+  const h = householdList(state)[0];
+  h.voucherUnits = 0;
+  const people = householdPopulation(h);
+  const keepDays = daysUntilHarvest(state, CONTENT) + CONTENT.rules.householdBudget.harvestBufferDays;
+  h.inventory.wheat = people * CONTENT.rules.foodPerPersonDay * keepDays * I;
+  for (const itemId of ["flour", "bread"]) h.inventory[itemId] = 0;
+  assert.equal(householdWealthUnits(state, h, CONTENT), 0);
+  h.inventory.wheat += 600 * people * I;
+  assert.ok(householdWealthUnits(state, h, CONTENT) > 0, "多出来的小麦才算家底");
 });
 
 test("镇营酒坊用镇库小麦酿酒，棉田产棉，织坊用棉织布", () => {

@@ -1,11 +1,10 @@
 import { currencyScale } from "../economy/currency.js";
 import { bookAddAll, PERIODS } from "../economy/books.js";
-import { quantityToUnits } from "../economy/inventory.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { selectHousing } from "../selectors/housing.js";
-import { householdConvertibleWheatUnits, householdList, syncResidentAggregates } from "./households.js";
+import { activeHouseholds, householdConvertibleWheatUnits, householdList, syncResidentAggregates } from "./households.js";
 import { purchaseItemForResidents } from "./consumer-market.js";
 import { recordHouseholdRentDue, recordHouseholdRentPaid } from "./household-life.js";
 
@@ -46,14 +45,24 @@ export function settleHousingRent(state, housingAtStart, content) {
 
 export function currentHousing(state, content) { return selectHousing(state, content); }
 
+// 修缮木材日需求：按活跃家庭数 × 每户每年斤数累计，除以 daysPerYear 取整；余数结转到 state.housing.repairWoodCarry（与食盐需求同一做法）。
+export function accrueRepairWoodNeed(state, householdCount, content) {
+  const perYearUnits = content.rules.houseRepairWoodJinPerHouseholdYear * content.precision.inventoryUnitsPerJin;
+  state.housing ||= {};
+  const numerator = (state.housing.repairWoodCarry || 0) + householdCount * perYearUnits;
+  const targetUnits = Math.floor(numerator / content.rules.daysPerYear);
+  state.housing.repairWoodCarry = numerator % content.rules.daysPerYear;
+  return targetUnits;
+}
+
 // 居民每日购买木材用于修缮自有房屋：买入后立即记为修缮消耗。
 // 同一轮市场里家庭之间也可能互相转卖木材，因此这里只把“本日买入的木材”从家户账上扣回：
 // 目标是把居民木材总量降到买入前水平，且任何家庭最多被扣回自己买入后的净增量，
 // 不会动居民原有库存，木材也不会在家户库存里堆积。
 export function buyRepairWoodForResidents(state, content) {
   const households = householdList(state);
-  // 规则里的修缮需求按“木材单位”计，这里折算成库存精度单位。
-  const targetUnits = quantityToUnits(content.rules.houseRepairWoodUnitsPerDay ?? 5, content);
+  // 今日修缮需求（库存精度单位）：随活跃家庭数增长。
+  const targetUnits = accrueRepairWoodNeed(state, activeHouseholds(state).length, content);
   // 购买前快照各家庭木材库存与居民总量。
   const before = new Map(households.map(household => [household.id, household.inventory?.wood || 0]));
   const beforeTotal = households.reduce((sum, household) => sum + (household.inventory?.wood || 0), 0);

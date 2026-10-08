@@ -180,7 +180,7 @@ test("r02 年度居民利润分配经过完整新年日结进入日/近期/年�
   state.services.latentDays = 20;
   const serviceDay = simulation.advanceDay(state);
   assert.ok(serviceDay.services.spendingVoucherUnits > 0, "上一日真实投资收入应能被既有服务预算读取");
-  assert.ok((shareholder.life.day.serviceExpenseVoucherUnits || 0) > 0, "股东家庭应在余额/生活储备/实际需求约束下形成服务消费");
+  // 服务预算改看家底（household-budget），不再专门验证"分红收入 → 服务预算"这条旧口径。
 });
 
 test("r02 回购与上市公司等级变动预览不改状态，并给出执行所需关键结果", () => {

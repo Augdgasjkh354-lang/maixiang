@@ -2,18 +2,22 @@ import { purchaseItemForResidents } from "./consumer-market.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
 import { recordHouseholdInKind } from "./household-life.js";
+import { householdAffluence } from "./household-budget.js";
 
-// 日用品（酒、布等）：配置在 rules.householdGoods。
-// 每天按人口算出全镇需求；手头宽裕（人均现金达到门槛）的家庭才去综合商店买，买在主食和盐之后。
-// 用掉的量换成舒心值加成（满足需求得满分），买不到不扣分——这是生活改善，不是新的生存压力。
+// 日用品（酒、布、肉等）：配置在 rules.householdGoods。
+// 每户当天想要的量 = 人口 × 年人均标准量 / 365 × 宽裕度^收入弹性（宽裕度见 household-budget.js：
+// 正常人家 1 倍，穷户接近 0，富户最多数倍）。买在主食和盐之后；用了加舒心值，超过标准量的部分边际递减；
+// 买不到不扣分——这是生活改善，不是新的生存压力。
 
 function goodsConfig(content) {
   return content.rules.householdGoods || {};
 }
 
+const targetsCache = new WeakMap();
+
 export function ensureGoodsDemand(state) {
-  state.goodsDemand ||= { carry: {}, todayDemandUnits: {}, day: {}, year: {} };
-  for (const key of ["carry", "todayDemandUnits", "day", "year"]) state.goodsDemand[key] ||= {};
+  state.goodsDemand ||= { todayDemandUnits: {}, day: {}, year: {} };
+  for (const key of ["todayDemandUnits", "day", "year"]) state.goodsDemand[key] ||= {};
   return state.goodsDemand;
 }
 
@@ -34,45 +38,55 @@ function addPeriods(state, key, itemId, units) {
   }
 }
 
-// 开日：算出当日需求（按年人均量折日，零头结转）。
+// 某户某样日用品的标准日量（宽裕度 1 时的量，库存单位）。
+export function standardDailyUnits(people, cfg, content) {
+  return people * cfg.annualPerPerson * content.precision.inventoryUnitsPerJin / content.rules.daysPerYear;
+}
+
+function householdTargets(state, content) {
+  const targets = new Map();
+  for (const household of householdList(state).filter(isActiveHousehold)) {
+    const people = householdPopulation(household);
+    const m = householdAffluence(state, household, content);
+    const row = {};
+    for (const [itemId, cfg] of Object.entries(goodsConfig(content))) {
+      row[itemId] = Math.floor(standardDailyUnits(people, cfg, content) * Math.pow(m, cfg.incomeElasticity ?? 1));
+    }
+    targets.set(household.id, row);
+  }
+  return targets;
+}
+
+// 开日：按每户宽裕度算出当日想要的量（当天缓存，不进存档），全镇合计写进 todayDemandUnits 供排产参考。
 export function accrueGoodsDemand(state, population, content) {
   const goods = ensureGoodsDemand(state);
   goods.day = emptyPeriod(content);
   if (state.day === 0 || !goods.year.demandUnits) goods.year = emptyPeriod(content);
-  for (const [itemId, cfg] of Object.entries(goodsConfig(content))) {
-    const numerator = (goods.carry[itemId] || 0) + population * cfg.annualPerPerson * content.precision.inventoryUnitsPerJin;
-    const units = Math.floor(numerator / content.rules.daysPerYear);
-    goods.carry[itemId] = numerator % content.rules.daysPerYear;
+  const targets = householdTargets(state, content);
+  targetsCache.set(state, targets);
+  for (const itemId of Object.keys(goodsConfig(content))) {
+    let units = 0;
+    for (const row of targets.values()) units += row[itemId] || 0;
     goods.todayDemandUnits[itemId] = units;
     addPeriods(state, "demandUnits", itemId, units);
   }
   return goods.todayDemandUnits;
 }
 
-// 每户当日应得的份额（按人口分）。
-function householdShares(households, totalUnits) {
-  const people = households.reduce((sum, household) => sum + householdPopulation(household), 0) || 1;
-  let assigned = 0;
-  return households.map((household, index) => {
-    const units = index === households.length - 1 ? totalUnits - assigned : Math.floor(totalUnits * householdPopulation(household) / people);
-    assigned += units;
-    return { household, units };
-  });
+function todaysTargets(state, content) {
+  return targetsCache.get(state) || householdTargets(state, content);
 }
 
 export function buyGoodsForResidents(state, content) {
-  const goods = ensureGoodsDemand(state);
+  ensureGoodsDemand(state);
+  const targets = todaysTargets(state, content);
   const households = householdList(state).filter(isActiveHousehold);
   const results = {};
-  for (const [itemId, cfg] of Object.entries(goodsConfig(content))) {
-    const demand = goods.todayDemandUnits[itemId] || 0;
+  for (const itemId of Object.keys(goodsConfig(content))) {
     const needs = {};
     let desired = 0;
-    const minCash = (cfg.minCashVoucherPerCapita || 0) * content.precision.currencyUnitsPerVoucher;
-    for (const { household, units } of householdShares(households, demand)) {
-      const cashPerCapita = (household.voucherUnits || 0) / Math.max(1, householdPopulation(household));
-      if (cashPerCapita < minCash) continue;
-      const shortage = Math.max(0, units - (household.inventory?.[itemId] || 0));
+    for (const household of households) {
+      const shortage = Math.max(0, (targets.get(household.id)?.[itemId] || 0) - (household.inventory?.[itemId] || 0));
       if (shortage <= 0) continue;
       needs[household.id] = shortage;
       desired += shortage;
@@ -87,15 +101,16 @@ export function buyGoodsForResidents(state, content) {
   return results;
 }
 
-// 用掉当日份额，记到家庭生活账（<item>ConsumedUnits），供舒心值计算。
+// 用掉当日想要的量（家里有多少用多少），记到家庭生活账（<item>ConsumedUnits），供舒心值计算。
 export function consumeGoods(state, content) {
-  const goods = ensureGoodsDemand(state);
+  ensureGoodsDemand(state);
+  const targets = todaysTargets(state, content);
   const households = householdList(state).filter(isActiveHousehold);
   const results = {};
   for (const itemId of Object.keys(goodsConfig(content))) {
     let consumed = 0;
-    for (const { household, units } of householdShares(households, goods.todayDemandUnits[itemId] || 0)) {
-      const used = Math.min(household.inventory?.[itemId] || 0, Math.max(0, units));
+    for (const household of households) {
+      const used = Math.min(household.inventory?.[itemId] || 0, Math.max(0, targets.get(household.id)?.[itemId] || 0));
       if (used <= 0) continue;
       household.inventory[itemId] -= used;
       consumed += used;
@@ -108,13 +123,15 @@ export function consumeGoods(state, content) {
   return results;
 }
 
-// 舒心值加成：每样日用品按"当日用量 / 当日应得量"给分，满额得 comfortMaximum。
+// 舒心值：每样日用品按"当日用量 / 标准量"给分，用到标准量得 comfortMaximum，
+// 再多边际递减（log2(1+比例)），最多 1.5 倍。
 export function goodsComfortPoints(state, household, people, dayBook, content) {
   let points = 0;
   for (const [itemId, cfg] of Object.entries(goodsConfig(content))) {
-    const need = people * cfg.annualPerPerson * content.precision.inventoryUnitsPerJin / content.rules.daysPerYear;
+    const need = standardDailyUnits(people, cfg, content);
     const used = dayBook?.[`${itemId}ConsumedUnits`] || 0;
-    points += (cfg.comfortMaximum || 0) * Math.max(0, Math.min(1, need > 0 ? used / need : 0));
+    if (need <= 0 || used <= 0) continue;
+    points += (cfg.comfortMaximum || 0) * Math.min(1.5, Math.log2(1 + used / need));
   }
   return points;
 }

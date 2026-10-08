@@ -3,6 +3,7 @@ import { bookAddAll } from "../economy/books.js";
 import { purchaseItemForResidents } from "./consumer-market.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdList, householdPopulation, isActiveHousehold } from "./households.js";
+import { householdAffluence } from "./household-budget.js";
 
 export function breadDemandShare(price, content) {
   if (!Number.isFinite(price) || price <= 0) return 0;
@@ -23,55 +24,81 @@ export function stapleDemandShares(content) {
   };
 }
 
-// 单项主食按“净需求”购买：按户计算缺口（有粮户少买、无粮户多买），避免按人口均分导致富户囤粮穷户挨饿。
-function buyStapleItem(state, population, content, itemId, share) {
+// 单项主食按"每户缺口"购买：每户目标口粮当量减去自家已有的，缺多少买多少。
+function buyStapleItem(state, content, itemId, familyTargetQeq) {
   const price = currentUnitPrice(state, itemId, content);
   const item = content.items[itemId];
-  const dailyNeed = population * content.rules.foodPerPersonDay * content.precision.qeqUnitsPerJin;
   const perUnitQeq = itemQeqUnitsPerInventoryUnit(item, content);
-  const targetQeq = Math.floor(dailyNeed * share);
-  const currentQeq = (state.accounts.residents[itemId] || 0) * perUnitQeq;
-  const targetUnits = perUnitQeq > 0
-    ? Math.max(0, Math.floor((targetQeq - currentQeq) / perUnitQeq)) : 0;
-
-  // 按户缺口：每户按人口分目标，减去自有库存。
   const householdNeedsUnits = {};
-  if (perUnitQeq > 0 && targetUnits > 0) {
-    const households = householdList(state).filter(isActiveHousehold);
-    const totalPeople = Math.max(1, households.reduce((sum, h) => sum + householdPopulation(h), 0));
-    for (const h of households) {
-      const people = householdPopulation(h);
-      const familyTargetQeq = Math.floor(targetQeq * people / totalPeople);
-      const familyHasQeq = Math.floor((h.inventory?.[itemId] || 0) * perUnitQeq);
-      householdNeedsUnits[h.id] = Math.max(0, Math.floor((familyTargetQeq - familyHasQeq) / perUnitQeq));
-    }
+  let targetQeq = 0;
+  let targetUnits = 0;
+  for (const [householdId, qeq] of familyTargetQeq) {
+    targetQeq += qeq;
+    const household = state.households?.byId?.[householdId];
+    const hasQeq = Math.floor((household?.inventory?.[itemId] || 0) * perUnitQeq);
+    const units = perUnitQeq > 0 ? Math.max(0, Math.floor((qeq - hasQeq) / perUnitQeq)) : 0;
+    if (units > 0) { householdNeedsUnits[householdId] = units; targetUnits += units; }
   }
-
-  // Quote the town cost basis before the shared market moves inventory. Company sales account for their own COGS.
   const townBefore = state.accounts.town[itemId] || 0;
-  const result = purchaseItemForResidents(state, itemId, targetUnits, price, content, `居民以粮券购买${item?.name || itemId}`, { householdNeedsUnits });
-  const soldJin = result.purchasedUnits / content.precision.inventoryUnitsPerJin;
-  const voucher = result.paidVoucherUnits / content.precision.currencyUnitsPerVoucher;
+  const result = targetUnits > 0
+    ? purchaseItemForResidents(state, itemId, targetUnits, price, content, `居民以粮券购买${item?.name || itemId}`, { householdNeedsUnits })
+    : { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: null };
+  // 买完后每户还差多少（口粮当量），留给下一种主食替代。
+  const shortfallQeq = new Map();
+  for (const [householdId, qeq] of familyTargetQeq) {
+    const household = state.households?.byId?.[householdId];
+    const has = Math.floor((household?.inventory?.[itemId] || 0) * perUnitQeq);
+    if (qeq > has) shortfallQeq.set(householdId, qeq - has);
+  }
   return {
     itemId,
-    targetShare: share,
     targetQeq,
     targetQeqJin: targetQeq / content.precision.qeqUnitsPerJin,
     targetUnits,
     price,
     purchasedUnits: result.purchasedUnits,
-    purchasedJin: soldJin,
+    purchasedJin: result.purchasedUnits / content.precision.inventoryUnitsPerJin,
     paidVoucherUnits: result.paidVoucherUnits,
-    paidVoucher: voucher,
+    paidVoucher: result.paidVoucherUnits / content.precision.currencyUnitsPerVoucher,
     townStockBeforeJin: townBefore / content.precision.inventoryUnitsPerJin,
     sellerRows: result.sellerRows,
+    shortfallQeq,
     limitReason: targetUnits <= 0 ? `居民自有${item?.name || itemId}已满足今日目标` : result.reason
   };
 }
 
+// 主食：口粮默认吃自家小麦；家里越宽裕（household-budget 的宽裕度），越多换成面粉、面包
+// （标准比例 × 宽裕度，最多 stapleUpgradeMax 倍）。先买面包，没买到的改买面粉，还不够的买小麦。
 export function buyStaplesForResidents(state, population, content) {
   const shares = stapleDemandShares(content);
-  const rows = ["wheat", "flour", "bread"].map(itemId => buyStapleItem(state, population, content, itemId, shares[itemId]));
+  const maxUpgrade = content.rules.householdBudget?.stapleUpgradeMax ?? 1.5;
+  const dailyQeqPerPerson = content.rules.foodPerPersonDay * content.precision.qeqUnitsPerJin;
+  const plan = { bread: new Map(), flour: new Map(), wheat: new Map() };
+  let upgradeShareSum = 0;
+  let people = 0;
+  for (const household of householdList(state).filter(isActiveHousehold)) {
+    const need = householdPopulation(household) * dailyQeqPerPerson;
+    const upgrade = Math.min(maxUpgrade, householdAffluence(state, household, content));
+    const bread = Math.min(need, Math.floor(need * shares.bread * upgrade));
+    const flour = Math.min(need - bread, Math.floor(need * shares.flour * upgrade));
+    plan.bread.set(household.id, bread);
+    plan.flour.set(household.id, flour);
+    plan.wheat.set(household.id, need - bread - flour);
+    upgradeShareSum += (bread + flour) / Math.max(1, need) * householdPopulation(household);
+    people += householdPopulation(household);
+  }
+  const rows = [];
+  const breadRow = buyStapleItem(state, content, "bread", plan.bread);
+  rows.push(breadRow);
+  for (const [id, qeq] of breadRow.shortfallQeq) plan.flour.set(id, (plan.flour.get(id) || 0) + qeq);
+  const flourRow = buyStapleItem(state, content, "flour", plan.flour);
+  rows.push(flourRow);
+  for (const [id, qeq] of flourRow.shortfallQeq) plan.wheat.set(id, (plan.wheat.get(id) || 0) + qeq);
+  rows.push(buyStapleItem(state, content, "wheat", plan.wheat));
+  rows.sort((a, b) => ["wheat", "flour", "bread"].indexOf(a.itemId) - ["wheat", "flour", "bread"].indexOf(b.itemId));
+  const totalQeq = rows.reduce((sum, row) => sum + row.targetQeq, 0) || 1;
+  for (const row of rows) row.targetShare = row.targetQeq / totalQeq;
+  state.market.upgradeShare = upgradeShareSum / Math.max(1, people);
   const bread = rows.find(row => row.itemId === "bread");
   const purchasedBreadUnits = bread.purchasedUnits;
   // 面包为 generalStoreOnly，镇库不直售；以下镇库面包记账恒为0，保留作兼容（死代码）。

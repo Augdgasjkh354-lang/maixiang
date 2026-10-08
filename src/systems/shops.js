@@ -504,16 +504,23 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
   const prices = shopTradePrices(state, shop.typeId, content, itemId, shop);
   const quantity = Math.min(Math.max(0, Math.floor(units)), shop.inventory[itemId] || 0);
   if (quantity <= 0) return { ok: false, reason: "店铺缺货" };
-  const customerCapacity = shopDailyCustomerCapacity(state, shop, content);
-  if ((shop.accounts.day.customerCount || 0) >= customerCapacity) {
-    registerRejectedCustomers(state, shopId, 1, content);
+  // 客流按家庭计：同一家庭当日在本店无论买几样，只算一个客人。已计入的家庭不受客流上限拦截。
+  const buyerHouseholdId = householdIdOf(buyerOwner);
+  const day = shop.accounts.day;
+  const alreadyServed = !!(buyerHouseholdId && day.customerHouseholds?.[buyerHouseholdId]);
+  if (!alreadyServed && (day.customerCount || 0) >= shopDailyCustomerCapacity(state, shop, content)) {
+    // 同一家庭当日被拒只记一次拒客。
+    day.rejectedHouseholds ||= {};
+    if (!buyerHouseholdId || !day.rejectedHouseholds[buyerHouseholdId]) {
+      if (buyerHouseholdId) day.rejectedHouseholds[buyerHouseholdId] = true;
+      registerRejectedCustomers(state, shopId, 1, content);
+    }
     return { ok: false, reason: "今日客流接待能力已满" };
   }
   const soldToday = Object.values(shop.accounts.day.soldUnits || {}).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
   const remainingGoodsCapacity = Math.max(0, shopSalesCapacityUnits(state, shop, content) - soldToday);
   const actual = Math.min(quantity, remainingGoodsCapacity);
   if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * prices.retailVoucherPerUnit * currencyScale(content));
-  const buyerHouseholdId = householdIdOf(buyerOwner);
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
   const maxWheatUnits = buyerHousehold ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30) : undefined;
   const payment = settleMonetaryPayment(state, buyerOwner, `shop:${shopId}`, currentPaymentComposition(state, paymentUnits), content,
@@ -524,7 +531,17 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
   addBookValue(shop, "revenueVoucherUnits", paymentUnits);
   addBookValue(shop, "cogsVoucherUnits", cogs);
   addBookMap(shop, "soldUnits", itemId, actual);
-  bookAdd(shop.accounts, "customerCount", 1);
+  // 首次成交的家庭才记一个客人；非家庭买家（如公司、店铺）每笔照旧记一次。
+  if (buyerHouseholdId) {
+    const today = shop.accounts.day;
+    if (!today.customerHouseholds?.[buyerHouseholdId]) {
+      today.customerHouseholds ||= {};
+      today.customerHouseholds[buyerHouseholdId] = true;
+      bookAdd(shop.accounts, "customerCount", 1);
+    }
+  } else {
+    bookAdd(shop.accounts, "customerCount", 1);
+  }
   applyProfit(shop, paymentUnits - cogs);
   // 0.2.3 动态加价：把这一笔成交记入按商品的利润率窗口（收入/进货成本/销量）。
   recordShopItemSale(shop, itemId, actual, paymentUnits, cogs, content);

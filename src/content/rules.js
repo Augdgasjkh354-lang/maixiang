@@ -20,8 +20,9 @@ export const RULES = Object.freeze({
   breadTargetShareMaximum: 0.5,
   // 居民主食需求按固定比例拆分到小麦、面粉、面包。三项之和应为 1，改动后需同步核算口粮当量。
   stapleDemandShares: Object.freeze({ wheat: 0.6, flour: 0.2, bread: 0.2 }),
-  // 居民每日用于房屋修缮的木材需求（木材“单位”，非库存精度单位）。
-  houseRepairWoodUnitsPerDay: 5,
+  // 居民房屋修缮的木材需求：每户每年斤数，按活跃家庭数累计，日需求用 daysPerYear 分摊（小数由 state.housing.repairWoodCarry 结转）。
+  // 250 户 × 7.3 斤 ÷ 365 ≈ 5 斤/日。
+  houseRepairWoodJinPerHouseholdYear: 7.3,
   breadBasicReserveDays: 30,
   breadBasePriceWheatPerJin: 2,
   unemploymentDailyJin: 1,
@@ -132,17 +133,21 @@ export const RULES = Object.freeze({
   // 经济历史曲线保留天数（用户 0.1.11：地图"经济"面板走势）。
   economyHistoryDays: 60,
   serviceDemandMaximumCycles: 2,
-  serviceBudgetSharePercent: 35,
   serviceComfortDailyMaximum: 3,
-  // 日用品：每人每年用量；人均现金达到门槛的家庭才买；用够当日份额得满额舒心值加成。
   operatingStockCorrectionDays: 5,
+  // 家庭购买力（systems/household-budget.js）：人均家底达到参照值时宽裕度为 1（正常消费），宽裕度 = √(人均家底/参照值)，封顶 maxAffluence；
+  // 家底只算粮券 + 留够到下次秋收再加 harvestBufferDays 天口粮后多出的小麦；服务预算 = 家底 / wealthSpendDays × serviceShare；
+  // 主食里面粉、面包的比例 = 标准比例 × 宽裕度（最多 stapleUpgradeMax 倍）。
+  householdBudget: Object.freeze({ referenceWealthPerCapita: 60, maxAffluence: 3, wealthSpendDays: 60, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5 }),
+  // 日用品：annualPerPerson 是正常人家（宽裕度 1）的年人均量；实际量 × 宽裕度^incomeElasticity（必需品弹性小，享受品大）；
+  // comfortMaximum 是用到标准量时的舒心值加成，多用边际递减（最多 1.5 倍）。
   householdGoods: Object.freeze({
-    cloth: Object.freeze({ annualPerPerson: 1, minCashVoucherPerCapita: 10, comfortMaximum: 3 }),
-    wine: Object.freeze({ annualPerPerson: 6, minCashVoucherPerCapita: 30, comfortMaximum: 2 }),
-    chicken: Object.freeze({ annualPerPerson: 4, minCashVoucherPerCapita: 15, comfortMaximum: 0.6 }),
-    duck: Object.freeze({ annualPerPerson: 3, minCashVoucherPerCapita: 15, comfortMaximum: 0.5 }),
-    goose: Object.freeze({ annualPerPerson: 2, minCashVoucherPerCapita: 20, comfortMaximum: 0.5 }),
-    pork: Object.freeze({ annualPerPerson: 8, minCashVoucherPerCapita: 15, comfortMaximum: 1 })
+    cloth: Object.freeze({ annualPerPerson: 1, incomeElasticity: 0.6, comfortMaximum: 3 }),
+    wine: Object.freeze({ annualPerPerson: 6, incomeElasticity: 1.2, comfortMaximum: 2 }),
+    chicken: Object.freeze({ annualPerPerson: 4, incomeElasticity: 1, comfortMaximum: 0.6 }),
+    duck: Object.freeze({ annualPerPerson: 3, incomeElasticity: 1, comfortMaximum: 0.5 }),
+    goose: Object.freeze({ annualPerPerson: 2, incomeElasticity: 1.3, comfortMaximum: 0.5 }),
+    pork: Object.freeze({ annualPerPerson: 8, incomeElasticity: 0.8, comfortMaximum: 1 })
   }),
   serviceTypes: Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", basis: "person", cycleDays: 20, priceVoucher: 4, merchantCapacity: 24, clerkCapacity: 30, consumables: Object.freeze([]), comfort: 0.8, incomeSensitivity: 0.8 }),

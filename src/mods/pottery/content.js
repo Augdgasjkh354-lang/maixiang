@@ -49,9 +49,9 @@ export default {
     // 批发市场默认售价 / 收购价。
     wholesaleDefaultSalePrices: { clay: 2, pottery: 9 },
     wholesaleDefaultPurchasePrices: { clay: 1.2, pottery: 6.5 },
-    // 居民日用品：年人均 1 件（低于酒、布），人均现金 8 券以上才买，满额加舒心值 1 分。
+    // 居民日用品：正常人家年人均 1 件，越宽裕买得越多（弹性 0.6），用够标准量加舒心值 1 分。
     householdGoods: {
-      pottery: { annualPerPerson: 1, minCashVoucherPerCapita: 8, comfortMaximum: 1 }
+      pottery: { annualPerPerson: 1, incomeElasticity: 0.6, comfortMaximum: 1 }
     }
   },
 

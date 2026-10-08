@@ -57,7 +57,8 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 
 | 产业 | 有 `industryTier` 的建筑（0 原料：伐木场/盐场/棉田；1 加工：磨坊/酒坊/织坊；2 成品：面包房）。所有"哪些建筑能民营/成立公司/设生产税"都由 `content/buildings.js` 的 `industryTypeIds` / `isIndustryType` 推导，经营计划从下游往上游排。加新产业 = 加 item + recipe + 带 industryTier 的建筑 |
 | 养殖基地 / 时代广场 | 都是"店铺"的宿主建筑（建筑定义带 `shopHost.slotsPerLevel`），复用店铺的店主、商人、店员、工资、租金、利润税、清算。养殖场是 `kind: "farm"` 的店铺（`systems/livestock.js` 每天喂麦出肉，直供综合商店 `buyFromFarms`，余量进批发市场）；时代广场是一个集体集市（`kind: "stall"`、`collective: true` 的店铺，不属于某一户；`systems/stalls.js` 按销量增减摆摊人数，只卖 `householdGoods`，每人每日 25 斤，利润每天按人头 ×0.8—1.2 随机分给摆摊家庭） |
-| 日用品 | 酒、布、鸡鸭鹅猪肉（茶叶、陶器在 mod 里）：`rules.householdGoods` 配置年人均用量与购买门槛；有余钱的家庭在主食和盐之后到综合商店买，用了加舒心值，没有不扣分（`systems/goods-demand.js`）。后加的零售商品标 `optionalRetail`，镇上有货才参与商店试进货与资金储备 |
+| 家底 / 宽裕度 | `systems/household-budget.js`：家底 = 粮券 + 留够到下次秋收再加 30 天口粮后多出的小麦；宽裕度 = √(人均家底/参照值)，封顶 3。日用品数量、主食里面粉面包的比例、服务预算都由它决定（`rules.householdBudget`）。当天缓存不进存档，同一天内改了家底要 `invalidateHouseholdBudgets` |
+| 日用品 | 酒、布、鸡鸭鹅猪肉（茶叶、陶器在 mod 里）：`rules.householdGoods` 配置正常人家的年人均量和收入弹性，实际量 = 标准量 × 宽裕度^弹性；主食和盐之后到综合商店买，用了加舒心值（多用边际递减），没有不扣分（`systems/goods-demand.js`）。后加的零售商品标 `optionalRetail`，镇上有货才参与商店试进货与资金储备 |
 
 开局只有麦田。伐木场盖在南林伐木点、**不需要木材**，是起步路线；其他建筑都要木材。**建筑建成后不会自动派工**，要在就业面板设人数，否则没有产出、也没有工资支付。
 
@@ -92,7 +93,8 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 - 小麦归镇库直管：磨坊直接用镇库小麦，公司/民营经批发市场按售价从镇库存量买小麦。做市清单 `WHOLESALE_MONOPOLY_ITEM_IDS` 由物品的 `wholesale` 标记推导。
 - 带 `storeOnly` 标记的商品（面粉/面包/盐/酒/布）只能经综合商店卖给居民；测试 fixture 要先建商店。
 - 小麦阶段居民直接从镇库买主粮、不经过市场和商店；测批发/商店要先推进到粮券阶段。
-- 主食购买按户缺口分配，不按人口均分；需求弹性只在综合商店是卖家时生效。
+- 主食按户算：口粮默认吃自家小麦，宽裕人家换一部分面粉面包（面包买不到改面粉，再不够买小麦）；需求弹性只在综合商店是卖家时生效。
+- 居民实际能花多少还受每日就业换券额度限制（政策 `employmentExchangeJin`），家底多但粮券少时这是最常见的瓶颈。
 - 店员和商人都算接待能力；店主兼商人拿利润，不领固定工资。
 
 **界面**

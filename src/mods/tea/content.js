@@ -37,7 +37,7 @@ export default {
     wholesaleDefaultPurchasePrices: { tea_leaf: 5 },
     // 居民日用品：每人每年 2 斤；有余钱（每人至少 20 券）才去买；喝茶最多加 1 分舒心值。
     householdGoods: {
-      tea_leaf: { annualPerPerson: 2, minCashVoucherPerCapita: 20, comfortMaximum: 1 }
+      tea_leaf: { annualPerPerson: 2, incomeElasticity: 1, comfortMaximum: 1 }
     }
   },
 

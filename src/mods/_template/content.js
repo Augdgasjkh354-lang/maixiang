@@ -35,8 +35,8 @@ export default {
     marketPricesVoucherPerUnit: { tea_leaf: 6 },          // 本镇中间价
     wholesaleDefaultSalePrices: { tea_leaf: 6.5 },        // 批发市场默认售价
     wholesaleDefaultPurchasePrices: { tea_leaf: 5 },      // 批发市场默认收购价
-    householdGoods: {                                     // 居民日用品：每人每年用量、购买门槛、舒心值加成上限
-      tea_leaf: { annualPerPerson: 2, minCashVoucherPerCapita: 20, comfortMaximum: 1 }
+    householdGoods: {                                     // 居民日用品：正常人家每人每年用量、收入弹性、舒心值加成
+      tea_leaf: { annualPerPerson: 2, incomeElasticity: 1, comfortMaximum: 1 }
     }
   },
 

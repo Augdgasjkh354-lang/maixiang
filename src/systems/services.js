@@ -1,7 +1,8 @@
 import { currencyScale } from "../economy/currency.js";
 import { createPaymentCapabilityContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } from "../economy/payment.js";
 import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits } from "./households.js";
-import { ensureHouseholdLife, householdRecentTotals } from "./household-life.js";
+import { ensureHouseholdLife } from "./household-life.js";
+import { householdBudgets } from "./household-budget.js";
 import { recordShopServiceSale, serviceShopCapacityUses, shopDefinition } from "./shops.js";
 
 const DEMAND_SCALE = 1000;
@@ -101,23 +102,17 @@ export function accrueServiceDemand(state, content) {
   return serviceState.day.demandedUses;
 }
 
+// 服务预算看家底（household-budget：可动用财富摊到 wealthSpendDays 天 × 服务占比），
+// 不再看最近 7 天收入——农民的收入是一年一次的秋收，按周收入算会让他们永远"没钱"。
 function householdDailyServiceBudget(state, household, content) {
-  const scale = currencyScale(content);
-  const recent = householdRecentTotals(household, 7, content);
-  const days = Math.max(1, recent.days || 1);
-  const disposablePerDay = Math.max(0, ((recent.incomeVoucherUnits || 0) - (recent.lifeExpenseVoucherUnits || 0)) / days);
-  const todayDisposable = Math.max(0, (ensureHouseholdLife(household, content).day.incomeVoucherUnits || 0) - (ensureHouseholdLife(household, content).day.lifeExpenseVoucherUnits || 0));
-  const surplus = Math.max(disposablePerDay, todayDisposable);
-  const share = Math.max(0, Math.min(100, content.rules.serviceBudgetSharePercent || 35)) / 100;
-  const policyBudget = Math.floor(surplus * share);
-  if (policyBudget <= 0) return 0;
+  const budget = householdBudgets(state, content).get(household.id)?.serviceBudgetUnits || 0;
+  if (budget <= 0) return 0;
   const owner = `household:${household.id}`;
   const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
   const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits });
-  // Keep the historical unbounded upper bound; only the repeated bounded quote search reuses derived capability data.
   const payable = maximumFullyPayableValueUnits(state, owner,
     maximumPayableValueUnits(state, owner, content), content, { maxWheatUnits, paymentContext });
-  return Math.max(0, Math.min(policyBudget, payable, Number.MAX_SAFE_INTEGER));
+  return Math.max(0, Math.min(budget, payable, Number.MAX_SAFE_INTEGER));
 }
 
 function serviceShops(state, serviceId, content) {

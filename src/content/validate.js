@@ -63,7 +63,6 @@ export function validateContent(content) {
     }
   }
   if (!Number.isInteger(content.rules?.serviceDemandMaximumCycles) || content.rules.serviceDemandMaximumCycles <= 0 ||
-      !Number.isFinite(content.rules?.serviceBudgetSharePercent) || content.rules.serviceBudgetSharePercent < 0 || content.rules.serviceBudgetSharePercent > 100 ||
       !Number.isFinite(content.rules?.serviceComfortDailyMaximum) || content.rules.serviceComfortDailyMaximum < 0) {
     errors.push("服务需求累计、预算或舒心上限参数无效");
   }

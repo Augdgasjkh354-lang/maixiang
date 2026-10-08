@@ -112,7 +112,7 @@ test("时代广场：一个集体集市，只卖日用品、比商店便宜、�
 
 test("集市利润按人头 ×0.8—1.2 随机分给摆摊家庭；摆摊人数不超过允许人数", () => {
   const { state } = town(6105);
-  state.wholesaleMarket.inventory.wine = 5000 * I;
+  state.wholesaleMarket.inventory.wine = 50000 * I;
   state.wholesaleMarket.inventory.cloth = 500 * I;
   assert.equal(simulation.setStallKeeperLimit(state, 6).ok, true);
   const before = new Map(Object.values(state.households.byId).map(h => [h.id, h.voucherUnits || 0]));

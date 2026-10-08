@@ -1,8 +1,9 @@
 import test from "node:test";
+import { daysUntilHarvest, invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
 import { initializeBuildingJobs, refillAgricultureToTarget, reconcileEmployment } from "../src/systems/employment.js";
-import { householdList, householdIdleWorkers, jobCount, setHouseholdJobCount, setJobCount, syncResidentAggregates } from "../src/systems/households.js";
+import { householdList, householdPopulation, householdIdleWorkers, jobCount, setHouseholdJobCount, setJobCount, syncResidentAggregates } from "../src/systems/households.js";
 import { ensureHouseholdLife } from "../src/systems/household-life.js";
 import { accrueServiceDemand, processServiceDemand } from "../src/systems/services.js";
 import { prepareShopsForDay, finishShopsDay, resetShopDaily, sellShopProduct } from "../src/systems/shops.js";
@@ -31,10 +32,21 @@ function idleHouseholds(state, count = 2) {
   return rows.slice(0, count);
 }
 
-function setBudget(household, voucherPerDay) {
-  const life = ensureHouseholdLife(household, CONTENT);
-  life.recent = [{ incomeVoucherUnits: Math.round(voucherPerDay * V), lifeExpenseVoucherUnits: 0 }];
-  life.day = {};
+// 服务预算 = 家底 / wealthSpendDays × serviceShare（household-budget）。这里把"每日可花"设成 voucherPerDay：
+// 家底 = voucherPerDay × wealthSpendDays，全放在粮券里，小麦清零以免多出来的存粮也算进家底。
+function setBudget(household, voucherPerDay, state = null) {
+  ensureHouseholdLife(household, CONTENT).day = {};
+  const rules = CONTENT.rules.householdBudget;
+  const keepDays = (state ? daysUntilHarvest(state, CONTENT) : CONTENT.rules.daysPerYear) + rules.harvestBufferDays;
+  const keepJin = householdPopulation(household) * CONTENT.rules.foodPerPersonDay * keepDays;
+  household.voucherUnits = 0;
+  for (const itemId of ["flour", "bread"]) household.inventory[itemId] = 0;
+  household.inventory.wheat = Math.round((keepJin + voucherPerDay * rules.wealthSpendDays) * CONTENT.precision.inventoryUnitsPerJin);
+  budgetDirty = true;
+}
+let budgetDirty = false;
+function refreshBudgets(state) {
+  if (budgetDirty) { invalidateHouseholdBudgets(state); budgetDirty = false; }
 }
 
 function openService(state, street, typeId, owner) {
@@ -146,8 +158,9 @@ test("服务需求在店铺间共享且家庭共用一份服务预算，成交�
   const teaA = openService(state, street, "tea", ownerA);
   const teaB = openService(state, street, "tea", ownerB);
   const haircut = openService(state, street, "haircut", ownerC);
-  setBudget(buyer, 15);
+  setBudget(buyer, 15, state);
   state.services.demandByHousehold[buyer.id] = { tea: 1000, haircut: 1000, repair: 0 };
+  refreshBudgets(state);
   const result = processServiceDemand(state, CONTENT);
   const totalUses = (teaA.accounts.day.serviceUses.tea || 0) + (teaB.accounts.day.serviceUses.tea || 0) + (haircut.accounts.day.serviceUses.haircut || 0);
   assert.equal(totalUses, 1, "5券服务预算不能被每个服务系统重复使用");
@@ -158,12 +171,14 @@ test("服务需求在店铺间共享且家庭共用一份服务预算，成交�
   // 同类两店共享一份需求，并用轮换避免长期固定第一家。
   teaA.accounts.day.serviceUses = {}; teaB.accounts.day.serviceUses = {}; haircut.accounts.day.serviceUses = {};
   state.services.demandByHousehold[buyer.id] = { tea: 1000, haircut: 0, repair: 0 };
-  setBudget(buyer, 15);
+  setBudget(buyer, 15, state);
+  refreshBudgets(state);
   processServiceDemand(state, CONTENT);
   const firstSeller = (teaA.accounts.day.serviceUses.tea || 0) ? teaA.id : teaB.id;
   teaA.accounts.day.serviceUses = {}; teaB.accounts.day.serviceUses = {};
   state.services.demandByHousehold[buyer.id].tea = 1000;
-  setBudget(buyer, 15);
+  setBudget(buyer, 15, state);
+  refreshBudgets(state);
   processServiceDemand(state, CONTENT);
   const secondSeller = (teaA.accounts.day.serviceUses.tea || 0) ? teaA.id : teaB.id;
   assert.notEqual(secondSeller, firstSeller);
@@ -184,7 +199,7 @@ async function servicePaymentCase(stage, targetBps) {
     const transfer = transferVouchers(state, "town", `household:${buyer.id}`, 20 * V, CONTENT, "test_income", "测试服务消费资金");
     assert.equal(transfer.ok, true, transfer.reason);
   }
-  setBudget(buyer, 20);
+  setBudget(buyer, 20, state);
   state.services.demandByHousehold[buyer.id] = { haircut: 1000, repair: 0, tea: 0 };
   const before = { voucher: shop.cashVoucherUnits, wheat: shop.cashWheatUnits };
   const result = processServiceDemand(state, CONTENT);
@@ -203,7 +218,7 @@ test("服务成交、店员工资、店租与利润税均形成真实资金流",
   prepareShopsForDay(state, CONTENT);
   const buyers = householdList(state).filter(h => h.id !== owner.id).slice(0, 50);
   for (const buyer of buyers) {
-    setBudget(buyer, 20);
+    setBudget(buyer, 20, state);
     state.services.demandByHousehold[buyer.id] = { haircut: 1000, repair: 0, tea: 0 };
   }
   processServiceDemand(state, CONTENT);
@@ -231,7 +246,8 @@ function serviceIncomeScenario(disposableVoucherPerDay) {
   const tea = openService(state, street, "tea", owners[2]);
   for (let day = 0; day < 18; day += 1) {
     resetShopDaily(state, CONTENT);
-    for (const household of householdList(state)) setBudget(household, disposableVoucherPerDay);
+    for (const household of householdList(state)) setBudget(household, disposableVoucherPerDay, state);
+    refreshBudgets(state);
     accrueServiceDemand(state, CONTENT);
     prepareShopsForDay(state, CONTENT);
     processServiceDemand(state, CONTENT);

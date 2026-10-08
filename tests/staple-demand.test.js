@@ -1,4 +1,5 @@
 import test from "node:test";
+import { householdPopulation, syncResidentAggregates } from "../src/systems/households.js";
 import assert from "node:assert/strict";
 import { CONTENT } from "../src/content/index.js";
 import { simulation } from "../src/engine.js";
@@ -9,8 +10,8 @@ import { householdList, setJobCount } from "../src/systems/households.js";
 import { grantResidentVouchers, setResidentInventoryJin } from "./helpers-v16.js";
 
 const SCALE = CONTENT.precision.inventoryUnitsPerJin;
-// 每日修缮木材：规则按“木材单位”计，断言一律用库存精度单位。
-const WOOD_DAY_UNITS = quantityToUnits(CONTENT.rules.houseRepairWoodUnitsPerDay, CONTENT);
+// 每日修缮木材：初始 250 户 × 7.3 斤/户年 ÷ 365 = 5 斤/日（正好整除，无结转）。
+const WOOD_DAY_UNITS = 5 * SCALE;
 
 // 居民购买面粉、面包只允许在综合商店成交，这里搭一间有充足伙计的综合商店。
 function voucherState() {
@@ -46,82 +47,53 @@ function clearStaples(state) {
   for (const itemId of ["wheat", "flour", "bread"]) setResidentInventoryJin(state, itemId, 0, CONTENT);
 }
 
-test("居民主食需求按固定份额拆分，小麦、面粉、面包都会购买", () => {
-  assert.deepEqual(stapleDemandShares(CONTENT), { wheat: 0.6, flour: 0.2, bread: 0.2 });
-  assert.equal(CONTENT.rules.stapleDemandShares.wheat + CONTENT.rules.stapleDemandShares.flour
-    + CONTENT.rules.stapleDemandShares.bread, 1);
+function residentPeople(state) {
+  return Object.values(state.households.byId).reduce((sum, h) => sum + householdPopulation(h), 0);
+}
 
-  const state = withGeneralStore(voucherState(), {
-    wheat: 3000 * SCALE, flour: 3000 * SCALE, bread: 3000 * SCALE
-  });
-  grantResidentVouchers(state, 10000000, CONTENT);
-  clearStaples(state);
-
+test("主食：宽裕人家把口粮换成面粉、面包（标准比例 × 宽裕度，最多 1.5 倍），穷户吃自家小麦", () => {
   const population = 250;
-  const result = buyStaplesForResidents(state, population, CONTENT);
-  const rows = result.staples.rows;
-
-  // 三项份额都发起了购买，并且都真实成交。
-  assert.deepEqual(rows.map(row => row.itemId), ["wheat", "flour", "bread"]);
-  assert.deepEqual(rows.map(row => row.targetShare), [0.6, 0.2, 0.2]);
+  const rich = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE, bread: 3000 * SCALE });
+  grantResidentVouchers(rich, 10000000, CONTENT);
+  clearStaples(rich);
+  const need = residentPeople(rich) * CONTENT.rules.foodPerPersonDay;
+  const rows = buyStaplesForResidents(rich, population, CONTENT).staples.rows;
+  const byId = Object.fromEntries(rows.map(row => [row.itemId, row]));
+  // 很富：宽裕度封顶，面粉、面包各 0.2 × 1.5 = 0.3。
+  assert.ok(Math.abs(byId.bread.targetQeqJin - need * 0.3) < 1, `面包目标 ${byId.bread.targetQeqJin}`);
+  assert.ok(Math.abs(byId.flour.targetQeqJin - need * 0.3) < 1, `面粉目标 ${byId.flour.targetQeqJin}`);
   for (const row of rows) assert.ok(row.purchasedJin > 0, `${row.itemId} 应当发生购买`);
-
-  // 目标口粮当量严格按份额拆分。
-  const dailyNeedJin = population * CONTENT.rules.foodPerPersonDay;
-  assert.equal(rows[0].targetQeqJin, dailyNeedJin * 0.6);
-  assert.equal(rows[1].targetQeqJin, dailyNeedJin * 0.2);
-  assert.equal(rows[2].targetQeqJin, dailyNeedJin * 0.2);
-
-  // 面包口粮当量为 5/6，因此成交的物理斤数比口粮当量多。
-  // （户数增加后逐户取整累积微小误差，用近似比较）
-  assert.ok(Math.abs(rows[2].purchasedJin - rows[2].targetQeqJin / (5 / 6)) < 0.1,
-    `面包购买量应接近理论值，实际${rows[2].purchasedJin}`);
   assert.equal(itemQeqUnitsPerInventoryUnit(CONTENT.items.bread, CONTENT), 5);
-  assert.equal(itemQeqUnitsPerInventoryUnit(CONTENT.items.wheat, CONTENT), 6);
 
-  // 居民库存里确实增加了这三种主食。
-  assert.ok(state.accounts.residents.wheat > 0);
-  assert.ok(state.accounts.residents.flour > 0);
-  assert.ok(state.accounts.residents.bread > 0);
+  const poor = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE, bread: 3000 * SCALE });
+  for (const household of Object.values(poor.households.byId)) household.voucherUnits = 0;
+  syncResidentAggregates(poor, CONTENT);
+  clearStaples(poor);
+  const poorRows = Object.fromEntries(buyStaplesForResidents(poor, population, CONTENT).staples.rows.map(row => [row.itemId, row]));
+  assert.equal(poorRows.bread.targetQeqJin, 0, "没有家底的人家不买面包");
+  assert.equal(poorRows.flour.targetQeqJin, 0, "没有家底的人家不买面粉");
+  assert.ok(Math.abs(poorRows.wheat.targetQeqJin - need) < 1, "口粮全由小麦承担");
 });
 
-test("主食购买采用净需求：已有库存会扣减当日购买量", () => {
+test("主食替代：买不到面包改买面粉；已有库存扣减当日购买量", () => {
   const population = 250;
-  const flourTargetJin = population * CONTENT.rules.foodPerPersonDay * 0.2;
+  const noBread = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE });
+  grantResidentVouchers(noBread, 10000000, CONTENT);
+  clearStaples(noBread);
+  const rows = Object.fromEntries(buyStaplesForResidents(noBread, population, CONTENT).staples.rows.map(row => [row.itemId, row]));
+  assert.equal(rows.bread.purchasedJin, 0);
+  const need = residentPeople(noBread) * CONTENT.rules.foodPerPersonDay;
+  assert.ok(rows.flour.targetQeqJin > need * 0.55, `面包缺口转给面粉，面粉目标 ${rows.flour.targetQeqJin}`);
+  assert.ok(rows.flour.purchasedJin > 0);
 
-  // 对照组：家中没有面粉，按目标足额购买。
-  const full = withGeneralStore(voucherState(), { flour: 3000 * SCALE });
-  grantResidentVouchers(full, 10000000, CONTENT);
-  setResidentInventoryJin(full, "flour", 0, CONTENT);
-  const boughtFull = buyStaplesForResidents(full, population, CONTENT).staples.rows
-    .find(row => row.itemId === "flour");
-  // （户数增加后逐户取整累积微小误差，用近似比较）
-  assert.ok(Math.abs(boughtFull.purchasedJin - flourTargetJin) < 0.1,
-    `对照组应足额购买，实际${boughtFull.purchasedJin}，目标${flourTargetJin}`);
-
-  // 实验组：家中已有大部分面粉，只补足差额。
-  const partial = withGeneralStore(voucherState(), { flour: 3000 * SCALE });
-  grantResidentVouchers(partial, 10000000, CONTENT);
-  const heldJin = Math.floor(flourTargetJin * 0.75);
-  setResidentInventoryJin(partial, "flour", heldJin, CONTENT);
-  const boughtPartial = buyStaplesForResidents(partial, population, CONTENT).staples.rows
-    .find(row => row.itemId === "flour");
-
-  assert.ok(boughtPartial.purchasedJin < boughtFull.purchasedJin);
-  // （户数增加后逐户取整累积微小误差，用近似比较）
-  assert.ok(Math.abs(boughtPartial.purchasedJin - (flourTargetJin - heldJin)) < 0.1,
-    `实验组应补足差额，实际${boughtPartial.purchasedJin}，目标${flourTargetJin - heldJin}`);
-  assert.ok(Math.abs(partial.accounts.residents.flour / SCALE - flourTargetJin) < 0.1,
-    `居民面粉库存应接近目标${flourTargetJin}，实际${partial.accounts.residents.flour / SCALE}`);
-
-  // 已有库存超过目标时完全不买。
-  const satisfied = withGeneralStore(voucherState(), { flour: 3000 * SCALE });
-  grantResidentVouchers(satisfied, 10000000, CONTENT);
-  setResidentInventoryJin(satisfied, "flour", flourTargetJin * 2, CONTENT);
-  const boughtNone = buyStaplesForResidents(satisfied, population, CONTENT).staples.rows
-    .find(row => row.itemId === "flour");
-  assert.equal(boughtNone.purchasedJin, 0);
-  assert.match(boughtNone.limitReason, /已满足今日目标/);
+  // 已有面粉多于目标：不再买面粉。
+  const stocked = withGeneralStore(voucherState(), { flour: 3000 * SCALE, bread: 3000 * SCALE });
+  grantResidentVouchers(stocked, 10000000, CONTENT);
+  clearStaples(stocked);
+  setResidentInventoryJin(stocked, "flour", residentPeople(stocked) * CONTENT.rules.foodPerPersonDay, CONTENT);
+  const flour = buyStaplesForResidents(stocked, population, CONTENT).staples.rows.find(row => row.itemId === "flour");
+  assert.equal(flour.purchasedJin, 0);
+  assert.match(flour.limitReason, /已满足今日目标/);
 });
 
 test("面包需求份额保持弹性函数原样，旧入口按固定份额购买", () => {

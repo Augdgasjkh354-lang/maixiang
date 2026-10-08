@@ -45,8 +45,12 @@ export function processBuilding(state, building, content) {
     for (const input of recipeDef.inputs || []) {
       const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);
       const required = perBatch * wantedBatches;
-      const purchase = procureTownInputFromWholesale(state, input.itemId, required, content, `${definition.name}从批发市场领用${content.items[input.itemId]?.name || input.itemId}`);
-      const boughtUnits = purchase.boughtUnits || 0;
+      // 镇库里已有的（如本镇磨坊当天的面粉）先用，不够再从批发市场领；都是镇里内部调拨，不付钱。
+      const inTown = Math.min(required, Math.max(0, state.accounts.town?.[input.itemId] || 0));
+      const purchase = required - inTown > 0
+        ? procureTownInputFromWholesale(state, input.itemId, required - inTown, content, `${definition.name}从批发市场领用${content.items[input.itemId]?.name || input.itemId}`)
+        : { boughtUnits: 0 };
+      const boughtUnits = (purchase.boughtUnits || 0) + inTown;
       procuredInputs.push({ itemId: input.itemId, boughtUnits, perBatch });
       wholesaleBatchCap = Math.min(wholesaleBatchCap, Math.floor(boughtUnits / Math.max(1, perBatch)));
     }
@@ -128,8 +132,12 @@ export function setBuildingOutputTarget(state, buildingId, quantityJin, content)
   return { ok: true, buildingId, quantityJin: building.outputTargetJin || 0 };
 }
 
+// 先上游后下游（产业层级 0 → 1 → 2），当天磨好的面粉能直接供面包房用；结果仍按建筑原顺序返回。
 export function processAllBuildings(state, content) {
-  return state.buildings.map(function (building) {
-    return processBuilding(state, building, content);
-  });
+  const tier = building => content.buildings[building.typeId]?.industryTier ?? -1;
+  const order = state.buildings.map((building, index) => ({ building, index }))
+    .sort((a, b) => tier(a.building) - tier(b.building) || a.index - b.index);
+  const results = new Array(state.buildings.length);
+  for (const { building, index } of order) results[index] = processBuilding(state, building, content);
+  return results;
 }
