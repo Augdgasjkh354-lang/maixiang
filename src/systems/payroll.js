@@ -4,7 +4,7 @@ import { currentPaymentComposition, settleMonetaryPayment } from "../economy/pay
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } from "./households.js";
 import { accrueWages, payWages, wageArrears } from "./employer.js";
-import { collectSocialContributions, ensureSocialSecurity, payFromFund } from "./social-security.js";
+import { ensureSocialSecurity, payFromFund } from "./social-security.js";
 
 function ensurePayroll(state) {
   state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
@@ -149,8 +149,6 @@ export function payDailyWages(state, laborAtStart, content) {
     currentPaidByKey[row.payrollKey] = (currentPaidByKey[row.payrollKey] || 0) + Math.max(0, paidKey - historicalPaidNow);
   }
 
-  // 社保收缴：基金开启时，从本日实际发放的工资中按人头代扣缴费。
-  const socialCollected = collectSocialContributions(state, workerPay, currentPaidByKey, paidByHousehold, content);
 
   const arrearsPaid = Object.values(arrearsPaidByKey).reduce((a,b)=>a+b,0);
   const currentPaid = Object.values(currentPaidByKey).reduce((a,b)=>a+b,0);

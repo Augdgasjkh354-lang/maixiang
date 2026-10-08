@@ -31,7 +31,7 @@ function goodCard(view, townId, good) {
         <strong class="value">收购${number(good.sellPrice, 2)} · 出售${buyText} <span class="subtle">小麦斤/${unit}</span></strong></div>
       <div class="row"><span class="label">我镇库存</span>
         <strong class="value">${number(good.ourStock, 1)}${unit}${canBuy ? ` <span class="subtle">可外卖${number(good.sellable, 1)}${unit}</span>` : ""}</strong></div>
-      <div class="row"><span class="label">数量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "outside-qty", good.itemId), kind: "outside-trade-qty", target: good.itemId, value: "", label: `${name}交易数量`, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${unit}</b>
+      <div class="row"><span class="label">数量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "outside-qty", good.itemId), kind: "outside-trade-qty", target: good.itemId, value: "", label: `${name}交易数量`, minimum: 0, maximum: 1e12, className: "setting-editor" })}<b>${unit}</b>
         <button class="secondary" data-outside-sell="${escapeHtml(good.itemId)}" data-town="${id}">卖出</button>
         ${canBuy ? `<button class="secondary" data-outside-buy="${escapeHtml(good.itemId)}" data-town="${id}">买入</button>` : ""}</div></div>
     </div>`;
@@ -133,7 +133,7 @@ export function renderOutsideTown(view) {
         <select data-draft-key="${draftKey(townId, "trade-agreement-item")}" data-draft-kind="trade-agreement-item" data-draft-target="tradeAgreement" data-draft-label="长协品类" class="setting-editor">
           ${agreementItems}
         </select></div></div>
-      <div class="row"><span class="label">年供货量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-annual"), kind: "trade-agreement-annual", target: "tradeAgreement", value: "", label: "长协年供货量", minimum: 0, maximum: 5000000, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>单位</b></div></div>
+      <div class="row"><span class="label">年供货量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-annual"), kind: "trade-agreement-annual", target: "tradeAgreement", value: "", label: "长协年供货量", minimum: 0, maximum: 1e12, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>单位</b></div></div>
       <div class="row"><span class="label">年限</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-years"), kind: "trade-agreement-years", target: "tradeAgreement", value: "", label: "长协年限", minimum: 1, maximum: 5, integer: true, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>年</b>
         <button class="secondary" data-agreement-sign="1" data-town="${id}" ${signDisabled}>签约</button></div></div>
       <div class="subtle">签约按当前收购价锁定单价（关系融洽时×1.05）；每月交付1/12，从批发市场扣货；货不足即我方违约，赔年货值10%并扣关系分（融洽时减半），连续3次对方解约。</div>
@@ -142,7 +142,7 @@ export function renderOutsideTown(view) {
       <div class="subtle">天灾欠收时可放贷解急。每年年结计息，${escapeHtml(ot.name)}用结余小麦先息后本偿还。</div>
       ${loanRows}
       <div class="row"><span class="label">累计放贷 / 收息</span><strong class="value">${number(ot.loanStats?.totalIssuedJin || 0)} / ${number(ot.loanStats?.totalInterestJin || 0, 1)}斤</strong></div>
-      <div class="row"><span class="label">放贷斤数</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-principal"), kind: "wheat-loan-principal", target: "wheatLoan", value: "", label: "小麦贷款斤数", minimum: 0, maximum: 1000000, className: "setting-editor" })}<b>斤</b></div></div>
+      <div class="row"><span class="label">放贷斤数</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-principal"), kind: "wheat-loan-principal", target: "wheatLoan", value: "", label: "小麦贷款斤数", minimum: 0, maximum: 1e12, className: "setting-editor" })}<b>斤</b></div></div>
       <div class="row"><span class="label">年利率</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-rate"), kind: "wheat-loan-rate", target: "wheatLoan", value: "", label: "小麦贷款年利率", minimum: 0, maximum: 50, className: "setting-editor" })}<b>%</b>
       <button class="secondary" data-wheat-loan-issue="1" data-town="${id}">发放贷款</button></div></div>
     </div>`;

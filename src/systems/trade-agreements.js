@@ -19,7 +19,6 @@ export const AGREEMENT_BREACH_LIMIT = 3;
 export const AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS = 3;
 export const RELATIONS_TRUSTED_PRICE_FACTOR = 1.05;
 export const RELATIONS_TRUSTED_PENALTY_FACTOR = 0.5;
-const MAX_ANNUAL_JIN = 5000000;
 
 const round2 = value => Math.round(value * 100) / 100;
 
@@ -60,7 +59,6 @@ export function signTradeAgreement(state, { itemId, annualJin, years, content, t
   if (!profile.goods[itemId]) return { ok: false, reason: `${profile.name}不收购这种货` };
   const quantity = round2(Number(annualJin));
   if (!Number.isFinite(quantity) || quantity <= 0) return { ok: false, reason: "年供货量必须大于0" };
-  if (quantity > MAX_ANNUAL_JIN) return { ok: false, reason: `单笔长协年供货量不超过${MAX_ANNUAL_JIN}` };
   const term = Math.floor(Number(years));
   if (!Number.isFinite(term) || term < AGREEMENT_MIN_YEARS || term > AGREEMENT_MAX_YEARS) {
     return { ok: false, reason: `年限须在${AGREEMENT_MIN_YEARS}—${AGREEMENT_MAX_YEARS}年之间` };

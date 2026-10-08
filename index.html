@@ -2206,7 +2206,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod14 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-3ca8d80";
+       const BUILD_ID = "0203-b72812e";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -5061,7 +5061,6 @@ const { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } = __mxmod6;
 const { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } = __mxmod27;
 const { jobCount } = __mxmod16;
 const SLICES = 20;
-       const MAX_TRADE_JIN_PER_ORDER = 100000;
        const RELATIONS_DEFAULT = 60;
        const RELATIONS_MAX = 100;
        const RELATIONS_TRUSTED = 70;
@@ -5159,7 +5158,26 @@ function spreadRate(town) {
   return 0.2 - Math.max(0, Math.min(100, town.relations)) / 100 * 0.1;
 }
 
+// 外镇要进口的东西（盐、木材、布、酒）：存货不到 3 年用量都按正常价收，囤够 3 年以上才开始压价；
+// 繁荣度越低（越缺东西、越着急）越愿意出高价，繁荣度 100 按基准价，繁荣度 0 出到 1.8 倍。
+// 外镇自产外卖的东西（面粉、面包）照旧按库存比目标定价。
+       const IMPORT_DISCOUNT_AFTER_YEARS = 3;
+
+function stockYears(town, good, stock) {
+  const yearNeed = dailyNeed(town, good) * 365;
+  return yearNeed > 0 ? Math.max(0, stock) / yearNeed : Infinity;
+}
+
+function importUrgency(town) {
+  return 1 + (1 - Math.max(0, Math.min(100, town.prosperity)) / 100) * 0.8;
+}
+
 function midPrice(town, good, stock) {
+  if (!good.sellsToUs) {
+    const years = stockYears(town, good, stock);
+    const glut = years <= IMPORT_DISCOUNT_AFTER_YEARS ? 1 : Math.max(0.4, 1 - 0.2 * (years - IMPORT_DISCOUNT_AFTER_YEARS));
+    return good.basePrice * glut * importUrgency(town);
+  }
   const target = targetStock(town, good);
   const scarcity = target > 0 ? (target / Math.max(stock, target * 0.05)) ** 0.7 : 1;
   return good.basePrice * Math.max(0.35, Math.min(3, scarcity)) * prosperityFactor(town);
@@ -5273,7 +5291,8 @@ function recordTradeStats(town, direction, valueJin) {
       let stock = (town.stocks[itemId] || 0) + town.population * good.producePerPersonDay;
       const used = Math.min(stock, need);
       stock -= used;
-      const cap = targetStock(town, good) * STOCK_SPOIL_MULTIPLE;
+      // 自产品超过目标 2 倍、进口品超过 5 年用量的部分才开始损耗。
+      const cap = good.sellsToUs ? targetStock(town, good) * STOCK_SPOIL_MULTIPLE : need * 365 * 5;
       if (stock > cap) stock -= (stock - cap) * 0.02;
       town.stocks[itemId] = round2(stock);
       const satisfied = need > 0 ? used / need : 1;
@@ -5341,11 +5360,10 @@ function recordTradeStats(town, direction, valueJin) {
       town.tradeClosed = true;
       recordEvent(state, `${profile.name}与我镇关系破裂，商路断绝。`, content, { day: 1 });
     }
-    // 人口：繁荣度 50 以上增长、以下减少，最多 ±3%/年；口粮不足时按缺口收缩。
-    let rate = Math.max(-0.03, Math.min(0.03, (town.prosperity - 50) / 50 * 0.03));
-    if (town.supply.food < 0.97) rate = Math.min(rate, -(1 - town.supply.food) * 0.5);
+    // 人口只增不减：每年 +0.5%（繁荣度 0）到 +3%（繁荣度 100）；口粮不足的年份停止增长。
+    const rate = town.supply.food < 0.97 ? 0 : 0.005 + 0.025 * Math.max(0, Math.min(100, town.prosperity)) / 100;
     const before = town.population;
-    town.population = Math.max(100, Math.round(before * (1 + Math.max(-0.1, rate))));
+    town.population = Math.round(before * (1 + rate));
     town.lastYear.populationChange = town.population - before;
     town.landMu += profile.landGrowthMuPerYear;
     town.lastYear.landAddedMu = profile.landGrowthMuPerYear;
@@ -5373,7 +5391,6 @@ function recordTradeStats(town, direction, valueJin) {
   if (direction === "buy" && !good.sellsToUs) return { ok: false, reason: `${profile.name}不出售${item.name}` };
   let qty = Number(quantityJin);
   if (!Number.isFinite(qty) || qty <= 0) return { ok: false, reason: "数量必须大于0" };
-  qty = Math.min(qty, MAX_TRADE_JIN_PER_ORDER);
   const transactionId = makeTransactionId(state);
 
   if (direction === "sell") {
@@ -5419,7 +5436,6 @@ function recordTradeStats(town, direction, valueJin) {
 
 // ---------------------------------------------------------------- 小麦贷款
 
-       const MAX_LOAN_JIN = 1000000;
        const MAX_LOAN_RATE_PERCENT = 50;
 
        function issueWheatLoan(state, principalJin, annualRatePercent, content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
@@ -5429,7 +5445,6 @@ function recordTradeStats(town, direction, valueJin) {
   const principal = round2(Number(principalJin));
   const rate = Number(annualRatePercent);
   if (!Number.isFinite(principal) || principal <= 0) return { ok: false, reason: "贷款斤数须大于0" };
-  if (principal > MAX_LOAN_JIN) return { ok: false, reason: `单笔贷款不超过${MAX_LOAN_JIN}斤` };
   if (!Number.isFinite(rate) || rate < 0 || rate > MAX_LOAN_RATE_PERCENT) return { ok: false, reason: `年利率须在0—${MAX_LOAN_RATE_PERCENT}%之间` };
   const units = Math.floor(principal * content.precision.inventoryUnitsPerJin);
   if (units <= 0) return { ok: false, reason: "贷款斤数过小" };
@@ -5565,7 +5580,7 @@ function recordTradeStats(town, direction, valueJin) {
     foreignTradeCapacity: staff * AGREEMENTS_PER_STAFF
   };
 }
-return { MAX_TRADE_JIN_PER_ORDER, RELATIONS_DEFAULT, RELATIONS_MAX, RELATIONS_TRUSTED, RELATIONS_DISTRUST, RELATIONS_BREAKOFF, AGREEMENTS_PER_STAFF, outsideTownProfile, createOutsideTowns, ensureOutsideTowns, outsideTown, readOutsideTown, targetStock, unitPrice, payableWheatJin, sellableStock, currentPrice, buildingOperational, buildingStaffOnDuty, changeRelations, deliverToOutsideTown, advanceOutsideTownDay, settleOutsideTownYear, tradeWithOutsideTown, MAX_LOAN_JIN, MAX_LOAN_RATE_PERCENT, issueWheatLoan, settleWheatLoansYear, selectOutsideTownView, recordTradeStats };
+return { RELATIONS_DEFAULT, RELATIONS_MAX, RELATIONS_TRUSTED, RELATIONS_DISTRUST, RELATIONS_BREAKOFF, AGREEMENTS_PER_STAFF, outsideTownProfile, createOutsideTowns, ensureOutsideTowns, outsideTown, readOutsideTown, targetStock, IMPORT_DISCOUNT_AFTER_YEARS, unitPrice, payableWheatJin, sellableStock, currentPrice, buildingOperational, buildingStaffOnDuty, changeRelations, deliverToOutsideTown, advanceOutsideTownDay, settleOutsideTownYear, tradeWithOutsideTown, MAX_LOAN_RATE_PERCENT, issueWheatLoan, settleWheatLoansYear, selectOutsideTownView, recordTradeStats };
 })();
 
 // ===== core/state.js =====
@@ -6242,7 +6257,7 @@ const __mxmod32 = (() => {
 const { currencyScale } = __mxmod22;
 const { currentPaymentComposition, maximumPayableValueUnits, normalizePaymentObligation, settleMonetaryPayment } = __mxmod23;
 const { makeTransactionId, recordLedger } = __mxmod10;
-const { syncResidentAggregates, householdList, isActiveHousehold } = __mxmod16;
+const { syncResidentAggregates, householdList, isActiveHousehold, householdEmploymentCount, householdConvertibleWheatUnits } = __mxmod16;
 const SOCIAL_OWNER = "social";
        const DEFAULT_SS_DAILY_JIN = 1;
        const DEFAULT_SS_PENSION_JIN = 2;
@@ -6368,35 +6383,35 @@ function requireOffice(state) {
 }
 
 // 工资代扣：payDailyWages 在发放完毕后调用。
-       function collectSocialContributions(state, workerPay, currentPaidByKey, paidByHousehold, content) {
+// 每日社保缴费：所有在岗劳动力（务农、镇营、民营、公司、店铺都算）每人每天缴 dailyPerWorkerJin，
+// 在当天各雇主发完工资之后、由所在家庭统一缴纳。用粮券或小麦付，不动家庭口粮储备；付不起的部分当天免缴。
+       function collectSocialContributions(state, content) {
   const ss = ensureSocialSecurity(state);
-  if (!ss.enabled) return { collected: 0 };
+  if (!ss.enabled) return { collectedValueUnits: 0 };
   const perWorker = Math.round(Math.max(0, Number(ss.dailyPerWorkerJin) || 0) * currencyScale(content));
-  if (perWorker <= 0) return { collected: 0 };
+  if (perWorker <= 0) return { collectedValueUnits: 0 };
+  let workers = 0;
+  let due = 0;
   let collected = 0;
-  for (const row of workerPay) {
-    const payable = row.payable || 0;
-    const currentPaid = currentPaidByKey[row.payrollKey] || 0;
-    if (payable <= 0 || currentPaid <= 0 || !(row.count > 0)) continue;
-    // 按本日工资实际发放比例折算缴费人数。
-    const contribTotal = Math.round(row.count * Math.min(1, currentPaid / payable) * perWorker);
-    if (contribTotal <= 0) continue;
-    const paidRows = paidByHousehold[row.payrollKey] || {};
-    const paidTotal = Object.values(paidRows).reduce((sum, value) => sum + (value || 0), 0);
-    if (paidTotal <= 0) continue;
-    for (const [householdId, hpaid] of Object.entries(paidRows)) {
-      const share = Math.round(contribTotal * (hpaid || 0) / paidTotal);
-      const household = state.households?.byId?.[householdId];
-      if (share <= 0 || !household) continue;
-      const result = settleMonetaryPayment(state, `household:${householdId}`, SOCIAL_OWNER,
-        currentPaymentComposition(state, share), content,
-        "social_security_contribution", `${household.name}缴纳社保（从工资代扣）`, { requireFull: false });
-      collected += result.paidValueUnits || 0;
-    }
+  const previousDefer = Boolean(state._deferHouseholdSync);
+  state._deferHouseholdSync = true;
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household)) continue;
+    const employed = householdEmploymentCount(household);
+    if (employed <= 0) continue;
+    const amount = employed * perWorker;
+    workers += employed;
+    due += amount;
+    const result = settleMonetaryPayment(state, `household:${household.id}`, SOCIAL_OWNER, currentPaymentComposition(state, amount), content,
+      "social_security_contribution", `${household.name}缴纳社保（${employed}名在岗劳动力）`,
+      { requireFull: false, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) });
+    collected += result.paidValueUnits || 0;
   }
+  state._deferHouseholdSync = previousDefer;
+  if (!previousDefer) syncResidentAggregates(state, content);
   ss.totalCollectedUnits += collected;
-  if (collected > 0) syncResidentAggregates(state, content);
-  return { collectedValueUnits: collected };
+  ss.lastContribution = { workers, dueValueUnits: due, collectedValueUnits: collected };
+  return { workers, dueValueUnits: due, collectedValueUnits: collected };
 }
 
 // 每日养老金：按老人人数发到所在家庭。
@@ -6528,7 +6543,7 @@ const { currentPaymentComposition, settleMonetaryPayment } = __mxmod23;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod10;
 const { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } = __mxmod16;
 const { accrueWages, payWages, wageArrears } = __mxmod31;
-const { collectSocialContributions, ensureSocialSecurity, payFromFund } = __mxmod32;
+const { ensureSocialSecurity, payFromFund } = __mxmod32;
 function ensurePayroll(state) {
   state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
   state.payroll.arrearsVoucherUnits ||= state.payroll.arrearsWheatUnits || {};
@@ -6672,8 +6687,6 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
     currentPaidByKey[row.payrollKey] = (currentPaidByKey[row.payrollKey] || 0) + Math.max(0, paidKey - historicalPaidNow);
   }
 
-  // 社保收缴：基金开启时，从本日实际发放的工资中按人头代扣缴费。
-  const socialCollected = collectSocialContributions(state, workerPay, currentPaidByKey, paidByHousehold, content);
 
   const arrearsPaid = Object.values(arrearsPaidByKey).reduce((a,b)=>a+b,0);
   const currentPaid = Object.values(currentPaidByKey).reduce((a,b)=>a+b,0);
@@ -13222,7 +13235,6 @@ const AGREEMENT_MIN_YEARS = 1;
        const AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS = 3;
        const RELATIONS_TRUSTED_PRICE_FACTOR = 1.05;
        const RELATIONS_TRUSTED_PENALTY_FACTOR = 0.5;
-const MAX_ANNUAL_JIN = 5000000;
 
 const round2 = value => Math.round(value * 100) / 100;
 
@@ -13263,7 +13275,6 @@ function nextAgreementId(state) {
   if (!profile.goods[itemId]) return { ok: false, reason: `${profile.name}不收购这种货` };
   const quantity = round2(Number(annualJin));
   if (!Number.isFinite(quantity) || quantity <= 0) return { ok: false, reason: "年供货量必须大于0" };
-  if (quantity > MAX_ANNUAL_JIN) return { ok: false, reason: `单笔长协年供货量不超过${MAX_ANNUAL_JIN}` };
   const term = Math.floor(Number(years));
   if (!Number.isFinite(term) || term < AGREEMENT_MIN_YEARS || term > AGREEMENT_MAX_YEARS) {
     return { ok: false, reason: `年限须在${AGREEMENT_MIN_YEARS}—${AGREEMENT_MAX_YEARS}年之间` };
@@ -15803,7 +15814,7 @@ const { advancePopulation } = __mxmod67;
 const { selectHousing } = __mxmod40;
 const { settleHousingRent, buyRepairWoodForResidents } = __mxmod68;
 const { settleVillaPurchases, settleVillaPropertyTax } = __mxmod56;
-const { payPensions } = __mxmod32;
+const { collectSocialContributions, payPensions } = __mxmod32;
 const { advanceOutsideTownDay, settleOutsideTownYear, settleWheatLoansYear } = __mxmod28;
 const { settleTradeAgreementsMonth, settleTradeAgreementsYear } = __mxmod59;
 const { resetLaborCompetitionYear } = __mxmod34;
@@ -15926,6 +15937,8 @@ const yearEndsToday = (state, content) => state.day + 1 >= content.rules.daysPer
   { id: "wages", run: (state, content, day) => payDailyWages(state, day.laborAtStart, content) },
   { id: "companyWages", run: payListedCompanyWages },
   { id: "privateWages", run: payPrivateIndustryWages },
+  // 各雇主发完工资后统一收社保（按在岗人数，所有岗位都算）。
+  { id: "socialContribution", run: collectSocialContributions },
   { id: "unemployment", run: (state, content, day) => payUnemploymentBenefit(state, day.laborAtStart, content) },
   { id: "pension", run: payPensions },
 
@@ -20095,7 +20108,7 @@ function goodCard(view, townId, good) {
         <strong class="value">收购${number(good.sellPrice, 2)} · 出售${buyText} <span class="subtle">小麦斤/${unit}</span></strong></div>
       <div class="row"><span class="label">我镇库存</span>
         <strong class="value">${number(good.ourStock, 1)}${unit}${canBuy ? ` <span class="subtle">可外卖${number(good.sellable, 1)}${unit}</span>` : ""}</strong></div>
-      <div class="row"><span class="label">数量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "outside-qty", good.itemId), kind: "outside-trade-qty", target: good.itemId, value: "", label: `${name}交易数量`, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${unit}</b>
+      <div class="row"><span class="label">数量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "outside-qty", good.itemId), kind: "outside-trade-qty", target: good.itemId, value: "", label: `${name}交易数量`, minimum: 0, maximum: 1e12, className: "setting-editor" })}<b>${unit}</b>
         <button class="secondary" data-outside-sell="${escapeHtml(good.itemId)}" data-town="${id}">卖出</button>
         ${canBuy ? `<button class="secondary" data-outside-buy="${escapeHtml(good.itemId)}" data-town="${id}">买入</button>` : ""}</div></div>
     </div>`;
@@ -20197,7 +20210,7 @@ function townSwitch(view, selectedId) {
         <select data-draft-key="${draftKey(townId, "trade-agreement-item")}" data-draft-kind="trade-agreement-item" data-draft-target="tradeAgreement" data-draft-label="长协品类" class="setting-editor">
           ${agreementItems}
         </select></div></div>
-      <div class="row"><span class="label">年供货量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-annual"), kind: "trade-agreement-annual", target: "tradeAgreement", value: "", label: "长协年供货量", minimum: 0, maximum: 5000000, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>单位</b></div></div>
+      <div class="row"><span class="label">年供货量</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-annual"), kind: "trade-agreement-annual", target: "tradeAgreement", value: "", label: "长协年供货量", minimum: 0, maximum: 1e12, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>单位</b></div></div>
       <div class="row"><span class="label">年限</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "trade-agreement-years"), kind: "trade-agreement-years", target: "tradeAgreement", value: "", label: "长协年限", minimum: 1, maximum: 5, integer: true, className: "setting-editor", disabled: !ot.foreignTradeOperational })}<b>年</b>
         <button class="secondary" data-agreement-sign="1" data-town="${id}" ${signDisabled}>签约</button></div></div>
       <div class="subtle">签约按当前收购价锁定单价（关系融洽时×1.05）；每月交付1/12，从批发市场扣货；货不足即我方违约，赔年货值10%并扣关系分（融洽时减半），连续3次对方解约。</div>
@@ -20206,7 +20219,7 @@ function townSwitch(view, selectedId) {
       <div class="subtle">天灾欠收时可放贷解急。每年年结计息，${escapeHtml(ot.name)}用结余小麦先息后本偿还。</div>
       ${loanRows}
       <div class="row"><span class="label">累计放贷 / 收息</span><strong class="value">${number(ot.loanStats?.totalIssuedJin || 0)} / ${number(ot.loanStats?.totalInterestJin || 0, 1)}斤</strong></div>
-      <div class="row"><span class="label">放贷斤数</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-principal"), kind: "wheat-loan-principal", target: "wheatLoan", value: "", label: "小麦贷款斤数", minimum: 0, maximum: 1000000, className: "setting-editor" })}<b>斤</b></div></div>
+      <div class="row"><span class="label">放贷斤数</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-principal"), kind: "wheat-loan-principal", target: "wheatLoan", value: "", label: "小麦贷款斤数", minimum: 0, maximum: 1e12, className: "setting-editor" })}<b>斤</b></div></div>
       <div class="row"><span class="label">年利率</span><div class="setting-input">${renderNumericInput(view, { key: draftKey(townId, "wheat-loan-rate"), kind: "wheat-loan-rate", target: "wheatLoan", value: "", label: "小麦贷款年利率", minimum: 0, maximum: 50, className: "setting-editor" })}<b>%</b>
       <button class="secondary" data-wheat-loan-issue="1" data-town="${id}">发放贷款</button></div></div>
     </div>`;
@@ -22969,7 +22982,7 @@ function closest(element, selector) {
       const key = `outside-qty:${townId}:${itemId}`;
       const input = numericInputFor(key);
       const rawValue = numericDrafts.has(key) ? numericDrafts.get(key).value : input?.value;
-      const parsed = parseNumericDraft(rawValue, { label: "交易数量", minimum: 0, maximum: 100000 });
+      const parsed = parseNumericDraft(rawValue, { label: "交易数量", minimum: 0, maximum: 1e12 });
       if (!parsed.ok) {
         setDraftError(key, parsed.reason, input);
         return;
@@ -23003,7 +23016,7 @@ function closest(element, selector) {
       const rateInput = numericInputFor(rateKey);
       const principalRaw = numericDrafts.has(principalKey) ? numericDrafts.get(principalKey).value : principalInput?.value;
       const rateRaw = numericDrafts.has(rateKey) ? numericDrafts.get(rateKey).value : rateInput?.value;
-      const principalParsed = parseNumericDraft(principalRaw, { label: "放贷斤数", minimum: 0, maximum: 1000000 });
+      const principalParsed = parseNumericDraft(principalRaw, { label: "放贷斤数", minimum: 0, maximum: 1e12 });
       if (!principalParsed.ok) {
         setDraftError(principalKey, principalParsed.reason, principalInput);
         return;
@@ -23038,7 +23051,7 @@ function closest(element, selector) {
       const yearsInput = numericInputFor(yearsKey);
       const annualRaw = numericDrafts.has(annualKey) ? numericDrafts.get(annualKey).value : annualInput?.value;
       const yearsRaw = numericDrafts.has(yearsKey) ? numericDrafts.get(yearsKey).value : yearsInput?.value;
-      const annualParsed = parseNumericDraft(annualRaw, { label: "年供货量", minimum: 0, maximum: 5000000 });
+      const annualParsed = parseNumericDraft(annualRaw, { label: "年供货量", minimum: 0, maximum: 1e12 });
       if (!annualParsed.ok) {
         setDraftError(annualKey, annualParsed.reason, annualInput);
         return;

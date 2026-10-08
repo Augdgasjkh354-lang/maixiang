@@ -1578,7 +1578,7 @@ export function mountGame(root) {
       const key = `outside-qty:${townId}:${itemId}`;
       const input = numericInputFor(key);
       const rawValue = numericDrafts.has(key) ? numericDrafts.get(key).value : input?.value;
-      const parsed = parseNumericDraft(rawValue, { label: "交易数量", minimum: 0, maximum: 100000 });
+      const parsed = parseNumericDraft(rawValue, { label: "交易数量", minimum: 0, maximum: 1e12 });
       if (!parsed.ok) {
         setDraftError(key, parsed.reason, input);
         return;
@@ -1612,7 +1612,7 @@ export function mountGame(root) {
       const rateInput = numericInputFor(rateKey);
       const principalRaw = numericDrafts.has(principalKey) ? numericDrafts.get(principalKey).value : principalInput?.value;
       const rateRaw = numericDrafts.has(rateKey) ? numericDrafts.get(rateKey).value : rateInput?.value;
-      const principalParsed = parseNumericDraft(principalRaw, { label: "放贷斤数", minimum: 0, maximum: 1000000 });
+      const principalParsed = parseNumericDraft(principalRaw, { label: "放贷斤数", minimum: 0, maximum: 1e12 });
       if (!principalParsed.ok) {
         setDraftError(principalKey, principalParsed.reason, principalInput);
         return;
@@ -1647,7 +1647,7 @@ export function mountGame(root) {
       const yearsInput = numericInputFor(yearsKey);
       const annualRaw = numericDrafts.has(annualKey) ? numericDrafts.get(annualKey).value : annualInput?.value;
       const yearsRaw = numericDrafts.has(yearsKey) ? numericDrafts.get(yearsKey).value : yearsInput?.value;
-      const annualParsed = parseNumericDraft(annualRaw, { label: "年供货量", minimum: 0, maximum: 5000000 });
+      const annualParsed = parseNumericDraft(annualRaw, { label: "年供货量", minimum: 0, maximum: 1e12 });
       if (!annualParsed.ok) {
         setDraftError(annualKey, annualParsed.reason, annualInput);
         return;

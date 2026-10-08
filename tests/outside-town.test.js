@@ -33,14 +33,20 @@ function runDays(state, days) {
   }
 }
 
-test("外镇价格只看对方库存：我们卖得越多收购价越低，买进再卖回只亏价差", () => {
+test("外镇进口品：不到 3 年存货按正常价收购，超过 3 年才压价；买进再卖回只亏价差", () => {
   const state = tradingState();
   const town = state.outsideTowns.minzhen;
   const before = currentPrice(state, CONTENT, "minzhen", "salt", "sell");
   const sold = simulation.tradeWithOutsideTown(state, "sell", "salt", 10000);
   assert.equal(sold.ok, true, sold.reason);
-  assert.ok(currentPrice(state, CONTENT, "minzhen", "salt", "sell") < before, "卖出后收购价应下降");
-  assert.ok(sold.priceWheatPerUnit < before, "大单按曲线逐段计价，均价低于首单价");
+  assert.equal(currentPrice(state, CONTENT, "minzhen", "salt", "sell"), before, "存货不足 3 年，收购价不变");
+  const yearNeed = town.population * PROFILE.goods.salt.needPerPersonDay * 365;
+  town.stocks.salt = yearNeed * 3.5;
+  assert.ok(currentPrice(state, CONTENT, "minzhen", "salt", "sell") < before, "囤够 3 年以上开始压价");
+  town.stocks.salt = 0;
+  const calm = currentPrice(state, CONTENT, "minzhen", "salt", "sell");
+  town.prosperity = 10;
+  assert.ok(currentPrice(state, CONTENT, "minzhen", "salt", "sell") > calm, "繁荣度越低越愿意出高价");
 
   // 面粉：买进再卖回同样数量，镇库小麦净减少（价差），不能套利。
   const wheatBefore = state.accounts.town.wheat;
@@ -77,12 +83,12 @@ test("关税已删除；外贸房无人值守不能交易", () => {
   assert.match(result.reason, /无人值守/);
 });
 
-test("盐木长期断供时外镇衰退，供应充足时繁荣、人口增长、耕地每年扩大", () => {
+test("盐木长期断供时外镇繁荣度下降但人口不减，供应充足时繁荣、人口增长更快、耕地每年扩大", () => {
   const starved = tradingState(4404);
   runDays(starved, 365 * 5);
   const s = starved.outsideTowns.minzhen;
   assert.ok(s.prosperity < 50, `断供繁荣度应低于50，实际${s.prosperity}`);
-  assert.ok(s.population < PROFILE.population, "断供人口应减少");
+  assert.ok(s.population >= PROFILE.population, "人口只增不减");
   assert.equal(s.landMu, PROFILE.landMu + 4 * PROFILE.landGrowthMuPerYear);
 
   const fed = tradingState(4404);

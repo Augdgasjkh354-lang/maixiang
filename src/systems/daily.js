@@ -15,7 +15,7 @@ import { advancePopulation } from "./population.js";
 import { selectHousing } from "../selectors/housing.js";
 import { settleHousingRent, buyRepairWoodForResidents } from "./housing.js";
 import { settleVillaPurchases, settleVillaPropertyTax } from "./villas.js";
-import { payPensions } from "./social-security.js";
+import { collectSocialContributions, payPensions } from "./social-security.js";
 import { advanceOutsideTownDay, settleOutsideTownYear, settleWheatLoansYear } from "./outside-town.js";
 import { settleTradeAgreementsMonth, settleTradeAgreementsYear } from "./trade-agreements.js";
 import { resetLaborCompetitionYear } from "./labor-market.js";
@@ -141,6 +141,8 @@ export const DAILY_STEPS = [
   { id: "wages", run: (state, content, day) => payDailyWages(state, day.laborAtStart, content) },
   { id: "companyWages", run: payListedCompanyWages },
   { id: "privateWages", run: payPrivateIndustryWages },
+  // 各雇主发完工资后统一收社保（按在岗人数，所有岗位都算）。
+  { id: "socialContribution", run: collectSocialContributions },
   { id: "unemployment", run: (state, content, day) => payUnemploymentBenefit(state, day.laborAtStart, content) },
   { id: "pension", run: payPensions },
 

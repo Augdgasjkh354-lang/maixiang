@@ -17,7 +17,6 @@ import { jobCount } from "./households.js";
 // 每年：秋收入库；元旦抽天气与年事件、按繁荣度和口粮增减人口、开垦新耕地。
 
 const SLICES = 20;
-export const MAX_TRADE_JIN_PER_ORDER = 100000;
 export const RELATIONS_DEFAULT = 60;
 export const RELATIONS_MAX = 100;
 export const RELATIONS_TRUSTED = 70;
@@ -115,7 +114,26 @@ function spreadRate(town) {
   return 0.2 - Math.max(0, Math.min(100, town.relations)) / 100 * 0.1;
 }
 
+// 外镇要进口的东西（盐、木材、布、酒）：存货不到 3 年用量都按正常价收，囤够 3 年以上才开始压价；
+// 繁荣度越低（越缺东西、越着急）越愿意出高价，繁荣度 100 按基准价，繁荣度 0 出到 1.8 倍。
+// 外镇自产外卖的东西（面粉、面包）照旧按库存比目标定价。
+export const IMPORT_DISCOUNT_AFTER_YEARS = 3;
+
+function stockYears(town, good, stock) {
+  const yearNeed = dailyNeed(town, good) * 365;
+  return yearNeed > 0 ? Math.max(0, stock) / yearNeed : Infinity;
+}
+
+function importUrgency(town) {
+  return 1 + (1 - Math.max(0, Math.min(100, town.prosperity)) / 100) * 0.8;
+}
+
 function midPrice(town, good, stock) {
+  if (!good.sellsToUs) {
+    const years = stockYears(town, good, stock);
+    const glut = years <= IMPORT_DISCOUNT_AFTER_YEARS ? 1 : Math.max(0.4, 1 - 0.2 * (years - IMPORT_DISCOUNT_AFTER_YEARS));
+    return good.basePrice * glut * importUrgency(town);
+  }
   const target = targetStock(town, good);
   const scarcity = target > 0 ? (target / Math.max(stock, target * 0.05)) ** 0.7 : 1;
   return good.basePrice * Math.max(0.35, Math.min(3, scarcity)) * prosperityFactor(town);
@@ -229,7 +247,8 @@ export function advanceOutsideTownDay(state, content) {
       let stock = (town.stocks[itemId] || 0) + town.population * good.producePerPersonDay;
       const used = Math.min(stock, need);
       stock -= used;
-      const cap = targetStock(town, good) * STOCK_SPOIL_MULTIPLE;
+      // 自产品超过目标 2 倍、进口品超过 5 年用量的部分才开始损耗。
+      const cap = good.sellsToUs ? targetStock(town, good) * STOCK_SPOIL_MULTIPLE : need * 365 * 5;
       if (stock > cap) stock -= (stock - cap) * 0.02;
       town.stocks[itemId] = round2(stock);
       const satisfied = need > 0 ? used / need : 1;
@@ -297,11 +316,10 @@ export function settleOutsideTownYear(state, content) {
       town.tradeClosed = true;
       recordEvent(state, `${profile.name}与我镇关系破裂，商路断绝。`, content, { day: 1 });
     }
-    // 人口：繁荣度 50 以上增长、以下减少，最多 ±3%/年；口粮不足时按缺口收缩。
-    let rate = Math.max(-0.03, Math.min(0.03, (town.prosperity - 50) / 50 * 0.03));
-    if (town.supply.food < 0.97) rate = Math.min(rate, -(1 - town.supply.food) * 0.5);
+    // 人口只增不减：每年 +0.5%（繁荣度 0）到 +3%（繁荣度 100）；口粮不足的年份停止增长。
+    const rate = town.supply.food < 0.97 ? 0 : 0.005 + 0.025 * Math.max(0, Math.min(100, town.prosperity)) / 100;
     const before = town.population;
-    town.population = Math.max(100, Math.round(before * (1 + Math.max(-0.1, rate))));
+    town.population = Math.round(before * (1 + rate));
     town.lastYear.populationChange = town.population - before;
     town.landMu += profile.landGrowthMuPerYear;
     town.lastYear.landAddedMu = profile.landGrowthMuPerYear;
@@ -329,7 +347,6 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   if (direction === "buy" && !good.sellsToUs) return { ok: false, reason: `${profile.name}不出售${item.name}` };
   let qty = Number(quantityJin);
   if (!Number.isFinite(qty) || qty <= 0) return { ok: false, reason: "数量必须大于0" };
-  qty = Math.min(qty, MAX_TRADE_JIN_PER_ORDER);
   const transactionId = makeTransactionId(state);
 
   if (direction === "sell") {
@@ -375,7 +392,6 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
 
 // ---------------------------------------------------------------- 小麦贷款
 
-export const MAX_LOAN_JIN = 1000000;
 export const MAX_LOAN_RATE_PERCENT = 50;
 
 export function issueWheatLoan(state, principalJin, annualRatePercent, content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
@@ -385,7 +401,6 @@ export function issueWheatLoan(state, principalJin, annualRatePercent, content, 
   const principal = round2(Number(principalJin));
   const rate = Number(annualRatePercent);
   if (!Number.isFinite(principal) || principal <= 0) return { ok: false, reason: "贷款斤数须大于0" };
-  if (principal > MAX_LOAN_JIN) return { ok: false, reason: `单笔贷款不超过${MAX_LOAN_JIN}斤` };
   if (!Number.isFinite(rate) || rate < 0 || rate > MAX_LOAN_RATE_PERCENT) return { ok: false, reason: `年利率须在0—${MAX_LOAN_RATE_PERCENT}%之间` };
   const units = Math.floor(principal * content.precision.inventoryUnitsPerJin);
   if (units <= 0) return { ok: false, reason: "贷款斤数过小" };

@@ -1,7 +1,7 @@
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, maximumPayableValueUnits, normalizePaymentObligation, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
-import { syncResidentAggregates, householdList, isActiveHousehold } from "./households.js";
+import { syncResidentAggregates, householdList, isActiveHousehold, householdEmploymentCount, householdConvertibleWheatUnits } from "./households.js";
 
 // 社保基金：独立钱包（支付账户 "social"），粮券存 cashVoucherUnits、实物小麦存 cashWheatUnits。
 // - 收缴：从本日实际发放的工资按人头代扣，家庭 → 基金。
@@ -135,35 +135,35 @@ export function chargeFundForRelief(state, valueUnits, content) {
 }
 
 // 工资代扣：payDailyWages 在发放完毕后调用。
-export function collectSocialContributions(state, workerPay, currentPaidByKey, paidByHousehold, content) {
+// 每日社保缴费：所有在岗劳动力（务农、镇营、民营、公司、店铺都算）每人每天缴 dailyPerWorkerJin，
+// 在当天各雇主发完工资之后、由所在家庭统一缴纳。用粮券或小麦付，不动家庭口粮储备；付不起的部分当天免缴。
+export function collectSocialContributions(state, content) {
   const ss = ensureSocialSecurity(state);
-  if (!ss.enabled) return { collected: 0 };
+  if (!ss.enabled) return { collectedValueUnits: 0 };
   const perWorker = Math.round(Math.max(0, Number(ss.dailyPerWorkerJin) || 0) * currencyScale(content));
-  if (perWorker <= 0) return { collected: 0 };
+  if (perWorker <= 0) return { collectedValueUnits: 0 };
+  let workers = 0;
+  let due = 0;
   let collected = 0;
-  for (const row of workerPay) {
-    const payable = row.payable || 0;
-    const currentPaid = currentPaidByKey[row.payrollKey] || 0;
-    if (payable <= 0 || currentPaid <= 0 || !(row.count > 0)) continue;
-    // 按本日工资实际发放比例折算缴费人数。
-    const contribTotal = Math.round(row.count * Math.min(1, currentPaid / payable) * perWorker);
-    if (contribTotal <= 0) continue;
-    const paidRows = paidByHousehold[row.payrollKey] || {};
-    const paidTotal = Object.values(paidRows).reduce((sum, value) => sum + (value || 0), 0);
-    if (paidTotal <= 0) continue;
-    for (const [householdId, hpaid] of Object.entries(paidRows)) {
-      const share = Math.round(contribTotal * (hpaid || 0) / paidTotal);
-      const household = state.households?.byId?.[householdId];
-      if (share <= 0 || !household) continue;
-      const result = settleMonetaryPayment(state, `household:${householdId}`, SOCIAL_OWNER,
-        currentPaymentComposition(state, share), content,
-        "social_security_contribution", `${household.name}缴纳社保（从工资代扣）`, { requireFull: false });
-      collected += result.paidValueUnits || 0;
-    }
+  const previousDefer = Boolean(state._deferHouseholdSync);
+  state._deferHouseholdSync = true;
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household)) continue;
+    const employed = householdEmploymentCount(household);
+    if (employed <= 0) continue;
+    const amount = employed * perWorker;
+    workers += employed;
+    due += amount;
+    const result = settleMonetaryPayment(state, `household:${household.id}`, SOCIAL_OWNER, currentPaymentComposition(state, amount), content,
+      "social_security_contribution", `${household.name}缴纳社保（${employed}名在岗劳动力）`,
+      { requireFull: false, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) });
+    collected += result.paidValueUnits || 0;
   }
+  state._deferHouseholdSync = previousDefer;
+  if (!previousDefer) syncResidentAggregates(state, content);
   ss.totalCollectedUnits += collected;
-  if (collected > 0) syncResidentAggregates(state, content);
-  return { collectedValueUnits: collected };
+  ss.lastContribution = { workers, dueValueUnits: due, collectedValueUnits: collected };
+  return { workers, dueValueUnits: due, collectedValueUnits: collected };
 }
 
 // 每日养老金：按老人人数发到所在家庭。
