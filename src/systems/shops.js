@@ -1250,7 +1250,7 @@ export function shopSummaries(state, content) {
       itemId: primary, itemName: primary ? (content.items[primary]?.name || primary) : "", itemIds, inventoryRows, serviceId,
       serviceName: serviceId ? (content.rules.serviceTypes?.[serviceId]?.name || serviceId) : null,
       ownerHouseholdId: shop.ownerHouseholdId, ownerName: state.households?.byId?.[shop.ownerHouseholdId]?.name || shop.ownerHouseholdId, merchantHouseholdId: shop.ownerHouseholdId, merchantOnDuty: shopMerchantOnDuty(state, shop),
-      merchants: shopMerchantCount(state, shop), maxMerchants: content.rules.shopMaxMerchants || 4,
+      merchants: shopMerchantCount(state, shop), maxMerchants: shopMaxMerchants(shop, content),
       clerks: shopClerkCount(state, shop), maxClerks: shopClerkLimit(shop, content), occupiesStreet: shopOccupiesStreet(shop),
       cashVoucher: shop.cashVoucherUnits / scale, cashWheatJin: (shop.cashWheatUnits || 0) / invScale,
       cashValue: maximumPayableValueUnits(state, `shop:${shop.id}`, content) / scale, inventory: stockUnits / invScale,
@@ -1279,7 +1279,38 @@ export function shopSummaries(state, content) {
       taxArrearsVoucher: (shop.liabilities.taxVoucherUnits || 0) / scale,
       lastTaxVoucher: (shop.settlement.lastTaxVoucherUnits || 0) / scale,
       lossCarryVoucher: (shop.settlement.lossCarryVoucherUnits || 0) / scale,
-      retainedEarningsVoucher: (shop.retainedEarningsVoucherUnits || 0) / scale
+      retainedEarningsVoucher: (shop.retainedEarningsVoucherUnits || 0) / scale,
+      // 养殖场：产品、日产能、今日产量、存货、饲料、今日卖给商店的量。
+      farm: kind === "farm" ? {
+        productItemId: def.productItemId, productName: content.items[def.productItemId]?.name || def.productItemId,
+        feedItemId: def.feedItemId, feedName: content.items[def.feedItemId]?.name || def.feedItemId, feedPerUnit: def.feedPerUnit,
+        outputPerWorkerDay: def.outputPerWorkerDay,
+        capacityJin: farmDailyOutputUnits(state, source, content) / invScale,
+        producedDayJin: (shop.accounts.day.producedUnits?.[def.productItemId] || 0) / invScale,
+        storeSoldDayJin: (shop.accounts.day.storeSoldUnits?.[def.productItemId] || 0) / invScale,
+        soldDayJin: (shop.accounts.day.soldUnits?.[def.productItemId] || 0) / invScale,
+        productStockJin: (shop.inventory[def.productItemId] || 0) / invScale,
+        feedStockJin: (shop.inventory[def.feedItemId] || 0) / invScale,
+        priceVoucher: currentUnitPrice(state, def.productItemId, content)
+      } : null
+    };
+  });
+}
+
+// 时代广场总览（只读）：每座广场的摊位数、摊贩人数、今日卖货与利润。
+export function stallSquareSummaries(state, content, summaries = shopSummaries(state, content)) {
+  const limit = Math.max(0, Math.floor(state.policy?.stallKeeperLimit ?? content.rules.stallKeeperDefaultLimit ?? 50));
+  return (state.buildings || []).filter(building => building.typeId === "times_square").map(building => {
+    const stalls = summaries.filter(row => row.kind === "stall" && row.buildingId === building.id && row.status !== "closed");
+    return {
+      buildingId: building.id, slots: shopHostSlots(building, content), stalls: stalls.length,
+      keepers: stalls.reduce((sum, row) => sum + row.merchants, 0), keeperLimit: limit,
+      rentVoucher: state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2,
+      soldDayJin: stalls.reduce((sum, row) => sum + Object.values(state.shops?.[row.id]?.accounts?.day?.soldUnits || {}).reduce((a, b) => a + b, 0), 0) / content.precision.inventoryUnitsPerJin,
+      profitDayVoucher: stalls.reduce((sum, row) => sum + row.profitDayVoucher, 0),
+      averageDailyProfitVoucher: stalls.length ? stalls.reduce((sum, row) => sum + row.averageDailyProfitVoucher, 0) / stalls.length : 0,
+      cooldownDays: Math.max(0, (state.stallMarket?.cooldownUntilSerial || 0) - ((state.year - 1) * content.rules.daysPerYear + state.day)),
+      dailySalesCapJin: content.rules.shopTypes?.stall?.dailySalesCapJin ?? 50
     };
   });
 }

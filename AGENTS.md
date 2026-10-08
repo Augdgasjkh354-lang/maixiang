@@ -56,7 +56,8 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 | 社保基金 | 独立钱包（支付账户 `social`），操作入口在社保局建筑。养老金、失业金由基金付，不够时镇库垫付并记为基金欠国库的债；镇库注资也记债，基金可还款；基金可买卖上市公司股票（`company.fundShares`）并分红 |
 
 | 产业 | 有 `industryTier` 的建筑（0 原料：伐木场/盐场/棉田；1 加工：磨坊/酒坊/织坊；2 成品：面包房）。所有"哪些建筑能民营/成立公司/设生产税"都由 `content/buildings.js` 的 `industryTypeIds` / `isIndustryType` 推导，经营计划从下游往上游排。加新产业 = 加 item + recipe + 带 industryTier 的建筑 |
-| 日用品 | 酒、布：`rules.householdGoods` 配置年人均用量与购买门槛；有余钱的家庭在主食和盐之后到综合商店买，用了加舒心值，没有不扣分（`systems/goods-demand.js`）。后加的零售商品标 `optionalRetail`，镇上有货才参与商店试进货与资金储备 |
+| 养殖基地 / 时代广场 | 都是"店铺"的宿主建筑（建筑定义带 `shopHost.slotsPerLevel`），复用店铺的店主、商人、店员、工资、租金、利润税、清算。养殖场是 `kind: "farm"` 的店铺（`systems/livestock.js` 每天喂麦出肉，直供综合商店 `buyFromFarms`，余量进批发市场）；摊位是 `kind: "stall"` 的店铺（`systems/stalls.js` 自动开摊/收摊/加帮手，只卖 `householdGoods`，每摊每日封顶 50 斤） |
+| 日用品 | 酒、布、鸡鸭鹅猪肉（茶叶、陶器在 mod 里）：`rules.householdGoods` 配置年人均用量与购买门槛；有余钱的家庭在主食和盐之后到综合商店买，用了加舒心值，没有不扣分（`systems/goods-demand.js`）。后加的零售商品标 `optionalRetail`，镇上有货才参与商店试进货与资金储备 |
 
 开局只有麦田。伐木场盖在南林伐木点、**不需要木材**，是起步路线；其他建筑都要木材。**建筑建成后不会自动派工**，要在就业面板设人数，否则没有产出、也没有工资支付。
 

@@ -24,7 +24,7 @@ import { hasBankAccess } from "../economy/payment.js";
 import { WAGE_CONTROL_CIVIL_ROLE_IDS } from "../systems/payroll.js";
 import { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } from "../systems/households.js";
 import { bondOutstandingVoucherUnits } from "../systems/bonds.js";
-import { shopSummaries } from "../systems/shops.js";
+import { stallSquareSummaries, shopSummaries } from "../systems/shops.js";
 import { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO } from "../systems/wholesale-market.js";
 import { selectOutsideTownView } from "../systems/outside-town.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
@@ -389,6 +389,7 @@ export function selectDashboard(state, content, selection) {
     ? state.satisfaction - recentSat[Math.max(0, recentSat.length - 8)].value
     : 0;
   const shops = (full || needPolicy || needSite) ? shopSummaries(state, content) : [];
+  const stallSquares = (full || needPolicy || needSite) ? stallSquareSummaries(state, content, shops) : [];
   const companies = needBusiness ? Object.values(state.companies || {}).map(company => {
     const summary = companySummary(state, company, content);
     const subscription = company.listing?.listed ? previewShareSubscription(state, company.id, content) : { available: false, reason: "公司尚未上市" };
@@ -472,6 +473,7 @@ export function selectDashboard(state, content, selection) {
     accounts,
     households: { count: households.length, living: householdLiving, occupations, exchangeRemainingJin: exchangeRemainingUnits / content.precision.inventoryUnitsPerJin, details: householdDetails, categories: householdCategories, issueCounts: state.satisfactionFactors?.issueCounts || { food:0,salt:0,housing:0,wage:0 }, satisfactionChange },
     shops,
+    stallSquares,
     wholesaleMarket: (needBusiness || needSite) ? wholesaleSummary(state, content) : null,
     wholesaleTrends: (needBusiness || needSite) ? wholesaleTrends(state, content) : null,
     servicePricesVoucherPerUse: (needBusiness || needSite) ? { ...(state.services?.pricesVoucherPerUse || {}) } : {},
