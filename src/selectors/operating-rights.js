@@ -2,7 +2,7 @@ import { privateJobKeyForBuilding, listedJobKeyForBuilding, populationStats, rea
 import { isIndustryType } from "../content/buildings.js";
 import { accountQeqUnits } from "../economy/inventory.js";
 import { voucherBalance } from "../economy/currency.js";
-import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment } from "../economy/payment.js";
+import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
 import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from "../systems/households.js";
 import { currentUnitPrice, theoreticalFullSaleProfitPerWorker } from "../economy/prices.js";
 import { selectPublicProcurementDemand } from "../systems/public-procurement.js";
@@ -187,7 +187,7 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const minimumPerCapita = content.rules.householdLiving?.difficultPerCapitaVoucher ?? 30;
   const investmentRows = householdList(state).filter(isActiveHousehold).map(household => {
     const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-    const totalValue = voucherBalance(state, `household:${household.id}`) + Math.floor(maxWheatUnits * moneyScale / scale);
+    const totalValue = spendableVoucherUnits(state, `household:${household.id}`) + Math.floor(maxWheatUnits * moneyScale / scale);
     const livingReserve = Math.round((household.ageBands?.children || 0) + (household.ageBands?.workers || 0) + (household.ageBands?.elders || 0)) * minimumPerCapita * moneyScale;
     const investableValue = Math.max(0, totalValue - livingReserve);
     const canPayPrice = investableValue >= costUnits && quoteMonetaryPayment(paymentState, `household:${household.id}`, currentPaymentComposition(paymentState, costUnits), content, { maxWheatUnits }).full;

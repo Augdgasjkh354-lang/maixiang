@@ -3,8 +3,9 @@ import { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot
 import { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } from "./business.js";
 import { makeTransactionId, recordLedger } from "./ledger.js";
 import { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits } from "./money-units.js";
-import { distributeResidentInventory, takeResidentInventory, syncResidentAggregates, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList } from "../systems/households.js";
+import { distributeResidentInventory, takeResidentInventory, syncResidentAggregates, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList, hasHouseholds, isActiveHousehold, withDeferredHouseholdSync } from "../systems/households.js";
 import { recordHouseholdVoucherTransfer } from "../systems/household-life.js";
+import { withdrawFromBank } from "./deposits.js";
 
 // 货币制度只有两段：小麦结算 → 粮券结算。启动货币改革即一次性切换，没有过渡期。
 export const MONETARY_STAGE_WHEAT = "wheat";
@@ -87,6 +88,58 @@ function autoExchangeForPayment(state, owner, voucherNeedUnits, dueWheatValueUni
 
 export function paymentWheatBalanceUnits(state, owner) {
   return readSlot(paymentWheatSlot(state, owner));
+}
+
+// 存款可随时取回付款：住户存款与银行现金的较小者（银行现金不够时只能取到现金为止）。
+// 只有家庭（以及居民汇总，即全体家庭之和）有存款；其他经济主体返回 0。O(户数)。
+export function depositWithdrawableUnits(state, owner) {
+  const bank = state.bank;
+  const cash = Math.max(0, bank?.cashVoucherUnits || 0);
+  if (!bank || cash <= 0) return 0;
+  const kind = parseOwner(owner).kind;
+  if (kind === "household") return Math.min(cash, Math.max(0, bank.deposits?.[householdIdOf(owner)] || 0));
+  if (owner === "residents" && hasHouseholds(state)) {
+    let deposits = 0;
+    for (const [householdId, units] of Object.entries(bank.deposits || {})) {
+      const household = state.households?.byId?.[householdId];
+      if (household && isActiveHousehold(household)) deposits += Math.max(0, units || 0);
+    }
+    return Math.min(cash, deposits);
+  }
+  return 0;
+}
+
+// 付款可动用的粮券 = 手头粮券 + 可取回的存款。所有"能不能付、最多付多少"的判断都用它。
+export function spendableVoucherUnits(state, owner) {
+  return Math.max(0, voucherBalance(state, owner)) + depositWithdrawableUnits(state, owner);
+}
+
+// 现金不够时先从存款取回（住户存款在银行台账里，取回后粮券回到住户手里再付款）。
+// 调用顺序：手头粮券 → 存款取回 → 换券（小麦）。居民汇总从存款最多的家庭开始取。
+function withdrawDepositsForPayment(state, owner, needUnits, content) {
+  let left = Math.min(Math.max(0, needUnits), depositWithdrawableUnits(state, owner));
+  if (left <= 0) return;
+  if (parseOwner(owner).kind === "household") {
+    const result = withdrawFromBank(state, householdIdOf(owner), left, content);
+    if (!result.ok) throw new Error("存款取款预检后失败：" + result.reason);
+    return;
+  }
+  withDeferredHouseholdSync(state, content, () => {
+    const rows = Object.entries(state.bank.deposits || {})
+      .filter(([householdId, units]) => {
+        const household = state.households?.byId?.[householdId];
+        return (units || 0) > 0 && Boolean(household) && isActiveHousehold(household);
+      })
+      .sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    for (const [householdId, units] of rows) {
+      if (left <= 0) break;
+      const take = Math.min(left, units, state.bank.cashVoucherUnits || 0);
+      if (take <= 0) continue;
+      const result = withdrawFromBank(state, householdId, take, content);
+      if (!result.ok) throw new Error("存款取款预检后失败：" + result.reason);
+      left -= take;
+    }
+  });
 }
 
 function canCreditWheat(state, owner, wheatUnits) {
@@ -176,7 +229,7 @@ export function createPaymentCapabilityContext(state, owner, content, options = 
   return {
     content,
     stage: reform.stage,
-    voucherUnits: Math.max(0, voucherBalance(state, owner)),
+    voucherUnits: spendableVoucherUnits(state, owner),
     actualWheatUnits,
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, owner, content, options),
@@ -305,7 +358,7 @@ export function quoteMonetaryPayment(state, from, dueInput, content, options = {
     Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheatUnits);
   return quoteMonetaryPaymentFromCapability(due, {
     stage: reform.stage,
-    voucherUnits: Math.max(0, voucherBalance(state, from)),
+    voucherUnits: spendableVoucherUnits(state, from),
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, from, content, options),
     exchangeVoucherPoolUnits: from === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
@@ -325,8 +378,10 @@ export function settleMonetaryPayment(state, from, to, dueInput, content, type =
         voucherShortfallValueUnits: preflight.voucherShortfallValueUnits || 0 };
     }
   }
+  // 付款顺序：手头粮券 → 存款取回 → 换券（小麦）。
   const beforeVoucher = voucherBalance(state, from);
-  autoExchangeForPayment(state, from, Math.max(0, due.voucherValueUnits - beforeVoucher), due.wheatValueUnits, content, options);
+  withdrawDepositsForPayment(state, from, Math.max(0, due.voucherValueUnits - beforeVoucher), content);
+  autoExchangeForPayment(state, from, Math.max(0, due.voucherValueUnits - voucherBalance(state, from)), due.wheatValueUnits, content, options);
   const voucherAvailable = voucherBalance(state, from);
   const regularVoucherPaid = Math.min(due.voucherValueUnits, voucherAvailable);
   const voucherRemaining = due.voucherValueUnits - regularVoucherPaid;

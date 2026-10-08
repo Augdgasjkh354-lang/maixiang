@@ -7,7 +7,7 @@ import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { recordFundDividend } from "./social-security.js";
 import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
-import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, paymentWheatBalanceUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
+import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, paymentWheatBalanceUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/business.js";
@@ -395,7 +395,7 @@ function householdShareCapacity(state, household, priceUnits, content) {
   const foodReserveDays = content.rules.shareFoodReserveDays || 90;
   const livingDays = content.rules.shareLivingVoucherReserveDays || 30;
   const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, foodReserveDays);
-  const totalValue = voucherBalance(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
+  const totalValue = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
   const livingReserve = Math.round(householdPopulation(household) * content.rules.foodPerPersonDay * livingDays * scale);
   let high = Math.max(0, Math.floor((totalValue - livingReserve) / priceUnits));
   let low = 0;

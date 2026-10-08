@@ -234,9 +234,9 @@ export function createInitialState(options) {
       valueFlow: { day: { sales: 0, purchases: 0 }, year: { sales: 0, purchases: 0 }, cumulative: { sales: 0, purchases: 0 } },
       purchaseSpend: { day: 0, year: 0, cumulative: 0 },
       dailyTownAllocationUnits: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0])),
-      day: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
-      year: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
-      cumulative: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 }
+      day: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
+      year: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
+      cumulative: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 }
     },
     market: {
       breadPriceWheatPerJin: content.rules.marketPricesVoucherPerUnit?.bread ?? content.rules.breadBasePriceWheatPerJin,

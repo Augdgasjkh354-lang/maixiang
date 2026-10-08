@@ -1,7 +1,7 @@
 import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { householdIdOf } from "../economy/accounts.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
-import { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
+import { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { recordEvent } from "../economy/ledger.js";
 import { nextRandom } from "../core/random.js";
@@ -285,7 +285,7 @@ function chooseMerchantHousehold(state, content, preferredId = null, startup = s
   const candidates = householdList(state).filter(household => {
     if (!isActiveHousehold(household) || householdIdleWorkers(household) <= 0) return false;
     const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-    const totalValue = voucherBalance(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
+    const totalValue = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
     if (totalValue < startup + householdStartupReserveUnits(household, content)) return false;
     return quoteMonetaryPayment(state, `household:${household.id}`, currentPaymentComposition(state, startup), content, { maxWheatUnits }).full;
   }).sort((a, b) => maximumPayableValueUnits(state, `household:${b.id}`, content) - maximumPayableValueUnits(state, `household:${a.id}`, content) || a.id.localeCompare(b.id));

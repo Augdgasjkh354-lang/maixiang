@@ -7,6 +7,9 @@
 //   company:<id>     company.cashVoucherUnits       company.cashWheatUnits         company.inventory
 //   shop:<id>        shop.cashVoucherUnits          shop.cashWheatUnits            shop.inventory
 //   social           socialSecurity.cashVoucherUnits socialSecurity.cashWheatUnits  （无）
+//   bank             bank.cashVoucherUnits           （无）                           （无）
+//
+//（存款不是银行的付款账户：住户存款在 bank.deposits 台账里，取款时由支付层先转回住户粮券。）
 //
 // 本模块只做查找、不改状态、不引用其他系统，避免循环依赖。
 // 改了家庭余额后需要同步居民汇总，由调用方负责。
@@ -14,7 +17,7 @@
 const PREFIXES = [["household:", "household"], ["company:", "company"], ["shop:", "shop"]];
 
 export function parseOwner(owner) {
-  if (owner === "town" || owner === "residents" || owner === "social") return { kind: owner, id: null };
+  if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") return { kind: owner, id: null };
   for (const [prefix, kind] of PREFIXES) {
     if (typeof owner === "string" && owner.startsWith(prefix)) return { kind, id: owner.slice(prefix.length) };
   }
@@ -26,6 +29,7 @@ function entityOf(state, kind, id) {
   if (kind === "company") return state.companies?.[id] || null;
   if (kind === "shop") return state.shops?.[id] || null;
   if (kind === "social") return state.socialSecurity || null;
+  if (kind === "bank") return state.bank || null;
   if (kind === "town" || kind === "residents") return state.accounts?.[kind] || null;
   return null;
 }
@@ -62,6 +66,7 @@ export function voucherSlot(state, owner) {
     return { holder: state.currency.balances, key: "town" };
   }
   if (kind === "residents") return state.currency?.balances ? { holder: state.currency.balances, key: "residents" } : null;
+  if (kind === "bank") return state.bank ? { holder: state.bank, key: "cashVoucherUnits" } : null;
   const entity = entityOf(state, kind, id);
   if (!entity) return null;
   return { holder: entity, key: kind === "household" ? "voucherUnits" : "cashVoucherUnits" };
@@ -71,6 +76,7 @@ export function voucherSlot(state, owner) {
 export function paymentWheatSlot(state, owner) {
   const { kind, id } = parseOwner(owner);
   if (kind === "town" || kind === "residents") return state.accounts?.[kind] ? { holder: state.accounts[kind], key: "wheat" } : null;
+  if (kind === "bank") return null;
   const entity = entityOf(state, kind, id);
   if (!entity) return null;
   if (kind === "household") return entity.inventory ? { holder: entity.inventory, key: "wheat" } : null;

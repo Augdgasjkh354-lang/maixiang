@@ -107,7 +107,11 @@ function walkingPeople() {
 }
 
 function workState(building) {
-  return ["ready", "limited_materials"].includes(building.status?.status) ? "working" : "idle";
+  const status = building.status || {};
+  // 闸门减产（市场积压 / 口粮储备）时仍在出货的建筑亮"运作"灯。
+  const producing = ["ready", "limited_materials"].includes(status.status)
+    || (["market_capped", "wheat_reserve"].includes(status.status) && (status.batches || 0) > 0);
+  return producing ? "working" : "idle";
 }
 
 function renderBuilding(building, plot, selected) {

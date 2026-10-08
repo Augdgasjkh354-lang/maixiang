@@ -36,7 +36,8 @@ function holderKeyOf(kind, id) {
   return `${kind}:${id}`;
 }
 
-function payToHolder(state, holderKey, units, content = null) {
+// incomeUnits：其中属于利息收入的部分（银行持券时计入留存利润，本金回收不计）。
+function payToHolder(state, holderKey, units, content = null, incomeUnits = 0) {
   const [kind, id] = holderKey.split(":");
   if (kind === "household") {
     const household = state.households?.byId?.[id];
@@ -48,6 +49,7 @@ function payToHolder(state, holderKey, units, content = null) {
   } else if (kind === "bank") {
     const bank = ensureBankState(state);
     bank.cashVoucherUnits = (bank.cashVoucherUnits || 0) + units;
+    bank.retainedVoucherUnits += incomeUnits;
   }
 }
 
@@ -185,14 +187,14 @@ function payCoupon(state, issue, content) {
       if (due > topDue) { topDue = due; topHolding = holding; }
       const part = totalDue > 0 ? Math.floor(pay * due / totalDue) : 0;
       if (part > 0) {
-        payToHolder(state, holding.holderKey, part, content);
+        payToHolder(state, holding.holderKey, part, content, part);
         distributed += part;
       }
     }
     // floor 分摊的余数补给最大持有人：镇库已全额扣款，余数凭空销毁会打破货币守恒。
     const leftover = pay - distributed;
     if (leftover > 0 && topHolding) {
-      payToHolder(state, topHolding.holderKey, leftover, content);
+      payToHolder(state, topHolding.holderKey, leftover, content, leftover);
       distributed += leftover;
     }
     issue.stats.couponPaidVoucherUnits += distributed;
@@ -225,7 +227,10 @@ function settleMaturity(state, issue, content) {
     recordEvent(state, `镇库现金不足，国债${issue.id}展期1年（第${issue.extensions}次）。`, content);
     return;
   }
-  // 违约：剩余持有者血本无归
+  // 违约：剩余持有者血本无归。银行持有的本金随之消失，留存利润等额减少。
+  const bankLoss = (issue.holdings || []).filter(holding => holding.holderKey === "bank:bank")
+    .reduce((sum, holding) => sum + (holding.principalVoucherUnits || 0), 0);
+  if (bankLoss > 0) ensureBankState(state).retainedVoucherUnits -= bankLoss;
   issue.holdings = [];
   issue.status = "defaulted";
   recordEvent(state, `国债${issue.id}违约！镇库无力偿还，持有者血本无归。`, content);
@@ -245,7 +250,7 @@ export function redeemBondEarly(state, issueId, holderKey, content) {
   const total = holding.principalVoucherUnits + accrued;
   if (townCashUnits(state) < total) return { ok: false, reason: "镇库现金不足，暂无法赎回" };
   addTownCashUnits(state, -total);
-  payToHolder(state, holderKey, total, content);
+  payToHolder(state, holderKey, total, content, accrued);
   issue.holdings = issue.holdings.filter(row => row !== holding);
   return { ok: true, principalVoucherUnits: holding.principalVoucherUnits, interestVoucherUnits: accrued };
 }

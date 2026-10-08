@@ -197,7 +197,13 @@ export const RULES = Object.freeze({
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
   wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 })
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 }),
+  // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
+  // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
+  townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
+  townOutputStockDays: 30, // 备货天数：目标库存相当于多少天的需求
+  // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
+  townWheatReserveDays: 180
 });
 
 export const AGRICULTURE = Object.freeze({

@@ -1190,7 +1190,13 @@ const __mxmod2 = (() => {
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
   wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 })
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 }),
+  // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
+  // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
+  townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
+  townOutputStockDays: 30, // 备货天数：目标库存相当于多少天的需求
+  // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
+  townWheatReserveDays: 180
 });
 
        const AGRICULTURE = Object.freeze({
@@ -1702,6 +1708,9 @@ const __mxmod12 = (() => {
 //   company:<id>     company.cashVoucherUnits       company.cashWheatUnits         company.inventory
 //   shop:<id>        shop.cashVoucherUnits          shop.cashWheatUnits            shop.inventory
 //   social           socialSecurity.cashVoucherUnits socialSecurity.cashWheatUnits  （无）
+//   bank             bank.cashVoucherUnits           （无）                           （无）
+//
+//（存款不是银行的付款账户：住户存款在 bank.deposits 台账里，取款时由支付层先转回住户粮券。）
 //
 // 本模块只做查找、不改状态、不引用其他系统，避免循环依赖。
 // 改了家庭余额后需要同步居民汇总，由调用方负责。
@@ -1709,7 +1718,7 @@ const __mxmod12 = (() => {
 const PREFIXES = [["household:", "household"], ["company:", "company"], ["shop:", "shop"]];
 
        function parseOwner(owner) {
-  if (owner === "town" || owner === "residents" || owner === "social") return { kind: owner, id: null };
+  if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") return { kind: owner, id: null };
   for (const [prefix, kind] of PREFIXES) {
     if (typeof owner === "string" && owner.startsWith(prefix)) return { kind, id: owner.slice(prefix.length) };
   }
@@ -1721,6 +1730,7 @@ function entityOf(state, kind, id) {
   if (kind === "company") return state.companies?.[id] || null;
   if (kind === "shop") return state.shops?.[id] || null;
   if (kind === "social") return state.socialSecurity || null;
+  if (kind === "bank") return state.bank || null;
   if (kind === "town" || kind === "residents") return state.accounts?.[kind] || null;
   return null;
 }
@@ -1757,6 +1767,7 @@ function entityOf(state, kind, id) {
     return { holder: state.currency.balances, key: "town" };
   }
   if (kind === "residents") return state.currency?.balances ? { holder: state.currency.balances, key: "residents" } : null;
+  if (kind === "bank") return state.bank ? { holder: state.bank, key: "cashVoucherUnits" } : null;
   const entity = entityOf(state, kind, id);
   if (!entity) return null;
   return { holder: entity, key: kind === "household" ? "voucherUnits" : "cashVoucherUnits" };
@@ -1766,6 +1777,7 @@ function entityOf(state, kind, id) {
        function paymentWheatSlot(state, owner) {
   const { kind, id } = parseOwner(owner);
   if (kind === "town" || kind === "residents") return state.accounts?.[kind] ? { holder: state.accounts[kind], key: "wheat" } : null;
+  if (kind === "bank") return null;
   const entity = entityOf(state, kind, id);
   if (!entity) return null;
   if (kind === "household") return entity.inventory ? { holder: entity.inventory, key: "wheat" } : null;
@@ -1786,7 +1798,9 @@ function emptyOwner() {
     reliefWheatUnits: 0, rentWheatUnits: 0, breadPurchaseWheatUnits: 0,
     saltPurchaseWheatUnits: 0, operatingRightWheatUnits: 0,
     consumptionQeqUnits: 0, privateInputs: {}, privateOutputs: {}, privateTaxes: {},
-    constructionMaterials: {}, constructionMaterialsReturned: {}
+    constructionMaterials: {}, constructionMaterialsReturned: {},
+    // 镇库小麦的实物流水：镇营加工投入（磨坊/酒坊）、居民用小麦换券入库、居民用券兑回小麦。
+    productionInputWheatUnits: 0, wheatExchangeInUnits: 0, wheatRedeemedUnits: 0
   };
 }
 
@@ -1826,6 +1840,9 @@ function add(map, key, value) { map[key] = (map[key] || 0) + value; }
     else if (row.type === "private_process_input") add(residents.privateInputs, row.itemId, units);
     else if (row.type === "private_production_output") add(residents.privateOutputs, row.itemId, units);
     else if (row.type === "private_production_tax") add(town.privateTaxes, row.itemId, units);
+    else if (row.type === "process_input" && row.source === "town" && row.itemId === "wheat") add(town, "productionInputWheatUnits", units);
+    else if (row.type === "voucher_exchange" && row.itemId === "wheat" && row.destination === "town") add(town, "wheatExchangeInUnits", units);
+    else if (row.type === "voucher_redeem" && row.itemId === "wheat" && row.source === "town") add(town, "wheatRedeemedUnits", units);
     else if (row.type === "construction_material") add(town.constructionMaterials, row.itemId, units);
     else if (row.type === "construction_material_return") add(town.constructionMaterialsReturned, row.itemId, units);
   }
@@ -2550,7 +2567,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod18 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-576e84c";
+       const BUILD_ID = "0203-90ba03c";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -4032,15 +4049,38 @@ function currencyAccessCheck(state, owner) {
 return { currencyScale, ensureCurrencyState, voucherBalance, totalVoucherBalances, validateCurrencyInvariant, issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, transferVouchers, maximumResidentAutoExchangeWheatUnits, ensureHouseholdVouchersForEssential, ensureResidentVouchersForEssential };
 })();
 
-// ===== economy/payment.js =====
+// ===== economy/deposits.js =====
 const __mxmod27 = (() => {
+const { syncResidentAggregates } = __mxmod20;
+function withdrawFromBank(state, householdId, voucherUnits, content = null) {
+  const units = Math.floor(Number(voucherUnits) || 0);
+  if (!Number.isSafeInteger(units) || units <= 0) return { ok: false, reason: "取款金额必须为正整数" };
+  const bank = state.bank;
+  const deposited = bank?.deposits?.[householdId] || 0;
+  if (deposited < units) return { ok: false, reason: "存款余额不足" };
+  if ((bank.cashVoucherUnits || 0) < units) return { ok: false, reason: "银行现金不足，暂无法兑付" };
+  const household = state.households?.byId?.[householdId];
+  if (!household) return { ok: false, reason: "住户不存在" };
+  bank.deposits[householdId] = deposited - units;
+  bank.cashVoucherUnits -= units;
+  household.voucherUnits = (household.voucherUnits || 0) + units;
+  // 居民汇总粮券是缓存值，改动家庭券后必须同步。
+  if (content) syncResidentAggregates(state, content);
+  return { ok: true, householdId, voucherUnits: units };
+}
+return { withdrawFromBank };
+})();
+
+// ===== economy/payment.js =====
+const __mxmod28 = (() => {
 const { issueTownVouchers, issueVouchersFromWheat, transferVouchers, voucherBalance } = __mxmod26;
 const { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot } = __mxmod12;
 const { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } = __mxmod22;
 const { makeTransactionId, recordLedger } = __mxmod14;
 const { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits } = __mxmod25;
-const { distributeResidentInventory, takeResidentInventory, syncResidentAggregates, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList } = __mxmod20;
+const { distributeResidentInventory, takeResidentInventory, syncResidentAggregates, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList, hasHouseholds, isActiveHousehold, withDeferredHouseholdSync } = __mxmod20;
 const { recordHouseholdVoucherTransfer } = __mxmod23;
+const { withdrawFromBank } = __mxmod27;
 const MONETARY_STAGE_WHEAT = "wheat";
        const MONETARY_STAGE_VOUCHER = "voucher";
 
@@ -4121,6 +4161,58 @@ function autoExchangeForPayment(state, owner, voucherNeedUnits, dueWheatValueUni
 
        function paymentWheatBalanceUnits(state, owner) {
   return readSlot(paymentWheatSlot(state, owner));
+}
+
+// 存款可随时取回付款：住户存款与银行现金的较小者（银行现金不够时只能取到现金为止）。
+// 只有家庭（以及居民汇总，即全体家庭之和）有存款；其他经济主体返回 0。O(户数)。
+       function depositWithdrawableUnits(state, owner) {
+  const bank = state.bank;
+  const cash = Math.max(0, bank?.cashVoucherUnits || 0);
+  if (!bank || cash <= 0) return 0;
+  const kind = parseOwner(owner).kind;
+  if (kind === "household") return Math.min(cash, Math.max(0, bank.deposits?.[householdIdOf(owner)] || 0));
+  if (owner === "residents" && hasHouseholds(state)) {
+    let deposits = 0;
+    for (const [householdId, units] of Object.entries(bank.deposits || {})) {
+      const household = state.households?.byId?.[householdId];
+      if (household && isActiveHousehold(household)) deposits += Math.max(0, units || 0);
+    }
+    return Math.min(cash, deposits);
+  }
+  return 0;
+}
+
+// 付款可动用的粮券 = 手头粮券 + 可取回的存款。所有"能不能付、最多付多少"的判断都用它。
+       function spendableVoucherUnits(state, owner) {
+  return Math.max(0, voucherBalance(state, owner)) + depositWithdrawableUnits(state, owner);
+}
+
+// 现金不够时先从存款取回（住户存款在银行台账里，取回后粮券回到住户手里再付款）。
+// 调用顺序：手头粮券 → 存款取回 → 换券（小麦）。居民汇总从存款最多的家庭开始取。
+function withdrawDepositsForPayment(state, owner, needUnits, content) {
+  let left = Math.min(Math.max(0, needUnits), depositWithdrawableUnits(state, owner));
+  if (left <= 0) return;
+  if (parseOwner(owner).kind === "household") {
+    const result = withdrawFromBank(state, householdIdOf(owner), left, content);
+    if (!result.ok) throw new Error("存款取款预检后失败：" + result.reason);
+    return;
+  }
+  withDeferredHouseholdSync(state, content, () => {
+    const rows = Object.entries(state.bank.deposits || {})
+      .filter(([householdId, units]) => {
+        const household = state.households?.byId?.[householdId];
+        return (units || 0) > 0 && Boolean(household) && isActiveHousehold(household);
+      })
+      .sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    for (const [householdId, units] of rows) {
+      if (left <= 0) break;
+      const take = Math.min(left, units, state.bank.cashVoucherUnits || 0);
+      if (take <= 0) continue;
+      const result = withdrawFromBank(state, householdId, take, content);
+      if (!result.ok) throw new Error("存款取款预检后失败：" + result.reason);
+      left -= take;
+    }
+  });
 }
 
 function canCreditWheat(state, owner, wheatUnits) {
@@ -4210,7 +4302,7 @@ function paymentCompositionFromContext(context, valueUnits) {
   return {
     content,
     stage: reform.stage,
-    voucherUnits: Math.max(0, voucherBalance(state, owner)),
+    voucherUnits: spendableVoucherUnits(state, owner),
     actualWheatUnits,
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, owner, content, options),
@@ -4339,7 +4431,7 @@ function maximumPayableValueUnitsFromContext(context) {
     Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheatUnits);
   return quoteMonetaryPaymentFromCapability(due, {
     stage: reform.stage,
-    voucherUnits: Math.max(0, voucherBalance(state, from)),
+    voucherUnits: spendableVoucherUnits(state, from),
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, from, content, options),
     exchangeVoucherPoolUnits: from === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
@@ -4359,8 +4451,10 @@ function maximumPayableValueUnitsFromContext(context) {
         voucherShortfallValueUnits: preflight.voucherShortfallValueUnits || 0 };
     }
   }
+  // 付款顺序：手头粮券 → 存款取回 → 换券（小麦）。
   const beforeVoucher = voucherBalance(state, from);
-  autoExchangeForPayment(state, from, Math.max(0, due.voucherValueUnits - beforeVoucher), due.wheatValueUnits, content, options);
+  withdrawDepositsForPayment(state, from, Math.max(0, due.voucherValueUnits - beforeVoucher), content);
+  autoExchangeForPayment(state, from, Math.max(0, due.voucherValueUnits - voucherBalance(state, from)), due.wheatValueUnits, content, options);
   const voucherAvailable = voucherBalance(state, from);
   const regularVoucherPaid = Math.min(due.voucherValueUnits, voucherAvailable);
   const voucherRemaining = due.voucherValueUnits - regularVoucherPaid;
@@ -4427,13 +4521,13 @@ function maximumPayableValueUnitsFromContext(context) {
   reform.completed = { year: state.year, day };
   return { ok: true, stage: reform.stage, printedVoucherUnits: printUnits };
 }
-return { MONETARY_STAGE_WHEAT, MONETARY_STAGE_VOUCHER, ensureMonetaryReform, hasCompletedBank, hasBankAccess, paymentWheatBalanceUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, startMonetaryReform };
+return { MONETARY_STAGE_WHEAT, MONETARY_STAGE_VOUCHER, ensureMonetaryReform, hasCompletedBank, hasBankAccess, paymentWheatBalanceUnits, depositWithdrawableUnits, spendableVoucherUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, startMonetaryReform };
 })();
 
 // ===== economy/trade.js =====
-const __mxmod28 = (() => {
+const __mxmod29 = (() => {
 const { currencyScale } = __mxmod26;
-const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod28;
 const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod22;
 const { makeTransactionId, recordLedger } = __mxmod14;
 const { bookAdd, bookAddMap } = __mxmod21;
@@ -4630,7 +4724,7 @@ return { putStock, takeStock, valueOf, affordableUnits, sellCompanyGoods, direct
 })();
 
 // ===== economy/productivity.js =====
-const __mxmod29 = (() => {
+const __mxmod30 = (() => {
 // 人均产出（劳动生产率）：每个工人每天能做的批次数 = 配方基准 × 生产率系数。
 //
 //   生产率系数 = 等级加成 × 熟练度加成
@@ -4676,8 +4770,8 @@ return { LEVEL_BONUS_PER_LEVEL, EXPERIENCE_BONUS_MAX, EXPERIENCE_SCALE_WORKER_DA
 })();
 
 // ===== economy/prices.js =====
-const __mxmod30 = (() => {
-const { experienceBonus } = __mxmod29;
+const __mxmod31 = (() => {
+const { experienceBonus } = __mxmod30;
 function currentUnitPrice(state, itemId, content) {  const defaults = content.rules.marketPricesVoucherPerUnit || {};
   const wholesale = state.wholesaleMarket?.pricesVoucherPerUnit || {};
   if (Number.isFinite(wholesale[itemId]) && wholesale[itemId] > 0) return Number(wholesale[itemId]);
@@ -4800,17 +4894,17 @@ return { currentUnitPrice, currentPriceMap, setCurrentUnitPrice, PRICE_BAND_LOWE
 })();
 
 // ===== systems/wholesale-market.js =====
-const __mxmod31 = (() => {
+const __mxmod32 = (() => {
 const { CONTENT } = __mxmod11;
 const { wholesaleItemIds } = __mxmod0;
 const { householdIdOf } = __mxmod12;
 const { currencyScale, ensureCurrencyState } = __mxmod26;
 const { bookAdd, bookAddMap } = __mxmod21;
-const { buyDirect, directSellers, putStock, takeStock } = __mxmod28;
-const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod27;
+const { buyDirect, directSellers, putStock, takeStock } = __mxmod29;
+const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod28;
 const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod22;
 const { makeTransactionId, recordLedger } = __mxmod14;
-const { setCurrentUnitPrice, currentUnitPrice } = __mxmod30;
+const { setCurrentUnitPrice, currentUnitPrice } = __mxmod31;
 const { householdConvertibleWheatUnits, syncResidentAggregates } = __mxmod20;
 const idCache = new WeakMap();
        function wholesaleMonopolyItemIds(content = CONTENT) {
@@ -4841,9 +4935,9 @@ const idCache = new WeakMap();
   market.purchasePricesVoucherPerUnit ||= {};
   market.purchasePriceReferenceVoucherPerUnit ||= {};
   market.dailyTownAllocationUnits ||= emptyItemMap(content, 0);
-  market.day ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
-  market.year ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
-  market.cumulative ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.year ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.cumulative ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   // 统购统销累计账：无偿调拨入库与领用的成本价值。
   market.monopoly ||= { allocatedInValueUnits: 0, allocatedInputValueUnits: 0 };
   market.purchaseSpend ||= { day: 0, year: 0, cumulative: 0 };
@@ -4894,14 +4988,14 @@ const addPeriodValue = bookAdd;
 
        function resetWholesaleDay(state, content) {
   const market = ensureWholesaleMarket(state, content);
-  market.day = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.purchaseSpend.day = 0;
   market.valueFlow.day = { sales: 0, purchases: 0 };
 }
 
        function resetWholesaleYear(state, content) {
   const market = ensureWholesaleMarket(state, content);
-  market.year = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.year = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.purchaseSpend.year = 0;
   market.valueFlow.year = { sales: 0, purchases: 0 };
 }
@@ -5403,6 +5497,7 @@ function readPurchasePrice(market, itemId, content) {
     day: state.day,
     inventory: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.inventory?.[itemId] || 0])),
     sold: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.soldUnits?.[itemId] || 0])),
+    townConsumed: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.townConsumedUnits?.[itemId] || 0])),
     price: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.pricesVoucherPerUnit?.[itemId] || 0]))
   };
   market.history.push(snapshot);
@@ -5415,6 +5510,33 @@ function readPurchasePrice(market, itemId, content) {
   const history = (market.history || []).slice(-days);
   if (history.length === 0) return 0;
   return history.reduce((sum, h) => sum + (h.sold?.[itemId] || 0), 0) / history.length;
+}
+
+// 镇营自身领用原料（磨坊领小麦、面包房领面粉等）的记账，与市场售出一起构成"需求"口径。
+// 只在有批发市场时记账；与 bookAddMap 一样同时写当日/本年/累计三段。
+       function recordTownInputConsumption(state, itemId, units, content) {
+  if (!wholesaleMonopolyItemIds(content).includes(itemId) || !(units > 0) || !hasWholesaleMarket(state)) return;
+  const market = ensureWholesaleMarket(state, content);
+  addPeriodMap(market, "townConsumedUnits", itemId, Math.round(units));
+}
+
+// 近 N 日需求（单位/日）：市场售出 + 镇营领用，按历史快照取平均（与 wholesaleAvgSoldUnits 同口径）。
+       function wholesaleAvgDemandUnits(state, itemId, content, days = 7) {
+  const history = (state.wholesaleMarket?.history || []).slice(-days);
+  if (history.length === 0) return 0;
+  return history.reduce((sum, h) => sum + (h.sold?.[itemId] || 0) + (h.townConsumed?.[itemId] || 0), 0) / history.length;
+}
+
+// 镇营产出的入市余量（单位）：目标库存 − 现有库存（市场 + 镇库）。
+// 目标库存 = max(最低备货, 近 7 日需求 × 备货天数)。没有批发市场时返回 Infinity（不设闸门）。
+       function townOutputMarketRoomUnits(state, itemId, content) {
+  if (!hasWholesaleMarket(state)) return Number.POSITIVE_INFINITY;
+  const scale = content.precision.inventoryUnitsPerJin;
+  const demand = wholesaleAvgDemandUnits(state, itemId, content, 7);
+  const minimum = (content.rules.townOutputMinStockJin ?? 200) * scale;
+  const target = Math.max(minimum, demand * (content.rules.townOutputStockDays ?? 30));
+  const stock = Math.max(0, state.wholesaleMarket?.inventory?.[itemId] || 0) + Math.max(0, state.accounts?.town?.[itemId] || 0);
+  return Math.max(0, target - stock);
 }
 
 // 批发市场趋势视图（0.1.11 zM）：供面板使用
@@ -5436,16 +5558,16 @@ function readPurchasePrice(market, itemId, content) {
   }
   return result;
 }
-return { wholesaleMonopolyItemIds, wholesaleMarketItemIds, INVENTORY_PRICE_FEEDBACK_ELASTICITY, INVENTORY_PRICE_FEEDBACK_SCALE, PURCHASE_PRICE_FLOOR_RATIO, ensureWholesaleMarket, hasWholesaleMarket, resetWholesaleDay, resetWholesaleYear, wholesaleUnitPrice, wholesalePurchasePrice, purchasePriceFeedback, refreshWholesalePurchasePrices, setWholesalePrice, setWholesalePurchasePrice, wholesalePurchaseQuote, setWholesaleTownAllocation, takeWholesaleInventoryForExport, transferTownToWholesale, stockpileWholesale, releaseWholesale, allocateTownOutputToWholesale, allocateInputToTown, depositWholesalePurchasedInventory, depositProductionTaxToWholesale, runWholesaleIntake, procureTownInputFromWholesale, buyWholesaleForOwner, readWholesaleMarket, wholesaleSummary, snapshotWholesaleHistory, wholesaleAvgSoldUnits, wholesaleTrends };
+return { wholesaleMonopolyItemIds, wholesaleMarketItemIds, INVENTORY_PRICE_FEEDBACK_ELASTICITY, INVENTORY_PRICE_FEEDBACK_SCALE, PURCHASE_PRICE_FLOOR_RATIO, ensureWholesaleMarket, hasWholesaleMarket, resetWholesaleDay, resetWholesaleYear, wholesaleUnitPrice, wholesalePurchasePrice, purchasePriceFeedback, refreshWholesalePurchasePrices, setWholesalePrice, setWholesalePurchasePrice, wholesalePurchaseQuote, setWholesaleTownAllocation, takeWholesaleInventoryForExport, transferTownToWholesale, stockpileWholesale, releaseWholesale, allocateTownOutputToWholesale, allocateInputToTown, depositWholesalePurchasedInventory, depositProductionTaxToWholesale, runWholesaleIntake, procureTownInputFromWholesale, buyWholesaleForOwner, readWholesaleMarket, wholesaleSummary, snapshotWholesaleHistory, wholesaleAvgSoldUnits, recordTownInputConsumption, wholesaleAvgDemandUnits, townOutputMarketRoomUnits, wholesaleTrends };
 })();
 
 // ===== systems/outside-town.js =====
-const __mxmod32 = (() => {
+const __mxmod33 = (() => {
 const { nextRandom } = __mxmod24;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
 const { addInventory, changeInventory, quantityToUnits, unitsToQuantity } = __mxmod16;
 const { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } = __mxmod7;
-const { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } = __mxmod31;
+const { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } = __mxmod32;
 const { jobCount } = __mxmod20;
 const SLICES = 20;
        const RELATIONS_DEFAULT = 60;
@@ -5971,11 +6093,11 @@ return { RELATIONS_DEFAULT, RELATIONS_MAX, RELATIONS_TRUSTED, RELATIONS_DISTRUST
 })();
 
 // ===== core/state.js =====
-const __mxmod33 = (() => {
+const __mxmod34 = (() => {
 const { CONTENT } = __mxmod11;
 const { emptyFinancialFlowPeriod } = __mxmod13;
 const { createInitialHouseholds } = __mxmod20;
-const { createOutsideTowns } = __mxmod32;
+const { createOutsideTowns } = __mxmod33;
 function ensureProjectAccessor(state) {
   if (!state || typeof state !== "object") return state;
   state.projects = Array.isArray(state.projects) ? state.projects : [];
@@ -6204,9 +6326,9 @@ function emptyRentPeriod() {
       valueFlow: { day: { sales: 0, purchases: 0 }, year: { sales: 0, purchases: 0 }, cumulative: { sales: 0, purchases: 0 } },
       purchaseSpend: { day: 0, year: 0, cumulative: 0 },
       dailyTownAllocationUnits: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0])),
-      day: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
-      year: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
-      cumulative: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 }
+      day: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
+      year: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
+      cumulative: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 }
     },
     market: {
       breadPriceWheatPerJin: content.rules.marketPricesVoucherPerUnit?.bread ?? content.rules.breadBasePriceWheatPerJin,
@@ -6311,16 +6433,16 @@ return { ensureProjectAccessor, createInitialCohorts, emptyYearTotals, defaultWa
 })();
 
 // ===== systems/agriculture.js =====
-const __mxmod34 = (() => {
+const __mxmod35 = (() => {
 const { changeInventory, quantityToUnits } = __mxmod16;
 const { bookAddAll, ensureBook } = __mxmod21;
 const { recordEvent, recordLedger } = __mxmod14;
 const { jobAssignments, jobCount, distributeResidentInventory, householdList, householdIdleWorkers, householdEmploymentCount } = __mxmod20;
 const { addTownCostBasis } = __mxmod22;
 const { recordHouseholdInKind, recordHouseholdWageDue } = __mxmod23;
-const { emptyReclaimState, emptyReclaimPeriod } = __mxmod33;
+const { emptyReclaimState, emptyReclaimPeriod } = __mxmod34;
 const { currencyScale } = __mxmod26;
-const { currentPaymentComposition, settleMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, settleMonetaryPayment } = __mxmod28;
 const { makeTransactionId } = __mxmod14;
 function ensureAgricultureState(state, content) {
   state.agriculture ||= {};
@@ -6562,9 +6684,9 @@ return { ensureAgricultureState, reclaimedAcresMaximum, reclaimedAcres, reclaimW
 })();
 
 // ===== systems/employer.js =====
-const __mxmod35 = (() => {
+const __mxmod36 = (() => {
 const { allocateIntegerByWeight } = __mxmod15;
-const { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } = __mxmod27;
+const { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } = __mxmod28;
 const { recordHouseholdWageDue } = __mxmod23;
 const { jobAssignments, syncResidentAggregates } = __mxmod20;
 function wageBook(holder) {
@@ -6648,9 +6770,9 @@ return { wageBook, wageArrears, accrueWages, payWages, productionTaxUnits, hireT
 })();
 
 // ===== systems/social-security.js =====
-const __mxmod36 = (() => {
+const __mxmod37 = (() => {
 const { currencyScale } = __mxmod26;
-const { currentPaymentComposition, maximumPayableValueUnits, normalizePaymentObligation, settleMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, maximumPayableValueUnits, normalizePaymentObligation, settleMonetaryPayment } = __mxmod28;
 const { makeTransactionId, recordLedger } = __mxmod14;
 const { syncResidentAggregates, householdList, isActiveHousehold, householdEmploymentCount, householdConvertibleWheatUnits } = __mxmod20;
 const SOCIAL_OWNER = "social";
@@ -6931,14 +7053,14 @@ return { SOCIAL_OWNER, DEFAULT_SS_DAILY_JIN, DEFAULT_SS_PENSION_JIN, ensureSocia
 })();
 
 // ===== systems/payroll.js =====
-const __mxmod37 = (() => {
+const __mxmod38 = (() => {
 const { addWageExpense } = __mxmod22;
 const { currencyScale } = __mxmod26;
-const { currentPaymentComposition, settleMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, settleMonetaryPayment } = __mxmod28;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
 const { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } = __mxmod20;
-const { accrueWages, payWages, wageArrears } = __mxmod35;
-const { ensureSocialSecurity, payFromFund } = __mxmod36;
+const { accrueWages, payWages, wageArrears } = __mxmod36;
+const { ensureSocialSecurity, payFromFund } = __mxmod37;
 function ensurePayroll(state) {
   state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
   state.payroll.arrearsVoucherUnits ||= state.payroll.arrearsWheatUnits || {};
@@ -7169,10 +7291,10 @@ return { WAGE_CONTROL_CIVIL_ROLE_IDS, wageControlFactor, ensureWageControl, setW
 })();
 
 // ===== systems/labor-market.js =====
-const __mxmod38 = (() => {
+const __mxmod39 = (() => {
 const { recordEvent } = __mxmod14;
 const { householdList, householdWorkingAge, householdEmploymentCount, jobCount, setHouseholdJobCount } = __mxmod20;
-const { wageControlFactor } = __mxmod37;
+const { wageControlFactor } = __mxmod38;
 function clerkJobKey(shop) { return `shop:${shop.id}:clerk`; }
 function merchantJobKey(shop) { return `shop:${shop.id}:merchant`; }
 function shopClerkCount(state, shop) { return jobCount(state, clerkJobKey(shop)); }
@@ -7486,11 +7608,11 @@ return { publicWageForRole, computeLaborMarket, laborMoodLabel, ensureLaborCompe
 })();
 
 // ===== selectors/labor.js =====
-const __mxmod39 = (() => {
+const __mxmod40 = (() => {
 const { CORE_ROLES } = __mxmod4;
 const { householdList, householdEmploymentCount, householdWorkingAge, jobCount } = __mxmod20;
-const { reclaimedAcres } = __mxmod34;
-const { computePoachable } = __mxmod38;
+const { reclaimedAcres } = __mxmod35;
+const { computePoachable } = __mxmod39;
 function jobKeyForBuilding(buildingId, roleId) { return buildingId + "::" + roleId; }
        function privateJobKeyForBuilding(buildingId, roleId) { return buildingId + "::" + roleId + "::private"; }
        function listedJobKeyForBuilding(buildingId, roleId) { return buildingId + "::" + roleId + "::listed"; }
@@ -7620,11 +7742,11 @@ return { jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding, r
 })();
 
 // ===== systems/employment.js =====
-const __mxmod40 = (() => {
-const { populationStats, selectJobRows, jobKeyForBuilding, readJobCount, privateJobKeyForBuilding } = __mxmod39;
+const __mxmod41 = (() => {
+const { populationStats, selectJobRows, jobKeyForBuilding, readJobCount, privateJobKeyForBuilding } = __mxmod40;
 const { setJobCount, releaseExcessHouseholdEmployment, jobCount } = __mxmod20;
-const { reclaimedAcres } = __mxmod34;
-const { poachWorkers } = __mxmod38;
+const { reclaimedAcres } = __mxmod35;
+const { poachWorkers } = __mxmod39;
 function farmerCapacity(state, content) {
   return Math.max(0, Math.floor(reclaimedAcres(state, content) / content.agriculture.acresPerFarmer));
 }
@@ -7742,11 +7864,11 @@ return { agricultureEmploymentTarget, refillAgricultureToTarget, assignWorkers, 
 })();
 
 // ===== systems/public-procurement.js =====
-const __mxmod41 = (() => {
+const __mxmod42 = (() => {
 const { parseOwner } = __mxmod12;
-const { currentUnitPrice } = __mxmod30;
-const { hasWholesaleMarket, procureTownInputFromWholesale } = __mxmod31;
-const { affordableUnits: affordableUnitsFor, buyDirect, directSellers, valueOf } = __mxmod28;
+const { currentUnitPrice } = __mxmod31;
+const { hasWholesaleMarket, procureTownInputFromWholesale } = __mxmod32;
+const { affordableUnits: affordableUnitsFor, buyDirect, directSellers, valueOf } = __mxmod29;
 function rotated(list, offset) {
   if (!list.length) return list;
   const start = ((offset || 0) % list.length + list.length) % list.length;
@@ -7932,12 +8054,12 @@ return { setPublicProcurementIntent, clearPublicProcurementIntent, selectPublicP
 })();
 
 // ===== systems/construction.js =====
-const __mxmod42 = (() => {
+const __mxmod43 = (() => {
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
-const { employmentSnapshot, initializeBuildingJobs } = __mxmod40;
+const { employmentSnapshot, initializeBuildingJobs } = __mxmod41;
 const { atomicInventoryTransaction, quantityToUnits } = __mxmod16;
-const { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcurementIntent, checkTownMaterialShortfall } = __mxmod41;
-const { readJobCount } = __mxmod39;
+const { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcurementIntent, checkTownMaterialShortfall } = __mxmod42;
+const { readJobCount } = __mxmod40;
 const { setJobCount } = __mxmod20;
 function totalProjectWorkers(state) {
   return (state.projects || []).reduce(function (sum, project) {
@@ -8187,8 +8309,8 @@ return { totalProjectWorkers, staffProject, setProjectWorkers, startConstruction
 })();
 
 // ===== systems/finance.js =====
-const __mxmod43 = (() => {
-const { chargeFundForRelief } = __mxmod36;
+const __mxmod44 = (() => {
+const { chargeFundForRelief } = __mxmod37;
 const { transferFoodQeq } = __mxmod16;
 const { currencyScale, redeemVouchersForWheat } = __mxmod26;
 const { wheatUnitsForVoucherUnits } = __mxmod25;
@@ -8347,8 +8469,8 @@ return { redeemEssentialFoodForHouseholds, setAutomaticRelief, applyAutomaticRel
 })();
 
 // ===== selectors/housing.js =====
-const __mxmod44 = (() => {
-const { populationStats } = __mxmod39;
+const __mxmod45 = (() => {
+const { populationStats } = __mxmod40;
 const { householdList, householdPopulation, isActiveHousehold } = __mxmod20;
 function selectHousing(state, content) {
   const people = populationStats(state).total;
@@ -8405,12 +8527,12 @@ return { selectHousing };
 })();
 
 // ===== economy/operating-plan.js =====
-const __mxmod45 = (() => {
-const { currentUnitPrice } = __mxmod30;
-const { productivityFactor } = __mxmod29;
+const __mxmod46 = (() => {
+const { currentUnitPrice } = __mxmod31;
+const { productivityFactor } = __mxmod30;
 const { voucherBalance } = __mxmod26;
-const { maximumFullyPayableValueUnits, maximumPayableValueUnits } = __mxmod27;
-const { populationStats, readJobCount, privateJobKeyForBuilding, listedJobKeyForBuilding } = __mxmod39;
+const { maximumFullyPayableValueUnits, maximumPayableValueUnits } = __mxmod28;
+const { populationStats, readJobCount, privateJobKeyForBuilding, listedJobKeyForBuilding } = __mxmod40;
 const { householdConvertibleWheatUnits, householdList, isActiveHousehold } = __mxmod20;
 const { industryTypeIds } = __mxmod1;
 function daySerial(state, content) {
@@ -8802,9 +8924,9 @@ return { shopTradePrices, ensureOperatingPlanState, refreshOperatingPlan, planne
 })();
 
 // ===== systems/shop-pricing.js =====
-const __mxmod46 = (() => {
+const __mxmod47 = (() => {
 const { recordEvent } = __mxmod14;
-const { currentUnitPrice } = __mxmod30;
+const { currentUnitPrice } = __mxmod31;
 const PRICING_REVIEW_INTERVAL_DAYS = 7;
        const PRICING_DEVIATION_TOLERANCE_PERCENT = 3;
        const PRICING_MAX_STEP_PERCENT = 10;
@@ -9161,21 +9283,21 @@ return { PRICING_REVIEW_INTERVAL_DAYS, PRICING_DEVIATION_TOLERANCE_PERCENT, PRIC
 })();
 
 // ===== systems/shops.js =====
-const __mxmod47 = (() => {
+const __mxmod48 = (() => {
 const { currencyScale, voucherBalance } = __mxmod26;
 const { householdIdOf } = __mxmod12;
 const { PERIODS, bookAdd, bookAddMap, ensureBook } = __mxmod21;
-const { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment } = __mxmod27;
+const { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } = __mxmod28;
 const { voucherUnitsForWheatUnits } = __mxmod25;
 const { recordEvent } = __mxmod14;
 const { nextRandom } = __mxmod24;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold, syncResidentAggregates, setHouseholdJobCount, setJobCount, jobCount, jobAssignments } = __mxmod20;
-const { shopTradePrices, recentAverage } = __mxmod45;
-const { currentUnitPrice } = __mxmod30;
-const { accrueWages, payWages, wageArrears, wageBook } = __mxmod35;
-const { buyWholesaleForOwner, hasWholesaleMarket } = __mxmod31;
-const { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } = __mxmod38;
-const { ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory, updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop } = __mxmod46;
+const { shopTradePrices, recentAverage } = __mxmod46;
+const { currentUnitPrice } = __mxmod31;
+const { accrueWages, payWages, wageArrears, wageBook } = __mxmod36;
+const { buyWholesaleForOwner, hasWholesaleMarket } = __mxmod32;
+const { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } = __mxmod39;
+const { ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory, updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop } = __mxmod47;
 function emptyShopInventory(content) {
   return Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0]));
 }
@@ -9441,7 +9563,7 @@ function chooseMerchantHousehold(state, content, preferredId = null, startup = s
   const candidates = householdList(state).filter(household => {
     if (!isActiveHousehold(household) || householdIdleWorkers(household) <= 0) return false;
     const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-    const totalValue = voucherBalance(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
+    const totalValue = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
     if (totalValue < startup + householdStartupReserveUnits(household, content)) return false;
     return quoteMonetaryPayment(state, `household:${household.id}`, currentPaymentComposition(state, startup), content, { maxWheatUnits }).full;
   }).sort((a, b) => maximumPayableValueUnits(state, `household:${b.id}`, content) - maximumPayableValueUnits(state, `household:${a.id}`, content) || a.id.localeCompare(b.id));
@@ -10670,16 +10792,16 @@ return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, sho
 })();
 
 // ===== systems/building-development.js =====
-const __mxmod48 = (() => {
+const __mxmod49 = (() => {
 const { atomicInventoryTransaction, quantityToUnits, returnConstructionMaterial } = __mxmod16;
 const { recordEvent } = __mxmod14;
-const { employmentSnapshot } = __mxmod40;
-const { populationStats } = __mxmod39;
-const { selectHousing } = __mxmod44;
-const { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcurementIntent, checkTownMaterialShortfall } = __mxmod41;
+const { employmentSnapshot } = __mxmod41;
+const { populationStats } = __mxmod40;
+const { selectHousing } = __mxmod45;
+const { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcurementIntent, checkTownMaterialShortfall } = __mxmod42;
 const { householdList, releaseJobFromHousehold } = __mxmod20;
-const { staffProject } = __mxmod42;
-const { windUpCollectiveShop } = __mxmod47;
+const { staffProject } = __mxmod43;
+const { windUpCollectiveShop } = __mxmod48;
 function materialLines(rows, content) {
   return (rows || []).map(row => ({
     owner: "town", itemId: row.itemId,
@@ -10864,7 +10986,7 @@ return { selectUpgradePreview, startBuildingUpgrade, selectDemolitionPreview, de
 })();
 
 // ===== economy/payment-view-state.js =====
-const __mxmod49 = (() => {
+const __mxmod50 = (() => {
 const { householdEmploymentCount, householdList } = __mxmod20;
 function createPaymentViewState(state) {
   const preview = { ...state };
@@ -10899,25 +11021,25 @@ return { createPaymentViewState };
 })();
 
 // ===== systems/companies.js =====
-const __mxmod50 = (() => {
-const { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } = __mxmod39;
-const { laborBatches, nextCarry } = __mxmod29;
+const __mxmod51 = (() => {
+const { populationStats, readJobCount, listedJobKeyForBuilding, selectJobRows } = __mxmod40;
+const { laborBatches, nextCarry } = __mxmod30;
 const { isIndustryType } = __mxmod1;
 const { householdIdOf } = __mxmod12;
-const { putStock, sellCompanyGoods, takeStock } = __mxmod28;
+const { putStock, sellCompanyGoods, takeStock } = __mxmod29;
 const { PERIODS, bookAdd, bookAddMap, ensureBook } = __mxmod21;
-const { recordFundDividend } = __mxmod36;
+const { recordFundDividend } = __mxmod37;
 const { currencyScale, voucherBalance } = __mxmod26;
-const { createPaymentViewState } = __mxmod49;
-const { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, paymentWheatBalanceUnits, quoteMonetaryPayment, settleMonetaryPayment } = __mxmod27;
+const { createPaymentViewState } = __mxmod50;
+const { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, paymentWheatBalanceUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } = __mxmod28;
 const { voucherUnitsForWheatUnits } = __mxmod25;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
 const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod22;
-const { currentUnitPrice, setCurrentUnitPrice } = __mxmod30;
+const { currentUnitPrice, setCurrentUnitPrice } = __mxmod31;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold, jobAssignments, setJobCount, syncResidentAggregates } = __mxmod20;
-const { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } = __mxmod45;
-const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod35;
-const { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } = __mxmod31;
+const { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } = __mxmod46;
+const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod36;
+const { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleUnitPrice } = __mxmod32;
 function blankPeriod() {
   return {
     revenueVoucherUnits: 0,
@@ -11295,7 +11417,7 @@ function householdShareCapacity(state, household, priceUnits, content) {
   const foodReserveDays = content.rules.shareFoodReserveDays || 90;
   const livingDays = content.rules.shareLivingVoucherReserveDays || 30;
   const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, foodReserveDays);
-  const totalValue = voucherBalance(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
+  const totalValue = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(maxWheatUnits, content, "floor");
   const livingReserve = Math.round(householdPopulation(household) * content.rules.foodPerPersonDay * livingDays * scale);
   let high = Math.max(0, Math.floor((totalValue - livingReserve) / priceUnits));
   let low = 0;
@@ -11856,17 +11978,17 @@ return { ensureCompanies, buyInputForCompany, createIndependentCompany, createLi
 })();
 
 // ===== selectors/operating-rights.js =====
-const __mxmod51 = (() => {
-const { privateJobKeyForBuilding, listedJobKeyForBuilding, populationStats, readJobCount, selectJobRows } = __mxmod39;
+const __mxmod52 = (() => {
+const { privateJobKeyForBuilding, listedJobKeyForBuilding, populationStats, readJobCount, selectJobRows } = __mxmod40;
 const { isIndustryType } = __mxmod1;
 const { accountQeqUnits } = __mxmod16;
 const { voucherBalance } = __mxmod26;
-const { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, spendableVoucherUnits } = __mxmod28;
 const { householdConvertibleWheatUnits, householdList, isActiveHousehold } = __mxmod20;
-const { currentUnitPrice, theoreticalFullSaleProfitPerWorker } = __mxmod30;
-const { selectPublicProcurementDemand } = __mxmod41;
-const { companyActualProfitValuation } = __mxmod50;
-const { createPaymentViewState } = __mxmod49;
+const { currentUnitPrice, theoreticalFullSaleProfitPerWorker } = __mxmod31;
+const { selectPublicProcurementDemand } = __mxmod42;
+const { companyActualProfitValuation } = __mxmod51;
+const { createPaymentViewState } = __mxmod50;
 function outputCompetitionStock(state, itemId) {
   const town = state.accounts.town[itemId] || 0;
   const companies = Object.values(state.companies || {}).reduce((sum, company) => sum + (company.inventory?.[itemId] || 0), 0);
@@ -12044,7 +12166,7 @@ function demandForType(state, typeId, content) {
   const minimumPerCapita = content.rules.householdLiving?.difficultPerCapitaVoucher ?? 30;
   const investmentRows = householdList(state).filter(isActiveHousehold).map(household => {
     const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-    const totalValue = voucherBalance(state, `household:${household.id}`) + Math.floor(maxWheatUnits * moneyScale / scale);
+    const totalValue = spendableVoucherUnits(state, `household:${household.id}`) + Math.floor(maxWheatUnits * moneyScale / scale);
     const livingReserve = Math.round((household.ageBands?.children || 0) + (household.ageBands?.workers || 0) + (household.ageBands?.elders || 0)) * minimumPerCapita * moneyScale;
     const investableValue = Math.max(0, totalValue - livingReserve);
     const canPayPrice = investableValue >= costUnits && quoteMonetaryPayment(paymentState, `household:${household.id}`, currentPaymentComposition(paymentState, costUnits), content, { maxWheatUnits }).full;
@@ -12116,12 +12238,12 @@ return { selectOperatingRightPreview };
 })();
 
 // ===== systems/operating-rights.js =====
-const __mxmod52 = (() => {
-const { createPaymentCapabilityContext, currentPaymentComposition, maximumFullyPayableValueUnits, settleMonetaryPayment } = __mxmod27;
+const __mxmod53 = (() => {
+const { createPaymentCapabilityContext, currentPaymentComposition, maximumFullyPayableValueUnits, settleMonetaryPayment } = __mxmod28;
 const { recordEvent } = __mxmod14;
-const { selectOperatingRightPreview } = __mxmod51;
+const { selectOperatingRightPreview } = __mxmod52;
 const { householdConvertibleWheatUnits, setJobCount } = __mxmod20;
-const { readJobCount, jobKeyForBuilding, privateJobKeyForBuilding } = __mxmod39;
+const { readJobCount, jobKeyForBuilding, privateJobKeyForBuilding } = __mxmod40;
 function sellOperatingLevel(state, buildingId, content) {
   const preview = selectOperatingRightPreview(state, buildingId, content);
   if (!preview.available) return { ok: false, reason: preview.reason, preview };
@@ -12195,11 +12317,11 @@ return { sellOperatingLevel };
 })();
 
 // ===== systems/wealth-stats.js =====
-const __mxmod53 = (() => {
+const __mxmod54 = (() => {
 const { householdList, householdPopulation, isActiveHousehold } = __mxmod20;
-const { wholesaleUnitPrice } = __mxmod31;
-const { shopWage } = __mxmod38;
-const { computeLaborMarket } = __mxmod38;
+const { wholesaleUnitPrice } = __mxmod32;
+const { shopWage } = __mxmod39;
+const { computeLaborMarket } = __mxmod39;
 const { totalQeqUnits } = __mxmod16;
 function wholesalePrice(state, itemId, content) {
   const market = state.wholesaleMarket?.pricesVoucherPerUnit || {};
@@ -12348,10 +12470,10 @@ return { wholesalePrice, householdWealth, computeWealthStats, averageShopWage, r
 })();
 
 // ===== systems/liquidity.js =====
-const __mxmod54 = (() => {
+const __mxmod55 = (() => {
 const { currencyScale, voucherBalance } = __mxmod26;
 const { householdList, householdPopulation, isActiveHousehold } = __mxmod20;
-const { wholesalePrice } = __mxmod53;
+const { wholesalePrice } = __mxmod54;
 const INVEST_RATIO_MIN = 0.5;
        const INVEST_RATIO_MAX = 0.8;
        const FOOD_JIN_PER_PERSON_DAY = 2;
@@ -12411,11 +12533,11 @@ return { INVEST_RATIO_MIN, INVEST_RATIO_MAX, FOOD_JIN_PER_PERSON_DAY, computeLiq
 })();
 
 // ===== systems/investment-preference.js =====
-const __mxmod55 = (() => {
+const __mxmod56 = (() => {
 const { currencyScale } = __mxmod26;
 const { householdList, householdPopulation, isActiveHousehold } = __mxmod20;
-const { wholesalePrice } = __mxmod53;
-const { liquidityInvestRatio } = __mxmod54;
+const { wholesalePrice } = __mxmod54;
+const { liquidityInvestRatio } = __mxmod55;
 const { nextRandom } = __mxmod24;
 const HOUSEHOLD_RESERVE_DAYS = 30; // 生活支出储备天数（口粮），与银行吸储口径一致
        const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
@@ -12488,13 +12610,13 @@ return { HOUSEHOLD_RESERVE_DAYS, DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT, baseDeposi
 })();
 
 // ===== systems/stock-exchange.js =====
-const __mxmod56 = (() => {
+const __mxmod57 = (() => {
 const { currencyScale } = __mxmod26;
-const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod28;
 const { recordEvent } = __mxmod14;
 const { householdList, isActiveHousehold } = __mxmod20;
-const { consumeHouseholdStockBudget } = __mxmod55;
-const { companyActualProfitValuation } = __mxmod50;
+const { consumeHouseholdStockBudget } = __mxmod56;
+const { companyActualProfitValuation } = __mxmod51;
 const { nextRandom } = __mxmod24;
 const DEFAULT_TOTAL_SHARES = 100000;
 // 股价每日波动：向利润锚均值回归系数、噪声幅度、单日涨跌幅钳制。
@@ -12746,35 +12868,87 @@ return { DEFAULT_TOTAL_SHARES, SHARE_PRICE_REVERSION, SHARE_PRICE_NOISE_DAILY, S
 })();
 
 // ===== selectors/production.js =====
-const __mxmod57 = (() => {
-const { jobKeyForBuilding, readJobCount } = __mxmod39;
+const __mxmod58 = (() => {
+const { jobKeyForBuilding, populationStats, readJobCount } = __mxmod40;
 const { itemQeqUnitsPerInventoryUnit } = __mxmod16;
-const { hasWholesaleMarket } = __mxmod31;
-const { laborBatches } = __mxmod29;
+const { hasWholesaleMarket, townOutputMarketRoomUnits, wholesaleMonopolyItemIds } = __mxmod32;
+const { laborBatches } = __mxmod30;
+function townWheatReserveUnits(state, content) {
+  const people = populationStats(state).total;
+  return Math.round(people * content.rules.foodPerPersonDay * (content.rules.townWheatReserveDays ?? 180) * content.precision.inventoryUnitsPerJin);
+}
+
+// 镇营产出的市场闸门（批次数）：加工配方（有投入）的主产出若是批发市场商品，按市场余量最多能开几批。
+// 采集类（伐木、采盐、种棉）不设闸门：开局木材库存就高于最低备货，设闸门会让伐木场永久停产、起步路线断掉。
+// 无市场、非统购品时返回 Infinity。
+       function townOutputMarketBatchCap(state, recipe, content) {
+  const main = recipe?.outputs?.[0];
+  if (!main || !(recipe.inputs || []).length || !wholesaleMonopolyItemIds(content).includes(main.itemId)) return Number.POSITIVE_INFINITY;
+  const room = townOutputMarketRoomUnits(state, main.itemId, content);
+  if (!Number.isFinite(room)) return Number.POSITIVE_INFINITY;
+  const perBatch = Math.max(1, Math.round(main.quantity * content.precision.inventoryUnitsPerJin));
+  return Math.max(0, Math.ceil(room / perBatch));
+}
+
+// 镇营小麦投入的口粮储备上限（批次数）：只有镇库小麦超出储备的部分能用；没有小麦投入时 Infinity。
+       function townWheatReserveBatchCap(state, recipe, content) {
+  const wheat = (recipe?.inputs || []).find(input => input.itemId === "wheat");
+  if (!wheat) return Number.POSITIVE_INFINITY;
+  const perBatch = Math.max(1, Math.round(wheat.quantity * content.precision.inventoryUnitsPerJin));
+  const spare = Math.max(0, (state.accounts?.town?.wheat || 0) - townWheatReserveUnits(state, content));
+  return Math.floor(spare / perBatch);
+}
+
+// 两道闸门合并：wanted 是人手与目标产量封顶后的批次数。marketBinding / reserveBinding 表示该闸门是唯一的最紧约束。
+       function townOutputGate(state, recipe, wanted, content) {
+  const marketCap = townOutputMarketBatchCap(state, recipe, content);
+  const reserveCap = townWheatReserveBatchCap(state, recipe, content);
+  return {
+    batches: Math.max(0, Math.min(wanted, marketCap, reserveCap)),
+    marketCap,
+    reserveCap,
+    marketBinding: marketCap < Math.min(wanted, reserveCap),
+    reserveBinding: reserveCap < Math.min(wanted, marketCap)
+  };
+}
+
+// 闸门是否是最终实际投产批次数的限制因素：返回 "market_capped" / "wheat_reserve" / null。
+       function townGateCap(gate, batches) {
+  if (gate.marketBinding && batches === gate.marketCap) return "market_capped";
+  if (gate.reserveBinding && batches === gate.reserveCap) return "wheat_reserve";
+  return null;
+}
+
+// 与 processBuilding 同口径的纯函数预估：镇营生产经批发市场采购原料，
+// 镇库余粮不能绕过批发市场直接投产（"镇营生产原料必须经过批发市场"）。
+// 注意 processBuilding 会真实扣减，此处只读 state、不产生副作用。
 function wholesaleBatches(state, recipe, workers, content, building) {
   const market = state.wholesaleMarket;
   if (!hasWholesaleMarket(state) || !market) {
     return { batches: 0, reason: "尚未建成批发市场" };
   }
   const wanted = laborBatches(state, building.typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry).batches;
-  let batches = wanted;
+  const gate = townOutputGate(state, recipe, wanted, content);
+  let batches = gate.batches;
   let shortestName = null;
   for (const input of recipe.inputs || []) {
     const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);
-    // 小麦由镇库直管：可用量读镇库
+    // 小麦由镇库直管：可用量读镇库（口粮储备已由 gate 扣除）
     const marketUnits = input.itemId === "wheat"
       ? Math.max(0, state.accounts?.town?.wheat || 0)
       : Math.max(0, market.inventory?.[input.itemId] || 0);
-    const byItem = Math.min(wanted, Math.floor(marketUnits / Math.max(1, perBatch)));
+    const byItem = Math.min(batches, Math.floor(marketUnits / Math.max(1, perBatch)));
     if (byItem < batches) {
       batches = byItem;
       shortestName = content.items[input.itemId]?.name || input.itemId;
     }
   }
   if (batches <= 0) {
+    const cap = townGateCap(gate, 0);
+    if (cap) return { batches: 0, reason: null, cap };
     return { batches: 0, reason: `批发市场${shortestName || "原料"}缺货，待镇库调拨` };
   }
-  return { batches, reason: null };
+  return { batches, reason: null, cap: townGateCap(gate, batches) };
 }
 
        function recipeCapacity(state, building, content) {
@@ -12803,6 +12977,8 @@ function wholesaleBatches(state, recipe, workers, content, building) {
   return { status: "ready", batches: available, workers, recipe, capacity };
 }
 
+const CAP_LABELS = Object.freeze({ market_capped: "市场积压，减产", wheat_reserve: "保留口粮储备，减产" });
+
        function productionStatus(state, building, content) {
   const result = recipeCapacity(state, building, content);
   const definition = content.buildings[building.typeId];
@@ -12821,6 +12997,9 @@ function wholesaleBatches(state, recipe, workers, content, building) {
   // 镇营生产的实际投产量以批发市场可领用量为准（processBuilding 同口径），
   // 镇库有粮不等于能开工：避免显示"正在加工"、实际却零产出误导玩家。
   const wholesale = wholesaleBatches(state, result.recipe, result.workers, content, building);
+  if (wholesale.batches <= 0 && wholesale.cap) {
+    return { ...result, status: wholesale.cap, batches: 0, label: CAP_LABELS[wholesale.cap], reason: null };
+  }
   if (wholesale.batches <= 0) {
     return {
       ...result,
@@ -12829,6 +13008,9 @@ function wholesaleBatches(state, recipe, workers, content, building) {
       label: wholesale.reason === "尚未建成批发市场" ? "缺料停工（未建批发市场）" : "缺料停工（待镇库调拨）",
       reason: wholesale.reason
     };
+  }
+  if (wholesale.cap) {
+    return { ...result, batches: wholesale.batches, status: wholesale.cap, label: CAP_LABELS[wholesale.cap], reason: null };
   }
   const limited = wholesale.batches < result.capacity;
   return {
@@ -12853,17 +13035,17 @@ function wholesaleBatches(state, recipe, workers, content, building) {
   }
   return input;
 }
-return { recipeCapacity, productionStatus, buildingJobCount, buildingRoleInputQeq };
+return { townWheatReserveUnits, townOutputMarketBatchCap, townWheatReserveBatchCap, townOutputGate, townGateCap, recipeCapacity, productionStatus, buildingJobCount, buildingRoleInputQeq };
 })();
 
 // ===== systems/production.js =====
-const __mxmod58 = (() => {
+const __mxmod59 = (() => {
 const { atomicInventoryTransaction } = __mxmod16;
 const { commitProductionAccounting, planProductionAccounting } = __mxmod22;
-const { recipeCapacity } = __mxmod57;
-const { jobKeyForBuilding, readJobCount } = __mxmod39;
-const { procureTownInputFromWholesale, transferTownToWholesale } = __mxmod31;
-const { laborBatches, nextCarry } = __mxmod29;
+const { recipeCapacity, townGateCap, townOutputGate } = __mxmod58;
+const { jobKeyForBuilding, readJobCount } = __mxmod40;
+const { procureTownInputFromWholesale, recordTownInputConsumption, transferTownToWholesale } = __mxmod32;
+const { laborBatches, nextCarry } = __mxmod30;
 function recipeDeltas(recipe, batches, content) {
   const inputs = [];
   for (const input of recipe.inputs) {
@@ -12896,17 +13078,20 @@ function recipeDeltas(recipe, batches, content) {
   // 封顶每日批次数；用不上的人手仍照常领工资。用 0 表示取消（按人手满产）。
   const targetCap = targetBatchCap(building, recipeDef);
   const labor = laborBatches(state, building.typeId, building.level, workers, recipeDef?.batchesPerWorkerDay, building.productivityCarry);
-  let wholesaleBatchCap = Number.POSITIVE_INFINITY;
+  // 镇营产出闸门（用户口径：市场积压、口粮储备）：在领原料之前封顶批次数，免得白领用不掉的小麦/面粉。
+  const gate = recipeDef && workers > 0 ? townOutputGate(state, recipeDef, Math.min(labor.batches, targetCap), content) : null;
+  let wholesaleBatchCap = gate ? gate.batches : Number.POSITIVE_INFINITY;
   const procuredInputs = [];
   if (recipeDef && workers > 0 && (recipeDef.inputs || []).length) {
-    const wantedBatches = Math.min(labor.batches, targetCap);
+    const wantedBatches = gate.batches;
     wholesaleBatchCap = wantedBatches;
     for (const input of recipeDef.inputs || []) {
       const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);
       const required = perBatch * wantedBatches;
       // 镇库里已有的（如本镇磨坊当天的面粉）先用，不够再从批发市场领；都是镇里内部调拨，不付钱。
+      // 小麦由镇库直管、从不经批发市场领用；口粮储备已由 gate 扣除，这里不会越过储备。
       const inTown = Math.min(required, Math.max(0, state.accounts.town?.[input.itemId] || 0));
-      const purchase = required - inTown > 0
+      const purchase = required - inTown > 0 && input.itemId !== "wheat"
         ? procureTownInputFromWholesale(state, input.itemId, required - inTown, content, `${definition.name}从批发市场领用${content.items[input.itemId]?.name || input.itemId}`)
         : { boughtUnits: 0 };
       const boughtUnits = (purchase.boughtUnits || 0) + inTown;
@@ -12932,8 +13117,9 @@ function recipeDeltas(recipe, batches, content) {
     }
   }
   if (allowedBatches <= 0) delete building.productivityCarry;
+  const gateCap = gate ? townGateCap(gate, allowedBatches) : null;
   if (!definition || !definition.recipeId || capacity.status === "no_workers" || allowedBatches <= 0) {
-    return { buildingId: building.id, status: capacity.status === "no_workers" ? "no_workers" : "no_materials", batches: 0 };
+    return { buildingId: building.id, status: capacity.status === "no_workers" ? "no_workers" : (gateCap || "no_materials"), batches: 0 };
   }
   const recipe = capacity.recipe;
   const prepared = recipeDeltas(recipe, allowedBatches, content);
@@ -12954,6 +13140,10 @@ function recipeDeltas(recipe, batches, content) {
     };
   }
   commitProductionAccounting(state, accounting);
+  // 镇营自身领用的原料计入"需求"（与市场售出一起决定下一轮的市场闸门）。
+  for (const input of recipe.inputs || []) {
+    recordTownInputConsumption(state, input.itemId, Math.round(input.quantity * allowedBatches * content.precision.inventoryUnitsPerJin), content);
+  }
   // 生产成功且满负荷，才把不足一批的零头留到明天。
   building.productivityCarry = nextCarry(labor.exact, allowedBatches, allowedBatches >= labor.batches);
   if (!building.productivityCarry) delete building.productivityCarry;
@@ -12961,7 +13151,7 @@ function recipeDeltas(recipe, batches, content) {
     buildingId: building.id,
     status: allowedBatches >= targetCap
       ? "target_capped"
-      : allowedBatches < (capacity.batches || 0) ? "limited_materials" : capacity.status,
+      : gateCap || (allowedBatches < (capacity.batches || 0) ? "limited_materials" : capacity.status),
     batches: allowedBatches,
     transactionId: transaction.transactionId,
     outputUnits: accounting.outputs.reduce(function (totals, output) {
@@ -13004,7 +13194,7 @@ return { processBuilding, targetBatchCap, setBuildingOutputTarget, processAllBui
 })();
 
 // ===== systems/household-budget.js =====
-const __mxmod59 = (() => {
+const __mxmod60 = (() => {
 const { currencyScale } = __mxmod26;
 const { voucherUnitsForWheatUnits } = __mxmod25;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold } = __mxmod20;
@@ -13033,7 +13223,8 @@ function daySerial(state, content) {
   const rules = budgetRules(content);
   const keepDays = daysUntilHarvest(state, content) + rules.harvestBufferDays;
   const surplusWheat = householdConvertibleWheatUnits(state, household, content, keepDays);
-  return Math.max(0, household.voucherUnits || 0) + voucherUnitsForWheatUnits(surplusWheat, content, "floor");
+  const deposit = Math.max(0, state.bank?.deposits?.[household.id] || 0);
+  return Math.max(0, household.voucherUnits || 0) + deposit + voucherUnitsForWheatUnits(surplusWheat, content, "floor");
 }
 
 function computeRow(state, household, content) {
@@ -13087,13 +13278,13 @@ return { daysUntilHarvest, householdWealthUnits, householdBudgets, invalidateHou
 })();
 
 // ===== systems/services.js =====
-const __mxmod60 = (() => {
+const __mxmod61 = (() => {
 const { currencyScale } = __mxmod26;
-const { createPaymentCapabilityContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } = __mxmod27;
+const { createPaymentCapabilityContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } = __mxmod28;
 const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, withDeferredHouseholdSync } = __mxmod20;
 const { ensureHouseholdLife } = __mxmod23;
-const { householdBudgets } = __mxmod59;
-const { recordShopServiceSale, serviceShopCapacityUses, shopDefinition } = __mxmod47;
+const { householdBudgets } = __mxmod60;
+const { recordShopServiceSale, serviceShopCapacityUses, shopDefinition } = __mxmod48;
 const DEMAND_SCALE = 1000;
 
 function ensureServiceState(state) {
@@ -13301,9 +13492,9 @@ return { serviceUnitPrice, setServiceUnitPrice, serviceOutstandingUses, accrueSe
 })();
 
 // ===== systems/villas.js =====
-const __mxmod61 = (() => {
+const __mxmod62 = (() => {
 const { currencyScale, voucherBalance } = __mxmod26;
-const { currentPaymentComposition, settleMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, settleMonetaryPayment, spendableVoucherUnits } = __mxmod28;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
 const { voucherUnitsForWheatUnits } = __mxmod25;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } = __mxmod20;
@@ -13333,7 +13524,7 @@ const DEFAULT_VILLA_PRICE_WHEAT_JIN = 10000;
 
 // 家庭流动资产（小麦等值单位）：粮券 + 超出基本口粮储备的可折算小麦。
 function householdLiquidValueUnits(state, household, content) {
-  const vouchers = voucherBalance(state, `household:${household.id}`);
+  const vouchers = spendableVoucherUnits(state, `household:${household.id}`);
   const wheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
   return vouchers + voucherUnitsForWheatUnits(wheatUnits, content, "floor");
 }
@@ -13535,13 +13726,15 @@ return { DEFAULT_VILLA_PRICE_WHEAT_JIN, DEFAULT_VILLA_TAX_RATE_PERCENT, ensureVi
 })();
 
 // ===== systems/bank.js =====
-const __mxmod62 = (() => {
-const { currencyScale } = __mxmod26;
+const __mxmod63 = (() => {
+const { currencyScale, voucherBalance } = __mxmod26;
 const { recordEvent } = __mxmod14;
+const { currentPaymentComposition, settleMonetaryPayment } = __mxmod28;
+const { withdrawFromBank } = __mxmod27;
 const { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } = __mxmod20;
-const { wholesalePrice } = __mxmod53;
-const { companyWorkingCapitalReserve } = __mxmod50;
-const { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEHOLD_RESERVE_DAYS } = __mxmod55;
+const { wholesalePrice } = __mxmod54;
+const { companyWorkingCapitalReserve } = __mxmod51;
+const { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEHOLD_RESERVE_DAYS } = __mxmod56;
 const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
        const DEFAULT_LOAN_RATE_ANNUAL_PERCENT = 6;
        const DEFAULT_RESERVE_REQUIREMENT_PERCENT = 10;
@@ -13596,7 +13789,49 @@ const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
   stats.loansIssuedVoucherUnits ||= 0;
   stats.loansRepaidVoucherUnits ||= 0;
   stats.badDebtVoucherUnits ||= 0;
+  if (!Number.isSafeInteger(bank.retainedVoucherUnits)) bank.retainedVoucherUnits = bankRetainedVoucherUnits(state);
   return bank;
+}
+
+// 银行资产：现金 + 在贷余额（含应计利息）+ 持有的国债本金。只读。
+function bankAssetVoucherUnits(state) {
+  const bank = state.bank || {};
+  let assets = bank.cashVoucherUnits || 0;
+  for (const loan of bank.loans || []) if (loan.status === "active") assets += loan.outstandingVoucherUnits || 0;
+  for (const issue of state.bonds?.issues || []) {
+    for (const holding of issue.holdings || []) if (holding.holderKey === "bank:bank") assets += holding.principalVoucherUnits || 0;
+  }
+  return assets;
+}
+
+function bankDepositTotalVoucherUnits(state) {
+  let total = 0;
+  for (const units of Object.values(state.bank?.deposits || {})) total += units || 0;
+  return total;
+}
+
+// 银行留存利润（可为负）：贷款利息应计 − 坏账核销 + 国债利息收入 − 国债违约损失。
+// 旧存档没有这个字段：此时按"资产 − 存款"反推。旧版存款利息只记台账不付现金，
+// 反推出的负数正是这部分无现金支撑的利息，存款人余额保持不变。
+       function bankRetainedVoucherUnits(state) {
+  const bank = state.bank || {};
+  if (Number.isSafeInteger(bank.retainedVoucherUnits)) return bank.retainedVoucherUnits;
+  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state);
+}
+
+// 存款台账守恒（只读）：存款 = 现金 + 在贷余额 + 国债本金 − 留存利润。
+       function bankLedgerInvariant(state) {
+  const bank = state.bank || {};
+  const deposits = bankDepositTotalVoucherUnits(state);
+  const cash = bank.cashVoucherUnits || 0;
+  let loans = 0;
+  for (const loan of bank.loans || []) if (loan.status === "active") loans += loan.outstandingVoucherUnits || 0;
+  let bonds = 0;
+  for (const issue of state.bonds?.issues || []) {
+    for (const holding of issue.holdings || []) if (holding.holderKey === "bank:bank") bonds += holding.principalVoucherUnits || 0;
+  }
+  const retained = bankRetainedVoucherUnits(state);
+  return { deposits, cash, loans, bonds, retained, valid: deposits === cash + loans + bonds - retained };
 }
 
        function bankAvailable(state) {
@@ -13645,22 +13880,8 @@ const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
   return { ok: true, householdId, voucherUnits: units };
 }
 
-       function withdrawFromBank(state, householdId, voucherUnits, content = null) {
-  const units = Math.floor(Number(voucherUnits) || 0);
-  if (!Number.isSafeInteger(units) || units <= 0) return { ok: false, reason: "取款金额必须为正整数" };
-  const bank = ensureBankState(state);
-  const deposited = bank.deposits[householdId] || 0;
-  if (deposited < units) return { ok: false, reason: "存款余额不足" };
-  if ((bank.cashVoucherUnits || 0) < units) return { ok: false, reason: "银行现金不足，暂无法兑付" };
-  const household = state.households?.byId?.[householdId];
-  if (!household) return { ok: false, reason: "住户不存在" };
-  bank.deposits[householdId] = deposited - units;
-  bank.cashVoucherUnits -= units;
-  household.voucherUnits = (household.voucherUnits || 0) + units;
-  // 同上：居民汇总粮券缓存必须随之刷新。
-  if (content) syncResidentAggregates(state, content);
-  return { ok: true, householdId, voucherUnits: units };
-}
+                                                                    
+                            
 
 function borrowerCashUnits(state, loan) {
   if (loan.borrowerKind === "company") return state.companies?.[loan.borrowerId]?.cashVoucherUnits || 0;
@@ -13721,6 +13942,8 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
     if (interest > 0) {
       loan.outstandingVoucherUnits += interest;
       loan.accruedInterestVoucherUnits += interest;
+      // 应计利息是银行收入（资产增加、无人付现金）：计入留存利润，保证台账守恒。
+      bank.retainedVoucherUnits += interest;
     }
     if (dayIndex < loan.issuedDayIndex + loan.termDays) continue;
     // 到期：从借款方现金自动扣款
@@ -13745,6 +13968,8 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
       if (loan.overdueDays > BANK_LOAN_WRITEOFF_OVERDUE_DAYS) {
         loan.status = "written_off";
         bank.stats.badDebtVoucherUnits += loan.outstandingVoucherUnits;
+        // 核销：资产消失、无现金进账，留存利润等额减少。
+        bank.retainedVoucherUnits -= loan.outstandingVoucherUnits;
         recordEvent(state, `银行贷款${loan.id}（${borrowerName(state, loan)}）逾期${loan.overdueDays}天，${loan.outstandingVoucherUnits}券核销为坏账。`, content);
         loan.outstandingVoucherUnits = 0;
       }
@@ -13752,25 +13977,57 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
   }
 }
 
+// 存款利息：镇库付现金给银行，银行同时计入存款台账（一笔计息对应一笔等额现金）。
+// 镇库现金不够时按比例少计，台账只记实际到账的部分，绝不透支。
+function settleDepositInterestDay(state, content, bank, dailyDepositRate) {
+  if (!(dailyDepositRate > 0)) return;
+  const rows = [];
+  let due = 0;
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household)) continue;
+    const deposited = bank.deposits[household.id] || 0;
+    if (deposited <= 0) continue;
+    const interest = Math.floor(deposited * dailyDepositRate);
+    if (interest > 0) { rows.push({ householdId: household.id, interest }); due += interest; }
+  }
+  if (due <= 0) return;
+  const paidCap = Math.min(due, Math.max(0, voucherBalance(state, "town")));
+  let credited = 0;
+  const credits = [];
+  for (const row of rows) {
+    const credit = paidCap >= due ? row.interest : Math.floor(row.interest * paidCap / due);
+    if (credit > 0) { credits.push({ householdId: row.householdId, credit }); credited += credit; }
+  }
+  if (credited > 0) {
+    const payment = settleMonetaryPayment(state, "town", "bank", currentPaymentComposition(state, credited), content,
+      "bank_deposit_interest", "银行存款利息（镇库付现）", { requireFull: false });
+    if (!payment.ok || payment.paidValueUnits !== credited) throw new Error("存款利息付款预检后失败");
+    for (const { householdId, credit } of credits) {
+      bank.deposits[householdId] = (bank.deposits[householdId] || 0) + credit;
+      bank.stats.interestPaidVoucherUnits += credit;
+    }
+  }
+  if (credited < due) {
+    recordEvent(state, "镇库现金不足，存款利息未能足额计入。", content, {
+      mergeKey: "bank_interest_shortfall",
+      mergeWindowDays: 7,
+      amount: due - credited,
+      mergedText: count => `镇库现金连续${count}天不足，存款利息未能足额计入。`
+    });
+  }
+}
+
 function settleBankDepositsDay(state, content, bank, policy, daysPerYear) {
   const scale = currencyScale(content);
   const dailyDepositRate = policy.depositRateAnnualPercent / 100 / daysPerYear;
   const wheatPricePerJin = wholesalePrice(state, "wheat", content) || 0;
+  settleDepositInterestDay(state, content, bank, dailyDepositRate);
   // 本循环逐户存取款，会批量改家庭钱包；推迟到循环结束再同步一次居民汇总，
   // 避免每户都做一次全量重算（O(n²)），同时保证粮券守恒口径正确。
   const previousDefer = Boolean(state._deferHouseholdSync);
   state._deferHouseholdSync = true;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
-    // 先计息：存款台账增加（银行确认支出，兑付时从现金支付）
-    const deposited = bank.deposits[household.id] || 0;
-    if (deposited > 0 && dailyDepositRate > 0) {
-      const interest = Math.floor(deposited * dailyDepositRate);
-      if (interest > 0) {
-        bank.deposits[household.id] = deposited + interest;
-        bank.stats.interestPaidVoucherUnits += interest;
-      }
-    }
     const pop = householdPopulation(household);
     if (!(pop > 0) || !(wheatPricePerJin > 0)) continue;
     const reserveUnits = Math.ceil(pop * 2 * BANK_HOUSEHOLD_RESERVE_DAYS * wheatPricePerJin * scale);
@@ -13839,17 +14096,17 @@ function settleBankAutoLoans(state, content, bank) {
     badDebtVoucherUnits: bank.stats.badDebtVoucherUnits
   };
 }
-return { DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT, DEFAULT_LOAN_RATE_ANNUAL_PERCENT, DEFAULT_RESERVE_REQUIREMENT_PERCENT, BANK_HOUSEHOLD_RESERVE_DAYS, BANK_LOAN_TERM_DAYS, BANK_LOAN_WRITEOFF_OVERDUE_DAYS, bankPolicy, setBankPolicy, ensureBankState, bankAvailable, bankTotals, bankLoanableVoucherUnits, depositToBank, withdrawFromBank, issueBankLoan, settleBankDay };
+return { DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT, DEFAULT_LOAN_RATE_ANNUAL_PERCENT, DEFAULT_RESERVE_REQUIREMENT_PERCENT, BANK_HOUSEHOLD_RESERVE_DAYS, BANK_LOAN_TERM_DAYS, BANK_LOAN_WRITEOFF_OVERDUE_DAYS, bankPolicy, setBankPolicy, ensureBankState, bankRetainedVoucherUnits, bankLedgerInvariant, bankAvailable, bankTotals, bankLoanableVoucherUnits, depositToBank, issueBankLoan, settleBankDay, withdrawFromBank };
 })();
 
 // ===== systems/bonds.js =====
-const __mxmod63 = (() => {
+const __mxmod64 = (() => {
 const { currencyScale, ensureCurrencyState, voucherBalance } = __mxmod26;
 const { recordEvent } = __mxmod14;
 const { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } = __mxmod20;
-const { wholesalePrice } = __mxmod53;
-const { bankLoanableVoucherUnits, bankPolicy, ensureBankState } = __mxmod62;
-const { liquidityInvestRatio } = __mxmod54;
+const { wholesalePrice } = __mxmod54;
+const { bankLoanableVoucherUnits, bankPolicy, ensureBankState } = __mxmod63;
+const { liquidityInvestRatio } = __mxmod55;
 const BOND_MAX_EXTENSIONS = 2;
 
        function ensureBondState(state) {
@@ -13878,7 +14135,8 @@ function holderKeyOf(kind, id) {
   return `${kind}:${id}`;
 }
 
-function payToHolder(state, holderKey, units, content = null) {
+// incomeUnits：其中属于利息收入的部分（银行持券时计入留存利润，本金回收不计）。
+function payToHolder(state, holderKey, units, content = null, incomeUnits = 0) {
   const [kind, id] = holderKey.split(":");
   if (kind === "household") {
     const household = state.households?.byId?.[id];
@@ -13890,6 +14148,7 @@ function payToHolder(state, holderKey, units, content = null) {
   } else if (kind === "bank") {
     const bank = ensureBankState(state);
     bank.cashVoucherUnits = (bank.cashVoucherUnits || 0) + units;
+    bank.retainedVoucherUnits += incomeUnits;
   }
 }
 
@@ -14027,14 +14286,14 @@ function payCoupon(state, issue, content) {
       if (due > topDue) { topDue = due; topHolding = holding; }
       const part = totalDue > 0 ? Math.floor(pay * due / totalDue) : 0;
       if (part > 0) {
-        payToHolder(state, holding.holderKey, part, content);
+        payToHolder(state, holding.holderKey, part, content, part);
         distributed += part;
       }
     }
     // floor 分摊的余数补给最大持有人：镇库已全额扣款，余数凭空销毁会打破货币守恒。
     const leftover = pay - distributed;
     if (leftover > 0 && topHolding) {
-      payToHolder(state, topHolding.holderKey, leftover, content);
+      payToHolder(state, topHolding.holderKey, leftover, content, leftover);
       distributed += leftover;
     }
     issue.stats.couponPaidVoucherUnits += distributed;
@@ -14067,7 +14326,10 @@ function settleMaturity(state, issue, content) {
     recordEvent(state, `镇库现金不足，国债${issue.id}展期1年（第${issue.extensions}次）。`, content);
     return;
   }
-  // 违约：剩余持有者血本无归
+  // 违约：剩余持有者血本无归。银行持有的本金随之消失，留存利润等额减少。
+  const bankLoss = (issue.holdings || []).filter(holding => holding.holderKey === "bank:bank")
+    .reduce((sum, holding) => sum + (holding.principalVoucherUnits || 0), 0);
+  if (bankLoss > 0) ensureBankState(state).retainedVoucherUnits -= bankLoss;
   issue.holdings = [];
   issue.status = "defaulted";
   recordEvent(state, `国债${issue.id}违约！镇库无力偿还，持有者血本无归。`, content);
@@ -14087,7 +14349,7 @@ function settleMaturity(state, issue, content) {
   const total = holding.principalVoucherUnits + accrued;
   if (townCashUnits(state) < total) return { ok: false, reason: "镇库现金不足，暂无法赎回" };
   addTownCashUnits(state, -total);
-  payToHolder(state, holderKey, total, content);
+  payToHolder(state, holderKey, total, content, accrued);
   issue.holdings = issue.holdings.filter(row => row !== holding);
   return { ok: true, principalVoucherUnits: holding.principalVoucherUnits, interestVoucherUnits: accrued };
 }
@@ -14127,12 +14389,12 @@ return { BOND_MAX_EXTENSIONS, ensureBondState, bondAvailable, bondOutstandingVou
 })();
 
 // ===== systems/trade-agreements.js =====
-const __mxmod64 = (() => {
+const __mxmod65 = (() => {
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
 const { addInventory, quantityToUnits, unitsToQuantity } = __mxmod16;
 const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod7;
-const { takeWholesaleInventoryForExport, hasWholesaleMarket } = __mxmod31;
-const { AGREEMENTS_PER_STAFF, RELATIONS_DISTRUST, RELATIONS_TRUSTED, buildingOperational, buildingStaffOnDuty, changeRelations, currentPrice, deliverToOutsideTown, outsideTown, outsideTownProfile, payableWheatJin, readOutsideTown, recordTradeStats } = __mxmod32;
+const { takeWholesaleInventoryForExport, hasWholesaleMarket } = __mxmod32;
+const { AGREEMENTS_PER_STAFF, RELATIONS_DISTRUST, RELATIONS_TRUSTED, buildingOperational, buildingStaffOnDuty, changeRelations, currentPrice, deliverToOutsideTown, outsideTown, outsideTownProfile, payableWheatJin, readOutsideTown, recordTradeStats } = __mxmod33;
 const AGREEMENT_MIN_YEARS = 1;
        const AGREEMENT_MAX_YEARS = 5;
        const AGREEMENT_BREACH_PENALTY_RATE = 0.1;
@@ -14347,32 +14609,32 @@ return { AGREEMENT_MIN_YEARS, AGREEMENT_MAX_YEARS, AGREEMENT_BREACH_PENALTY_RATE
 })();
 
 // ===== core/commands.js =====
-const __mxmod65 = (() => {
-const { assignWorkers } = __mxmod40;
+const __mxmod66 = (() => {
+const { assignWorkers } = __mxmod41;
 const { isIndustryType } = __mxmod1;
-const { startConstruction, setProjectWorkers: setProjectWorkersSystem } = __mxmod42;
-const { setAutomaticRelief } = __mxmod43;
-const { demolishBuilding, startBuildingUpgrade } = __mxmod48;
-const { sellOperatingLevel: sellOperatingLevelSystem } = __mxmod52;
+const { startConstruction, setProjectWorkers: setProjectWorkersSystem } = __mxmod43;
+const { setAutomaticRelief } = __mxmod44;
+const { demolishBuilding, startBuildingUpgrade } = __mxmod49;
+const { sellOperatingLevel: sellOperatingLevelSystem } = __mxmod53;
 const { issueTownVouchers, issueVouchersFromWheat, redeemVouchersForWheat, currencyScale } = __mxmod26;
-const { startMonetaryReform } = __mxmod27;
-const { createIndependentCompany, executeShareSubscription, injectCompanyCapital, setCompanyDividendPercent, setIntermediatePrice, setShareOffer, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice, addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown } = __mxmod50;
-const { listCompanyOnExchange, configureListedShareOffer, executeTownBuyback } = __mxmod56;
-const { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndustryPrices } = __mxmod30;
-const { setPublicProcurementIntent: setPublicProcurementIntentSystem, clearPublicProcurementIntent: clearPublicProcurementIntentSystem } = __mxmod41;
-const { openShop, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } = __mxmod47;
-const { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, stockpileWholesale: stockpileWholesaleSystem, releaseWholesale: releaseWholesaleSystem } = __mxmod31;
-const { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice } = __mxmod46;
-const { setBuildingOutputTarget } = __mxmod58;
-const { setServiceUnitPrice } = __mxmod60;
-const { reclaimFarmland: reclaimFarmlandSystem } = __mxmod34;
-const { setVillaPolicy: setVillaPolicySystem } = __mxmod61;
-const { setBankPolicy: setBankPolicySystem } = __mxmod62;
-const { issueGovernmentBond: issueGovernmentBondSystem } = __mxmod63;
-const { setWageControlPolicy: setWageControlPolicySystem } = __mxmod37;
-const { setSocialSecurityPolicy: setSocialSecurityPolicySystem, injectSocialSecurity: injectSocialSecuritySystem, repaySocialSecurityDebt: repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares } = __mxmod36;
-const { tradeWithOutsideTown: tradeWithOutsideTownSystem, issueWheatLoan: issueWheatLoanSystem } = __mxmod32;
-const { signTradeAgreement: signTradeAgreementSystem, terminateTradeAgreement: terminateTradeAgreementSystem } = __mxmod64;
+const { startMonetaryReform } = __mxmod28;
+const { createIndependentCompany, executeShareSubscription, injectCompanyCapital, setCompanyDividendPercent, setIntermediatePrice, setShareOffer, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice, addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown } = __mxmod51;
+const { listCompanyOnExchange, configureListedShareOffer, executeTownBuyback } = __mxmod57;
+const { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndustryPrices } = __mxmod31;
+const { setPublicProcurementIntent: setPublicProcurementIntentSystem, clearPublicProcurementIntent: clearPublicProcurementIntentSystem } = __mxmod42;
+const { openShop, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } = __mxmod48;
+const { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, stockpileWholesale: stockpileWholesaleSystem, releaseWholesale: releaseWholesaleSystem } = __mxmod32;
+const { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice } = __mxmod47;
+const { setBuildingOutputTarget } = __mxmod59;
+const { setServiceUnitPrice } = __mxmod61;
+const { reclaimFarmland: reclaimFarmlandSystem } = __mxmod35;
+const { setVillaPolicy: setVillaPolicySystem } = __mxmod62;
+const { setBankPolicy: setBankPolicySystem } = __mxmod63;
+const { issueGovernmentBond: issueGovernmentBondSystem } = __mxmod64;
+const { setWageControlPolicy: setWageControlPolicySystem } = __mxmod38;
+const { setSocialSecurityPolicy: setSocialSecurityPolicySystem, injectSocialSecurity: injectSocialSecuritySystem, repaySocialSecurityDebt: repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares } = __mxmod37;
+const { tradeWithOutsideTown: tradeWithOutsideTownSystem, issueWheatLoan: issueWheatLoanSystem } = __mxmod33;
+const { signTradeAgreement: signTradeAgreementSystem, terminateTradeAgreement: terminateTradeAgreementSystem } = __mxmod65;
 function setWageRate(state, roleId, dailyJin, content) {
   const value = Number(dailyJin);
   const rows = Object.values(content.roles).some(role => role.id === roleId) ||
@@ -14731,7 +14993,7 @@ return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setB
 })();
 
 // ===== mods/api.js =====
-const __mxmod66 = (() => {
+const __mxmod67 = (() => {
 // mod 行为侧的公共工具（见 MODDING.md）。
 //
 // 一个 mod 的 mod.js 默认导出：
@@ -14810,8 +15072,8 @@ return { defineMod, modState, assembleDailySteps, bindModCommands, selectModView
 })();
 
 // ===== mods/tea/mod.js =====
-const __mxmod67 = (() => {
-const { defineMod, modState } = __mxmod66;
+const __mxmod68 = (() => {
+const { defineMod, modState } = __mxmod67;
 const ITEM = "tea_leaf";
 const TOWNS = ["minzhen", "wangzhen"];
 
@@ -14952,8 +15214,8 @@ return { default: __dflt };
 })();
 
 // ===== mods/pottery/mod.js =====
-const __mxmod68 = (() => {
-const { defineMod } = __mxmod66;
+const __mxmod69 = (() => {
+const { defineMod } = __mxmod67;
 const KILN_ART_BODY = `
 <g stroke="#7a5a43" stroke-width="1">
   <path d="M-42 34V6Q-42-26 2-28Q46-26 46 6V34Z" fill="#b08462"/>
@@ -15036,23 +15298,24 @@ return { default: __dflt };
 })();
 
 // ===== mods/registry.js =====
-const __mxmod69 = (() => {
-const { default: tea } = __mxmod67;
-const { default: pottery } = __mxmod68;
+const __mxmod70 = (() => {
+const { default: tea } = __mxmod68;
+const { default: pottery } = __mxmod69;
 const MODS = [tea, pottery];
 return { MODS };
 })();
 
 // ===== core/validation.js =====
-const __mxmod70 = (() => {
-const { populationStats, selectJobRows } = __mxmod39;
-const { MODS } = __mxmod69;
-const { validateMods } = __mxmod66;
+const __mxmod71 = (() => {
+const { populationStats, selectJobRows } = __mxmod40;
+const { MODS } = __mxmod70;
+const { validateMods } = __mxmod67;
 const { industryTypeIds, isIndustryType } = __mxmod1;
 const { PERIODS } = __mxmod21;
 const { householdList, householdPopulation, householdWorkingAge, householdEmploymentCount, totalHouseholdAgeBands, jobCount, isActiveHousehold } = __mxmod20;
 const { validateContent } = __mxmod17;
 const { validateCurrencyInvariant } = __mxmod26;
+const { bankLedgerInvariant } = __mxmod63;
 function validateState(state, content) {
   const errors = [];
   const contentCheck = validateContent(content);
@@ -15271,6 +15534,8 @@ function validateState(state, content) {
   }
   const currencyCheck = validateCurrencyInvariant(state, content);
   if (!currencyCheck.valid) errors.push("粮券总账不守恒：账户余额与未注销发行量不一致");
+  // 存款台账 = 银行现金 + 在贷余额 + 国债本金 − 留存利润：存款利息必须有现金支撑。
+  if (!bankLedgerInvariant(state).valid) errors.push("银行存款台账与现金、贷款、国债不守恒");
   if (!state.stockExchange || typeof state.stockExchange !== "object" || Array.isArray(state.stockExchange) || typeof state.stockExchange.legacyAccess !== "boolean") {
     errors.push("交易所状态无效");
   }
@@ -15456,12 +15721,12 @@ return { validateState };
 })();
 
 // ===== systems/livestock.js =====
-const __mxmod71 = (() => {
+const __mxmod72 = (() => {
 const { currencyScale } = __mxmod26;
-const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod27;
-const { putStock, takeStock } = __mxmod28;
-const { addBookMap, addBookValue, applyProfit, ensureShops, farmDailyOutputUnits, shopDefinition } = __mxmod47;
-const { depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleAvgSoldUnits, wholesaleMarketItemIds, wholesalePurchasePrice } = __mxmod31;
+const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod28;
+const { putStock, takeStock } = __mxmod29;
+const { addBookMap, addBookValue, applyProfit, ensureShops, farmDailyOutputUnits, shopDefinition } = __mxmod48;
+const { depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleAvgSoldUnits, wholesaleMarketItemIds, wholesalePurchasePrice } = __mxmod32;
 const SURPLUS_DAYS = 3;
 
 function openFarms(state, content) {
@@ -15527,9 +15792,9 @@ return { produceLivestock, sellFarmSurplusToWholesale };
 })();
 
 // ===== systems/stalls.js =====
-const __mxmod72 = (() => {
+const __mxmod73 = (() => {
 const { jobCount, setJobCount } = __mxmod20;
-const { closeShop, ensureShops, openCollectiveShop, refundCollectiveIfStranded, shopDefinition, shopHostSlots } = __mxmod47;
+const { closeShop, ensureShops, openCollectiveShop, refundCollectiveIfStranded, shopDefinition, shopHostSlots } = __mxmod48;
 const ADJUST_DAYS = 3;
 const START_KEEPERS = 2;
 
@@ -15608,19 +15873,19 @@ return { stallKeeperLimit, manageStalls };
 })();
 
 // ===== systems/consumer-market.js =====
-const __mxmod73 = (() => {
-const { maximumResidentAutoExchangeWheatUnits, voucherBalance, currencyScale } = __mxmod26;
-const { createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment } = __mxmod27;
+const __mxmod74 = (() => {
+const { maximumResidentAutoExchangeWheatUnits, currencyScale } = __mxmod26;
+const { createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits } = __mxmod28;
 const { voucherUnitsForWheatUnits } = __mxmod25;
-const { sellCompanyProduct, companySalePrice } = __mxmod50;
-const { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedHouseholds, registerShopStockoutDemand } = __mxmod47;
-const { shopTradePrices } = __mxmod45;
+const { sellCompanyProduct, companySalePrice } = __mxmod51;
+const { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedHouseholds, registerShopStockoutDemand } = __mxmod48;
+const { shopTradePrices } = __mxmod46;
 const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdFoodQeqUnits, householdReserveQeqUnits, creditHouseholdInventory, residentInventoryUnits, syncResidentAggregates } = __mxmod20;
 const { qeqUnitsForInventoryUnits } = __mxmod16;
 const { removeTownInventoryWithCost } = __mxmod22;
-const { populationStats } = __mxmod39;
+const { populationStats } = __mxmod40;
 const { allocateIntegerByWeight } = __mxmod15;
-const { priceElasticityDemandMultiplier } = __mxmod46;
+const { priceElasticityDemandMultiplier } = __mxmod47;
 function rotated(list, offset) {
   if (!list.length) return list;
   const start = ((offset || 0) % list.length + list.length) % list.length;
@@ -15702,7 +15967,7 @@ function quickAffordableUnits(state, household, price, content, reserveDays) {
   if (!(price > 0)) return 0;
   const wheatUnits = Math.min(householdConvertibleWheatUnits(state, household, content, reserveDays),
     householdExchangeAllowanceUnits(state, household.id, content));
-  const value = voucherBalance(state, `household:${household.id}`) + voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
+  const value = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
   return Math.max(0, Math.floor(value * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))));
 }
 
@@ -15711,7 +15976,7 @@ function maximumAffordableUnits(state, household, price, content, reserveDays, c
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   if (price <= 0) return 0;
   const owner = `household:${household.id}`;
-  const voucherAvailable = voucherBalance(state, owner);
+  const voucherAvailable = spendableVoucherUnits(state, owner);
   const wheatUnitsAvailable = householdConvertibleWheatUnits(state, household, content, reserveDays);
   const wheatValueAvailable = voucherUnitsForWheatUnits(wheatUnitsAvailable, content, "floor");
   const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits: wheatUnitsAvailable });
@@ -15768,7 +16033,7 @@ function transactSeller(state, seller, household, itemId, units, content, reason
 }
 
        function residentPurchasePowerUnits(state, priceVoucherPerPhysicalUnit, content, reserveDays = null) {
-  const current = voucherBalance(state, "residents");
+  const current = spendableVoucherUnits(state, "residents");
   const people = populationStats(state).total;
   const convertibleWheatUnits = maximumResidentAutoExchangeWheatUnits(
     state, people, reserveDays ?? content.rules.basicCommerceFoodReserveDays ?? 30, content
@@ -15956,13 +16221,13 @@ return { residentPurchasePowerUnits, purchaseItemForResidents };
 })();
 
 // ===== systems/market.js =====
-const __mxmod74 = (() => {
+const __mxmod75 = (() => {
 const { itemQeqUnitsPerInventoryUnit } = __mxmod16;
 const { bookAddAll } = __mxmod21;
-const { purchaseItemForResidents } = __mxmod73;
-const { currentUnitPrice } = __mxmod30;
+const { purchaseItemForResidents } = __mxmod74;
+const { currentUnitPrice } = __mxmod31;
 const { householdList, householdPopulation, isActiveHousehold } = __mxmod20;
-const { householdAffluence } = __mxmod59;
+const { householdAffluence } = __mxmod60;
 function breadDemandShare(price, content) {
   if (!Number.isFinite(price) || price <= 0) return 0;
   const base = content.rules.breadBasePriceWheatPerJin;
@@ -16101,7 +16366,7 @@ return { breadDemandShare, stapleDemandShares, buyStaplesForResidents, buyBreadF
 })();
 
 // ===== systems/consumption.js =====
-const __mxmod75 = (() => {
+const __mxmod76 = (() => {
 const { itemQeqUnitsPerInventoryUnit, planFoodTransfer, qeqUnitsToJin } = __mxmod16;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
 const { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } = __mxmod20;
@@ -16211,12 +16476,12 @@ return { planDailyFoodConsumption, consumeDailyRations };
 })();
 
 // ===== systems/goods-demand.js =====
-const __mxmod76 = (() => {
-const { purchaseItemForResidents } = __mxmod73;
-const { currentUnitPrice } = __mxmod30;
+const __mxmod77 = (() => {
+const { purchaseItemForResidents } = __mxmod74;
+const { currentUnitPrice } = __mxmod31;
 const { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } = __mxmod20;
 const { recordHouseholdInKind } = __mxmod23;
-const { householdAffluence } = __mxmod59;
+const { householdAffluence } = __mxmod60;
 function goodsConfig(content) {
   return content.rules.householdGoods || {};
 }
@@ -16347,12 +16612,12 @@ return { ensureGoodsDemand, standardDailyUnits, accrueGoodsDemand, buyGoodsForRe
 })();
 
 // ===== systems/satisfaction.js =====
-const __mxmod77 = (() => {
-const { MODS } = __mxmod69;
-const { modComfortPoints } = __mxmod66;
+const __mxmod78 = (() => {
+const { MODS } = __mxmod70;
+const { modComfortPoints } = __mxmod67;
 const { householdList, householdPopulation, isActiveHousehold } = __mxmod20;
 const { ensureHouseholdLife, householdFoodDays } = __mxmod23;
-const { goodsComfortPoints } = __mxmod76;
+const { goodsComfortPoints } = __mxmod77;
 function clamp01(value) { return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0)); }
 function round2(value) { return Math.round(value * 100) / 100; }
 
@@ -16417,15 +16682,15 @@ return { updateSatisfaction };
 })();
 
 // ===== systems/population.js =====
-const __mxmod78 = (() => {
+const __mxmod79 = (() => {
 const { binomial } = __mxmod24;
-const { populationStats } = __mxmod39;
-const { reconcileEmployment } = __mxmod40;
+const { populationStats } = __mxmod40;
+const { reconcileEmployment } = __mxmod41;
 const { accountQeqUnits } = __mxmod16;
 const { recordEvent } = __mxmod14;
-const { selectHousing } = __mxmod44;
+const { selectHousing } = __mxmod45;
 const { applyHouseholdDemography, totalHouseholdAgeBands } = __mxmod20;
-const { syncShopEmployment } = __mxmod47;
+const { syncShopEmployment } = __mxmod48;
 function deathRate(age) {
   if (age < 5) return 0.004;
   if (age < 18) return 0.001;
@@ -16553,15 +16818,15 @@ return { advancePopulation };
 })();
 
 // ===== systems/housing.js =====
-const __mxmod79 = (() => {
+const __mxmod80 = (() => {
 const { currencyScale } = __mxmod26;
 const { bookAddAll, PERIODS } = __mxmod21;
-const { currentPaymentComposition, settleMonetaryPayment } = __mxmod27;
+const { currentPaymentComposition, settleMonetaryPayment } = __mxmod28;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod14;
-const { currentUnitPrice } = __mxmod30;
-const { selectHousing } = __mxmod44;
+const { currentUnitPrice } = __mxmod31;
+const { selectHousing } = __mxmod45;
 const { activeHouseholds, householdConvertibleWheatUnits, householdList, syncResidentAggregates } = __mxmod20;
-const { purchaseItemForResidents } = __mxmod73;
+const { purchaseItemForResidents } = __mxmod74;
 const { recordHouseholdRentDue, recordHouseholdRentPaid } = __mxmod23;
 function settleHousingRent(state, housingAtStart, content) {
   const scale = currencyScale(content);
@@ -16674,11 +16939,11 @@ return { settleHousingRent, currentHousing, accrueRepairWoodNeed, buyRepairWoodF
 })();
 
 // ===== systems/salt.js =====
-const __mxmod80 = (() => {
-const { purchaseItemForResidents } = __mxmod73;
+const __mxmod81 = (() => {
+const { purchaseItemForResidents } = __mxmod74;
 const { parseOwner } = __mxmod12;
 const { bookAddAll } = __mxmod21;
-const { currentUnitPrice } = __mxmod30;
+const { currentUnitPrice } = __mxmod31;
 const { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } = __mxmod20;
 const { recordHouseholdInKind } = __mxmod23;
 const { makeTransactionId, recordLedger } = __mxmod14;
@@ -16818,21 +17083,21 @@ return { accrueSaltNeed, buySaltForResidents, consumeDailySalt, selectSaltCovera
 })();
 
 // ===== systems/private-industry.js =====
-const __mxmod81 = (() => {
+const __mxmod82 = (() => {
 const { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } = __mxmod16;
-const { laborBatches, nextCarry } = __mxmod29;
+const { laborBatches, nextCarry } = __mxmod30;
 const { industryTypeIds, isIndustryType } = __mxmod1;
 const { bookAdd, bookAddMap } = __mxmod21;
 const { recordEvent } = __mxmod14;
-const { privateJobKeyForBuilding, readJobCount, selectJobRows } = __mxmod39;
-const { setPrivateWorkers } = __mxmod40;
+const { privateJobKeyForBuilding, readJobCount, selectJobRows } = __mxmod40;
+const { setPrivateWorkers } = __mxmod41;
 const { addTownCostBasis } = __mxmod22;
 const { currencyScale } = __mxmod26;
-const { plannedBatchesForProducer, plannedWorkersForProducer } = __mxmod45;
-const { currentUnitPrice } = __mxmod30;
-const { buyWholesaleForOwner, depositProductionTaxToWholesale } = __mxmod31;
+const { plannedBatchesForProducer, plannedWorkersForProducer } = __mxmod46;
+const { currentUnitPrice } = __mxmod31;
+const { buyWholesaleForOwner, depositProductionTaxToWholesale } = __mxmod32;
 const { householdConvertibleWheatUnits, householdFoodQeqUnits, householdList, householdReserveQeqUnits, syncResidentAggregates, jobAssignments, isActiveHousehold, creditHouseholdInventory } = __mxmod20;
-const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod35;
+const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod36;
 function targetBatches(state, building) {
   return plannedBatchesForProducer(state, `private:${building.id}`);
 }
@@ -17079,7 +17344,7 @@ return { arrangePrivateWorkers, payPrivateIndustryWages, processPrivateBuilding,
 })();
 
 // ===== systems/income-expectation.js =====
-const __mxmod82 = (() => {
+const __mxmod83 = (() => {
 const { householdList, isActiveHousehold } = __mxmod20;
 const { nextRandom } = __mxmod24;
 const FALLBACK_DAILY_WAGE_JIN = 5;
@@ -17143,7 +17408,7 @@ return { FALLBACK_DAILY_WAGE_JIN, maybeRefreshHouseholdIncomeExpectations, updat
 })();
 
 // ===== systems/productivity.js =====
-const __mxmod83 = (() => {
+const __mxmod84 = (() => {
 const { industryTypeIds } = __mxmod1;
 const { jobCount } = __mxmod20;
 function accrueIndustryExperience(state, content) {
@@ -17165,8 +17430,8 @@ return { accrueIndustryExperience };
 })();
 
 // ===== systems/annual-reports.js =====
-const __mxmod84 = (() => {
-const { computeWealthStats } = __mxmod53;
+const __mxmod85 = (() => {
+const { computeWealthStats } = __mxmod54;
 const YEAR_TOTAL_FIELDS = ["harvestQeq", "consumptionQeq", "operatingWagesQeq", "constructionPayQeq", "reliefQeq", "processingLossQeq", "unemploymentPaidQeq", "wagePaidQeq", "wageArrearsQeq"];
 
 function cloneValue(value) {
@@ -17291,50 +17556,50 @@ return { buildAnnualReport, applyCompanyDistributionsToAnnualReport };
 })();
 
 // ===== systems/daily.js =====
-const __mxmod85 = (() => {
+const __mxmod86 = (() => {
 const { totalQeqUnits } = __mxmod16;
-const { produceLivestock } = __mxmod71;
-const { manageStalls } = __mxmod72;
-const { MODS } = __mxmod69;
-const { assembleDailySteps } = __mxmod66;
+const { produceLivestock } = __mxmod72;
+const { manageStalls } = __mxmod73;
+const { MODS } = __mxmod70;
+const { assembleDailySteps } = __mxmod67;
 const { emptyYearTotals, recordEvent } = __mxmod14;
-const { populationStats } = __mxmod39;
-const { employmentSnapshot, refillAgricultureToTarget } = __mxmod40;
+const { populationStats } = __mxmod40;
+const { employmentSnapshot, refillAgricultureToTarget } = __mxmod41;
 const { clearDailyHouseholdIncome, ensureEmploymentExchangeDay, resetYearHouseholdIncome } = __mxmod20;
-const { advanceConstruction } = __mxmod42;
-const { processAllBuildings } = __mxmod58;
-const { applyAutomaticRelief } = __mxmod43;
-const { payDailyWages, payUnemploymentBenefit } = __mxmod37;
-const { buyStaplesForResidents } = __mxmod74;
-const { consumeDailyRations } = __mxmod75;
-const { updateSatisfaction } = __mxmod77;
-const { accumulateFarmDay, harvest } = __mxmod34;
-const { advancePopulation } = __mxmod78;
-const { selectHousing } = __mxmod44;
-const { settleHousingRent, buyRepairWoodForResidents } = __mxmod79;
-const { settleVillaPurchases, settleVillaPropertyTax } = __mxmod61;
-const { collectSocialContributions, payPensions } = __mxmod36;
-const { advanceOutsideTownDay, settleOutsideTownYear, settleWheatLoansYear } = __mxmod32;
-const { settleTradeAgreementsMonth, settleTradeAgreementsYear } = __mxmod64;
-const { resetLaborCompetitionYear } = __mxmod38;
-const { recordEconomyHistory } = __mxmod53;
-const { accrueSaltNeed, buySaltForResidents, consumeDailySalt, finishSaltGraceDay, selectSaltCoverage } = __mxmod80;
-const { arrangePrivateWorkers, processPrivateIndustries, resetPrivateDaily, resetPrivateYear, payPrivateIndustryWages } = __mxmod81;
+const { advanceConstruction } = __mxmod43;
+const { processAllBuildings } = __mxmod59;
+const { applyAutomaticRelief } = __mxmod44;
+const { payDailyWages, payUnemploymentBenefit } = __mxmod38;
+const { buyStaplesForResidents } = __mxmod75;
+const { consumeDailyRations } = __mxmod76;
+const { updateSatisfaction } = __mxmod78;
+const { accumulateFarmDay, harvest } = __mxmod35;
+const { advancePopulation } = __mxmod79;
+const { selectHousing } = __mxmod45;
+const { settleHousingRent, buyRepairWoodForResidents } = __mxmod80;
+const { settleVillaPurchases, settleVillaPropertyTax } = __mxmod62;
+const { collectSocialContributions, payPensions } = __mxmod37;
+const { advanceOutsideTownDay, settleOutsideTownYear, settleWheatLoansYear } = __mxmod33;
+const { settleTradeAgreementsMonth, settleTradeAgreementsYear } = __mxmod65;
+const { resetLaborCompetitionYear } = __mxmod39;
+const { recordEconomyHistory } = __mxmod54;
+const { accrueSaltNeed, buySaltForResidents, consumeDailySalt, finishSaltGraceDay, selectSaltCoverage } = __mxmod81;
+const { arrangePrivateWorkers, processPrivateIndustries, resetPrivateDaily, resetPrivateYear, payPrivateIndustryWages } = __mxmod82;
 const { emptyFinancialFlowPeriod } = __mxmod13;
-const { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } = __mxmod50;
-const { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } = __mxmod47;
-const { refreshOperatingPlan, recordConsumerDay } = __mxmod45;
+const { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } = __mxmod51;
+const { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } = __mxmod48;
+const { refreshOperatingPlan, recordConsumerDay } = __mxmod46;
 const { archiveHouseholdLifeYear, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } = __mxmod23;
-const { settleBankDay } = __mxmod62;
-const { settleBondsDay } = __mxmod63;
-const { settleStockMarketDay, settleHouseholdStockBuying } = __mxmod56;
-const { settleLiquidityDay } = __mxmod54;
-const { maybeRefreshHouseholdIncomeExpectations } = __mxmod82;
-const { accrueServiceDemand, processServiceDemand } = __mxmod60;
-const { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } = __mxmod76;
-const { accrueIndustryExperience } = __mxmod83;
-const { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } = __mxmod31;
-const { applyCompanyDistributionsToAnnualReport, buildAnnualReport } = __mxmod84;
+const { settleBankDay } = __mxmod63;
+const { settleBondsDay } = __mxmod64;
+const { settleStockMarketDay, settleHouseholdStockBuying } = __mxmod57;
+const { settleLiquidityDay } = __mxmod55;
+const { maybeRefreshHouseholdIncomeExpectations } = __mxmod83;
+const { accrueServiceDemand, processServiceDemand } = __mxmod61;
+const { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } = __mxmod77;
+const { accrueIndustryExperience } = __mxmod84;
+const { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } = __mxmod32;
+const { applyCompanyDistributionsToAnnualReport, buildAnnualReport } = __mxmod85;
 function resetDayBooks(state, content) {
   state.financialFlows ||= { day: emptyFinancialFlowPeriod(), year: emptyFinancialFlowPeriod(), cumulative: emptyFinancialFlowPeriod() };
   state.financialFlows.day = emptyFinancialFlowPeriod();
@@ -17560,7 +17825,7 @@ return { CORE_DAILY_STEPS, DAILY_STEPS, settleOneDay, runDay };
 })();
 
 // ===== selectors/economy.js =====
-const __mxmod86 = (() => {
+const __mxmod87 = (() => {
 const { accountQeqUnits, itemQeqUnitsPerInventoryUnit, qeqUnitsToJin, unitsToQuantity } = __mxmod16;
 function selectAccounts(state, content) {
   const accounts = {};
@@ -17611,9 +17876,9 @@ return { selectAccounts, selectFoodDays, selectTotalQeq };
 })();
 
 // ===== selectors/agriculture.js =====
-const __mxmod87 = (() => {
-const { readJobCount } = __mxmod39;
-const { reclaimedAcres } = __mxmod34;
+const __mxmod88 = (() => {
+const { readJobCount } = __mxmod40;
+const { reclaimedAcres } = __mxmod35;
 function selectHarvestForecast(state, content) {
   const acres = reclaimedAcres(state, content);
   const capacity = acres / content.agriculture.acresPerFarmer;
@@ -17630,7 +17895,7 @@ return { selectHarvestForecast };
 })();
 
 // ===== selectors/dashboard-runtime.js =====
-const __mxmod88 = (() => {
+const __mxmod89 = (() => {
 const { householdEmploymentCount, householdList } = __mxmod20;
 function createDashboardRuntime(state) {
   const households = householdList(state);
@@ -17713,42 +17978,42 @@ return { createDashboardRuntime, employmentExchangeRemainingUnits };
 })();
 
 // ===== selectors/dashboard.js =====
-const __mxmod89 = (() => {
+const __mxmod90 = (() => {
 const { BUILDING_PRESENTATION } = __mxmod6;
-const { MODS } = __mxmod69;
-const { selectModViews } = __mxmod66;
+const { MODS } = __mxmod70;
+const { selectModViews } = __mxmod67;
 const { industryTypeIds, isIndustryType } = __mxmod1;
-const { experienceBonus, industryWorkerDays, levelBonus, productivityFactor } = __mxmod29;
-const { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } = __mxmod39;
-const { selectAccounts, selectFoodDays, selectTotalQeq } = __mxmod86;
-const { productionStatus } = __mxmod57;
-const { selectHarvestForecast } = __mxmod87;
-const { reclaimCostEstimate, reclaimWorkDaysForAcres, reclaimedAcres, reclaimedAcresMaximum } = __mxmod34;
+const { experienceBonus, industryWorkerDays, levelBonus, productivityFactor } = __mxmod30;
+const { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } = __mxmod40;
+const { selectAccounts, selectFoodDays, selectTotalQeq } = __mxmod87;
+const { productionStatus } = __mxmod58;
+const { selectHarvestForecast } = __mxmod88;
+const { reclaimCostEstimate, reclaimWorkDaysForAcres, reclaimedAcres, reclaimedAcresMaximum } = __mxmod35;
 const { qeqUnitsToJin } = __mxmod16;
-const { selectHousing } = __mxmod44;
-const { selectSaltCoverage } = __mxmod80;
-const { selectDemolitionPreview, selectUpgradePreview } = __mxmod48;
-const { selectOperatingRightPreview } = __mxmod51;
-const { companySummary, previewShareSubscription, companyWorkingCapitalReserve } = __mxmod50;
-const { hasStockExchange, stockReference } = __mxmod56;
-const { previewTownMaterialProcurement, selectPublicProcurementDemand } = __mxmod41;
-const { currentPriceMap, currentUnitPrice } = __mxmod30;
-const { computeLaborMarket } = __mxmod38;
-const { computeWealthStats } = __mxmod53;
+const { selectHousing } = __mxmod45;
+const { selectSaltCoverage } = __mxmod81;
+const { selectDemolitionPreview, selectUpgradePreview } = __mxmod49;
+const { selectOperatingRightPreview } = __mxmod52;
+const { companySummary, previewShareSubscription, companyWorkingCapitalReserve } = __mxmod51;
+const { hasStockExchange, stockReference } = __mxmod57;
+const { previewTownMaterialProcurement, selectPublicProcurementDemand } = __mxmod42;
+const { currentPriceMap, currentUnitPrice } = __mxmod31;
+const { computeLaborMarket } = __mxmod39;
+const { computeWealthStats } = __mxmod54;
 const { currencyScale, validateCurrencyInvariant, voucherBalance } = __mxmod26;
-const { hasBankAccess } = __mxmod27;
-const { WAGE_CONTROL_CIVIL_ROLE_IDS } = __mxmod37;
+const { hasBankAccess } = __mxmod28;
+const { WAGE_CONTROL_CIVIL_ROLE_IDS } = __mxmod38;
 const { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } = __mxmod20;
-const { bondOutstandingVoucherUnits } = __mxmod63;
-const { stallSquareSummaries, shopSummaries } = __mxmod47;
-const { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO } = __mxmod31;
-const { selectOutsideTownView } = __mxmod32;
+const { bondOutstandingVoucherUnits } = __mxmod64;
+const { stallSquareSummaries, shopSummaries } = __mxmod48;
+const { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO } = __mxmod32;
+const { selectOutsideTownView } = __mxmod33;
 const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod7;
-const { selectTradeAgreementView } = __mxmod64;
+const { selectTradeAgreementView } = __mxmod65;
 const { householdRecentTotalsReadonly, householdFoodDays } = __mxmod23;
-const { createDashboardRuntime, employmentExchangeRemainingUnits } = __mxmod88;
-const { selectVillaStats } = __mxmod61;
-const { selectSocialSecurityStats } = __mxmod36;
+const { createDashboardRuntime, employmentExchangeRemainingUnits } = __mxmod89;
+const { selectVillaStats } = __mxmod62;
+const { selectSocialSecurityStats } = __mxmod37;
 function selectSeason(day) {
   if (day < 91) return { key: "spring", name: "春", field: "麦苗返青", index: day + 1 };
   if (day < 183) return { key: "summer", name: "夏", field: "麦穗抽长", index: day - 90 };
@@ -18459,23 +18724,23 @@ return { selectSeason, selectReclaimView, selectConstructionOptions, selectDashb
 })();
 
 // ===== engine.js =====
-const __mxmod90 = (() => {
+const __mxmod91 = (() => {
 const { CONTENT } = __mxmod11;
-const { MODS } = __mxmod69;
-const { bindModCommands } = __mxmod66;
+const { MODS } = __mxmod70;
+const { bindModCommands } = __mxmod67;
 const { validateContent } = __mxmod17;
-const { createInitialState } = __mxmod33;
-const { settleOneDay } = __mxmod85;
+const { createInitialState } = __mxmod34;
+const { settleOneDay } = __mxmod86;
 const { advanceGameDays: advanceDaysWithClock } = __mxmod19;
-const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod65;
-const { selectDemolitionPreview, selectUpgradePreview } = __mxmod48;
-const { validateState } = __mxmod70;
-const { selectDashboard } = __mxmod89;
-const { selectOperatingRightPreview } = __mxmod51;
-const { populationStats, selectJobRows } = __mxmod39;
+const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod66;
+const { selectDemolitionPreview, selectUpgradePreview } = __mxmod49;
+const { validateState } = __mxmod71;
+const { selectDashboard } = __mxmod90;
+const { selectOperatingRightPreview } = __mxmod52;
+const { populationStats, selectJobRows } = __mxmod40;
 const { accountQeqUnits, totalQeqUnits } = __mxmod16;
-const { previewShareSubscription, previewCompanyLevelChange } = __mxmod50;
-const { previewTownBuyback } = __mxmod56;
+const { previewShareSubscription, previewCompanyLevelChange } = __mxmod51;
+const { previewTownBuyback } = __mxmod57;
 const { validateCurrencyInvariant } = __mxmod26;
 function createSimulation(content) {
   const definitions = content || CONTENT;
@@ -18650,7 +18915,7 @@ return { createSimulation, simulation, CONTENT, createInitialState, validateStat
 })();
 
 // ===== persistence/save-compat.js =====
-const __mxmod91 = (() => {
+const __mxmod92 = (() => {
 // 存档兼容：让存档跨版本一直能读。三层兜底：
 //
 // 1. 补默认值：用当前版本的新开局状态当底板，把存档逐项盖上去。存档里没有的新字段自动取新默认值，
@@ -18799,13 +19064,13 @@ return { RENAMES, ENTITY_MAPS, applyRenames, mergeOntoBase, sanitizeNumbers, res
 })();
 
 // ===== persistence/migrations.js =====
-const __mxmod92 = (() => {
+const __mxmod93 = (() => {
 const { CONTENT } = __mxmod11;
-const { validateState } = __mxmod70;
-const { createInitialState, ensureProjectAccessor } = __mxmod33;
-const { syncShopEmployment } = __mxmod47;
+const { validateState } = __mxmod71;
+const { createInitialState, ensureProjectAccessor } = __mxmod34;
+const { syncShopEmployment } = __mxmod48;
 const { syncResidentAggregates } = __mxmod20;
-const { ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers } = __mxmod91;
+const { ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers } = __mxmod92;
 const MIN_SAVE_VERSION = 17;
 
 function cloneJson(value) {
@@ -18856,11 +19121,11 @@ return { MIN_SAVE_VERSION, migrateSave, loadReportMessage };
 })();
 
 // ===== persistence/storage.js =====
-const __mxmod93 = (() => {
+const __mxmod94 = (() => {
 const { CONTENT } = __mxmod11;
-const { createInitialState } = __mxmod33;
-const { validateState } = __mxmod70;
-const { migrateSave } = __mxmod92;
+const { createInitialState } = __mxmod34;
+const { validateState } = __mxmod71;
+const { migrateSave } = __mxmod93;
 const SAVE_KEY = "maixiang-town-save-v1";
 
 function hashText(text) {
@@ -18945,9 +19210,9 @@ return { SAVE_KEY, saveState, loadState, exportState, parseSaveObject, parseSave
 })();
 
 // ===== persistence/save-container.js =====
-const __mxmod94 = (() => {
-const { validateState } = __mxmod70;
-const { parseSaveObject } = __mxmod93;
+const __mxmod95 = (() => {
+const { validateState } = __mxmod71;
+const { parseSaveObject } = __mxmod94;
 const SAVE_CONTAINER_VERSION = 2;
        const SAVE_CATALOG_VERSION = 1;
 
@@ -19048,11 +19313,11 @@ return { SAVE_CONTAINER_VERSION, SAVE_CATALOG_VERSION, SavePersistenceError, cla
 })();
 
 // ===== persistence/indexed-save-manager.js =====
-const __mxmod95 = (() => {
+const __mxmod96 = (() => {
 const { CONTENT } = __mxmod11;
-const { createInitialState } = __mxmod33;
-const { parseSaveFile } = __mxmod93;
-const { SAVE_CATALOG_VERSION, SavePersistenceError, classifyPersistenceError, decodeSaveContainer: decode, encodeSaveContainer: encode, inspectSaveContainer: inspect, stringifySaveJson: stringify } = __mxmod94;
+const { createInitialState } = __mxmod34;
+const { parseSaveFile } = __mxmod94;
+const { SAVE_CATALOG_VERSION, SavePersistenceError, classifyPersistenceError, decodeSaveContainer: decode, encodeSaveContainer: encode, inspectSaveContainer: inspect, stringifySaveJson: stringify } = __mxmod95;
 const SAVE_DB_NAME = "maixiang-save-db-v2";
        const SAVE_DB_VERSION = 1;
 const SLOT_STORE = "slots";
@@ -19423,7 +19688,7 @@ return { SAVE_DB_NAME, SAVE_DB_VERSION, createIndexedSaveManager };
 })();
 
 // ===== persistence/autosave-coordinator.js =====
-const __mxmod96 = (() => {
+const __mxmod97 = (() => {
 function createAutosaveCoordinator({ capture, save, onSuccess = () => {}, onFailure = () => {} }) {
   let running = null;
   let requested = false;
@@ -19525,7 +19790,7 @@ return { createAutosaveCoordinator };
 })();
 
 // ===== ui/simulation-clock.js =====
-const __mxmod97 = (() => {
+const __mxmod98 = (() => {
 class SimulationClock {
   constructor(content) {
     this.daysPerSecond = content.rules.dailyDaysPerSecond;
@@ -19567,9 +19832,9 @@ return { SimulationClock };
 })();
 
 // ===== ui/art.js =====
-const __mxmod98 = (() => {
-const { MODS } = __mxmod69;
-const { modArt } = __mxmod66;
+const __mxmod99 = (() => {
+const { MODS } = __mxmod70;
+const { modArt } = __mxmod67;
 function uiIcon(name, className = "ui-icon") {
   const paths = {
     people: '<circle cx="9" cy="8" r="3"/><path d="M3 20c.5-3.4 2.4-5 6-5s5.5 1.6 6 5M16 5.4a3 3 0 0 1 0 5.8M17 15c2.3.4 3.6 2 4 5"/>',
@@ -19698,7 +19963,7 @@ return { uiIcon, buildingSymbol };
 })();
 
 // ===== ui/format.js =====
-const __mxmod99 = (() => {
+const __mxmod100 = (() => {
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>\"']/g, function (character) {
     return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character];
@@ -19765,9 +20030,9 @@ return { escapeHtml, number, numberMax, shortageJin, compact, percent, accountLi
 })();
 
 // ===== ui/building-art.js =====
-const __mxmod100 = (() => {
-const { MODS } = __mxmod69;
-const { modArt } = __mxmod66;
+const __mxmod101 = (() => {
+const { MODS } = __mxmod70;
+const { modArt } = __mxmod67;
 const BUILDING_ART_CATALOG = Object.freeze({
   mill:{name:'磨坊',connected:true}, public_housing:{name:'公租房群',connected:true},
   bakery:{name:'面包房',connected:true}, lumberyard:{name:'伐木场',connected:true},
@@ -19890,9 +20155,9 @@ return { BUILDING_ART_CATALOG, renderBuildingArt, buildingSVG };
 })();
 
 // ===== ui/jiangnan-art.js =====
-const __mxmod101 = (() => {
+const __mxmod102 = (() => {
 const { PLOTS } = __mxmod6;
-const { renderBuildingArt } = __mxmod100;
+const { renderBuildingArt } = __mxmod101;
 const river = 'M35 -80 C115 120 -20 320 12 520 S-50 770 -20 950 S160 1210 90 1450 S40 1710 100 1900';
 // 与上面的 river 路径等价的三次贝塞尔分段（S 指令已展开），用于采样河岸。
 const RIVER_SEGMENTS = [
@@ -20168,10 +20433,10 @@ return { houseArt, wellArt, roadNetwork, townLandscape, miniMap };
 })();
 
 // ===== ui/map.js =====
-const __mxmod102 = (() => {
-const { escapeHtml, number } = __mxmod99;
-const { renderBuildingArt } = __mxmod100;
-const { townLandscape, houseArt, wellArt, miniMap } = __mxmod101;
+const __mxmod103 = (() => {
+const { escapeHtml, number } = __mxmod100;
+const { renderBuildingArt } = __mxmod101;
+const { townLandscape, houseArt, wellArt, miniMap } = __mxmod102;
 const MAP_WIDTH = 2400;
        const MAP_HEIGHT = 1800;
 
@@ -20277,7 +20542,11 @@ function walkingPeople() {
 }
 
 function workState(building) {
-  return ["ready", "limited_materials"].includes(building.status?.status) ? "working" : "idle";
+  const status = building.status || {};
+  // 闸门减产（市场积压 / 口粮储备）时仍在出货的建筑亮"运作"灯。
+  const producing = ["ready", "limited_materials"].includes(status.status)
+    || (["market_capped", "wheat_reserve"].includes(status.status) && (status.batches || 0) > 0);
+  return producing ? "working" : "idle";
 }
 
 function renderBuilding(building, plot, selected) {
@@ -20414,9 +20683,9 @@ return { MAP_WIDTH, MAP_HEIGHT, renderMap, renderMiniMap, mapSignature, updateMa
 })();
 
 // ===== ui/shell.js =====
-const __mxmod103 = (() => {
-const { uiIcon } = __mxmod98;
-const { renderMiniMap } = __mxmod102;
+const __mxmod104 = (() => {
+const { uiIcon } = __mxmod99;
+const { renderMiniMap } = __mxmod103;
 const SHELL_HTML = `<main class="shell">
   <header class="hud">
     <div class="resource-bar" aria-label="小镇资源">
@@ -20471,8 +20740,8 @@ return { SHELL_HTML };
 })();
 
 // ===== ui/map-camera.js =====
-const __mxmod104 = (() => {
-const { MAP_HEIGHT, MAP_WIDTH } = __mxmod102;
+const __mxmod105 = (() => {
+const { MAP_HEIGHT, MAP_WIDTH } = __mxmod103;
 const MIN_ZOOM = 0.42;
 const MAX_ZOOM = 1.55;
 
@@ -20756,7 +21025,7 @@ return { createMapCamera };
 })();
 
 // ===== ui/map-canvas.js =====
-const __mxmod105 = (() => {
+const __mxmod106 = (() => {
 /**
  * src/ui/map-canvas.js
  *
@@ -20773,7 +21042,7 @@ return { drawVillageMapCanvas };
 })();
 
 // ===== ui/map-model.js =====
-const __mxmod106 = (() => {
+const __mxmod107 = (() => {
 const MAP_PRESENTATION = Object.freeze({
   width: 1200,
   height: 1000,
@@ -20819,7 +21088,8 @@ function terrainAt(column, row) {
       x: point.x,
       y: point.y,
       status: building.status,
-      working: ["ready", "limited_materials"].includes(building.status?.status) &&
+      working: (["ready", "limited_materials"].includes(building.status?.status)
+        || (["market_capped", "wheat_reserve"].includes(building.status?.status) && (building.status?.batches || 0) > 0)) &&
         (building.jobs || []).some(job => job.workers > 0),
       jobs: (building.jobs || []).map(job => ({
         id: job.id,
@@ -20914,7 +21184,7 @@ return { MAP_PRESENTATION, createMapModel, canvasBackingSize };
 })();
 
 // ===== ui/navigation-state.js =====
-const __mxmod107 = (() => {
+const __mxmod108 = (() => {
 const MAIN_PANELS = new Set(["build", "residents", "business", "policy", "settings"]);
 
        function isChoosingBuildPlot(state) {
@@ -21012,7 +21282,7 @@ return { isChoosingBuildPlot, createNavigationState };
 })();
 
 // ===== ui/audio.js =====
-const __mxmod108 = (() => {
+const __mxmod109 = (() => {
 /**
  * src/ui/audio.js
  * 纯原生 Web Audio API 田园程序化音效合成器
@@ -21244,7 +21514,7 @@ return { sound };
 })();
 
 // ===== ui/toast.js =====
-const __mxmod109 = (() => {
+const __mxmod110 = (() => {
 function createToastController(element) {
   let timeout = null;
   let lastMessage = "";
@@ -21277,8 +21547,8 @@ return { createToastController };
 })();
 
 // ===== ui/numeric-drafts.js =====
-const __mxmod110 = (() => {
-const { escapeHtml } = __mxmod99;
+const __mxmod111 = (() => {
+const { escapeHtml } = __mxmod100;
 const NUMBER_PATTERN = /^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/;
 
        function parseNumericDraft(rawValue, options = {}) {
@@ -21346,12 +21616,12 @@ return { parseNumericDraft, shouldDeferNumericPanelRender, shouldCommitNumericDr
 })();
 
 // ===== ui/panel-build.js =====
-const __mxmod111 = (() => {
-const { buildingSymbol } = __mxmod98;
+const __mxmod112 = (() => {
+const { buildingSymbol } = __mxmod99;
 const { CONTENT } = __mxmod11;
 const { industryTypeIds } = __mxmod1;
-const { escapeHtml, number, percent, moneyUnit } = __mxmod99;
-const { renderNumericInput } = __mxmod110;
+const { escapeHtml, number, percent, moneyUnit } = __mxmod100;
+const { renderNumericInput } = __mxmod111;
 const BUILD_CATEGORIES = [
   { id: "production", name: "生产", types: [...industryTypeIds(CONTENT), "livestock_base"] },
   { id: "commercial", name: "商业", types: ["wholesale_market", "commercial_street", "times_square", "bank", "stock_exchange", "foreign_trade_house"] },
@@ -21482,9 +21752,9 @@ return { setBuildCategory, renderBuild };
 })();
 
 // ===== ui/panel-jobs.js =====
-const __mxmod112 = (() => {
-const { escapeHtml, number, moneyUnit, moneyMixHint, effectiveTownWage } = __mxmod99;
-const { renderNumericInput } = __mxmod110;
+const __mxmod113 = (() => {
+const { escapeHtml, number, moneyUnit, moneyMixHint, effectiveTownWage } = __mxmod100;
+const { renderNumericInput } = __mxmod111;
 const JOB_GROUPS = [
   { id: "industry", name: "镇营产业", match: row => row.scope === "building" && row.globalDemandKind !== "public_service" },
   { id: "public", name: "公共服务", match: row => row.globalDemandKind === "public_service" },
@@ -21567,8 +21837,8 @@ return { renderJobs };
 })();
 
 // ===== ui/panel-people.js =====
-const __mxmod113 = (() => {
-const { number } = __mxmod99;
+const __mxmod114 = (() => {
+const { number } = __mxmod100;
 function laborMoodText(mood) {
   if (mood === "slack") return "失业多，商店压工资";
   if (mood === "tight") return "人手紧，商店加工资";
@@ -21613,10 +21883,10 @@ return { renderPeople };
 })();
 
 // ===== ui/panel-residents.js =====
-const __mxmod114 = (() => {
-const { renderJobs } = __mxmod112;
-const { renderPeople } = __mxmod113;
-const { number, escapeHtml } = __mxmod99;
+const __mxmod115 = (() => {
+const { renderJobs } = __mxmod113;
+const { renderPeople } = __mxmod114;
+const { number, escapeHtml } = __mxmod100;
 function renderResidents(view) {
   const living = view.households?.living?.counts || { 困难: 0, 温饱: 0, 富裕: 0 };
   const issues = view.households?.issueCounts || {};
@@ -21637,9 +21907,9 @@ return { renderResidents };
 })();
 
 // ===== ui/panel-trade.js =====
-const __mxmod115 = (() => {
-const { escapeHtml, number, moneyUnit, moneyMixHint } = __mxmod99;
-const { renderNumericInput } = __mxmod110;
+const __mxmod116 = (() => {
+const { escapeHtml, number, moneyUnit, moneyMixHint } = __mxmod100;
+const { renderNumericInput } = __mxmod111;
 function renderTrade(view) {
   const unit = moneyUnit(view);
   const trade = view.market.trade || {};
@@ -21659,9 +21929,9 @@ return { renderTrade };
 })();
 
 // ===== ui/panel-outside-town.js =====
-const __mxmod116 = (() => {
-const { escapeHtml, number } = __mxmod99;
-const { renderNumericInput } = __mxmod110;
+const __mxmod117 = (() => {
+const { escapeHtml, number } = __mxmod100;
+const { renderNumericInput } = __mxmod111;
 function stockBadge(good) {
   if (good.stockDays == null || !good.targetDays) return "";
   const ratio = good.stockDays / good.targetDays;
@@ -21811,8 +22081,8 @@ return { renderOutsideTown };
 })();
 
 // ===== ui/panel-business.js =====
-const __mxmod117 = (() => {
-const { escapeHtml, number, moneyUnit } = __mxmod99;
+const __mxmod118 = (() => {
+const { escapeHtml, number, moneyUnit } = __mxmod100;
 function humanizePlotLabel(view, building) {
   const label = view.plots?.find(p => p.id === building.plotId)?.label;
   if (!label) return building.id;
@@ -21875,8 +22145,8 @@ return { renderBusiness };
 })();
 
 // ===== ui/panel-ledger.js =====
-const __mxmod118 = (() => {
-const { escapeHtml, number, numberMax, accountLines, moneyMixHint } = __mxmod99;
+const __mxmod119 = (() => {
+const { escapeHtml, number, numberMax, accountLines, moneyMixHint } = __mxmod100;
 const LABELS = {
   harvest: "收获", consume: "消耗", relief: "救济", wage: "工资", construction: "建设",
   process_input: "加工投入", process_output: "加工产出", process_loss: "加工损耗",
@@ -21950,8 +22220,8 @@ return { renderLedger };
 })();
 
 // ===== ui/panel-industries.js =====
-const __mxmod119 = (() => {
-const { escapeHtml, number, moneyUnit } = __mxmod99;
+const __mxmod120 = (() => {
+const { escapeHtml, number, moneyUnit } = __mxmod100;
 function quantity(units, scale, unit) {
   return number((units || 0) / scale, 2) + unit;
 }
@@ -21995,8 +22265,8 @@ return { renderIndustryAccounts };
 })();
 
 // ===== ui/panel-flows.js =====
-const __mxmod120 = (() => {
-const { number } = __mxmod99;
+const __mxmod121 = (() => {
+const { number } = __mxmod100;
 function items(map, names, units, scale) {
   return Object.entries(map || {}).filter(([, value]) => value > 0)
     .map(([id, value]) => `${names[id] || id} ${number(value / scale)}${units[id] || "单位"}`).join(" · ") || "无";
@@ -22031,8 +22301,8 @@ return { renderAnnualFlows };
 })();
 
 // ===== ui/panel-enterprises.js =====
-const __mxmod121 = (() => {
-const { escapeHtml, number, moneyUnit } = __mxmod99;
+const __mxmod122 = (() => {
+const { escapeHtml, number, moneyUnit } = __mxmod100;
 function draftValue(view, key, fallback) {
   return escapeHtml(view.numericDrafts?.[key]?.value ?? String(fallback ?? ""));
 }
@@ -22227,16 +22497,16 @@ return { renderEnterpriseFinance };
 })();
 
 // ===== ui/panel-economy.js =====
-const __mxmod122 = (() => {
-const { escapeHtml, number, numberMax, shortageJin } = __mxmod99;
-const { MODS } = __mxmod69;
-const { renderTrade } = __mxmod115;
-const { renderOutsideTown } = __mxmod116;
-const { renderBusiness } = __mxmod117;
-const { renderLedger } = __mxmod118;
-const { renderIndustryAccounts } = __mxmod119;
-const { renderAnnualFlows } = __mxmod120;
-const { renderEnterpriseFinance } = __mxmod121;
+const __mxmod123 = (() => {
+const { escapeHtml, number, numberMax, shortageJin } = __mxmod100;
+const { MODS } = __mxmod70;
+const { renderTrade } = __mxmod116;
+const { renderOutsideTown } = __mxmod117;
+const { renderBusiness } = __mxmod118;
+const { renderLedger } = __mxmod119;
+const { renderIndustryAccounts } = __mxmod120;
+const { renderAnnualFlows } = __mxmod121;
+const { renderEnterpriseFinance } = __mxmod122;
 function detail(key, title, body) {
   return `<details class="detail-block panel-detail" data-detail-key="${key}"><summary>${title}</summary><div class="detail-body">${body}</div></details>`;
 }
@@ -22270,8 +22540,8 @@ return { renderEconomy };
 })();
 
 // ===== ui/econ-mini.js =====
-const __mxmod123 = (() => {
-const { escapeHtml, number } = __mxmod99;
+const __mxmod124 = (() => {
+const { escapeHtml, number } = __mxmod100;
 function sparkline(history, key, label, decimals) {
   const values = history.map(row => row[key]).filter(value => Number.isFinite(value));
   if (values.length < 2) return "";
@@ -22322,8 +22592,8 @@ return { econMiniSummary, renderEconMini };
 })();
 
 // ===== ui/macro-panel.js =====
-const __mxmod124 = (() => {
-const { escapeHtml, number, compact } = __mxmod99;
+const __mxmod125 = (() => {
+const { escapeHtml, number, compact } = __mxmod100;
 const LIQUIDITY_LABEL = { tight: "偏紧", normal: "适中", loose: "宽松" };
 const DASH = "—";
 
@@ -22379,11 +22649,11 @@ return { macroPanelSummary, renderMacroPanel };
 })();
 
 // ===== ui/panel-policy.js =====
-const __mxmod125 = (() => {
-const { number } = __mxmod99;
+const __mxmod126 = (() => {
+const { number } = __mxmod100;
 const { CONTENT } = __mxmod11;
 const { industryTypeIds } = __mxmod1;
-const { renderNumericInput } = __mxmod110;
+const { renderNumericInput } = __mxmod111;
 function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
   const last = view.policy.lastDay || {};
@@ -22476,9 +22746,9 @@ return { renderPolicy };
 })();
 
 // ===== ui/panel-shop-pricing.js =====
-const __mxmod126 = (() => {
-const { escapeHtml, number } = __mxmod99;
-const { renderNumericInput } = __mxmod110;
+const __mxmod127 = (() => {
+const { escapeHtml, number } = __mxmod100;
+const { renderNumericInput } = __mxmod111;
 function marginText(value) {
   return value === null || value === undefined ? "—" : `${number(value, 1)}%`;
 }
@@ -22522,15 +22792,15 @@ return { renderShopPricing };
 })();
 
 // ===== ui/panel-site.js =====
-const __mxmod127 = (() => {
-const { escapeHtml, number, numberMax, moneyUnit, effectiveTownWage } = __mxmod99;
-const { MODS } = __mxmod69;
+const __mxmod128 = (() => {
+const { escapeHtml, number, numberMax, moneyUnit, effectiveTownWage } = __mxmod100;
+const { MODS } = __mxmod70;
 const { wholesaleItemIds } = __mxmod0;
 const { CONTENT } = __mxmod11;
 const { isIndustryType } = __mxmod1;
-const { villaCapacityOf } = __mxmod61;
-const { renderNumericInput } = __mxmod110;
-const { renderShopPricing } = __mxmod126;
+const { villaCapacityOf } = __mxmod62;
+const { renderNumericInput } = __mxmod111;
+const { renderShopPricing } = __mxmod127;
 function humanizePlotLabel(view, building) {
   const label = view.plots?.find(p => p.id === building.plotId)?.label;
   if (!label) return building.id;
@@ -22901,7 +23171,7 @@ function timesSquareMarkup(view, building, development) {
         ? `<div class="cardlet"><h3>出售一级经营权</h3><div class="row"><span class="label">售价 / 参考上限</span><strong class="value">${number(right.priceWheatJin, 2)} / ${number(right.maximumPriceWheatJin, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">预计参考收益</span><strong class="value">${number(right.estimatedAnnualReferenceReturn, 2)}${escapeHtml(unit)}${right.typeId === "lumberyard" ? "" : "/年"}</strong></div><div class="row"><span class="label">预计买家（合资）</span><strong class="value">${buyerGroupText}</strong></div><div class="row"><span class="label">转入民营</span><strong class="value">${number(right.transferableWorkers)}人</strong></div>${right.reason ? `<div class="shortage-banner visible">${escapeHtml(right.reason)}</div>` : ""}<details class="detail-block" data-detail-key="right-detail:${escapeHtml(building.id)}"><summary>估值详情</summary><div class="detail-body"><div class="row"><span class="label">产品价 / 税率 / 工资</span><strong class="value">${number(right.itemPriceVoucher, 3)}${escapeHtml(unit)}/${escapeHtml(view.itemUnits[right.outputItemId] || "单位")} · ${number(right.taxPercent, 2)}% · ${number(right.wageRateVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">需求 / 库存 / 缺口</span><strong class="value">${number(right.dailyDemandJin, 2)} / ${number(right.competitionStockJin, 2)} / ${number(right.unmetDemandJin, 2)}${escapeHtml(view.itemUnits[right.outputItemId] || "单位")}</strong></div><div class="row"><span class="label">预计满产满销人均日利润</span><strong class="value">${number(right.theoreticalFullSaleProfitPerWorkerVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">岗位容量</span><strong class="value">镇营${number(right.townCapacityBefore)}→${number(right.townCapacityAfter)} · 民营${number(right.privateCapacityBefore)}→${number(right.privateCapacityAfter)}</strong></div>${right.demandBasis ? `<div class="subtle">${escapeHtml(right.demandBasis)}</div>` : ""}<div class="subtle">成交后居民需保留90天基本口粮。</div></div></details><div class="business-sticky-actions"><button class="secondary" data-right-cancel>取消</button><button class="primary" data-right-confirm="${escapeHtml(building.id)}" ${right.available ? "" : "disabled"}>确认成交</button></div></div>`
         : `<div class="cardlet"><h3>经营权</h3><div class="row"><span class="label">一级售价</span><strong class="value">${number(right.priceWheatJin, 2)}${escapeHtml(unit)}</strong></div>${renderNumericInput(view, { key: `right-price:${building.id}`, kind: "operating-right-price", target: building.id, value: right.priceWheatJin, label: "单级经营权售价", minimum: 0.01, maximum: 1000000000, positive: true, className: "setting-editor" })}<button class="secondary wide" data-right-preview="${escapeHtml(building.id)}">预览出售</button></div>`
       : "";
-    body = `<div class="status-strip"><span class="status-light ${["ready", "limited_materials"].includes(building.status.status) ? "working" : "idle"}"></span><strong>${escapeHtml(building.status.label)}</strong><span>${number(building.level)}级</span></div>${publicService ? `<div class="row"><span class="label">全镇需求 / 在岗 / 缺员</span><strong class="value">${number(publicService.globalDemand)} / ${number(publicService.globalInPost)} / ${number(publicService.globalShortage)}人</strong></div>` : `<div class="row"><span class="label">人数 / 岗位</span><strong class="value">${number(staff)} / ${number(jobs.reduce((sum, job) => sum + job.capacity, 0))}人</strong></div>`}${productivityRow}<div class="row"><span class="label">今日产量</span><strong class="value">${outputLines(output, view.itemNames, view.itemUnits, view.inventoryUnitsPerJin)}</strong></div><div class="row"><span class="label">预计每日工资</span><strong class="value">${number(dailyCost)}${escapeHtml(unit)}</strong></div>${wageUnpaid > 0 ? `<div class="shortage-banner visible">新增欠薪 ${number(wageUnpaid)}${escapeHtml(unit)}</div>` : ""}<h3>镇营排班</h3>${jobMarkup}${outputTargetMarkup(view, building)}<div class="site-wage-edit"><span>日薪</span>${renderNumericInput(view, { key: `wage:${wage?.roleId || ""}`, kind: "wage", target: wage?.roleId || "", value: wage?.wagePerWorkerDay || 0, label: `${wage?.name || "作坊工人"}日薪`, minimum: 0, maximum: 100000, confirmLabel: "✓", className: "wage-editor" })}<span>${escapeHtml(unit)}</span></div><details class="detail-block" data-detail-key="ownership:${escapeHtml(building.id)}"><summary>产权详情</summary><div class="detail-body"><div class="row"><span class="label">镇营 / 民营 / 公司</span><strong class="value">${number(building.ownership.townLevels)} / ${number(building.ownership.privateLevels)} / ${number(building.ownership.listedLevels || 0)}级</strong></div></div></details>${privateSection}${saleCard}${developmentMarkup(view, building, development)}`;
+    body = `<div class="status-strip"><span class="status-light ${["ready", "limited_materials"].includes(building.status.status) || (["market_capped", "wheat_reserve"].includes(building.status.status) && (building.status.batches || 0) > 0) ? "working" : "idle"}"></span><strong>${escapeHtml(building.status.label)}</strong><span>${number(building.level)}级</span></div>${publicService ? `<div class="row"><span class="label">全镇需求 / 在岗 / 缺员</span><strong class="value">${number(publicService.globalDemand)} / ${number(publicService.globalInPost)} / ${number(publicService.globalShortage)}人</strong></div>` : `<div class="row"><span class="label">人数 / 岗位</span><strong class="value">${number(staff)} / ${number(jobs.reduce((sum, job) => sum + job.capacity, 0))}人</strong></div>`}${productivityRow}<div class="row"><span class="label">今日产量</span><strong class="value">${outputLines(output, view.itemNames, view.itemUnits, view.inventoryUnitsPerJin)}</strong></div><div class="row"><span class="label">预计每日工资</span><strong class="value">${number(dailyCost)}${escapeHtml(unit)}</strong></div>${wageUnpaid > 0 ? `<div class="shortage-banner visible">新增欠薪 ${number(wageUnpaid)}${escapeHtml(unit)}</div>` : ""}<h3>镇营排班</h3>${jobMarkup}${outputTargetMarkup(view, building)}<div class="site-wage-edit"><span>日薪</span>${renderNumericInput(view, { key: `wage:${wage?.roleId || ""}`, kind: "wage", target: wage?.roleId || "", value: wage?.wagePerWorkerDay || 0, label: `${wage?.name || "作坊工人"}日薪`, minimum: 0, maximum: 100000, confirmLabel: "✓", className: "wage-editor" })}<span>${escapeHtml(unit)}</span></div><details class="detail-block" data-detail-key="ownership:${escapeHtml(building.id)}"><summary>产权详情</summary><div class="detail-body"><div class="row"><span class="label">镇营 / 民营 / 公司</span><strong class="value">${number(building.ownership.townLevels)} / ${number(building.ownership.privateLevels)} / ${number(building.ownership.listedLevels || 0)}级</strong></div></div></details>${privateSection}${saleCard}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="residents">查看全部岗位</button>`;
   } else if (project) {
     title = `施工中 · ${project.name}`;
@@ -22948,8 +23218,8 @@ return { renderSite };
 })();
 
 // ===== ui/panel-settings.js =====
-const __mxmod128 = (() => {
-const { escapeHtml } = __mxmod99;
+const __mxmod129 = (() => {
+const { escapeHtml } = __mxmod100;
 const { APP_VERSION, BUILD_ID } = __mxmod18;
 function savedTime(value) {
   return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "未知";
@@ -23039,7 +23309,7 @@ return { renderSettings };
 })();
 
 // ===== ui/dashboard-view-cache.js =====
-const __mxmod129 = (() => {
+const __mxmod130 = (() => {
 function selectionKey(selection = {}) {
   return [
     selection.panel || "",
@@ -23087,34 +23357,34 @@ return { createDashboardViewCache };
 })();
 
 // ===== ui/app.js =====
-const __mxmod130 = (() => {
-const { simulation } = __mxmod90;
-const { loadReportMessage } = __mxmod92;
-const { exportState } = __mxmod93;
-const { classifyPersistenceError } = __mxmod94;
-const { createIndexedSaveManager, SAVE_DB_NAME } = __mxmod95;
-const { createAutosaveCoordinator } = __mxmod96;
-const { createInitialState } = __mxmod33;
-const { SimulationClock } = __mxmod97;
-const { SHELL_HTML } = __mxmod103;
-const { mapSignature, renderMap, updateMapMotion } = __mxmod102;
-const { createMapCamera } = __mxmod104;
-const { drawVillageMapCanvas } = __mxmod105;
-const { createMapModel } = __mxmod106;
-const { createNavigationState, isChoosingBuildPlot } = __mxmod107;
-const { sound } = __mxmod108;
-const { createToastController } = __mxmod109;
-const { renderBuild, setBuildCategory } = __mxmod111;
-const { renderResidents } = __mxmod114;
-const { renderEconomy } = __mxmod122;
-const { econMiniSummary, renderEconMini } = __mxmod123;
-const { macroPanelSummary, renderMacroPanel } = __mxmod124;
-const { renderPolicy } = __mxmod125;
-const { renderSite } = __mxmod127;
-const { renderSettings } = __mxmod128;
-const { compact, escapeHtml, number, numberMax, moneyUnit } = __mxmod99;
-const { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumericPanelRender } = __mxmod110;
-const { createDashboardViewCache } = __mxmod129;
+const __mxmod131 = (() => {
+const { simulation } = __mxmod91;
+const { loadReportMessage } = __mxmod93;
+const { exportState } = __mxmod94;
+const { classifyPersistenceError } = __mxmod95;
+const { createIndexedSaveManager, SAVE_DB_NAME } = __mxmod96;
+const { createAutosaveCoordinator } = __mxmod97;
+const { createInitialState } = __mxmod34;
+const { SimulationClock } = __mxmod98;
+const { SHELL_HTML } = __mxmod104;
+const { mapSignature, renderMap, updateMapMotion } = __mxmod103;
+const { createMapCamera } = __mxmod105;
+const { drawVillageMapCanvas } = __mxmod106;
+const { createMapModel } = __mxmod107;
+const { createNavigationState, isChoosingBuildPlot } = __mxmod108;
+const { sound } = __mxmod109;
+const { createToastController } = __mxmod110;
+const { renderBuild, setBuildCategory } = __mxmod112;
+const { renderResidents } = __mxmod115;
+const { renderEconomy } = __mxmod123;
+const { econMiniSummary, renderEconMini } = __mxmod124;
+const { macroPanelSummary, renderMacroPanel } = __mxmod125;
+const { renderPolicy } = __mxmod126;
+const { renderSite } = __mxmod128;
+const { renderSettings } = __mxmod129;
+const { compact, escapeHtml, number, numberMax, moneyUnit } = __mxmod100;
+const { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumericPanelRender } = __mxmod111;
+const { createDashboardViewCache } = __mxmod130;
 const { APP_VERSION, BUILD_ID } = __mxmod18;
 const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod7;
 function closest(element, selector) {
@@ -25016,8 +25286,8 @@ return { mountGame };
 })();
 
 // ===== main.js =====
-const __mxmod131 = (() => {
-const { mountGame } = __mxmod130;
+const __mxmod132 = (() => {
+const { mountGame } = __mxmod131;
 const root = document.getElementById("app");
 if (!root) throw new Error("缺少游戏页面根容器 #app");
 mountGame(root);
@@ -25025,7 +25295,7 @@ return {  };
 })();
 
 // ===== mods/_template/content.js =====
-const __mxmod132 = (() => {
+const __mxmod133 = (() => {
 // mod 模板 · 内容（纯数据，不能 import 系统代码）。复制整个 _template 文件夹改名即可开始。
 // 本模板没有登记，不会进游戏；登记方法见 MODDING.md。
 // 下面以"茶叶"为例：茶园（原料产业）产茶叶，居民买来喝加舒心值，外镇也收。
@@ -25083,8 +25353,8 @@ return { default: __dflt };
 })();
 
 // ===== mods/_template/mod.js =====
-const __mxmod133 = (() => {
-const { defineMod, modState } = __mxmod66;
+const __mxmod134 = (() => {
+const { defineMod, modState } = __mxmod67;
 const __dflt = defineMod({
   id: "_template",
 
@@ -25137,8 +25407,8 @@ return { default: __dflt };
 })();
 
 // ===== ui/panel-overview.js =====
-const __mxmod134 = (() => {
-const { escapeHtml, number, numberMax, shortageJin } = __mxmod99;
+const __mxmod135 = (() => {
+const { escapeHtml, number, numberMax, shortageJin } = __mxmod100;
 function renderOverview(view) {
   const p = view.people;
   const shortage = view.shortageQeq > 0;
@@ -25166,7 +25436,7 @@ return { renderOverview };
 })();
 
 // ===== ui/terrain-art.js =====
-const __mxmod135 = (() => {
+const __mxmod136 = (() => {
 /**
  * src/ui/art.js
  * 麦乡 (Maixiang) 地图精细化美术渲染器

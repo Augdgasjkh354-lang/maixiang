@@ -248,11 +248,14 @@ test("processing is atomic; wages settle separately even when materials are shor
   simulation.setEmployment(state, "farmers", 388);
   simulation.setEmployment(state, start.instanceId + "::millers", 1);
   const scale = CONTENT.precision.inventoryUnitsPerJin;
-  changeInventory(state, "town", "wheat", 30 * scale - state.accounts.town.wheat,
+  // 镇营磨坊不能动用口粮储备（人口 × 日口粮 × 180 天）以下的小麦，故在储备之上只留 30 斤。
+  const reserveUnits = populationStats(state).total * CONTENT.rules.foodPerPersonDay * CONTENT.rules.townWheatReserveDays * scale;
+  changeInventory(state, "town", "wheat", reserveUnits + 30 * scale - state.accounts.town.wheat,
     "test stock balance", "test_adjustment", CONTENT);
-  // 镇库 30 斤小麦只够 1 批（每批 20 斤），而 1 名磨坊工满产 4 批 —— 产能不满。
+  // 储备之上的 30 斤小麦只够 1 批（每批 20 斤），而 1 名磨坊工满产 4 批 —— 产能不满。
   const market = state.wholesaleMarket;
-  assert.equal(productionStatus(state, state.buildings[0], CONTENT).status, "limited_materials");
+  // 储备之上的小麦只够 1 批，口粮储备是限制因素（而非磨坊工不足）。
+  assert.equal(productionStatus(state, state.buildings[0], CONTENT).status, "wheat_reserve");
   const beforeStocks = {
     wheat: state.accounts.town.wheat,
     flour: state.accounts.town.flour,
@@ -263,8 +266,8 @@ test("processing is atomic; wages settle separately even when materials are shor
   // 0.2.3：镇营产成品当日无偿调拨进批发市场（统购统销），不再留在镇库。
   assert.equal((market.inventory.flour || 0) / scale, 16);
   assert.equal(state.accounts.town.flour / scale, 0);
-  // 磨坊只用当日所需（1 批 20 斤），余下 10 斤留在镇库。
-  assert.equal(state.accounts.town.wheat / scale, 10);
+  // 磨坊只用当日所需（1 批 20 斤），余下 10 斤（储备之上）留在镇库。
+  assert.equal((state.accounts.town.wheat - reserveUnits) / scale, 10);
   assert.equal(market.inventory.wheat / scale, 0);
   assert.equal(state.accounts.residents.flour / scale, 0);
   // 默认日薪 10→5 斤（8cf03ae）：1 名磨坊工当日工资 5 斤。

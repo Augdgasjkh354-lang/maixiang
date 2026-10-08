@@ -4,7 +4,9 @@ function emptyOwner() {
     reliefWheatUnits: 0, rentWheatUnits: 0, breadPurchaseWheatUnits: 0,
     saltPurchaseWheatUnits: 0, operatingRightWheatUnits: 0,
     consumptionQeqUnits: 0, privateInputs: {}, privateOutputs: {}, privateTaxes: {},
-    constructionMaterials: {}, constructionMaterialsReturned: {}
+    constructionMaterials: {}, constructionMaterialsReturned: {},
+    // 镇库小麦的实物流水：镇营加工投入（磨坊/酒坊）、居民用小麦换券入库、居民用券兑回小麦。
+    productionInputWheatUnits: 0, wheatExchangeInUnits: 0, wheatRedeemedUnits: 0
   };
 }
 
@@ -44,6 +46,9 @@ export function recordFinancialFlow(state, row) {
     else if (row.type === "private_process_input") add(residents.privateInputs, row.itemId, units);
     else if (row.type === "private_production_output") add(residents.privateOutputs, row.itemId, units);
     else if (row.type === "private_production_tax") add(town.privateTaxes, row.itemId, units);
+    else if (row.type === "process_input" && row.source === "town" && row.itemId === "wheat") add(town, "productionInputWheatUnits", units);
+    else if (row.type === "voucher_exchange" && row.itemId === "wheat" && row.destination === "town") add(town, "wheatExchangeInUnits", units);
+    else if (row.type === "voucher_redeem" && row.itemId === "wheat" && row.source === "town") add(town, "wheatRedeemedUnits", units);
     else if (row.type === "construction_material") add(town.constructionMaterials, row.itemId, units);
     else if (row.type === "construction_material_return") add(town.constructionMaterialsReturned, row.itemId, units);
   }

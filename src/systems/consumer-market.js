@@ -1,10 +1,9 @@
 import {
   maximumResidentAutoExchangeWheatUnits,
-  voucherBalance,
   currencyScale
 } from "../economy/currency.js";
 import {
-  createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment
+  createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits
 } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { sellCompanyProduct, companySalePrice } from "./companies.js";
@@ -102,7 +101,7 @@ function quickAffordableUnits(state, household, price, content, reserveDays) {
   if (!(price > 0)) return 0;
   const wheatUnits = Math.min(householdConvertibleWheatUnits(state, household, content, reserveDays),
     householdExchangeAllowanceUnits(state, household.id, content));
-  const value = voucherBalance(state, `household:${household.id}`) + voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
+  const value = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
   return Math.max(0, Math.floor(value * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))));
 }
 
@@ -111,7 +110,7 @@ function maximumAffordableUnits(state, household, price, content, reserveDays, c
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   if (price <= 0) return 0;
   const owner = `household:${household.id}`;
-  const voucherAvailable = voucherBalance(state, owner);
+  const voucherAvailable = spendableVoucherUnits(state, owner);
   const wheatUnitsAvailable = householdConvertibleWheatUnits(state, household, content, reserveDays);
   const wheatValueAvailable = voucherUnitsForWheatUnits(wheatUnitsAvailable, content, "floor");
   const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits: wheatUnitsAvailable });
@@ -168,7 +167,7 @@ function transactSeller(state, seller, household, itemId, units, content, reason
 }
 
 export function residentPurchasePowerUnits(state, priceVoucherPerPhysicalUnit, content, reserveDays = null) {
-  const current = voucherBalance(state, "residents");
+  const current = spendableVoucherUnits(state, "residents");
   const people = populationStats(state).total;
   const convertibleWheatUnits = maximumResidentAutoExchangeWheatUnits(
     state, people, reserveDays ?? content.rules.basicCommerceFoodReserveDays ?? 30, content

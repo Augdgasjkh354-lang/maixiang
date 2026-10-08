@@ -1,8 +1,8 @@
 import { atomicInventoryTransaction } from "../economy/inventory.js";
 import { commitProductionAccounting, planProductionAccounting } from "../economy/business.js";
-import { recipeCapacity } from "../selectors/production.js";
+import { recipeCapacity, townGateCap, townOutputGate } from "../selectors/production.js";
 import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
-import { procureTownInputFromWholesale, transferTownToWholesale } from "./wholesale-market.js";
+import { procureTownInputFromWholesale, recordTownInputConsumption, transferTownToWholesale } from "./wholesale-market.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
 
 function recipeDeltas(recipe, batches, content) {
@@ -37,17 +37,20 @@ export function processBuilding(state, building, content) {
   // 封顶每日批次数；用不上的人手仍照常领工资。用 0 表示取消（按人手满产）。
   const targetCap = targetBatchCap(building, recipeDef);
   const labor = laborBatches(state, building.typeId, building.level, workers, recipeDef?.batchesPerWorkerDay, building.productivityCarry);
-  let wholesaleBatchCap = Number.POSITIVE_INFINITY;
+  // 镇营产出闸门（用户口径：市场积压、口粮储备）：在领原料之前封顶批次数，免得白领用不掉的小麦/面粉。
+  const gate = recipeDef && workers > 0 ? townOutputGate(state, recipeDef, Math.min(labor.batches, targetCap), content) : null;
+  let wholesaleBatchCap = gate ? gate.batches : Number.POSITIVE_INFINITY;
   const procuredInputs = [];
   if (recipeDef && workers > 0 && (recipeDef.inputs || []).length) {
-    const wantedBatches = Math.min(labor.batches, targetCap);
+    const wantedBatches = gate.batches;
     wholesaleBatchCap = wantedBatches;
     for (const input of recipeDef.inputs || []) {
       const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);
       const required = perBatch * wantedBatches;
       // 镇库里已有的（如本镇磨坊当天的面粉）先用，不够再从批发市场领；都是镇里内部调拨，不付钱。
+      // 小麦由镇库直管、从不经批发市场领用；口粮储备已由 gate 扣除，这里不会越过储备。
       const inTown = Math.min(required, Math.max(0, state.accounts.town?.[input.itemId] || 0));
-      const purchase = required - inTown > 0
+      const purchase = required - inTown > 0 && input.itemId !== "wheat"
         ? procureTownInputFromWholesale(state, input.itemId, required - inTown, content, `${definition.name}从批发市场领用${content.items[input.itemId]?.name || input.itemId}`)
         : { boughtUnits: 0 };
       const boughtUnits = (purchase.boughtUnits || 0) + inTown;
@@ -73,8 +76,9 @@ export function processBuilding(state, building, content) {
     }
   }
   if (allowedBatches <= 0) delete building.productivityCarry;
+  const gateCap = gate ? townGateCap(gate, allowedBatches) : null;
   if (!definition || !definition.recipeId || capacity.status === "no_workers" || allowedBatches <= 0) {
-    return { buildingId: building.id, status: capacity.status === "no_workers" ? "no_workers" : "no_materials", batches: 0 };
+    return { buildingId: building.id, status: capacity.status === "no_workers" ? "no_workers" : (gateCap || "no_materials"), batches: 0 };
   }
   const recipe = capacity.recipe;
   const prepared = recipeDeltas(recipe, allowedBatches, content);
@@ -95,6 +99,10 @@ export function processBuilding(state, building, content) {
     };
   }
   commitProductionAccounting(state, accounting);
+  // 镇营自身领用的原料计入"需求"（与市场售出一起决定下一轮的市场闸门）。
+  for (const input of recipe.inputs || []) {
+    recordTownInputConsumption(state, input.itemId, Math.round(input.quantity * allowedBatches * content.precision.inventoryUnitsPerJin), content);
+  }
   // 生产成功且满负荷，才把不足一批的零头留到明天。
   building.productivityCarry = nextCarry(labor.exact, allowedBatches, allowedBatches >= labor.batches);
   if (!building.productivityCarry) delete building.productivityCarry;
@@ -102,7 +110,7 @@ export function processBuilding(state, building, content) {
     buildingId: building.id,
     status: allowedBatches >= targetCap
       ? "target_capped"
-      : allowedBatches < (capacity.batches || 0) ? "limited_materials" : capacity.status,
+      : gateCap || (allowedBatches < (capacity.batches || 0) ? "limited_materials" : capacity.status),
     batches: allowedBatches,
     transactionId: transaction.transactionId,
     outputUnits: accounting.outputs.reduce(function (totals, output) {

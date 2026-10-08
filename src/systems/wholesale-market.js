@@ -59,9 +59,9 @@ export function ensureWholesaleMarket(state, content) {
   market.purchasePricesVoucherPerUnit ||= {};
   market.purchasePriceReferenceVoucherPerUnit ||= {};
   market.dailyTownAllocationUnits ||= emptyItemMap(content, 0);
-  market.day ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
-  market.year ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
-  market.cumulative ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.year ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.cumulative ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   // 统购统销累计账：无偿调拨入库与领用的成本价值。
   market.monopoly ||= { allocatedInValueUnits: 0, allocatedInputValueUnits: 0 };
   market.purchaseSpend ||= { day: 0, year: 0, cumulative: 0 };
@@ -112,14 +112,14 @@ const addPeriodValue = bookAdd;
 
 export function resetWholesaleDay(state, content) {
   const market = ensureWholesaleMarket(state, content);
-  market.day = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.purchaseSpend.day = 0;
   market.valueFlow.day = { sales: 0, purchases: 0 };
 }
 
 export function resetWholesaleYear(state, content) {
   const market = ensureWholesaleMarket(state, content);
-  market.year = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.year = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.purchaseSpend.year = 0;
   market.valueFlow.year = { sales: 0, purchases: 0 };
 }
@@ -621,6 +621,7 @@ export function snapshotWholesaleHistory(state, content) {
     day: state.day,
     inventory: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.inventory?.[itemId] || 0])),
     sold: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.soldUnits?.[itemId] || 0])),
+    townConsumed: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.townConsumedUnits?.[itemId] || 0])),
     price: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.pricesVoucherPerUnit?.[itemId] || 0]))
   };
   market.history.push(snapshot);
@@ -633,6 +634,33 @@ export function wholesaleAvgSoldUnits(state, itemId, content, days = 7) {
   const history = (market.history || []).slice(-days);
   if (history.length === 0) return 0;
   return history.reduce((sum, h) => sum + (h.sold?.[itemId] || 0), 0) / history.length;
+}
+
+// 镇营自身领用原料（磨坊领小麦、面包房领面粉等）的记账，与市场售出一起构成"需求"口径。
+// 只在有批发市场时记账；与 bookAddMap 一样同时写当日/本年/累计三段。
+export function recordTownInputConsumption(state, itemId, units, content) {
+  if (!wholesaleMonopolyItemIds(content).includes(itemId) || !(units > 0) || !hasWholesaleMarket(state)) return;
+  const market = ensureWholesaleMarket(state, content);
+  addPeriodMap(market, "townConsumedUnits", itemId, Math.round(units));
+}
+
+// 近 N 日需求（单位/日）：市场售出 + 镇营领用，按历史快照取平均（与 wholesaleAvgSoldUnits 同口径）。
+export function wholesaleAvgDemandUnits(state, itemId, content, days = 7) {
+  const history = (state.wholesaleMarket?.history || []).slice(-days);
+  if (history.length === 0) return 0;
+  return history.reduce((sum, h) => sum + (h.sold?.[itemId] || 0) + (h.townConsumed?.[itemId] || 0), 0) / history.length;
+}
+
+// 镇营产出的入市余量（单位）：目标库存 − 现有库存（市场 + 镇库）。
+// 目标库存 = max(最低备货, 近 7 日需求 × 备货天数)。没有批发市场时返回 Infinity（不设闸门）。
+export function townOutputMarketRoomUnits(state, itemId, content) {
+  if (!hasWholesaleMarket(state)) return Number.POSITIVE_INFINITY;
+  const scale = content.precision.inventoryUnitsPerJin;
+  const demand = wholesaleAvgDemandUnits(state, itemId, content, 7);
+  const minimum = (content.rules.townOutputMinStockJin ?? 200) * scale;
+  const target = Math.max(minimum, demand * (content.rules.townOutputStockDays ?? 30));
+  const stock = Math.max(0, state.wholesaleMarket?.inventory?.[itemId] || 0) + Math.max(0, state.accounts?.town?.[itemId] || 0);
+  return Math.max(0, target - stock);
 }
 
 // 批发市场趋势视图（0.1.11 zM）：供面板使用

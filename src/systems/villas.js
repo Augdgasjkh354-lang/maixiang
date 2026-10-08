@@ -1,5 +1,5 @@
 import { currencyScale, voucherBalance } from "../economy/currency.js";
-import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
+import { currentPaymentComposition, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import {
@@ -36,7 +36,7 @@ export function villaPolicy(state, content) {
 
 // 家庭流动资产（小麦等值单位）：粮券 + 超出基本口粮储备的可折算小麦。
 function householdLiquidValueUnits(state, household, content) {
-  const vouchers = voucherBalance(state, `household:${household.id}`);
+  const vouchers = spendableVoucherUnits(state, `household:${household.id}`);
   const wheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
   return vouchers + voucherUnitsForWheatUnits(wheatUnits, content, "floor");
 }

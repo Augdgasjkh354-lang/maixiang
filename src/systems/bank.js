@@ -1,15 +1,19 @@
-import { currencyScale } from "../economy/currency.js";
+import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { recordEvent } from "../economy/ledger.js";
+import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
+import { withdrawFromBank } from "../economy/deposits.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
 import { wholesalePrice } from "./wealth-stats.js";
 import { companyWorkingCapitalReserve } from "./companies.js";
 import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEHOLD_RESERVE_DAYS } from "./investment-preference.js";
 
-// 银行系统（金融扩展第二期）：镇营银行，利润归镇库。
+// 银行系统（金融扩展第二期）：镇营银行。
 // - 只存粮券不存粮食；存款按日计息；可向上市公司放贷
-// - 准备金率限制可贷额度；存贷利差为银行利润
-// - 粮券恒等式：银行现金计入 totalVoucherBalances（currency.js），
-//   deposits 台账只是现金归属明细，不重复计入。
+// - 存款利息由镇库付现金（付款类型 bank_deposit_interest）：每笔计息都有等额粮券进入银行现金；
+//   镇库现金不够时只计实付部分，绝不透支记账
+// - 准备金率限制可贷额度；存贷利差等银行利润记入 bank.retainedVoucherUnits 留存，不自动上缴镇库
+// - 粮券恒等式：银行现金计入 totalVoucherBalances（currency.js）。存款台账的守恒关系是
+//   存款 = 银行现金 + 在贷余额 + 持有国债 − 留存利润（bankLedgerInvariant，validateState 校验）。
 export const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
 export const DEFAULT_LOAN_RATE_ANNUAL_PERCENT = 6;
 export const DEFAULT_RESERVE_REQUIREMENT_PERCENT = 10;
@@ -64,7 +68,49 @@ export function ensureBankState(state) {
   stats.loansIssuedVoucherUnits ||= 0;
   stats.loansRepaidVoucherUnits ||= 0;
   stats.badDebtVoucherUnits ||= 0;
+  if (!Number.isSafeInteger(bank.retainedVoucherUnits)) bank.retainedVoucherUnits = bankRetainedVoucherUnits(state);
   return bank;
+}
+
+// 银行资产：现金 + 在贷余额（含应计利息）+ 持有的国债本金。只读。
+function bankAssetVoucherUnits(state) {
+  const bank = state.bank || {};
+  let assets = bank.cashVoucherUnits || 0;
+  for (const loan of bank.loans || []) if (loan.status === "active") assets += loan.outstandingVoucherUnits || 0;
+  for (const issue of state.bonds?.issues || []) {
+    for (const holding of issue.holdings || []) if (holding.holderKey === "bank:bank") assets += holding.principalVoucherUnits || 0;
+  }
+  return assets;
+}
+
+function bankDepositTotalVoucherUnits(state) {
+  let total = 0;
+  for (const units of Object.values(state.bank?.deposits || {})) total += units || 0;
+  return total;
+}
+
+// 银行留存利润（可为负）：贷款利息应计 − 坏账核销 + 国债利息收入 − 国债违约损失。
+// 旧存档没有这个字段：此时按"资产 − 存款"反推。旧版存款利息只记台账不付现金，
+// 反推出的负数正是这部分无现金支撑的利息，存款人余额保持不变。
+export function bankRetainedVoucherUnits(state) {
+  const bank = state.bank || {};
+  if (Number.isSafeInteger(bank.retainedVoucherUnits)) return bank.retainedVoucherUnits;
+  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state);
+}
+
+// 存款台账守恒（只读）：存款 = 现金 + 在贷余额 + 国债本金 − 留存利润。
+export function bankLedgerInvariant(state) {
+  const bank = state.bank || {};
+  const deposits = bankDepositTotalVoucherUnits(state);
+  const cash = bank.cashVoucherUnits || 0;
+  let loans = 0;
+  for (const loan of bank.loans || []) if (loan.status === "active") loans += loan.outstandingVoucherUnits || 0;
+  let bonds = 0;
+  for (const issue of state.bonds?.issues || []) {
+    for (const holding of issue.holdings || []) if (holding.holderKey === "bank:bank") bonds += holding.principalVoucherUnits || 0;
+  }
+  const retained = bankRetainedVoucherUnits(state);
+  return { deposits, cash, loans, bonds, retained, valid: deposits === cash + loans + bonds - retained };
 }
 
 export function bankAvailable(state) {
@@ -113,22 +159,8 @@ export function depositToBank(state, householdId, voucherUnits, content = null) 
   return { ok: true, householdId, voucherUnits: units };
 }
 
-export function withdrawFromBank(state, householdId, voucherUnits, content = null) {
-  const units = Math.floor(Number(voucherUnits) || 0);
-  if (!Number.isSafeInteger(units) || units <= 0) return { ok: false, reason: "取款金额必须为正整数" };
-  const bank = ensureBankState(state);
-  const deposited = bank.deposits[householdId] || 0;
-  if (deposited < units) return { ok: false, reason: "存款余额不足" };
-  if ((bank.cashVoucherUnits || 0) < units) return { ok: false, reason: "银行现金不足，暂无法兑付" };
-  const household = state.households?.byId?.[householdId];
-  if (!household) return { ok: false, reason: "住户不存在" };
-  bank.deposits[householdId] = deposited - units;
-  bank.cashVoucherUnits -= units;
-  household.voucherUnits = (household.voucherUnits || 0) + units;
-  // 同上：居民汇总粮券缓存必须随之刷新。
-  if (content) syncResidentAggregates(state, content);
-  return { ok: true, householdId, voucherUnits: units };
-}
+// 取款原语定义在 economy/deposits.js（避免 payment.js ↔ bank.js 循环引用），这里重新导出。
+export { withdrawFromBank };
 
 function borrowerCashUnits(state, loan) {
   if (loan.borrowerKind === "company") return state.companies?.[loan.borrowerId]?.cashVoucherUnits || 0;
@@ -189,6 +221,8 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
     if (interest > 0) {
       loan.outstandingVoucherUnits += interest;
       loan.accruedInterestVoucherUnits += interest;
+      // 应计利息是银行收入（资产增加、无人付现金）：计入留存利润，保证台账守恒。
+      bank.retainedVoucherUnits += interest;
     }
     if (dayIndex < loan.issuedDayIndex + loan.termDays) continue;
     // 到期：从借款方现金自动扣款
@@ -213,6 +247,8 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
       if (loan.overdueDays > BANK_LOAN_WRITEOFF_OVERDUE_DAYS) {
         loan.status = "written_off";
         bank.stats.badDebtVoucherUnits += loan.outstandingVoucherUnits;
+        // 核销：资产消失、无现金进账，留存利润等额减少。
+        bank.retainedVoucherUnits -= loan.outstandingVoucherUnits;
         recordEvent(state, `银行贷款${loan.id}（${borrowerName(state, loan)}）逾期${loan.overdueDays}天，${loan.outstandingVoucherUnits}券核销为坏账。`, content);
         loan.outstandingVoucherUnits = 0;
       }
@@ -220,25 +256,57 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
   }
 }
 
+// 存款利息：镇库付现金给银行，银行同时计入存款台账（一笔计息对应一笔等额现金）。
+// 镇库现金不够时按比例少计，台账只记实际到账的部分，绝不透支。
+function settleDepositInterestDay(state, content, bank, dailyDepositRate) {
+  if (!(dailyDepositRate > 0)) return;
+  const rows = [];
+  let due = 0;
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household)) continue;
+    const deposited = bank.deposits[household.id] || 0;
+    if (deposited <= 0) continue;
+    const interest = Math.floor(deposited * dailyDepositRate);
+    if (interest > 0) { rows.push({ householdId: household.id, interest }); due += interest; }
+  }
+  if (due <= 0) return;
+  const paidCap = Math.min(due, Math.max(0, voucherBalance(state, "town")));
+  let credited = 0;
+  const credits = [];
+  for (const row of rows) {
+    const credit = paidCap >= due ? row.interest : Math.floor(row.interest * paidCap / due);
+    if (credit > 0) { credits.push({ householdId: row.householdId, credit }); credited += credit; }
+  }
+  if (credited > 0) {
+    const payment = settleMonetaryPayment(state, "town", "bank", currentPaymentComposition(state, credited), content,
+      "bank_deposit_interest", "银行存款利息（镇库付现）", { requireFull: false });
+    if (!payment.ok || payment.paidValueUnits !== credited) throw new Error("存款利息付款预检后失败");
+    for (const { householdId, credit } of credits) {
+      bank.deposits[householdId] = (bank.deposits[householdId] || 0) + credit;
+      bank.stats.interestPaidVoucherUnits += credit;
+    }
+  }
+  if (credited < due) {
+    recordEvent(state, "镇库现金不足，存款利息未能足额计入。", content, {
+      mergeKey: "bank_interest_shortfall",
+      mergeWindowDays: 7,
+      amount: due - credited,
+      mergedText: count => `镇库现金连续${count}天不足，存款利息未能足额计入。`
+    });
+  }
+}
+
 function settleBankDepositsDay(state, content, bank, policy, daysPerYear) {
   const scale = currencyScale(content);
   const dailyDepositRate = policy.depositRateAnnualPercent / 100 / daysPerYear;
   const wheatPricePerJin = wholesalePrice(state, "wheat", content) || 0;
+  settleDepositInterestDay(state, content, bank, dailyDepositRate);
   // 本循环逐户存取款，会批量改家庭钱包；推迟到循环结束再同步一次居民汇总，
   // 避免每户都做一次全量重算（O(n²)），同时保证粮券守恒口径正确。
   const previousDefer = Boolean(state._deferHouseholdSync);
   state._deferHouseholdSync = true;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
-    // 先计息：存款台账增加（银行确认支出，兑付时从现金支付）
-    const deposited = bank.deposits[household.id] || 0;
-    if (deposited > 0 && dailyDepositRate > 0) {
-      const interest = Math.floor(deposited * dailyDepositRate);
-      if (interest > 0) {
-        bank.deposits[household.id] = deposited + interest;
-        bank.stats.interestPaidVoucherUnits += interest;
-      }
-    }
     const pop = householdPopulation(household);
     if (!(pop > 0) || !(wheatPricePerJin > 0)) continue;
     const reserveUnits = Math.ceil(pop * 2 * BANK_HOUSEHOLD_RESERVE_DAYS * wheatPricePerJin * scale);

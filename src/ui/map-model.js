@@ -43,7 +43,8 @@ export function createMapModel(view, navigation) {
       x: point.x,
       y: point.y,
       status: building.status,
-      working: ["ready", "limited_materials"].includes(building.status?.status) &&
+      working: (["ready", "limited_materials"].includes(building.status?.status)
+        || (["market_capped", "wheat_reserve"].includes(building.status?.status) && (building.status?.batches || 0) > 0)) &&
         (building.jobs || []).some(job => job.workers > 0),
       jobs: (building.jobs || []).map(job => ({
         id: job.id,

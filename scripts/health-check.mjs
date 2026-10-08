@@ -220,15 +220,21 @@ function snapshot(state, { year, day, report, acc, label, prevShopStatus, policy
 
   // 镇库：小麦与收支
   out.treasury = { wheatJin: r1((state.accounts?.town?.wheat || 0) / I), vouchers: r1(town) };
-  // 镇库年收支（小麦计价的实物流）：收入 = 农业税/收成入库 + 租金 + 营业权 + 向居民卖粮盐；
-  // 支出 = 工资 + 营造工资 + 失业金 + 救济。年报里 financialFlows 已展开为 {residents, town}。
+  // 镇库年收支（小麦计价的实物流）：收入 = 农业税/收成入库 + 租金 + 营业权 + 向居民卖粮盐 + 居民用小麦换券入库；
+  // 支出 = 工资 + 营造工资 + 失业金 + 救济 + 磨坊/酒坊投入小麦 + 居民用券兑回小麦。
+  // 年报里 financialFlows 已展开为 {residents, town}；换券/兑回/加工投入来自 economy/financial-flows.js 的账本映射。
   const flowsTown = report ? report.financialFlows?.town : state.financialFlows?.year?.town;
-  const INCOME_KEYS = ["agricultureWheatUnits", "rentWheatUnits", "operatingRightWheatUnits", "breadPurchaseWheatUnits", "saltPurchaseWheatUnits"];
-  const SPEND_KEYS = ["wagesWheatUnits", "constructionWagesWheatUnits", "unemploymentWheatUnits", "reliefWheatUnits"];
+  const INCOME_KEYS = ["agricultureWheatUnits", "rentWheatUnits", "operatingRightWheatUnits", "breadPurchaseWheatUnits", "saltPurchaseWheatUnits", "wheatExchangeInUnits"];
+  const SPEND_KEYS = ["wagesWheatUnits", "constructionWagesWheatUnits", "unemploymentWheatUnits", "reliefWheatUnits", "productionInputWheatUnits", "wheatRedeemedUnits"];
   const sumKeys = keys => keys.reduce((s, k) => s + (flowsTown?.[k] || 0), 0) / I;
   out.treasury.incomeWheatJin = r1(sumKeys(INCOME_KEYS));
   out.treasury.spendWheatJin = r1(sumKeys(SPEND_KEYS));
+  out.treasury.productionInputJin = r1(sumKeys(["productionInputWheatUnits"]));
+  out.treasury.exchangeInJin = r1(sumKeys(["wheatExchangeInUnits"]));
+  out.treasury.redeemedJin = r1(sumKeys(["wheatRedeemedUnits"]));
   out.treasury.flowsTown = flowsTown || null;
+  // 市场面包库存（批发市场账上，斤）：镇营面包房产出入市后没人买时在这里堆积。
+  out.marketBreadJin = r1((state.wholesaleMarket?.inventory?.bread || 0) / I);
 
   // 家底分布：人均（粮券 + 可折算余粮），人口加权分位。
   const pcs = [];
@@ -285,11 +291,15 @@ function snapshot(state, { year, day, report, acc, label, prevShopStatus, policy
     idle: producers.filter(p => p.status === "停工").length,
     list: producers
   };
+  // 产出口径：分行业账（report.industries / state.industries）+ 镇营账（report.business / state.business）。
+  // 面粉、面包没有 accountingSector，产出记在 business（economy/business.js commitProductionAccounting），
+  // 只读 industries 会得到 0。
   const sectorOut = {};
   for (const [sector, val] of Object.entries(report ? report.industries || {} : {})) {
     sectorOut[sector] = val?.producedUnits || {};
   }
   if (!report) for (const [sector, val] of Object.entries(state.industries || {})) sectorOut[sector] = val?.year?.producedUnits || {};
+  sectorOut.business = report ? (report.business?.producedUnits || {}) : (state.business?.year?.producedUnits || {});
   out.output = {};
   for (const [sector, units] of Object.entries(sectorOut)) {
     const total = Object.values(units).reduce((s, x) => s + x, 0);
@@ -400,11 +410,12 @@ function printTables(rows, meta) {
     pad(r.wealth.p10, 9), pad(r.wealth.p50, 7), pad(r.wealth.p90, 7), pad(r.wealth.meanPerCapita, 9), pad(r.affluence, 7)].join(""));
 
   L("\n【二】货币存量（粮券，万）与镇库");
-  L([pad("年", 8), pad("总券", 9), pad("镇库", 9), pad("居民", 9), pad("店铺", 9), pad("公司", 9), pad("社保", 9), pad("银行", 9), pad("镇库麦(斤)", 12), pad("镇库收(斤)", 11), pad("镇库支(斤)", 11)].join(""));
+  L([pad("年", 8), pad("总券", 9), pad("镇库", 9), pad("居民", 9), pad("店铺", 9), pad("公司", 9), pad("社保", 9), pad("银行", 9), pad("镇库麦(斤)", 12), pad("镇库收(斤)", 11), pad("镇库支(斤)", 11), pad("其中加工投入", 13), pad("市场面包(斤)", 14)].join(""));
   const wan = v => (v == null ? null : (v / 10000).toFixed(1));
   for (const r of rows) L([pad(tag(r), 8), pad(wan(r.money.total), 9), pad(wan(r.money.town), 9), pad(wan(r.money.residents), 9),
     pad(wan(r.money.shops), 9), pad(wan(r.money.companies), 9), pad(wan(r.money.social), 9), pad(wan(r.money.bank), 9),
-    pad(r.treasury.wheatJin != null ? Math.round(r.treasury.wheatJin) : null, 12), pad(Math.round(r.treasury.incomeWheatJin), 11), pad(Math.round(r.treasury.spendWheatJin), 11)].join(""));
+    pad(r.treasury.wheatJin != null ? Math.round(r.treasury.wheatJin) : null, 12), pad(Math.round(r.treasury.incomeWheatJin), 11), pad(Math.round(r.treasury.spendWheatJin), 11),
+    pad(Math.round(r.treasury.productionInputJin), 13), pad(Math.round(r.marketBreadJin), 14)].join(""));
 
   L("\n【三】批发售价（券/斤）与综合商店零售价");
   const items = PRICE_ITEMS;
