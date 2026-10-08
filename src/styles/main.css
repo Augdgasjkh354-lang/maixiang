@@ -621,3 +621,6 @@ button.wide { width: 100%; }
 .loom-thread { fill: none; stroke: #d8c59a; stroke-width: 1.5; stroke-linecap: round; }
 .indigo-cloth { fill: #4f6078; stroke: #2f3c52; stroke-width: 1.6; stroke-linejoin: round; }
 .grey-tile-line { fill: none; stroke: #5e6b68; stroke-width: 1.8; stroke-linecap: round; }
+
+/* 贫富面板：基尼系数逐年曲线 */
+.gini-sparkline { display: block; width: 100%; height: 56px; margin: 6px 0; }

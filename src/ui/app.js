@@ -19,7 +19,8 @@ import { renderResidents } from "./panel-residents.js";
 import { renderEconomy } from "./panel-economy.js";
 import { econMiniSummary, renderEconMini } from "./econ-mini.js";
 import { macroPanelSummary, renderMacroPanel } from "./macro-panel.js";
-import { renderPolicy } from "./panel-policy.js";
+import { renderPolicy, WEALTH_TAX_RATE_KEYS, WEALTH_TAX_THRESHOLD_KEYS } from "./panel-policy.js";
+import { CONTENT } from "../content/index.js";
 import { renderSite } from "./panel-site.js";
 import { renderSettings } from "./panel-settings.js";
 import { compact, escapeHtml, number, numberMax, moneyUnit } from "./format.js";
@@ -444,6 +445,12 @@ export function mountGame(root) {
     } else if (kind === "social-pension") {
       result = simulation.setSocialSecurityPolicy(state, { pensionPerElderJin: parsed.value });
       successMessage = `养老金已设为每老人每日${number(parsed.value, 2)}斤。`;
+    } else if (kind === "social-employer-share") {
+      result = simulation.setEmployerSocialSharePercent(state, parsed.value);
+      successMessage = `雇主承担社保比例已设为${number(parsed.value, 0)}%。`;
+    } else if (kind === "inheritance-tax") {
+      result = simulation.setInheritanceTax(state, parsed.value);
+      successMessage = `遗产税率已设为${number(parsed.value, 2)}%。`;
     } else if (kind === "social-inject") {
       // 注资走按钮提交，此处仅做数值校验占位。
       result = { ok: true };
@@ -1524,6 +1531,21 @@ export function mountGame(root) {
       render(true);
       showToast(socialTrade.dataset.socialRepay !== undefined ? `社保基金已还款${number(result.repaidJin, 1)}斤。`
         : socialTrade.dataset.socialBuy ? `社保基金买入${number(result.shares)}股。` : `社保基金卖出${number(result.shares)}股。`);
+      return;
+    }
+    if (closest(target, "[data-wealth-tax-save]") && state) {
+      const thresholds = WEALTH_TAX_THRESHOLD_KEYS.map(key => readStagedNumber(key, { label: "富人税门槛", minimum: 0, maximum: 1000000000 }));
+      const ratesPercent = WEALTH_TAX_RATE_KEYS.map(key => readStagedNumber(key, { label: "富人税税率", minimum: 0, maximum: 20 }));
+      if (thresholds.includes(null) || ratesPercent.includes(null)) return;
+      const result = simulation.setWealthTax(state, { thresholds, ratesPercent });
+      if (!result?.ok) {
+        showToast(result?.reason || "富人税政策未能保存。");
+        return;
+      }
+      for (const key of [...WEALTH_TAX_THRESHOLD_KEYS, ...WEALTH_TAX_RATE_KEYS]) numericDrafts.delete(key);
+      changed(true);
+      render(true);
+      showToast("富人税已保存。");
       return;
     }
     if (target.matches("[data-social-inject]") && state) {

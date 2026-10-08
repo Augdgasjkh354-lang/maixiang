@@ -473,7 +473,7 @@ export function selectDashboard(state, content, selection) {
     laborUnemploymentHighPercent: content.rules.laborUnemploymentHighPercent ?? 8,
     laborUnemploymentLowPercent: content.rules.laborUnemploymentLowPercent ?? 5,
     wealthNow: computeWealthStats(state, content),
-    inequality: needResidents ? selectInequality(state, content) : null,
+    inequality: needResidents || needPolicy ? selectInequality(state, content) : null,
     economy: {
       history: state.economyHistory || [],
       poachYear: state.laborCompetition?.year?.moves || 0,
