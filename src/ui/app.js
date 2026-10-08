@@ -1570,6 +1570,34 @@ export function mountGame(root) {
       }
       return;
     }
+    // mod 按钮：<button data-mod="tea" data-mod-command="setPrice" data-mod-input="草稿键" data-mod-arg="任意字符串">
+    // 有 data-mod-input 时读该数字输入框的值作为参数，否则传 data-mod-arg；命令返回 { ok, reason, message }。
+    const modButton = closest(target, "[data-mod-command]");
+    if (modButton && state) {
+      const { mod: modId, modCommand, modInput, modArg } = modButton.dataset;
+      const command = simulation.mods?.[modId]?.[modCommand];
+      if (!command) { showToast(`找不到 mod 命令 ${modId}.${modCommand}`, 4000); return; }
+      let argument = modArg;
+      let input = null;
+      if (modInput) {
+        input = numericInputFor(modInput);
+        const rawValue = numericDrafts.has(modInput) ? numericDrafts.get(modInput).value : input?.value;
+        const parsed = parseNumericDraft(rawValue, { label: modButton.dataset.modLabel || "数值", minimum: 0, maximum: 1e12 });
+        if (!parsed.ok) { setDraftError(modInput, parsed.reason, input); return; }
+        argument = parsed.value;
+      }
+      const result = command(state, argument, modArg);
+      if (!result?.ok) {
+        if (modInput) setDraftError(modInput, result?.reason || "操作失败", input);
+        else showToast(result?.reason || "操作失败", 4000);
+        return;
+      }
+      if (modInput) numericDrafts.delete(modInput);
+      changed(true);
+      render(true);
+      if (result.message) showToast(result.message, 3200);
+      return;
+    }
     const outsideTradeButton = closest(target, "[data-outside-sell],[data-outside-buy]");
     if (outsideTradeButton && state) {
       const townId = outsideTradeButton.dataset.town || selectedOutsideTownId;

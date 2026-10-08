@@ -8,7 +8,7 @@ import { createInitialState, ensureProjectAccessor } from "../core/state.js";
 import { syncShopEmployment } from "../systems/shops.js";
 import { syncResidentAggregates } from "../systems/households.js";
 import {
-  applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers
+  ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers
 } from "./save-compat.js";
 
 export const MIN_SAVE_VERSION = 17;
@@ -35,9 +35,11 @@ export function migrateSave(raw, content) {
   if (stored < MIN_SAVE_VERSION) throw new Error("旧版存档不兼容，请开始新游戏。");
 
   const report = emptyLoadReport();
-  const saved = applyRenames(cloneJson(raw), report);
+  // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
+  const saved = applyRenames(cloneJson(raw), report, definitions.modSave?.renames || []);
   const base = createInitialState({ content: definitions });
-  const state = mergeOntoBase(cloneJson(base), saved, "", report);
+  const entityMaps = new Set([...ENTITY_MAPS, ...(definitions.modSave?.entityMaps || [])]);
+  const state = mergeOntoBase(cloneJson(base), saved, "", report, entityMaps);
   state.version = current;
   state.schemaVersion = current;
   sanitizeNumbers(state, report);

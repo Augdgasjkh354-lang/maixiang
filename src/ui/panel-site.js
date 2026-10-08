@@ -1,4 +1,6 @@
 import { escapeHtml, number, numberMax, moneyUnit, effectiveTownWage } from "./format.js";
+import { MODS } from "../mods/registry.js";
+import { wholesaleItemIds } from "../content/assemble.js";
 import { CONTENT } from "../content/index.js";
 import { isIndustryType } from "../content/buildings.js";
 import { renderNumericInput } from "./numeric-drafts.js";
@@ -178,7 +180,7 @@ export function renderSite(view) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const market = view.wholesaleMarket || { inventory: {}, pricesVoucherPerUnit: {}, purchasePricesVoucherPerUnit: {}, dailyTownAllocation: {}, cashflow: null };
     const trends = view.wholesaleTrends || {};
-    const tradeableIds = ["flour", "bread", "wood", "salt"];
+    const tradeableIds = wholesaleItemIds(CONTENT);
     const marketRowsAll = tradeableIds.map(itemId => {
       const name = view.itemNames?.[itemId] || itemId;
       const itemUnit = view.itemUnits?.[itemId] || "斤";
@@ -295,7 +297,9 @@ export function renderSite(view) {
     body = `<div class="subtle">尚未建设。</div>`;
     actions = `<button class="secondary" data-go="build">去建设</button>`;
   }
-  return `<button class="site-back" data-back>‹ 返回镇图</button><h2>${escapeHtml(title)}</h2><div class="cardlet">${body}${actions ? `<div class="site-actions">${actions}</div>` : ""}</div>`;
+  // mod 给这种建筑追加的卡片（mod.js 的 ui.buildingSections）。
+  const modSections = building ? MODS.map(mod => mod.ui?.buildingSections?.[building.typeId]?.(view, building, view.mods?.[mod.id]) || "").join("") : "";
+  return `<button class="site-back" data-back>‹ 返回镇图</button><h2>${escapeHtml(title)}</h2><div class="cardlet">${body}${modSections}${actions ? `<div class="site-actions">${actions}</div>` : ""}</div>`;
 }
 
 function developmentMarkup(view, building, development) {

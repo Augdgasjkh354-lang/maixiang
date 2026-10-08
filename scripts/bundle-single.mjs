@@ -5,7 +5,7 @@
 // 原理：ESM 每个文件是独立作用域，直接拼接会因重名顶层声明而报错。
 // 这里把每个模块包进一个 IIFE：import 语句改写为从依赖模块的
 // 导出对象上解构，export 改写为 return 对象。源码中无循环依赖、
-// 无 export let/var、无 export * / export default（若将来出现，
+// 无 export let/var、无 export *；export default 只支持表达式（若将来出现，
 // 脚本会直接报错而不是默默产出错误包）。
 //
 // 用法：
@@ -149,7 +149,12 @@ function parseModule(key, masked) {
       bindings.push({ imported: "*", local: ns[1], kind: "namespace", impIndex });
       return;
     }
-    if (!list.startsWith("{")) fail(`模块 ${key} 出现默认导入（不支持）：${list.slice(0, 80)}`);
+    // 默认导入：import x from "..."（mod 用）
+    if (/^[A-Za-z_$][\w$]*$/.test(list)) {
+      bindings.push({ imported: "default", local: list, kind: "named", impIndex });
+      return;
+    }
+    if (!list.startsWith("{")) fail(`模块 ${key} 出现无法解析的默认导入：${list.slice(0, 80)}`);
     const inner = list.replace(/^\{/, "").replace(/\}$/, "");
     for (const part of inner.split(",")) {
       const p = part.trim();
@@ -204,10 +209,15 @@ function parseModule(key, masked) {
   }
   // 防御：export * / export default / export {} from 一律拒绝
   if (/^\s*export\s*\*/m.test(masked)) fail(`模块 ${key} 使用了 export *（不支持）`);
-  if (/^\s*export\s+default\b/m.test(masked)) fail(`模块 ${key} 使用了 export default（不支持）`);
+  // export default <表达式>; -> 原位改写为等长的 "const __dflt ="，导出名 default
+  const defaultMatches = [...masked.matchAll(/^\s*export default\b/gm)];
+  if (defaultMatches.length > 1) fail(`模块 ${key} 有多个 export default`);
+  if (/^\s*export\s+default\s+(async\s+)?(function|class)\b/m.test(masked)) fail(`模块 ${key} 的 export default 只支持表达式`);
+  const defaultAt = defaultMatches.length ? defaultMatches[0].index + defaultMatches[0][0].lastIndexOf("export") : -1;
+  if (defaultAt < 0 && /^\s*export\s+default\b/m.test(masked)) fail(`模块 ${key} 的 export default 格式不支持（写成 "export default 表达式"）`);
   if (/^\s*export\s*\{[^}]*\}\s*from\b/m.test(masked)) fail(`模块 ${key} 使用了 export..from 转发（不支持）`);
   if (/^\s*export\s+(let|var)\b/m.test(masked)) fail(`模块 ${key} 使用了 export let/var（活绑定不支持）`);
-  return { imports, bindings, keywordRanges, keywordExports, exportList, listRanges };
+  return { imports, bindings, keywordRanges, keywordExports, exportList, listRanges, defaultAt };
 }
 
 function resolveImport(fromKey, importPath) {
@@ -311,7 +321,10 @@ for (const key of topo) {
     ...parsed.keywordRanges,
     ...parsed.listRanges,
   ];
-  const body = blankRanges(mod.source, ranges).trim();
+  const source = parsed.defaultAt >= 0
+    ? mod.source.slice(0, parsed.defaultAt) + "const __dflt =" + mod.source.slice(parsed.defaultAt + "export default".length)
+    : mod.source;
+  const body = blankRanges(source, ranges).trim();
   const depVar = (target) => modules.get(target).varName;
   const importLines = [];
   for (const imp of parsed.imports) {
@@ -328,6 +341,7 @@ for (const key of topo) {
   const returnPairs = [
     ...parsed.keywordExports.map((e) => e.local),
     ...parsed.exportList.map((e) => (e.exported === e.local ? e.local : `${e.exported}: ${e.local}`)),
+    ...(parsed.defaultAt >= 0 ? ["default: __dflt"] : []),
   ];
   // 防御：同一模块内导出名重复
   const seenExp = new Set();

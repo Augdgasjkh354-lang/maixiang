@@ -34,6 +34,7 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 | `src/persistence/` | 存档：IndexedDB 多存档位（`indexed-save-manager.js`）、带校验和的存档容器（`save-container.js`）、读档校验（`migrations.js` 的 `migrateSave`，只认当前版本） |
 | `src/ui/` | 界面：`shell.js` 骨架、`app.js` 渲染与事件、`panel-*.js` 各面板、`map*.js` 地图 |
 | `src/styles/main.css` | 全部样式 |
+| `src/mods/` | mod：每个 mod 一个文件夹，登记在 `registry.js` / `content-registry.js`；公共工具 `api.js`；模板 `_template/`。**新功能优先写成 mod，见 `MODDING.md`** |
 | `src/engine.js` | 对外门面：`createSimulation()` 返回状态工厂 + 全部命令 + 校验，测试和脚本都用它 |
 | `tests/` `scenarios/` `docs/` | 测试、模拟场景、设计文档（`docs/ARCHITECTURE.md` 是总体架构） |
 
@@ -59,6 +60,10 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 
 开局只有麦田。伐木场盖在南林伐木点、**不需要木材**，是起步路线；其他建筑都要木材。**建筑建成后不会自动派工**，要在就业面板设人数，否则没有产出、也没有工资支付。
 
+## 加新内容：先考虑 mod
+
+新商品、新建筑、新玩法优先写成 mod（`MODDING.md`）：只动 `src/mods/<id>/` 和自己的测试，两个登记表各加一行。缺扩展点时在核心加通用钩子（`src/mods/api.js`），不要写某个 mod 的特例。物品的流通方式用标记表达（`wholesale` 批发做市 / `retail` 上商店货架 / `storeOnly` 只经商店卖居民 / `optionalRetail`），不要再手写商品清单。
+
 ## 铁律
 
 1. **存档一直能读**：读档时用新开局状态当底板，把存档盖上去（`persistence/save-compat.js`）——新增字段、新系统、新商品不用写任何迁移代码，也不用改 `SAVE_VERSION`（固定 17）。字段**改名或搬家**时必须在 `RENAMES` 里加一行 `{ from, to }`；含义变了（单位、口径）要在那里写换算。按实体 id 存的表（如 `households.byId`）要登记进 `ENTITY_MAPS`，否则旧档会被底板"补出"不存在的实体。能重算的派生数据尽量不进存档。坏数据读档时自动修复，修不了的子系统重置并提示玩家
@@ -83,8 +88,8 @@ node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输�
 - 清算要有破产核销：30 天还不清就核销坏账关闭，避免永久僵死。
 
 **流通口径**
-- 小麦归镇库直管：磨坊直接用镇库小麦，公司/民营经批发市场按售价从镇库存量买小麦。做市清单是 `WHOLESALE_MONOPOLY_ITEM_IDS`（面粉/面包/木材/盐）。
-- 面粉/面包/盐只能经综合商店卖给居民（`generalStoreOnly`）；测试 fixture 要先建商店。
+- 小麦归镇库直管：磨坊直接用镇库小麦，公司/民营经批发市场按售价从镇库存量买小麦。做市清单 `WHOLESALE_MONOPOLY_ITEM_IDS` 由物品的 `wholesale` 标记推导。
+- 带 `storeOnly` 标记的商品（面粉/面包/盐/酒/布）只能经综合商店卖给居民；测试 fixture 要先建商店。
 - 小麦阶段居民直接从镇库买主粮、不经过市场和商店；测批发/商店要先推进到粮券阶段。
 - 主食购买按户缺口分配，不按人口均分；需求弹性只在综合商店是卖家时生效。
 - 店员和商人都算接待能力；店主兼商人拿利润，不领固定工资。

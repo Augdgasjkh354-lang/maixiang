@@ -1,4 +1,6 @@
 import { BUILDING_PRESENTATION } from "../content/world.js";
+import { MODS } from "../mods/registry.js";
+import { selectModViews } from "../mods/api.js";
 import { industryTypeIds, isIndustryType } from "../content/buildings.js";
 import { experienceBonus, industryWorkerDays, levelBonus, productivityFactor } from "../economy/productivity.js";
 import { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } from "./labor.js";
@@ -517,6 +519,8 @@ export function selectDashboard(state, content, selection) {
       trade: state.market?.lastDay || null,
       business: state.business
     } : null,
+    // 各 mod 的只读视图（mod.js 的 select）。
+    mods: selectModViews(state, content, MODS),
     // 外镇：outsideTowns 是全部外镇的视图（界面切换用）；outsideTown / tradeAgreements 是当前选中的那一个。
     outsideTowns: needBusiness ? outsideTownViews : null,
     outsideTownId: outsideTownId,

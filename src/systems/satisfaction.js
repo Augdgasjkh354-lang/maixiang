@@ -1,3 +1,5 @@
+import { MODS } from "../mods/registry.js";
+import { modComfortPoints } from "../mods/api.js";
 import { householdList, householdPopulation, isActiveHousehold } from "./households.js";
 import { ensureHouseholdLife, householdFoodDays } from "./household-life.js";
 import { goodsComfortPoints } from "./goods-demand.js";
@@ -34,7 +36,7 @@ export function updateSatisfaction(state, population, comfortQeqUnits, content, 
     const disposableCoverage = clamp01((disposablePerCapitaDay + (cfg.disposableTargetVoucherPerCapitaDay || 1.5)) / (2 * (cfg.disposableTargetVoucherPerCapitaDay || 1.5)));
     const breadComfort = (cfg.breadComfortMaximum || 5) * clamp01((life.day.breadConsumedQeqUnits || 0) / Math.max(1, dailyFoodNeed * 0.25));
     const serviceComfort = Math.max(0, Math.min(content.rules.serviceComfortDailyMaximum || 3, life.day.serviceComfortPoints || 0));
-    const goodsComfort = goodsComfortPoints(state, household, people, life.day, content);
+    const goodsComfort = goodsComfortPoints(state, household, people, life.day, content) + modComfortPoints(state, household, people, life.day, content, MODS);
     const target = Math.max(0, Math.min(100,
       (cfg.foodWeight || 35) * foodCoverage + (cfg.saltWeight || 12) * saltCoverage +
       (cfg.housingWeight || 15) * housingCoverage + (cfg.wageWeight || 15) * wageCoverage +

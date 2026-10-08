@@ -1,4 +1,5 @@
 import { escapeHtml, number, numberMax, shortageJin } from "./format.js";
+import { MODS } from "../mods/registry.js";
 import { renderTrade } from "./panel-trade.js";
 import { renderOutsideTown } from "./panel-outside-town.js";
 import { renderBusiness } from "./panel-business.js";
@@ -32,6 +33,7 @@ export function renderEconomy(view) {
     ${detail("industry-accounts", "林业、盐业与住房", renderIndustryAccounts(view))}
     ${detail("workshop-accounts", "镇营作坊账", renderBusiness(view))}
     ${detail("industry-productivity", "产业熟练度", renderIndustryProductivity(view))}
+    ${MODS.filter(mod => mod.ui?.economySection).map(mod => detail(`mod-${mod.id}`, escapeHtml(mod.ui.economySection.title), mod.ui.economySection.render(view, view.mods?.[mod.id]))).join("")}
     ${detail("ledger", "账目与历史交易", renderLedger(view))}
     ${detail("annual-flows", "本年收支明细", renderAnnualFlows(view))}`;
 }

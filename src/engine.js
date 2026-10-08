@@ -1,4 +1,6 @@
 import { CONTENT } from "./content/index.js";
+import { MODS } from "./mods/registry.js";
+import { bindModCommands } from "./mods/api.js";
 import { validateContent } from "./content/validate.js";
 import { createInitialState } from "./core/state.js";
 import { settleOneDay } from "./systems/daily.js";
@@ -37,6 +39,8 @@ export function createSimulation(content) {
   if (!check.valid) throw new Error("模拟内容定义无效：" + check.errors.join("；"));
   return {
     content: definitions,
+    // mod 命令：simulation.mods[modId][command](state, ...args)
+    mods: bindModCommands(MODS, definitions),
     createInitialState: function (options) {
       return createInitialState({ ...(options || {}), content: definitions });
     },

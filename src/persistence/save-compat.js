@@ -15,7 +15,7 @@ export const RENAMES = Object.freeze([
   // 示例：{ from: "outsideTown", to: "outsideTowns.minzhen" },
 ]);
 
-const ENTITY_MAPS = new Set(["households.byId"]);
+export const ENTITY_MAPS = new Set(["households.byId"]);
 // 存档里出现这些键一律丢弃，防止原型污染。
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const FROM_CONTENT = new Set(["plots"]);
@@ -46,8 +46,8 @@ function deletePath(object, path) {
   if (isPlainObject(parent)) delete parent[keys[keys.length - 1]];
 }
 
-export function applyRenames(raw, report) {
-  for (const { from, to } of RENAMES) {
+export function applyRenames(raw, report, extraRenames = []) {
+  for (const { from, to } of [...RENAMES, ...extraRenames]) {
     const value = getPath(raw, from);
     if (value === undefined || getPath(raw, to) !== undefined) continue;
     setPath(raw, to, value);
@@ -64,7 +64,7 @@ function kindOf(value) {
 }
 
 // 类型对不上（比如该是对象却存成了字符串、该是数字却是 null）时用新版本的默认值，并记一笔修复。
-export function mergeOntoBase(base, saved, path = "", report = null) {
+export function mergeOntoBase(base, saved, path = "", report = null, entityMaps = ENTITY_MAPS) {
   if (FROM_CONTENT.has(path)) return base;
   if (saved === undefined) return base;
   const baseKind = kindOf(base);
@@ -72,12 +72,12 @@ export function mergeOntoBase(base, saved, path = "", report = null) {
     report?.repaired.push(path);
     return base;
   }
-  if (!isPlainObject(base) || ENTITY_MAPS.has(path)) return saved;
+  if (!isPlainObject(base) || entityMaps.has(path)) return saved;
   const result = { ...base };
   for (const [key, value] of Object.entries(saved)) {
     if (UNSAFE_KEYS.has(key)) continue;
     const childPath = path ? `${path}.${key}` : key;
-    result[key] = key in base ? mergeOntoBase(base[key], value, childPath, report) : value;
+    result[key] = key in base ? mergeOntoBase(base[key], value, childPath, report, entityMaps) : value;
   }
   return result;
 }

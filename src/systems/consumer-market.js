@@ -40,7 +40,7 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
   const capped = options.capped && Array.isArray(options.capped) ? options.capped : null;
   // 断货店（库存为 0）：居民想买时记为断货需求，供次日进货口径使用。
   const stockouts = options.stockouts && Array.isArray(options.stockouts) ? options.stockouts : null;
-  const generalStoreOnly = new Set(["flour", "bread", "salt", "wine", "cloth"]).has(itemId);
+  const generalStoreOnly = Boolean(content.items[itemId]?.storeOnly);
   const townStock = state.accounts.town[itemId] || 0;
   // 镇库木材属于建设储备，居民修缮需求不向镇库购买，避免挤占施工用材。
   const townSellable = !generalStoreOnly && options.excludeTownSellers !== true;

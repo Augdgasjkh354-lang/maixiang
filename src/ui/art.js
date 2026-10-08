@@ -1,3 +1,5 @@
+import { MODS } from "../mods/registry.js";
+import { modArt } from "../mods/api.js";
 export function uiIcon(name, className = "ui-icon") {
   const paths = {
     people: '<circle cx="9" cy="8" r="3"/><path d="M3 20c.5-3.4 2.4-5 6-5s5.5 1.6 6 5M16 5.4a3 3 0 0 1 0 5.8M17 15c2.3.4 3.6 2 4 5"/>',
@@ -19,6 +21,9 @@ export function uiIcon(name, className = "ui-icon") {
 
 export function buildingSymbol(type, state = "idle", ghost = false) {
   const classes = `building-art ${type} ${state}${ghost ? " ghost" : ""}`;
+  // mod 建筑：用 mod 提供的地图美术缩小成卡片图标。
+  const fromMod = modArt(MODS, type);
+  if (fromMod) return `<g class="${classes}"><g transform="translate(50 64) scale(.5)">${fromMod({ level: 1 })}</g></g>`;
   if (type === "mill") {
     return `<g class="${classes}">
       <ellipse class="building-shadow" cx="50" cy="101" rx="38" ry="7"/>

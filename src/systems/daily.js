@@ -1,4 +1,6 @@
 import { totalQeqUnits } from "../economy/inventory.js";
+import { MODS } from "../mods/registry.js";
+import { assembleDailySteps } from "../mods/api.js";
 import { emptyYearTotals, recordEvent } from "../economy/ledger.js";
 import { populationStats } from "../selectors/labor.js";
 import { employmentSnapshot, refillAgricultureToTarget } from "./employment.js";
@@ -103,7 +105,7 @@ function resetYearBooks(state, content) {
 const newYearDay = (state, content, day) => day.isNewYearDay;
 const yearEndsToday = (state, content) => state.day + 1 >= content.rules.daysPerYear;
 
-export const DAILY_STEPS = [
+export const CORE_DAILY_STEPS = [
   // ── 开日：清当日账，做快照
   { id: "openDay", run: (state, content, day) => {
     day.saltDemandUnits = accrueSaltNeed(state, day.peopleAtStart.total, content);
@@ -237,10 +239,18 @@ export const DAILY_STEPS = [
   { id: "history", run: (state, content) => { recordEconomyHistory(state, content); snapshotWholesaleHistory(state, content); } }
 ];
 
+// 核心步骤 + 已启用 mod 插入的步骤（mod 步骤 id 为 "<modId>:<stepId>"）。
+export const DAILY_STEPS = assembleDailySteps(CORE_DAILY_STEPS, MODS);
+
 export function settleOneDay(state, content) {
+  return runDay(state, content, DAILY_STEPS);
+}
+
+// 按给定步骤表跑一天（测试可传入带自定义 mod 步骤的表）。
+export function runDay(state, content, steps) {
   const beforeTotal = totalQeqUnits(state, content);
   const day = { isNewYearDay: state.day === 0, peopleAtStart: populationStats(state), demography: null };
-  for (const step of DAILY_STEPS) {
+  for (const step of steps) {
     day[step.id] = !step.when || step.when(state, content, day) ? (step.run(state, content, day) ?? null) : null;
   }
   return {

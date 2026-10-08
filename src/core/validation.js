@@ -1,4 +1,6 @@
 import { populationStats, selectJobRows } from "../selectors/labor.js";
+import { MODS } from "../mods/registry.js";
+import { validateMods } from "../mods/api.js";
 import { industryTypeIds, isIndustryType } from "../content/buildings.js";
 import { PERIODS } from "../economy/books.js";
 import { householdList, householdPopulation, householdWorkingAge, householdEmploymentCount, totalHouseholdAgeBands, jobCount, isActiveHousehold } from "../systems/households.js";
@@ -400,5 +402,6 @@ export function validateState(state, content) {
         !(project.kind === "upgrade" && project.buildingId === building.id))) errors.push("在建工程与已有建筑叠地");
   }
   if (!Array.isArray(state.demolishedBuildings)) errors.push("拆除历史记录无效");
+  errors.push(...validateMods(state, content, MODS));
   return { valid: errors.length === 0, errors };
 }

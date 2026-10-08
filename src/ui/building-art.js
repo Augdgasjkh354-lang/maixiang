@@ -1,3 +1,5 @@
+import { MODS } from "../mods/registry.js";
+import { modArt } from "../mods/api.js";
 /**
  * 麦乡 · 江南建筑绘制库 v1.0 / 无外部依赖 / SVG
  * 单位：建筑锚点为地块中心，常规占地约 140×120。
@@ -78,7 +80,7 @@ let body='';
 if(status==='construction'){
 const progress=clamp(options.progress||0,0,1);
 body=`<path d="M-57 4L-12-21 62 11 15 40Z" fill="#d8d6b8" stroke-dasharray="4 3"/><g stroke="#a08d67" stroke-width="3" fill="none"><path d="M-43 5v-42M14 26v-44M47 7v-39M-43-26L14-5 47-24M-43 5L14 26 47 7M-43-26L14 26M14-5L47 7"/></g><path d="M-45 45h90" stroke="#d4cfb5" stroke-width="5"/><path d="M-45 45h${90*progress}" stroke="#8e9d74" stroke-width="5"/>`;
-}else body=renderComplete(Object.hasOwn(BUILDING_ART_CATALOG,type)?type:'housing',level);
+}else body=modArt(MODS,type)?.({...options,level})??renderComplete(Object.hasOwn(BUILDING_ART_CATALOG,type)?type:'housing',level);
 return `<g class="ink-building" transform="scale(${scale})" stroke="#7b7c66" stroke-width="1.1" stroke-linejoin="round"><ellipse cx="4" cy="36" rx="66" ry="17" fill="#7c8567" opacity=".10" stroke="none"/>${body}${status==='complete'&&level>1?`<g fill="#8b9c71" stroke="none">${Array.from({length:level},(_,i)=>`<circle cx="${-12+i*6}" cy="57" r="1.8"/>`).join('')}</g>`:''}</g>`;
 }
 export function buildingSVG(type,options={}) { return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-85 -100 170 180">${renderBuildingArt(type,options)}</svg>`; }

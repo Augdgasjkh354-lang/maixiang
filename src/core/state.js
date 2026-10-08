@@ -151,8 +151,10 @@ function emptyIndustryPeriod() {
   };
 }
 
-export function emptyIndustryState() {
-  return Object.fromEntries(["forestry", "salt", "brewing", "textile"].map(function (sector) {
+// 产业账本：每个建筑定义里出现的 accountingSector 各一本（"bread" 记在镇营作坊账 business 里，不在这里）。
+export function emptyIndustryState(content = CONTENT) {
+  const sectors = new Set(Object.values(content.buildings).map(def => def.accountingSector).filter(sector => sector && sector !== "bread"));
+  return Object.fromEntries([...sectors].map(function (sector) {
     return [sector, {
       day: emptyIndustryPeriod(),
       year: emptyIndustryPeriod(),
@@ -290,7 +292,7 @@ export function createInitialState(options) {
       year: { paidWheatUnits: 0, currentPaidWheatUnits: 0, arrearsPaidWheatUnits: 0, unpaidWheatUnits: 0, unemploymentPaidWheatUnits: 0 }
     },
     business: emptyBusinessState(content),
-    industries: emptyIndustryState(),
+    industries: emptyIndustryState(content),
     fiscal: emptyFiscalState(),
     housing: { villageCapacity: content.rules.housingCapacity },
     villas: { sold: [], taxArrearsValueUnits: {}, stats: { soldTotal: 0, revenueValueUnits: 0, taxCollectedValueUnits: 0, taxArrearsValueUnits: 0 } },
@@ -301,6 +303,8 @@ export function createInitialState(options) {
     laborCompetition: { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] },
     goodsDemand: { carry: {}, todayDemandUnits: {}, day: {}, year: {} },
     industryExperience: {},
+    // 各 mod 自己的状态（初值来自 mod 的 content.js initialState）。
+    mods: structuredClone(content.modStates || {}),
     salt: {
       demandCarry: 0,
       graceDaysElapsed: 0,
