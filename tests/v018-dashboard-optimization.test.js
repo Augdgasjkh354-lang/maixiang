@@ -8,6 +8,7 @@ import { renderEconomy } from "../src/ui/panel-economy.js";
 import { renderPolicy } from "../src/ui/panel-policy.js";
 import { renderBuild } from "../src/ui/panel-build.js";
 import { renderSite } from "../src/ui/panel-site.js";
+import { selectInequality } from "../src/selectors/inequality.js";
 import { renderMap, mapSignature } from "../src/ui/map.js";
 import { createDashboardViewCache } from "../src/ui/dashboard-view-cache.js";
 import { createDashboardRuntime } from "../src/selectors/dashboard-runtime.js";
@@ -63,9 +64,11 @@ function activeTown(seed = 1801) {
   return state;
 }
 
-function uiView(view) {
+// 与 app.js 的 buildView 保持一致：政策页的本年再分配收入由界面补上（selectDashboard 只在人口页与全局视图里算 inequality）。
+function uiView(view, state = null) {
   return {
     ...view,
+    ...(view.policy && !view.inequality && state ? { inequality: selectInequality(state, CONTENT) } : {}),
     numericDrafts: {},
     upgradePreviewId: null,
     demolitionPreviewId: null,
@@ -96,8 +99,8 @@ test("0.1.8 当前面板视图与全量视图对实际面板渲染字段保持�
   ];
   for (const [panel, render, extra] of cases) {
     const selection = { panel, paused: true, speed: 1, ...extra };
-    const partial = uiView(simulation.selectDashboard(state, selection));
-    const full = uiView(simulation.selectDashboard(state, { ...selection, panel: "all" }));
+    const partial = uiView(simulation.selectDashboard(state, selection), state);
+    const full = uiView(simulation.selectDashboard(state, { ...selection, panel: "all" }), state);
     assert.equal(render(partial), render(full), `${panel} panel markup drifted`);
 
     const nav = {

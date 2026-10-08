@@ -7,6 +7,11 @@ import { villaCapacityOf } from "../systems/villas.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 import { renderShopPricing } from "./panel-shop-pricing.js";
 
+// 商业街能开的店：综合商店与服务类（无宿主建筑，或宿主为商业街），排除旧别名。新增服务店自动出现在按钮里。
+const COMMERCIAL_STREET_SHOP_TYPES = Object.values(CONTENT.rules.shopTypes || {})
+  .filter(def => !def.aliasOf && (def.kind === "retail" || def.kind === "service")
+    && (!def.hostBuildingTypeId || def.hostBuildingTypeId === "commercial_street"));
+
 // 地块标签人性化（0.1.11 _2() 补回）："空地 3" → "3号地"
 function humanizePlotLabel(view, building) {
   const label = view.plots?.find(p => p.id === building.plotId)?.label;
@@ -54,6 +59,26 @@ function stagedBankInput(view, key, label, value) {  const shown = view.numericD
     data-draft-integer="false" data-draft-positive="true">`;
 }
 
+const EMPLOYER_KIND_NAMES = { town: "镇营", private: "民营", company: "公司", shop: "店铺" };
+
+// 最近一日社保缴费的雇主 / 家庭拆分，以及雇主欠缴（按类别与前 5 名欠款方）。只读。
+function socialSecurityContributionMarkup(ss) {
+  const last = ss.lastContribution || {};
+  const byKind = ss.employerArrearsByKindJin || {};
+  const kinds = Object.keys(EMPLOYER_KIND_NAMES).map(kind => `${EMPLOYER_KIND_NAMES[kind]} ${number(byKind[kind] || 0, 1)}`).join(" / ");
+  const debtors = (ss.topEmployerDebtors || []).map(row =>
+    `<div class="row"><span class="label">${escapeHtml(row.name || row.owner)} · ${escapeHtml(EMPLOYER_KIND_NAMES[row.kind] || row.kind)}</span><strong class="value">${number(row.arrearsJin, 1)}斤</strong></div>`
+  ).join("");
+  return `<div class="cardlet">
+      <div class="setting-title">社保缴费拆分（今日）</div>
+      <div class="row"><span class="label">雇主应缴 / 已缴</span><strong class="value">${number(last.employerDueJin, 1)} / ${number(last.employerCollectedJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">家庭应缴 / 已缴</span><strong class="value">${number(last.householdDueJin, 1)} / ${number(last.householdCollectedJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">雇主欠缴合计</span><strong class="value">${number(ss.employerArrearsJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">欠缴按类别</span><strong class="value">${kinds}</strong></div>
+      ${debtors ? `<div class="subtle">欠缴最多的前 5 名</div>${debtors}` : `<div class="subtle">暂无雇主欠缴。</div>`}
+    </div>`;
+}
+
 function socialSecurityMarkup(view) {
   const ss = view.socialSecurity;
   if (!ss) return "";
@@ -68,8 +93,10 @@ function socialSecurityMarkup(view) {
       <label class="toggle"><input id="socialSecurityEnabled" type="checkbox" ${ss.enabled ? "checked" : ""}><span>开启社保基金</span></label>
       <div class="row"><span class="label">每劳动力每日缴纳</span><div class="setting-input">${input("social-daily", "social-daily", ss.dailyPerWorkerJin, "社保每日缴费")}<b>斤</b></div></div>
       <div class="row"><span class="label">每老人每日养老金</span><div class="setting-input">${input("social-pension", "social-pension", ss.pensionPerElderJin, "养老金标准")}<b>斤</b></div></div>
-      <div class="subtle">开启后失业金也由基金发放；基金不够时镇库垫付，计入负债。</div>
+      <div class="row"><span class="label">雇主承担比例（替员工交社保）</span><div class="setting-input">${input("social-employer-share", "social-employer-share", ss.employerSharePercent ?? 100, "雇主承担比例", { maximum: 100 })}<b>%</b></div></div>
+      <div class="subtle">开启后失业金也由基金发放；基金不够时镇库垫付，计入负债。雇主付不起的社保记为欠缴，之后有钱优先补缴。</div>
     </div>
+    ${socialSecurityContributionMarkup(ss)}
     <div class="cardlet">
       <div class="row"><span class="label">基金现金</span><strong class="value">${number(ss.cashJin, 1)}斤</strong></div>
       <div class="row"><span class="label">股票市值</span><strong class="value">${number(ss.stockValueJin, 1)}斤</strong></div>
@@ -326,7 +353,7 @@ export function renderSite(view) {
         ? `<button class="secondary" data-shop-fund="${escapeHtml(shop.id)}">业主补资清偿</button>`
         : `<button class="secondary" data-shop-close="${escapeHtml(shop.id)}">停业</button>`;
       const activity = shop.kind === "service"
-        ? `<div class="row"><span class="label">在岗 / 服务能力</span><strong class="value">${number(staff)}人 / ${number(shop.serviceCapacity)}次/日</strong></div><div class="row"><span class="label">近期需求 / 成交 / 满足率</span><strong class="value">${number(shop.recentDemandUses, 2)} / ${number(shop.recentServedUses, 2)} / ${shop.serviceFulfillmentRate === null ? "—" : number(shop.serviceFulfillmentRate * 100, 1) + "%"}</strong></div>`
+        ? `${shop.serviceId === "theater" ? `<div class="subtle">仅宽裕人家（宽裕度≥${escapeHtml(CONTENT.rules.serviceTypes?.theater?.minAffluence ?? 1.5)}）光顾</div>` : ""}<div class="row"><span class="label">在岗 / 服务能力</span><strong class="value">${number(staff)}人 / ${number(shop.serviceCapacity)}次/日</strong></div><div class="row"><span class="label">近期需求 / 成交 / 满足率</span><strong class="value">${number(shop.recentDemandUses, 2)} / ${number(shop.recentServedUses, 2)} / ${shop.serviceFulfillmentRate === null ? "—" : number(shop.serviceFulfillmentRate * 100, 1) + "%"}</strong></div>`
         : `<div class="row"><span class="label">在岗 / 接待能力</span><strong class="value">${number(staff)}人 / ${number(shop.customerCapacity || 0)}客流/日</strong></div><div class="row"><span class="label">近期顾客 / 日均销量</span><strong class="value">${number(shop.recentCustomers, 2)} / ${number(shop.averageDailySales, 2)}斤</strong></div>`;
       const stock = shop.kind === "retail" ? `<div class="shop-stock-grid">${(shop.inventoryRows || []).map(row => `<div class="row"><span class="label">${escapeHtml(row.itemName)}</span><strong class="value">库存${number(row.stock, 2)}${escapeHtml(view.itemUnits[row.itemId] || "单位")} · 售${number(row.retailVoucher, 2)}${escapeHtml(unit)}</strong></div>`).join("")}</div>` : "";
       const servicePriceControl = shop.serviceId === "school" ? `<div class="row"><span class="label">每日学费</span><div class="setting-input">${renderNumericInput(view, { key: "service-price:school", kind: "service-price", target: "school", value: view.servicePricesVoucherPerUse?.school ?? 1, label: "学堂每日学费", minimum: 0, maximum: 1000000, className: "setting-editor" })}<b>${escapeHtml(unit)}/儿童日</b></div></div>` : "";
@@ -335,7 +362,7 @@ export function renderSite(view) {
       const pricingDetail = shop.pricing?.dynamic ? `<details class="detail-block" data-detail-key="shop-pricing:${escapeHtml(shop.id)}"><summary>动态加价（目标利润率定价）</summary><div class="detail-body">${renderShopPricing(view, shop)}</div></details>` : "";
       return `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)} · ${escapeHtml(shop.typeName)}</strong><span class="badge">${escapeHtml(shop.statusReason)}</span></div><div class="row"><span class="label">今日利润</span><strong class="value">${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>${activity}${staffControls}<details class="detail-block" data-detail-key="shop:${escapeHtml(shop.id)}"><summary>经营详情</summary><div class="detail-body"><div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(shop.ownerName || shop.ownerHouseholdId)}</strong></div><div class="row"><span class="label">店员日薪</span><strong class="value">${number(shop.clerkWageVoucher, 1)}${escapeHtml(unit)}${shop.wageTarget != null ? ` · 行情${number(shop.wageTarget, 1)}` : ""}${shop.wageDiagnosis ? ` · ${escapeHtml(shop.wageDiagnosis)}` : ""}</strong></div>${stock}${serviceDetail}${shop.kind === "service" ? `<div class="row"><span class="label">未成交：没钱 / 容量不足</span><strong class="value">${number(shop.recentUnaffordableUses, 2)} / ${number(shop.recentCapacityUnmetUses, 2)}次</strong></div><div class="row"><span class="label">增1店员能力</span><strong class="value">+${number(shop.nextClerkServiceCapacity)}次/日</strong></div>` : ""}<div class="row"><span class="label">可支付资金</span><strong class="value">${number(shop.cashVoucher, 2)}粮券 · ${number(shop.cashWheatJin || 0, 2)}斤小麦</strong></div><div class="row"><span class="label">今日收入 / 成本</span><strong class="value">${number(shop.revenueDayVoucher, 2)} / ${number(shop.cogsDayVoucher + shop.wageDayVoucher + shop.rentDayVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">欠薪 / 欠租 / 欠税</span><strong class="value">${number(shop.wageArrearsVoucher, 2)} / ${number(shop.rentArrearsVoucher, 2)} / ${number(shop.taxArrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>${action}</div></details>${pricingDetail}</div>`;
     }).join("");
-    const openButtons = occupied.length < capacity ? (isTradeCenter ? `<div class="site-actions"><button class="secondary" data-shop-open="trading_house" data-shop-building="${escapeHtml(building.id)}">开贸易行</button></div>` : `<div class="site-actions"><button class="secondary" data-shop-open="general" data-shop-building="${escapeHtml(building.id)}">开综合商店</button><button class="secondary" data-shop-open="haircut" data-shop-building="${escapeHtml(building.id)}">开理发店</button><button class="secondary" data-shop-open="repair" data-shop-building="${escapeHtml(building.id)}">开修补铺</button><button class="secondary" data-shop-open="tea" data-shop-building="${escapeHtml(building.id)}">开茶馆</button><button class="secondary" data-shop-open="school" data-shop-building="${escapeHtml(building.id)}">开学堂</button><button class="secondary" data-shop-open="restaurant" data-shop-building="${escapeHtml(building.id)}">开饭店</button></div>`) : "";
+    const openButtons = occupied.length < capacity ? (isTradeCenter ? `<div class="site-actions"><button class="secondary" data-shop-open="trading_house" data-shop-building="${escapeHtml(building.id)}">开贸易行</button></div>` : `<div class="site-actions">${COMMERCIAL_STREET_SHOP_TYPES.map(def => `<button class="secondary" data-shop-open="${escapeHtml(def.id)}" data-shop-building="${escapeHtml(building.id)}">开${escapeHtml(def.name)}</button>`).join("")}</div>`) : "";
     body = `<div class="status-strip"><span class="status-light working"></span><strong>${isTradeCenter ? "贸易中心" : "商业街"}</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">占用店铺</span><strong class="value">${number(occupied.length)} / ${number(capacity)}间</strong></div><div class="row"><span class="label">商人 / 店员</span><strong class="value">${number(merchantCount)} / ${number(clerkCount)}人</strong></div>${openButtons}${shopCards || `<div class="subtle">暂无居民入驻。</div>`}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="policy">查看租税政策</button>`;
   } else if (building?.typeId === "livestock_base") {

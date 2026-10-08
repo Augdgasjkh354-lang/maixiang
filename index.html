@@ -633,6 +633,9 @@ button.wide { width: 100%; }
 .loom-thread { fill: none; stroke: #d8c59a; stroke-width: 1.5; stroke-linecap: round; }
 .indigo-cloth { fill: #4f6078; stroke: #2f3c52; stroke-width: 1.6; stroke-linejoin: round; }
 .grey-tile-line { fill: none; stroke: #5e6b68; stroke-width: 1.8; stroke-linecap: round; }
+
+/* 贫富面板：基尼系数逐年曲线 */
+.gini-sparkline { display: block; width: 100%; height: 56px; margin: 6px 0; }
   </style>
 </head>
 <body>
@@ -2734,7 +2737,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod19 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-8e1bcf6";
+       const BUILD_ID = "0203-2f31baa";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -16244,7 +16247,7 @@ const { recordEvent, recordLedger, makeTransactionId } = __mxmod15;
 const { bookAdd, ensureBook } = __mxmod22;
 const { qeqUnitsForInventoryUnits } = __mxmod17;
 const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, syncResidentAggregates, withDeferredHouseholdSync } = __mxmod21;
-const { householdWealthUnits } = __mxmod65;
+const { daysUntilHarvest, householdWealthUnits } = __mxmod65;
 const { wholesalePrice, householdWealth } = __mxmod60;
 const { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } = __mxmod46;
 const { transferWageClaimsToTown, wageBook } = __mxmod39;
@@ -16378,7 +16381,9 @@ function collectFromHouseholds(state, content, rows, type, label) {
         currentPaymentComposition(state, dueUnits), content, type, `${household.name}${label}`,
         {
           requireFull: false,
-          maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30)
+          // 只动"到下次秋收再加 30 天"以外的余粮（和家底口径一致），不让收税吃掉下一季口粮。
+          maxWheatUnits: householdConvertibleWheatUnits(state, household, content,
+            daysUntilHarvest(state, content) + (content.rules.householdBudget?.harvestBufferDays ?? 30))
         });
       const paid = result.paidValueUnits || 0;
       collected += paid;
@@ -25280,7 +25285,52 @@ return { renderJobs };
 
 // ===== ui/panel-people.js =====
 const __mxmod127 = (() => {
-const { number } = __mxmod114;
+const { escapeHtml, number } = __mxmod114;
+function giniSparkline(history) {
+  const rows = (history || []).filter(row => Number.isFinite(row.gini));
+  if (rows.length < 2) return "";
+  const width = 240, height = 56, pad = 4;
+  const values = rows.map(row => row.gini);
+  const low = Math.min(...values), high = Math.max(...values);
+  const span = high - low || 1;
+  const x = index => pad + (width - pad * 2) * index / (rows.length - 1);
+  const y = value => height - pad - (height - pad * 2) * (value - low) / span;
+  const points = rows.map((row, index) => `${x(index).toFixed(1)},${y(row.gini).toFixed(1)}`).join(" ");
+  const first = rows[0], last = rows.at(-1);
+  return `<svg class="gini-sparkline" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="基尼系数逐年曲线">`
+    + `<polyline fill="none" stroke="#73975b" stroke-width="1.6" stroke-linejoin="round" points="${points}"/></svg>`
+    + `<div class="row"><span class="label">第${number(first.year)}年 ${number(first.gini, 2)}</span><strong class="value">第${number(last.year)}年 ${number(last.gini, 2)}</strong></div>`;
+}
+
+function bracketRows(ineq) {
+  return (ineq.brackets || []).map(row => {
+    const label = row.index === 0
+      ? `免征档 · 人均家底低于${number(ineq.brackets[1]?.minPerCapitaVoucher ?? 0)}券`
+      : `${row.index}档 · 人均家底≥${number(row.minPerCapitaVoucher)}券 · 税率${number(row.ratePercent, 1)}%`;
+    return `<div class="row"><span class="label">${escapeHtml(label)}</span><strong class="value">${number(row.households)}户 / ${number(row.people)}人</strong></div>`;
+  }).join("");
+}
+
+// 贫富面板（docs/REDISTRIBUTION.md 第 5 条）：基尼、最富占比、各税档人家数、本年再分配收入与逐年基尼。只读。
+function inequalityCardlet(ineq) {
+  if (!ineq) return "";
+  const gini = ineq.gini === null || ineq.gini === undefined ? "—" : number(ineq.gini, 2);
+  const assessed = ineq.assessed
+    ? `<div class="subtle">税档按第${number(ineq.assessed.year)}年${number(ineq.assessed.day)}日评估（${number(ineq.assessed.households)}户）</div>`
+    : `<div class="subtle">尚未做过富人税评估。</div>`;
+  const year = ineq.thisYear || {};
+  return `<div class="cardlet" style="margin-top:10px"><div class="setting-title">贫富与再分配</div>
+    <div class="row"><span class="label">基尼系数</span><strong class="value">${gini}</strong></div>
+    <div class="row"><span class="label">最富1% / 10% 占全镇家底</span><strong class="value">${number(ineq.top1SharePercent, 1)}% / ${number(ineq.top10SharePercent, 1)}%</strong></div>
+    ${assessed}
+    ${bracketRows(ineq)}
+    <div class="row"><span class="label">本年富人税 / 免征</span><strong class="value">${number(year.wealthTaxVoucher, 2)} / ${number(year.wealthTaxWaivedVoucher, 2)}券</strong></div>
+    <div class="row"><span class="label">本年遗产税</span><strong class="value">${number(year.inheritanceTaxVoucher, 2)}券</strong></div>
+    <div class="row"><span class="label">本年无主家产归公</span><strong class="value">${number(year.escheatVoucher, 2)}券（${number(year.escheatHouseholds)}户）</strong></div>
+    ${giniSparkline(ineq.giniHistory)}
+  </div>`;
+}
+
 function laborMoodText(mood) {
   if (mood === "slack") return "失业多，商店压工资";
   if (mood === "tight") return "人手紧，商店加工资";
@@ -25319,7 +25369,8 @@ function wealthCardlet(view) {
     ${market ? `<div class="cardlet" style="margin-top:10px"><div class="row"><span class="label">失业率</span><strong class="value">${number(market.unemploymentRate * 100, 1)}% · ${laborMoodText(market.mood)}</strong></div><div class="row"><span class="label">待业 / 劳动年龄</span><strong class="value">${number(market.idle)} / ${number(market.workers)}人</strong></div><div class="row"><span class="label">公职平均日薪 / 商店目标日薪</span><strong class="value">${number(market.referenceWage, 1)} / ${number(market.targetShopWage, 1)}</strong></div><p class="subtle">失业率高于${highPct}%商店压薪，低于${lowPct}%加薪。</p></div>` : ""}
     <div class="cardlet" style="margin-top:10px"><div class="row"><span class="label">人口 / 住房</span><strong class="value">${number(p.total)} / ${number(view.housingCapacity)}人</strong></div><div class="meter"><span style="width:${housing}%"></span></div><div class="row"><span class="label">住房缺口</span><strong class="value">${number(view.housing.shortage)}人</strong></div><div class="row"><span class="label">食盐保障</span><strong class="value">${number(view.salt.historyCoverage * 100, 1)}%</strong></div><div class="row"><span class="label">舒心值</span><strong class="value">${number(view.satisfaction)} / 100</strong></div></div>
     <details class="detail-block" data-detail-key="population-history"><summary>上年人口变化</summary><div class="detail-body"><div class="row"><span class="label">出生 / 死亡</span><strong class="value">${number(last.births)} / ${number(last.deaths)}人</strong></div><div class="row"><span class="label">新结夫妇</span><strong class="value">${number(last.marriages)}对</strong></div>${labor ? `<div class="row"><span class="label">年初 / 年末劳动力</span><strong class="value">${number(labor.openingWorkers)} / ${number(labor.closingWorkers)}人</strong></div><div class="row"><span class="label">成年 / 退休</span><strong class="value">${number(labor.adults)} / ${number(labor.retirees)}人</strong></div>` : `<div class="subtle">完成本年度后显示劳动力变化。</div>`}</div></details>
-    ${wealthCardlet(view)}`;
+    ${wealthCardlet(view)}
+    ${inequalityCardlet(view.inequality)}`;
 }
 return { renderPeople };
 })();
@@ -26125,11 +26176,53 @@ return { macroPanelSummary, renderMacroPanel };
 
 // ===== ui/panel-policy.js =====
 const __mxmod139 = (() => {
-const { number } = __mxmod114;
+const { escapeHtml, number } = __mxmod114;
 const { CONTENT } = __mxmod12;
 const { industryTypeIds } = __mxmod1;
 const { renderNumericInput } = __mxmod124;
-function renderPolicy(view) {
+const WEALTH_TAX_THRESHOLD_KEYS = [0, 1, 2].map(index => `wealth-tax:threshold:${index}`);
+       const WEALTH_TAX_RATE_KEYS = [0, 1, 2].map(index => `wealth-tax:rate:${index}`);
+const WEALTH_TAX_DEFAULT_THRESHOLDS = [300, 1000, 3000];
+const WEALTH_TAX_DEFAULT_RATES = [0, 0, 0];
+
+function stagedTaxInput(view, key, value, label, maximum) {
+  const shown = view.numericDrafts?.[key]?.value ?? String(value ?? "");
+  return `<input class="staged-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(shown)}" aria-label="${escapeHtml(label)}" data-draft-key="${escapeHtml(key)}" data-draft-kind="stage" data-draft-label="${escapeHtml(label)}" data-draft-minimum="0" data-draft-maximum="${maximum}" data-draft-integer="false" data-draft-positive="false">`;
+}
+
+function wealthTaxCard(view) {
+  const policy = view.policy.wealthTax || {};
+  const thresholds = Array.isArray(policy.thresholds) && policy.thresholds.length === 3 ? policy.thresholds : WEALTH_TAX_DEFAULT_THRESHOLDS;
+  const rates = Array.isArray(policy.ratesPercent) && policy.ratesPercent.length === 3 ? policy.ratesPercent : WEALTH_TAX_DEFAULT_RATES;
+  const year = view.inequality?.thisYear;
+  const thresholdRows = thresholds.map((value, index) => `<div class="row"><span class="label">${index + 1}档门槛 · 人均家底超过（券）</span><div class="setting-input">${stagedTaxInput(view, WEALTH_TAX_THRESHOLD_KEYS[index], value, `富人税第${index + 1}档门槛`, 1000000000)}<b>券</b></div></div>`).join("");
+  const rateRows = rates.map((value, index) => `<div class="row"><span class="label">${index + 1}档年税率（超过门槛部分）</span><div class="setting-input">${stagedTaxInput(view, WEALTH_TAX_RATE_KEYS[index], value, `富人税第${index + 1}档年税率`, 20)}<b>%</b></div></div>`).join("");
+  const collected = year
+    ? `<div class="row"><span class="label">本年已收 / 付不起免征</span><strong class="value">${number(year.wealthTaxVoucher, 2)} / ${number(year.wealthTaxWaivedVoucher, 2)}券</strong></div><div class="row"><span class="label">本年纳税户数</span><strong class="value">${number(year.wealthTaxPayers)}户</strong></div>`
+    : "";
+  return `<details class="detail-block" data-detail-key="policy-wealthtax"><summary>富人税</summary><div class="detail-body">
+      <div class="subtle">超额累进，每30天收一次，付不起的部分当月免征。家底含粮券、存款、超出口粮储备的小麦、股票与民营建筑；按人均家底分档。</div>
+      ${thresholdRows}
+      ${rateRows}
+      <div class="settings-actions"><button class="primary" data-wealth-tax-save>保存</button></div>
+      ${collected}
+    </div></details>`;
+}
+
+function inheritanceTaxCard(view) {
+  const percent = view.policy.inheritanceTaxPercent ?? 0;
+  const year = view.inequality?.thisYear;
+  const collected = year
+    ? `<div class="row"><span class="label">本年遗产税 / 无主家产归公</span><strong class="value">${number(year.inheritanceTaxVoucher, 2)} / ${number(year.escheatVoucher, 2)}券</strong></div>`
+    : "";
+  return `<details class="detail-block" data-detail-key="policy-inheritance"><summary>遗产税</summary><div class="detail-body">
+      <div class="row"><span class="label">遗产税率（超过富人税第一档门槛的部分）</span><div class="setting-input">${renderNumericInput(view, { key: "inheritance-tax", kind: "inheritance-tax", target: "policy", value: percent, label: "遗产税率", minimum: 0, maximum: 50, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="subtle">整户无人时家产归镇库（一直生效）。</div>
+      ${collected}
+    </div></details>`;
+}
+
+       function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
   const last = view.policy.lastDay || {};
   const agriculture = view.agriculturePolicy;
@@ -26210,6 +26303,8 @@ function renderPolicy(view) {
     </div></details>
     <details class="detail-block" data-detail-key="policy-relief"><summary>救济</summary><div class="detail-body"><div class="row"><span class="label">需救济 / 已拨家庭</span><strong class="value">${number(relief.eligibleHouseholds||0)} / ${number(relief.servedHouseholds||0)}户</strong></div><div class="row"><span class="label">今日正常兑付 / 救济</span><strong class="value">${number((relief.redeemedWheatUnits||0)/view.inventoryUnitsPerJin,1)} / ${number((relief.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div>${(relief.missingQeqUnits||0)>0?`<div class="shortage-banner visible">镇库不足，尚缺 ${number(relief.missingQeqUnits/view.qeqUnitsPerJin,1)}斤口粮</div>`:""}<label class="toggle"><input id="autoRelief" type="checkbox" ${view.autoRelief ? "checked" : ""}><span>开启救济</span></label><div class="subtle">口粮不足7天的家庭补到14天；社保基金开启时由基金承担。</div></div></details>
     ${hasIndustry ? `<details class="detail-block" data-detail-key="policy-privatetax"><summary>民营生产税</summary><div class="detail-body">${privateTaxes}</div></details>` : ""}
+    ${wealthTaxCard(view)}
+    ${inheritanceTaxCard(view)}
     <details class="detail-block" data-detail-key="policy-detail"><summary>政策详情</summary><div class="detail-body">
       <div class="row"><span class="label">本季农业税平均</span><strong class="value">${number(agriculture.accumulatedAveragePercent, 2)}%</strong></div>
       <div class="row"><span class="label">预计结算税率</span><strong class="value">${number(agriculture.projectedSettlementPercent, 2)}%</strong></div>
@@ -26217,7 +26312,7 @@ function renderPolicy(view) {
       <div class="row"><span class="label">预计年度失业金</span><strong class="value">${number(view.policy.annualExpectedWheatJin)}${moneyUnit}</strong></div>
     </div></details>`;
 }
-return { renderPolicy };
+return { WEALTH_TAX_THRESHOLD_KEYS, WEALTH_TAX_RATE_KEYS, renderPolicy };
 })();
 
 // ===== ui/panel-shop-pricing.js =====
@@ -26277,6 +26372,11 @@ const { isIndustryType } = __mxmod1;
 const { villaCapacityOf } = __mxmod67;
 const { renderNumericInput } = __mxmod124;
 const { renderShopPricing } = __mxmod140;
+const COMMERCIAL_STREET_SHOP_TYPES = Object.values(CONTENT.rules.shopTypes || {})
+  .filter(def => !def.aliasOf && (def.kind === "retail" || def.kind === "service")
+    && (!def.hostBuildingTypeId || def.hostBuildingTypeId === "commercial_street"));
+
+// 地块标签人性化（0.1.11 _2() 补回）："空地 3" → "3号地"
 function humanizePlotLabel(view, building) {
   const label = view.plots?.find(p => p.id === building.plotId)?.label;
   if (!label) return building.id;
@@ -26323,6 +26423,26 @@ function stagedBankInput(view, key, label, value) {  const shown = view.numericD
     data-draft-integer="false" data-draft-positive="true">`;
 }
 
+const EMPLOYER_KIND_NAMES = { town: "镇营", private: "民营", company: "公司", shop: "店铺" };
+
+// 最近一日社保缴费的雇主 / 家庭拆分，以及雇主欠缴（按类别与前 5 名欠款方）。只读。
+function socialSecurityContributionMarkup(ss) {
+  const last = ss.lastContribution || {};
+  const byKind = ss.employerArrearsByKindJin || {};
+  const kinds = Object.keys(EMPLOYER_KIND_NAMES).map(kind => `${EMPLOYER_KIND_NAMES[kind]} ${number(byKind[kind] || 0, 1)}`).join(" / ");
+  const debtors = (ss.topEmployerDebtors || []).map(row =>
+    `<div class="row"><span class="label">${escapeHtml(row.name || row.owner)} · ${escapeHtml(EMPLOYER_KIND_NAMES[row.kind] || row.kind)}</span><strong class="value">${number(row.arrearsJin, 1)}斤</strong></div>`
+  ).join("");
+  return `<div class="cardlet">
+      <div class="setting-title">社保缴费拆分（今日）</div>
+      <div class="row"><span class="label">雇主应缴 / 已缴</span><strong class="value">${number(last.employerDueJin, 1)} / ${number(last.employerCollectedJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">家庭应缴 / 已缴</span><strong class="value">${number(last.householdDueJin, 1)} / ${number(last.householdCollectedJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">雇主欠缴合计</span><strong class="value">${number(ss.employerArrearsJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">欠缴按类别</span><strong class="value">${kinds}</strong></div>
+      ${debtors ? `<div class="subtle">欠缴最多的前 5 名</div>${debtors}` : `<div class="subtle">暂无雇主欠缴。</div>`}
+    </div>`;
+}
+
 function socialSecurityMarkup(view) {
   const ss = view.socialSecurity;
   if (!ss) return "";
@@ -26337,8 +26457,10 @@ function socialSecurityMarkup(view) {
       <label class="toggle"><input id="socialSecurityEnabled" type="checkbox" ${ss.enabled ? "checked" : ""}><span>开启社保基金</span></label>
       <div class="row"><span class="label">每劳动力每日缴纳</span><div class="setting-input">${input("social-daily", "social-daily", ss.dailyPerWorkerJin, "社保每日缴费")}<b>斤</b></div></div>
       <div class="row"><span class="label">每老人每日养老金</span><div class="setting-input">${input("social-pension", "social-pension", ss.pensionPerElderJin, "养老金标准")}<b>斤</b></div></div>
-      <div class="subtle">开启后失业金也由基金发放；基金不够时镇库垫付，计入负债。</div>
+      <div class="row"><span class="label">雇主承担比例（替员工交社保）</span><div class="setting-input">${input("social-employer-share", "social-employer-share", ss.employerSharePercent ?? 100, "雇主承担比例", { maximum: 100 })}<b>%</b></div></div>
+      <div class="subtle">开启后失业金也由基金发放；基金不够时镇库垫付，计入负债。雇主付不起的社保记为欠缴，之后有钱优先补缴。</div>
     </div>
+    ${socialSecurityContributionMarkup(ss)}
     <div class="cardlet">
       <div class="row"><span class="label">基金现金</span><strong class="value">${number(ss.cashJin, 1)}斤</strong></div>
       <div class="row"><span class="label">股票市值</span><strong class="value">${number(ss.stockValueJin, 1)}斤</strong></div>
@@ -26595,7 +26717,7 @@ function timesSquareMarkup(view, building, development) {
         ? `<button class="secondary" data-shop-fund="${escapeHtml(shop.id)}">业主补资清偿</button>`
         : `<button class="secondary" data-shop-close="${escapeHtml(shop.id)}">停业</button>`;
       const activity = shop.kind === "service"
-        ? `<div class="row"><span class="label">在岗 / 服务能力</span><strong class="value">${number(staff)}人 / ${number(shop.serviceCapacity)}次/日</strong></div><div class="row"><span class="label">近期需求 / 成交 / 满足率</span><strong class="value">${number(shop.recentDemandUses, 2)} / ${number(shop.recentServedUses, 2)} / ${shop.serviceFulfillmentRate === null ? "—" : number(shop.serviceFulfillmentRate * 100, 1) + "%"}</strong></div>`
+        ? `${shop.serviceId === "theater" ? `<div class="subtle">仅宽裕人家（宽裕度≥${escapeHtml(CONTENT.rules.serviceTypes?.theater?.minAffluence ?? 1.5)}）光顾</div>` : ""}<div class="row"><span class="label">在岗 / 服务能力</span><strong class="value">${number(staff)}人 / ${number(shop.serviceCapacity)}次/日</strong></div><div class="row"><span class="label">近期需求 / 成交 / 满足率</span><strong class="value">${number(shop.recentDemandUses, 2)} / ${number(shop.recentServedUses, 2)} / ${shop.serviceFulfillmentRate === null ? "—" : number(shop.serviceFulfillmentRate * 100, 1) + "%"}</strong></div>`
         : `<div class="row"><span class="label">在岗 / 接待能力</span><strong class="value">${number(staff)}人 / ${number(shop.customerCapacity || 0)}客流/日</strong></div><div class="row"><span class="label">近期顾客 / 日均销量</span><strong class="value">${number(shop.recentCustomers, 2)} / ${number(shop.averageDailySales, 2)}斤</strong></div>`;
       const stock = shop.kind === "retail" ? `<div class="shop-stock-grid">${(shop.inventoryRows || []).map(row => `<div class="row"><span class="label">${escapeHtml(row.itemName)}</span><strong class="value">库存${number(row.stock, 2)}${escapeHtml(view.itemUnits[row.itemId] || "单位")} · 售${number(row.retailVoucher, 2)}${escapeHtml(unit)}</strong></div>`).join("")}</div>` : "";
       const servicePriceControl = shop.serviceId === "school" ? `<div class="row"><span class="label">每日学费</span><div class="setting-input">${renderNumericInput(view, { key: "service-price:school", kind: "service-price", target: "school", value: view.servicePricesVoucherPerUse?.school ?? 1, label: "学堂每日学费", minimum: 0, maximum: 1000000, className: "setting-editor" })}<b>${escapeHtml(unit)}/儿童日</b></div></div>` : "";
@@ -26604,7 +26726,7 @@ function timesSquareMarkup(view, building, development) {
       const pricingDetail = shop.pricing?.dynamic ? `<details class="detail-block" data-detail-key="shop-pricing:${escapeHtml(shop.id)}"><summary>动态加价（目标利润率定价）</summary><div class="detail-body">${renderShopPricing(view, shop)}</div></details>` : "";
       return `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)} · ${escapeHtml(shop.typeName)}</strong><span class="badge">${escapeHtml(shop.statusReason)}</span></div><div class="row"><span class="label">今日利润</span><strong class="value">${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>${activity}${staffControls}<details class="detail-block" data-detail-key="shop:${escapeHtml(shop.id)}"><summary>经营详情</summary><div class="detail-body"><div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(shop.ownerName || shop.ownerHouseholdId)}</strong></div><div class="row"><span class="label">店员日薪</span><strong class="value">${number(shop.clerkWageVoucher, 1)}${escapeHtml(unit)}${shop.wageTarget != null ? ` · 行情${number(shop.wageTarget, 1)}` : ""}${shop.wageDiagnosis ? ` · ${escapeHtml(shop.wageDiagnosis)}` : ""}</strong></div>${stock}${serviceDetail}${shop.kind === "service" ? `<div class="row"><span class="label">未成交：没钱 / 容量不足</span><strong class="value">${number(shop.recentUnaffordableUses, 2)} / ${number(shop.recentCapacityUnmetUses, 2)}次</strong></div><div class="row"><span class="label">增1店员能力</span><strong class="value">+${number(shop.nextClerkServiceCapacity)}次/日</strong></div>` : ""}<div class="row"><span class="label">可支付资金</span><strong class="value">${number(shop.cashVoucher, 2)}粮券 · ${number(shop.cashWheatJin || 0, 2)}斤小麦</strong></div><div class="row"><span class="label">今日收入 / 成本</span><strong class="value">${number(shop.revenueDayVoucher, 2)} / ${number(shop.cogsDayVoucher + shop.wageDayVoucher + shop.rentDayVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">欠薪 / 欠租 / 欠税</span><strong class="value">${number(shop.wageArrearsVoucher, 2)} / ${number(shop.rentArrearsVoucher, 2)} / ${number(shop.taxArrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>${action}</div></details>${pricingDetail}</div>`;
     }).join("");
-    const openButtons = occupied.length < capacity ? (isTradeCenter ? `<div class="site-actions"><button class="secondary" data-shop-open="trading_house" data-shop-building="${escapeHtml(building.id)}">开贸易行</button></div>` : `<div class="site-actions"><button class="secondary" data-shop-open="general" data-shop-building="${escapeHtml(building.id)}">开综合商店</button><button class="secondary" data-shop-open="haircut" data-shop-building="${escapeHtml(building.id)}">开理发店</button><button class="secondary" data-shop-open="repair" data-shop-building="${escapeHtml(building.id)}">开修补铺</button><button class="secondary" data-shop-open="tea" data-shop-building="${escapeHtml(building.id)}">开茶馆</button><button class="secondary" data-shop-open="school" data-shop-building="${escapeHtml(building.id)}">开学堂</button><button class="secondary" data-shop-open="restaurant" data-shop-building="${escapeHtml(building.id)}">开饭店</button></div>`) : "";
+    const openButtons = occupied.length < capacity ? (isTradeCenter ? `<div class="site-actions"><button class="secondary" data-shop-open="trading_house" data-shop-building="${escapeHtml(building.id)}">开贸易行</button></div>` : `<div class="site-actions">${COMMERCIAL_STREET_SHOP_TYPES.map(def => `<button class="secondary" data-shop-open="${escapeHtml(def.id)}" data-shop-building="${escapeHtml(building.id)}">开${escapeHtml(def.name)}</button>`).join("")}</div>`) : "";
     body = `<div class="status-strip"><span class="status-light working"></span><strong>${isTradeCenter ? "贸易中心" : "商业街"}</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">占用店铺</span><strong class="value">${number(occupied.length)} / ${number(capacity)}间</strong></div><div class="row"><span class="label">商人 / 店员</span><strong class="value">${number(merchantCount)} / ${number(clerkCount)}人</strong></div>${openButtons}${shopCards || `<div class="subtle">暂无居民入驻。</div>`}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="policy">查看租税政策</button>`;
   } else if (building?.typeId === "livestock_base") {
@@ -26939,7 +27061,9 @@ const { renderResidents } = __mxmod128;
 const { renderEconomy } = __mxmod136;
 const { econMiniSummary, renderEconMini } = __mxmod137;
 const { macroPanelSummary, renderMacroPanel } = __mxmod138;
-const { renderPolicy } = __mxmod139;
+const { renderPolicy, WEALTH_TAX_RATE_KEYS, WEALTH_TAX_THRESHOLD_KEYS } = __mxmod139;
+const { CONTENT } = __mxmod12;
+const { selectInequality } = __mxmod99;
 const { renderSite } = __mxmod141;
 const { renderSettings } = __mxmod142;
 const { compact, escapeHtml, number, numberMax, moneyUnit } = __mxmod114;
@@ -27094,8 +27218,11 @@ function closest(element, selector) {
   function buildView() {
     if (!state) return null;
     const base = dashboardViews.get(state, dashboardSelection());
+    // 政策页要显示本年富人税/遗产税收入，但 selectDashboard 只在人口页与全局视图里算 inequality；这里补上（只读选择器）。
+    const inequality = base?.inequality ?? (navigation.state.activePanel === "policy" ? selectInequality(state, CONTENT) : null);
     return {
       ...base,
+      inequality,
       numericDrafts: Object.fromEntries(numericDrafts),
       upgradePreviewId,
       demolitionPreviewId,
@@ -27363,6 +27490,12 @@ function closest(element, selector) {
     } else if (kind === "social-pension") {
       result = simulation.setSocialSecurityPolicy(state, { pensionPerElderJin: parsed.value });
       successMessage = `养老金已设为每老人每日${number(parsed.value, 2)}斤。`;
+    } else if (kind === "social-employer-share") {
+      result = simulation.setEmployerSocialSharePercent(state, parsed.value);
+      successMessage = `雇主承担社保比例已设为${number(parsed.value, 0)}%。`;
+    } else if (kind === "inheritance-tax") {
+      result = simulation.setInheritanceTax(state, parsed.value);
+      successMessage = `遗产税率已设为${number(parsed.value, 2)}%。`;
     } else if (kind === "social-inject") {
       // 注资走按钮提交，此处仅做数值校验占位。
       result = { ok: true };
@@ -28443,6 +28576,21 @@ function closest(element, selector) {
       render(true);
       showToast(socialTrade.dataset.socialRepay !== undefined ? `社保基金已还款${number(result.repaidJin, 1)}斤。`
         : socialTrade.dataset.socialBuy ? `社保基金买入${number(result.shares)}股。` : `社保基金卖出${number(result.shares)}股。`);
+      return;
+    }
+    if (closest(target, "[data-wealth-tax-save]") && state) {
+      const thresholds = WEALTH_TAX_THRESHOLD_KEYS.map(key => readStagedNumber(key, { label: "富人税门槛", minimum: 0, maximum: 1000000000 }));
+      const ratesPercent = WEALTH_TAX_RATE_KEYS.map(key => readStagedNumber(key, { label: "富人税税率", minimum: 0, maximum: 20 }));
+      if (thresholds.includes(null) || ratesPercent.includes(null)) return;
+      const result = simulation.setWealthTax(state, { thresholds, ratesPercent });
+      if (!result?.ok) {
+        showToast(result?.reason || "富人税政策未能保存。");
+        return;
+      }
+      for (const key of [...WEALTH_TAX_THRESHOLD_KEYS, ...WEALTH_TAX_RATE_KEYS]) numericDrafts.delete(key);
+      changed(true);
+      render(true);
+      showToast("富人税已保存。");
       return;
     }
     if (target.matches("[data-social-inject]") && state) {

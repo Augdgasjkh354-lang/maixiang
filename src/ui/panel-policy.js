@@ -1,7 +1,51 @@
-import { number } from "./format.js";
+import { escapeHtml, number } from "./format.js";
 import { CONTENT } from "../content/index.js";
 import { industryTypeIds } from "../content/buildings.js";
 import { renderNumericInput } from "./numeric-drafts.js";
+
+// 再分配：富人税（按人均家底分三档、超额累进）与遗产税（docs/REDISTRIBUTION.md 第 1、2 条）。
+// 富人税三个门槛与三档税率一起暂存在输入框草稿里，由"保存"按钮一次提交（app.js 读取）。
+export const WEALTH_TAX_THRESHOLD_KEYS = [0, 1, 2].map(index => `wealth-tax:threshold:${index}`);
+export const WEALTH_TAX_RATE_KEYS = [0, 1, 2].map(index => `wealth-tax:rate:${index}`);
+const WEALTH_TAX_DEFAULT_THRESHOLDS = [300, 1000, 3000];
+const WEALTH_TAX_DEFAULT_RATES = [0, 0, 0];
+
+function stagedTaxInput(view, key, value, label, maximum) {
+  const shown = view.numericDrafts?.[key]?.value ?? String(value ?? "");
+  return `<input class="staged-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(shown)}" aria-label="${escapeHtml(label)}" data-draft-key="${escapeHtml(key)}" data-draft-kind="stage" data-draft-label="${escapeHtml(label)}" data-draft-minimum="0" data-draft-maximum="${maximum}" data-draft-integer="false" data-draft-positive="false">`;
+}
+
+function wealthTaxCard(view) {
+  const policy = view.policy.wealthTax || {};
+  const thresholds = Array.isArray(policy.thresholds) && policy.thresholds.length === 3 ? policy.thresholds : WEALTH_TAX_DEFAULT_THRESHOLDS;
+  const rates = Array.isArray(policy.ratesPercent) && policy.ratesPercent.length === 3 ? policy.ratesPercent : WEALTH_TAX_DEFAULT_RATES;
+  const year = view.inequality?.thisYear;
+  const thresholdRows = thresholds.map((value, index) => `<div class="row"><span class="label">${index + 1}档门槛 · 人均家底超过（券）</span><div class="setting-input">${stagedTaxInput(view, WEALTH_TAX_THRESHOLD_KEYS[index], value, `富人税第${index + 1}档门槛`, 1000000000)}<b>券</b></div></div>`).join("");
+  const rateRows = rates.map((value, index) => `<div class="row"><span class="label">${index + 1}档年税率（超过门槛部分）</span><div class="setting-input">${stagedTaxInput(view, WEALTH_TAX_RATE_KEYS[index], value, `富人税第${index + 1}档年税率`, 20)}<b>%</b></div></div>`).join("");
+  const collected = year
+    ? `<div class="row"><span class="label">本年已收 / 付不起免征</span><strong class="value">${number(year.wealthTaxVoucher, 2)} / ${number(year.wealthTaxWaivedVoucher, 2)}券</strong></div><div class="row"><span class="label">本年纳税户数</span><strong class="value">${number(year.wealthTaxPayers)}户</strong></div>`
+    : "";
+  return `<details class="detail-block" data-detail-key="policy-wealthtax"><summary>富人税</summary><div class="detail-body">
+      <div class="subtle">超额累进，每30天收一次，付不起的部分当月免征。家底含粮券、存款、超出口粮储备的小麦、股票与民营建筑；按人均家底分档。</div>
+      ${thresholdRows}
+      ${rateRows}
+      <div class="settings-actions"><button class="primary" data-wealth-tax-save>保存</button></div>
+      ${collected}
+    </div></details>`;
+}
+
+function inheritanceTaxCard(view) {
+  const percent = view.policy.inheritanceTaxPercent ?? 0;
+  const year = view.inequality?.thisYear;
+  const collected = year
+    ? `<div class="row"><span class="label">本年遗产税 / 无主家产归公</span><strong class="value">${number(year.inheritanceTaxVoucher, 2)} / ${number(year.escheatVoucher, 2)}券</strong></div>`
+    : "";
+  return `<details class="detail-block" data-detail-key="policy-inheritance"><summary>遗产税</summary><div class="detail-body">
+      <div class="row"><span class="label">遗产税率（超过富人税第一档门槛的部分）</span><div class="setting-input">${renderNumericInput(view, { key: "inheritance-tax", kind: "inheritance-tax", target: "policy", value: percent, label: "遗产税率", minimum: 0, maximum: 50, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="subtle">整户无人时家产归镇库（一直生效）。</div>
+      ${collected}
+    </div></details>`;
+}
 
 export function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
@@ -84,6 +128,8 @@ export function renderPolicy(view) {
     </div></details>
     <details class="detail-block" data-detail-key="policy-relief"><summary>救济</summary><div class="detail-body"><div class="row"><span class="label">需救济 / 已拨家庭</span><strong class="value">${number(relief.eligibleHouseholds||0)} / ${number(relief.servedHouseholds||0)}户</strong></div><div class="row"><span class="label">今日正常兑付 / 救济</span><strong class="value">${number((relief.redeemedWheatUnits||0)/view.inventoryUnitsPerJin,1)} / ${number((relief.movedQeqUnits||0)/view.qeqUnitsPerJin,1)}斤</strong></div>${(relief.missingQeqUnits||0)>0?`<div class="shortage-banner visible">镇库不足，尚缺 ${number(relief.missingQeqUnits/view.qeqUnitsPerJin,1)}斤口粮</div>`:""}<label class="toggle"><input id="autoRelief" type="checkbox" ${view.autoRelief ? "checked" : ""}><span>开启救济</span></label><div class="subtle">口粮不足7天的家庭补到14天；社保基金开启时由基金承担。</div></div></details>
     ${hasIndustry ? `<details class="detail-block" data-detail-key="policy-privatetax"><summary>民营生产税</summary><div class="detail-body">${privateTaxes}</div></details>` : ""}
+    ${wealthTaxCard(view)}
+    ${inheritanceTaxCard(view)}
     <details class="detail-block" data-detail-key="policy-detail"><summary>政策详情</summary><div class="detail-body">
       <div class="row"><span class="label">本季农业税平均</span><strong class="value">${number(agriculture.accumulatedAveragePercent, 2)}%</strong></div>
       <div class="row"><span class="label">预计结算税率</span><strong class="value">${number(agriculture.projectedSettlementPercent, 2)}%</strong></div>
