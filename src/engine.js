@@ -19,7 +19,7 @@ import {
   configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares,
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
   setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
-  configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
+  configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
   startCurrencyReform,
   reclaimFarmland
 } from "./core/commands.js";
@@ -175,6 +175,8 @@ export function createSimulation(content) {
     configureShopTargetMargin: function (state, shopId, percent) { return configureShopTargetMargin(state, shopId, percent, definitions); },
     configureAllShopsTargetMargin: function (state, percent) { return configureAllShopsTargetMargin(state, percent, definitions); },
     configureShopRetailPrice: function (state, shopId, itemId, value) { return configureShopRetailPrice(state, shopId, itemId, value, definitions); },
+    // 物价会动：批发市场自动调价开关（默认关；开启时以当前售价为锚定价，玩家手动改价即重置锚定）。
+    configureWholesaleAutoPricing: function (state, itemId, enabled) { return configureWholesaleAutoPricing(state, itemId, enabled, definitions); },
     configureWholesaleTownAllocation: function (state, itemId, value) { return configureWholesaleTownAllocation(state, itemId, value, definitions); },
     stockpileWholesale: function (state, itemId, quantityJin) { return stockpileWholesale(state, itemId, quantityJin, definitions); },
     releaseWholesale: function (state, itemId, quantityJin) { return releaseWholesale(state, itemId, quantityJin, definitions); },

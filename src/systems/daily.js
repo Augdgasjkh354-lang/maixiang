@@ -39,7 +39,7 @@ import { maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
 import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
 import { accrueIndustryExperience } from "./productivity.js";
-import { resetWholesaleDay, resetWholesaleYear, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
+import { resetWholesaleDay, resetWholesaleYear, reviewWholesaleAutoPricing, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
 
 // ---------------------------------------------------------------- 账本翻页
@@ -198,6 +198,8 @@ export const CORE_DAILY_STEPS = [
   { id: "shops", run: (state, content) => finishShopsDay(state, content, yearEndsToday(state, content)) },
   { id: "stalls", run: manageStalls },
   { id: "farmDay", run: (state, content) => { recordConsumerDay(state, content); accumulateFarmDay(state, content); } },
+  // 物价会动：批发市场自动调价（默认关，开启的商品每 reviewDays 天复核一次）；综合商店的系数在 shops 步骤里随 7 天复核更新。
+  { id: "pricing", run: reviewWholesaleAutoPricing },
 
   // ── 金融：流动性 → 银行 → 国债 → 股市 → 住户买股
   { id: "finance", run: (state, content) => {

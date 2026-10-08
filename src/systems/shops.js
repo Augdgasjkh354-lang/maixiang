@@ -1380,7 +1380,7 @@ export function shopSummaries(state, content) {
     const kind = def?.kind || "retail";
     const itemIds = shopRetailItemIds(shop, content);
     const primary = shop.primaryItemId || itemIds[0] || null;
-    const prices = primary ? shopTradePrices(state, shop.typeId, content, primary) : null;
+    const prices = primary ? shopTradePrices(state, shop.typeId, content, primary, shop) : null;
     const historyWithToday = [...(shop.history || []), {
       soldUnits: Object.values(shop.accounts?.day?.soldUnits || {}).reduce((sum, units) => sum + units, 0),
       serviceUses: { ...(shop.accounts?.day?.serviceUses || {}) },
@@ -1402,7 +1402,7 @@ export function shopSummaries(state, content) {
     const recentUnaffordableUses = serviceId ? serviceHistory.reduce((sum, row) => sum + Math.max(0, row.unaffordableUses?.[serviceId] || 0), 0) / Math.max(1, serviceHistory.length) : 0;
     const recentCapacityUnmetUses = serviceId ? serviceHistory.reduce((sum, row) => sum + Math.max(0, row.capacityUnmetUses?.[serviceId] || 0), 0) / Math.max(1, serviceHistory.length) : 0;
     const inventoryRows = itemIds.map(itemId => {
-      const itemPrices = shopTradePrices(state, shop.typeId, content, itemId);
+      const itemPrices = shopTradePrices(state, shop.typeId, content, itemId, shop);
       const stock = shop.inventory[itemId] || 0;
       const avg = recentRows.reduce((sum, row) => sum + Math.max(0, row.soldUnitsByItem?.[itemId] || 0), 0) / recentRows.length;
       return { itemId, itemName: content.items[itemId]?.name || itemId, stock: stock / invScale,

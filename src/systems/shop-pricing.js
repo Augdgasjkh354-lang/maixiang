@@ -16,6 +16,7 @@
 
 import { recordEvent } from "../economy/ledger.js";
 import { currentUnitPrice } from "../economy/prices.js";
+import { nextPriceFactor, priceFactorOf, retailFloorOf, stockDaysOf } from "../economy/price-adjust.js";
 
 export const PRICING_REVIEW_INTERVAL_DAYS = 7;
 export const PRICING_DEVIATION_TOLERANCE_PERCENT = 3;
@@ -92,6 +93,10 @@ export function ensureShopPricing(shop, content) {
   shop.pricing.itemCogs ||= emptyItemMap(content);
   shop.pricing.itemSoldUnits ||= emptyItemMap(content);
   shop.pricing.windowDays ??= 0;
+  // 物价会动：按商品的库存系数（缺省 1）、系数原因、是否处于清库存（允许降到进货价 × minFactor）。
+  shop.pricing.priceFactor ||= {};
+  shop.pricing.priceFactorReason ||= {};
+  shop.pricing.priceClearance ||= {};
   return shop.pricing;
 }
 
@@ -124,8 +129,11 @@ function salaryPortionForMargin(clerkWageVoucherUnits) {
 
 // 某商品的实际利润率（%）：(收入 − 进货成本 − 店员工资) / 收入。
 // 无销量时返回 null（无法核算，不参与调价判断）。
-export function shopItemActualMarginPercent(pricing, itemId) {
-  const revenue = Math.max(0, pricing?.itemRevenue?.[itemId] || 0);
+// priceFactor 缺省 1（面板展示的已实现利润率）；复核时传入窗口内的系数，把收入还原到基准价口径，
+// 使利润率只反映成本结构，不被库存系数（降价去库存）干扰。
+export function shopItemActualMarginPercent(pricing, itemId, priceFactor = 1) {
+  const realized = Math.max(0, pricing?.itemRevenue?.[itemId] || 0);
+  const revenue = realized / (Number.isFinite(priceFactor) && priceFactor > 0 ? priceFactor : 1);
   if (revenue <= 0) return null;
   const cogs = Math.max(0, pricing?.itemCogs?.[itemId] || 0);
   const wage = Math.max(0, pricing?.itemWageCost?.[itemId] || 0);
@@ -175,28 +183,35 @@ export function priceElasticityDemandMultiplier(state, shop, itemId, currentReta
   return Math.max(floor, Math.min(2, multiplier));
 }
 
-// 7 天复核：对每个有销量的商品判断实际利润率是否连续偏离目标超过 ±3%，
-// 若是则调价，单次幅度 ≤ ±10%，且售价不低于进货价。返回调价明细。
+// 7 天复核，做两件事（顺序很重要）：
+// 1. 利润率复核（既有逻辑）：对每个有销量的商品判断实际利润率是否连续偏离目标超过 ±3%，若是则调基准价，
+//    单次幅度 ≤ ±10%，且售价不低于进货价。利润率按基准价口径核算（收入除以窗口内的库存系数），
+//    这样降价去库存不会被利润率复核"拉回去"。
+// 2. 库存系数（物价会动）：每个经营商品按近 7 天日均销量、库存与断货需求，用 nextPriceFactor 更新系数。
+//    系数只在复核时变化，所以窗口内系数恒定，第 1 步读到的就是窗口内的系数。
 export function reviewShopPricing(state, shop, content, options = {}) {
   const pricing = ensureShopPricing(shop, content);
-  if (!isDynamicPricingShop(shop, content) || shop.status !== "open") return { reviewed: false, changes: [] };
+  if (!isDynamicPricingShop(shop, content) || shop.status !== "open") return { reviewed: false, changes: [], factorChanges: [] };
   const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
   const interval = Math.max(1, content.rules.generalStorePricingReviewDays ?? PRICING_REVIEW_INTERVAL_DAYS);
   if (!options.force && Number.isFinite(pricing.lastReviewSerial) && pricing.lastReviewSerial >= 0
-      && serial - pricing.lastReviewSerial < interval) return { reviewed: false, changes: [] };
+      && serial - pricing.lastReviewSerial < interval) return { reviewed: false, changes: [], factorChanges: [] };
   pricing.lastReviewSerial = serial;
   const target = shopTargetMarginPercent(state, shop, content);
   const tolerance = Math.max(0, content.rules.generalStorePricingTolerancePercent ?? PRICING_DEVIATION_TOLERANCE_PERCENT);
   const maxStep = Math.max(0, content.rules.generalStorePricingMaxStepPercent ?? PRICING_MAX_STEP_PERCENT);
+  const rules = content.rules.priceAdjust || {};
+  const itemIds = shopRetailItemIdsSafe(shop, content);
   const changes = [];
-  for (const itemId of shopRetailItemIdsSafe(shop, content)) {
-    const actual = shopItemActualMarginPercent(pricing, itemId);
+  for (const itemId of itemIds) {
+    const factorInWindow = priceFactorOf(pricing, itemId);
+    const actual = shopItemActualMarginPercent(pricing, itemId, factorInWindow);
     if (actual === null) continue;
     const deviation = actual - target;
     if (Math.abs(deviation) <= tolerance) continue;
     const wholesale = currentUnitPrice(state, itemId, content) || 0;
     if (!(wholesale > 0)) continue;
-    const currentPrice = currentEffectiveRetailPrice(shop, itemId, wholesale, pricing, content);
+    const currentPrice = shopBaseRetailPrice(itemId, wholesale, target, pricing);
     // 由本窗口的实际利润率反推目标售价：利润率 m = 1 − 成本/收入，故 成本/收入 = 1 − m。
     // 达到目标利润率 t 需要 成本/收入 = 1 − t，即 收入 需放大 (1−m)/(1−t) 倍；
     // 成本结构不变时，价格同比例放大即可。这就是"实际偏离多少就补多少"。
@@ -209,19 +224,44 @@ export function reviewShopPricing(state, shop, content, options = {}) {
     pricing.retailPriceVoucherPerUnit[itemId] = bounded;
     changes.push({ itemId, from: currentPrice, to: bounded, actualMarginPercent: actual, targetMarginPercent: target, deviationPercent: deviation });
   }
+  const factorChanges = updateShopPriceFactors(shop, pricing, itemIds, content, rules);
   // 窗口滚动：本轮判断用过的数据清零，下一轮重新累计 7 天，
   // 避免"连续偏离"被同一批陈旧样本反复触发。
   resetPricingWindow(pricing, content);
   const totalChanges = changes.length;
-  return { reviewed: true, changes, targetMarginPercent: target, changedItems: totalChanges };
+  return { reviewed: true, changes, factorChanges, targetMarginPercent: target, changedItems: totalChanges };
 }
 
-function currentEffectiveRetailPrice(shop, itemId, wholesale, pricing, content) {
+// 库存系数复核：窗口 = 最近 reviewDays 天的日归档（含当天）。
+// 积压 → 降价；紧缺（窗口内有断货需求）→ 涨价；清库存判定（库存天数 > clearanceStockDays）决定售价下限。
+function updateShopPriceFactors(shop, pricing, itemIds, content, rules) {
+  const windowDays = Math.max(1, rules.reviewDays ?? PRICING_REVIEW_INTERVAL_DAYS);
+  const clearanceDays = Math.max(0, rules.clearanceStockDays ?? 42);
+  const rows = (shop.history || []).slice(-windowDays);
+  const factorChanges = [];
+  for (const itemId of itemIds) {
+    const avgSoldUnits = rows.length ? rows.reduce((sum, row) => sum + Math.max(0, row.soldUnitsByItem?.[itemId] || 0), 0) / rows.length : 0;
+    const shortage = rows.some(row => (row.stockoutUnitsByItem?.[itemId] || 0) > 0);
+    const stockUnits = Math.max(0, shop.inventory?.[itemId] || 0);
+    const before = priceFactorOf(pricing, itemId);
+    const next = nextPriceFactor(before, { stockUnits, avgSoldUnits, shortage }, rules);
+    const stockDays = stockDaysOf(stockUnits, avgSoldUnits);
+    const clearance = stockDays > clearanceDays;
+    pricing.priceFactor[itemId] = next.factor;
+    pricing.priceFactorReason[itemId] = next.reason;
+    pricing.priceClearance[itemId] = clearance;
+    if (Math.abs(next.factor - before) > 1e-9) {
+      factorChanges.push({ itemId, from: before, to: next.factor, reason: next.reason, stockDays, shortage, clearance });
+    }
+  }
+  return factorChanges;
+}
+
+// 基准价（不含库存系数）：显式现售价优先，否则 进货价 × (1 + 目标利润率)。与 economy/operating-plan.js 的 shopTradePrices 同口径。
+function shopBaseRetailPrice(itemId, wholesale, target, pricing) {
   const explicit = Number(pricing.retailPriceVoucherPerUnit?.[itemId]);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  const fallbackPercent = Number(pricing.targetMarginPercent);
-  const percent = Number.isFinite(fallbackPercent) ? fallbackPercent : (content.rules.generalStoreMarkupPercent ?? 20);
-  return wholesale * (1 + percent / 100);
+  return wholesale * (1 + target / 100);
 }
 
 // 把定价窗口（收入/成本/工资/销量）清零，价格历史保留（弹性需要 30 天）。
@@ -295,14 +335,17 @@ export function setShopRetailPrice(state, shopId, itemId, value, content) {
   const price = Math.round(Number(value) * 1000) / 1000;
   if (!Number.isFinite(price) || price <= 0 || price > 1e6) return { ok: false, reason: "售价须为正的有限数值" };
   const wholesale = currentUnitPrice(state, itemId, content) || 0;
-  const finalPrice = Math.max(wholesale, price);
   const pricing = ensureShopPricing(shop, content);
+  // 物价会动：基准价 = 现售价 ÷ 当前库存系数，使面板上输入的价格就是实际成交价（下一次复核再随库存变化）。
+  const factor = priceFactorOf(pricing, itemId);
+  const base = Math.max(wholesale, price / factor);
   pricing.retailPriceVoucherPerUnit ||= {};
-  pricing.retailPriceVoucherPerUnit[itemId] = finalPrice;
+  pricing.retailPriceVoucherPerUnit[itemId] = base;
+  const finalPrice = Math.max(retailFloorOf(pricing, itemId, wholesale, content.rules.priceAdjust), base * factor);
   // 手动调价后重置复核节拍为当前，避免次日立刻被自动复核覆盖（之前置-1反而导致立即复核）。
   const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
   pricing.lastReviewSerial = serial;
-  return { ok: true, shopId, itemId, value: finalPrice, clampedToCost: finalPrice > price };
+  return { ok: true, shopId, itemId, value: finalPrice, clampedToCost: finalPrice > price + 1e-9 };
 }
 
 // 面板视图：每商品一行（进价/现售价/实际利润率/目标利润率/7天销量）+ 商店总览。
@@ -323,8 +366,9 @@ export function selectShopPricingView(state, shop, content) {
   const target = shopTargetMarginPercent(state, shop, content);
   const rows = shopRetailItemIdsSafe(shop, content).map(itemId => {
     const wholesale = currentUnitPrice(state, itemId, content) || 0;
-    const explicit = Number(pricing.retailPriceVoucherPerUnit?.[itemId]);
-    const retail = Number.isFinite(explicit) && explicit > 0 ? explicit : wholesale * (1 + target / 100);
+    const base = shopBaseRetailPrice(itemId, wholesale, target, pricing);
+    const factor = priceFactorOf(pricing, itemId);
+    const retail = Math.max(retailFloorOf(pricing, itemId, wholesale, content.rules.priceAdjust), base * factor);
     const revenue = Math.max(0, pricing.itemRevenue?.[itemId] || 0);
     const cogs = Math.max(0, pricing.itemCogs?.[itemId] || 0);
     const wage = Math.max(0, pricing.itemWageCost?.[itemId] || 0);
@@ -338,6 +382,10 @@ export function selectShopPricingView(state, shop, content) {
       unit: content.items[itemId]?.unit || "斤",
       wholesaleVoucherPerUnit: wholesale,
       retailVoucherPerUnit: retail,
+      basePriceVoucherPerUnit: base,
+      priceFactor: factor,
+      priceFactorReason: pricing.priceFactorReason?.[itemId] || "",
+      clearance: Boolean(pricing.priceClearance?.[itemId]),
       actualMarginPercent: actual,
       targetMarginPercent: target,
       soldJin7d: soldUnits / scale,

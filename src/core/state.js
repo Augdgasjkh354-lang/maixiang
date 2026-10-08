@@ -230,11 +230,13 @@ export function createInitialState(options) {
       purchasePricesVoucherPerUnit: { ...(content.rules.wholesaleDefaultPurchasePrices || {}) },
       purchasePriceReferenceVoucherPerUnit: { ...(content.rules.wholesaleDefaultPurchasePrices || {}) },
       purchasePriceIndex: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 1])),
+      // 物价会动：批发自动调价，默认全部关闭。条目 { enabled, anchorVoucherPerUnit, reason, lastReviewSerial }，缺省即关闭。
+      autoPricing: {},
       monopoly: { allocatedInValueUnits: 0, allocatedInputValueUnits: 0 },
       valueFlow: { day: { sales: 0, purchases: 0 }, year: { sales: 0, purchases: 0 }, cumulative: { sales: 0, purchases: 0 } },
       purchaseSpend: { day: 0, year: 0, cumulative: 0 },
       dailyTownAllocationUnits: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0])),
-      day: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
+      day: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, unmetUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
       year: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 },
       cumulative: { intakeUnits: {}, soldUnits: {}, townAllocatedUnits: {}, townConsumedUnits: {}, purchaseVoucherUnits: 0, salesVoucherUnits: 0 }
     },

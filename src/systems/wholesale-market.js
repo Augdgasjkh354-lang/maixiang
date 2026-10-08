@@ -23,6 +23,7 @@ import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPaym
 import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/business.js";
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
 import { setCurrentUnitPrice, currentUnitPrice } from "../economy/prices.js";
+import { nextPriceFactor } from "../economy/price-adjust.js";
 import { householdConvertibleWheatUnits, syncResidentAggregates } from "./households.js";
 
 
@@ -58,8 +59,11 @@ export function ensureWholesaleMarket(state, content) {
   market.pricesVoucherPerUnit ||= {};
   market.purchasePricesVoucherPerUnit ||= {};
   market.purchasePriceReferenceVoucherPerUnit ||= {};
+  // 物价会动：批发自动调价（默认关闭，见 setWholesaleAutoPricing）。
+  market.autoPricing ||= {};
   market.dailyTownAllocationUnits ||= emptyItemMap(content, 0);
-  market.day ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), unmetUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day.unmetUnits ||= emptyItemMap(content, 0);
   market.year ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.cumulative ||= { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   // 统购统销累计账：无偿调拨入库与领用的成本价值。
@@ -112,7 +116,7 @@ const addPeriodValue = bookAdd;
 
 export function resetWholesaleDay(state, content) {
   const market = ensureWholesaleMarket(state, content);
-  market.day = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
+  market.day = { intakeUnits: emptyItemMap(content, 0), soldUnits: emptyItemMap(content, 0), townAllocatedUnits: emptyItemMap(content, 0), townConsumedUnits: emptyItemMap(content, 0), unmetUnits: emptyItemMap(content, 0), purchaseVoucherUnits: 0, salesVoucherUnits: 0 };
   market.purchaseSpend.day = 0;
   market.valueFlow.day = { sales: 0, purchases: 0 };
 }
@@ -499,6 +503,11 @@ export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, 
   const available = itemId === "wheat"
     ? Math.max(0, state.accounts?.town?.wheat || 0)
     : Math.max(0, market.inventory[itemId] || 0);
+  // 缺货记账（批发自动调价的紧缺信号）：要的比有的多，差额记为当日未满足量。
+  if (itemId !== "wheat" && requestedUnits > available) {
+    market.day.unmetUnits ||= emptyItemMap(content, 0);
+    market.day.unmetUnits[itemId] = (market.day.unmetUnits[itemId] || 0) + Math.floor(requestedUnits - available);
+  }
   let units = Math.min(available, Math.max(0, Math.floor(requestedUnits)));
   if (units <= 0) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: "批发市场缺货" };
   const listPrice = wholesaleUnitPrice(state, itemId, content);
@@ -544,6 +553,7 @@ export function readWholesaleMarket(state, content) {
     purchasePricesVoucherPerUnit: { ...(source.purchasePricesVoucherPerUnit || {}) },
     purchasePriceReferenceVoucherPerUnit: { ...(source.purchasePriceReferenceVoucherPerUnit || {}) },
     purchasePriceIndex: { ...(source.purchasePriceIndex || {}) },
+    autoPricing: { ...(source.autoPricing || {}) },
     dailyTownAllocationUnits: { ...(source.dailyTownAllocationUnits || {}) },
     monopoly: { ...(source.monopoly || {}) },
     valueFlow: {
@@ -601,6 +611,10 @@ export function wholesaleSummary(state, content) {
     purchasePriceIndex: purchaseIndex,
     inventory: Object.fromEntries(wholesaleMarketItemIds(content).map(itemId => [itemId, (market.inventory[itemId] || 0) / scale])),
     dailyTownAllocation: Object.fromEntries(wholesaleMarketItemIds(content).map(itemId => [itemId, (market.dailyTownAllocationUnits[itemId] || 0) / scale])),
+    autoPricing: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => {
+      const row = market.autoPricing?.[itemId] || {};
+      return [itemId, { enabled: row.enabled === true, anchorVoucherPerUnit: Number(row.anchorVoucherPerUnit || 0), reason: row.reason || "" }];
+    })),
     cashflow,
     monopoly: { ...market.monopoly },
     valueFlow: { ...market.valueFlow, day: { ...market.valueFlow.day }, year: { ...market.valueFlow.year }, cumulative: { ...market.valueFlow.cumulative } },
@@ -621,6 +635,7 @@ export function snapshotWholesaleHistory(state, content) {
     day: state.day,
     inventory: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.inventory?.[itemId] || 0])),
     sold: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.soldUnits?.[itemId] || 0])),
+    unmet: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.unmetUnits?.[itemId] || 0])),
     townConsumed: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.day?.townConsumedUnits?.[itemId] || 0])),
     price: Object.fromEntries(wholesaleMonopolyItemIds(content).map(itemId => [itemId, market.pricesVoucherPerUnit?.[itemId] || 0]))
   };
@@ -661,6 +676,67 @@ export function townOutputMarketRoomUnits(state, itemId, content) {
   const target = Math.max(minimum, demand * (content.rules.townOutputStockDays ?? 30));
   const stock = Math.max(0, state.wholesaleMarket?.inventory?.[itemId] || 0) + Math.max(0, state.accounts?.town?.[itemId] || 0);
   return Math.max(0, target - stock);
+}
+
+// ---------------------------------------------------------------- 批发市场自动调价（物价会动）
+//
+// 默认全部关闭，玩家在面板逐品开启。开启时记下当前售价为锚定价；每 reviewDays 天复核一次：
+// 系数 = 当前售价 ÷ 锚定价，用 nextPriceFactor（库存、近 N 日日均售出、近 N 日缺货）更新，
+// 再限制在锚定价 ±wholesaleBandPercent 内，经 setCurrentUnitPrice 写回（仍受官价区间钳制）。
+// 玩家手动改价会成为新的锚定价（见 economy/prices.js 的 setCurrentUnitPrice）。
+
+function marketSerial(state, content) {
+  return (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
+}
+
+// 玩家命令：开启/关闭某商品的批发自动调价。开启时以当前售价为锚定价；关闭时保留当前售价不动。
+export function setWholesaleAutoPricing(state, itemId, enabled, content) {
+  if (itemId === "wheat") return { ok: false, reason: "小麦归镇库直管，不在批发市场挂价买卖" };
+  if (!wholesaleMonopolyItemIds(content).includes(itemId)) return { ok: false, reason: "批发市场不经营这种商品" };
+  if (typeof enabled !== "boolean") return { ok: false, reason: "开关须为布尔值" };
+  const market = ensureWholesaleMarket(state, content);
+  const current = wholesaleUnitPrice(state, itemId, content);
+  if (!(current > 0)) return { ok: false, reason: "当前售价无效" };
+  if (enabled) {
+    market.autoPricing[itemId] = { enabled: true, anchorVoucherPerUnit: current, reason: "", lastReviewSerial: marketSerial(state, content) };
+  } else {
+    market.autoPricing[itemId] = { ...(market.autoPricing[itemId] || {}), enabled: false };
+  }
+  return { ok: true, itemId, enabled, anchorVoucherPerUnit: market.autoPricing[itemId].anchorVoucherPerUnit ?? current, valueVoucherPerUnit: current };
+}
+
+// 日结：到期的已开启商品做一次自动调价。没有批发市场时不动。
+export function reviewWholesaleAutoPricing(state, content) {
+  if (!hasWholesaleMarket(state)) return { reviewed: false, changes: [] };
+  const market = ensureWholesaleMarket(state, content);
+  const rules = content.rules.priceAdjust || {};
+  const interval = Math.max(1, rules.reviewDays ?? 7);
+  const band = Math.max(0, rules.wholesaleBandPercent ?? 30) / 100;
+  const serial = marketSerial(state, content);
+  const changes = [];
+  for (const itemId of wholesaleMonopolyItemIds(content)) {
+    const row = market.autoPricing?.[itemId];
+    if (!row?.enabled) continue;
+    if (Number.isFinite(row.lastReviewSerial) && serial - row.lastReviewSerial < interval) continue;
+    row.lastReviewSerial = serial;
+    const current = wholesaleUnitPrice(state, itemId, content);
+    if (!(Number(row.anchorVoucherPerUnit) > 0)) row.anchorVoucherPerUnit = current;
+    const anchor = Number(row.anchorVoucherPerUnit);
+    if (!(anchor > 0) || !(current > 0)) continue;
+    const factor = current / anchor;
+    const window = (market.history || []).slice(-interval);
+    const shortage = window.some(h => (h.unmet?.[itemId] || 0) > 0);
+    const avgSoldUnits = wholesaleAvgSoldUnits(state, itemId, content, interval);
+    const next = nextPriceFactor(factor, { stockUnits: market.inventory?.[itemId] || 0, avgSoldUnits, shortage }, rules);
+    const bounded = Math.min(1 + band, Math.max(1 - band, next.factor));
+    const result = setCurrentUnitPrice(state, itemId, anchor * bounded, content, { autoPricing: true });
+    if (!result.ok) continue;
+    row.reason = next.reason;
+    if (Math.abs(result.value - current) > 1e-9) {
+      changes.push({ itemId, from: current, to: result.value, factor: bounded, reason: next.reason, shortage, avgSoldUnits });
+    }
+  }
+  return { reviewed: true, changes };
 }
 
 // 批发市场趋势视图（0.1.11 zM）：供面板使用

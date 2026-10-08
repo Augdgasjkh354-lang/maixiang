@@ -114,6 +114,20 @@ export const RULES = Object.freeze({
   generalStorePromotionRecoverDays: 7,     // 连续 7 天盈利 → 退出促销
   generalStorePriceElasticity: 0.5,        // 售价每贵 10%，购买量降 5%
   generalStoreElasticityFloor: 0.1,        // 需求乘数下限，避免价格把需求打到 0
+  // 物价会动（economy/price-adjust.js）：综合商店零售价系数与批发市场自动调价共用这一套阈值。
+  priceAdjust: Object.freeze({
+    reviewDays: 7,               // 复核周期（天）：综合商店每 7 天复核一次系数；批发自动调价同周期
+    highStockDays: 21,           // 库存够卖超过 21 天 → 积压，降价
+    clearanceStockDays: 42,      // 库存够卖超过 42 天 → 清库存，综合商店允许降到进货价 × minFactor
+    lowStockDays: 3,             // 库存够卖不足 3 天且有拒客/断货 → 紧缺，涨价
+    stepDown: 0.05,              // 积压时每次降价比例
+    stepUp: 0.05,                // 紧缺时每次涨价比例
+    shortageStepUp: 0.10,        // 库存已空且有断货时每次涨价比例（涨得更快）
+    driftStep: 0.02,             // 正常时系数向 1 回归的每次步长（不越过 1）
+    minFactor: 0.7,              // 系数下限（清库存时售价可低到进货价 × 0.7）
+    maxFactor: 1.5,              // 系数上限
+    wholesaleBandPercent: 30     // 批发市场自动调价：售价相对锚定价的最大偏离（±%）
+  }),
   // 0.2.3 流通改革：批发市场做市商——收购价随库存反馈（防大公司抽干粮券）。
   wholesalePurchasePriceElasticity: 1.0,
   wholesalePurchasePriceScale: 1.0,

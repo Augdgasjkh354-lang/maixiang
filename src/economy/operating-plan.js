@@ -5,6 +5,7 @@ import { maximumFullyPayableValueUnits, maximumPayableValueUnits } from "./payme
 import { populationStats, readJobCount, privateJobKeyForBuilding, listedJobKeyForBuilding } from "../selectors/labor.js";
 import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from "../systems/households.js";
 import { industryTypeIds } from "../content/buildings.js";
+import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
 
 
 function daySerial(state, content) {
@@ -28,13 +29,13 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
   let retail = wholesale * (1 + markup);
   if (def.id === "general" && shop) {
     const explicit = Number(shop.pricing?.retailPriceVoucherPerUnit?.[productId]);
-    if (Number.isFinite(explicit) && explicit > 0) retail = explicit;
-    else {
-      const target = shopTargetMarginPercentFor(shop, content);
-      retail = wholesale * (1 + target / 100);
-    }
-    // 售价下限不低于进货价（用户拍板的定价约束）。
-    retail = Math.max(wholesale, retail);
+    let base;
+    if (Number.isFinite(explicit) && explicit > 0) base = explicit;
+    else base = wholesale * (1 + shopTargetMarginPercentFor(shop, content) / 100);
+    // 物价会动：库存系数作用在基准价上（见 economy/price-adjust.js）。
+    // 售价下限不低于进货价（用户拍板的定价约束）；只有清库存（库存够卖超过 clearanceStockDays）时才可降到进货价 × minFactor。
+    const floor = retailFloorOf(shop.pricing, productId, wholesale, content.rules.priceAdjust);
+    retail = Math.max(floor, base * priceFactorOf(shop.pricing, productId));
   }
   return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: wholesale };
 }
@@ -60,6 +61,17 @@ function shopTargetMarginPercentFor(shop, content) {
   const value = Number(shop?.pricing?.targetMarginPercent);
   if (Number.isFinite(value)) return Math.max(0, Math.min(100, value));
   return Math.max(0, content.rules.generalStoreMarkupPercent ?? 20);
+}
+
+// 居民实际面对的综合商店零售价：营业中综合商店里最便宜的一家（与集市参考价同口径）；没有综合商店时按批发价加成。
+// 只用于需求测算（主食/盐/日用品的可买量），口径跟随店铺的目标利润率、现售价与物价系数。
+function generalStoreReferenceRetail(state, itemId, content) {
+  const prices = Object.values(state.shops || {})
+    .filter(shop => shop.status === "open" && shop.typeId === "general")
+    .map(shop => shopTradePrices(state, "general", content, itemId, shop)?.retailVoucherPerUnit)
+    .filter(price => price > 0);
+  if (prices.length) return Math.min(...prices);
+  return currentUnitPrice(state, itemId, content) * (1 + Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100);
 }
 
 function rollingAverage(rows, key, window) {
@@ -113,7 +125,7 @@ function residentAffordableUnits(state, itemId, price, content) {
 
 function breadDailyDemandUnits(state, content) {
   const people = populationStats(state).total;
-  const price = currentUnitPrice(state, "bread", content) * (1 + Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100);
+  const price = generalStoreReferenceRetail(state, "bread", content);
   const base = content.rules.breadBasePriceWheatPerJin;
   const share = Math.max(0, Math.min(content.rules.breadTargetShareMaximum,
     content.rules.breadTargetShareAtBasePrice * Math.pow(base / price, content.rules.breadPriceElasticity)));
@@ -128,7 +140,7 @@ function saltDailyDemandUnits(state, content) {
   const demand = Math.max(0, state.salt?.todayDemandUnits || 0);
   const residentStock = state.accounts?.residents?.salt || 0;
   const shortage = Math.max(0, demand - residentStock);
-  const price = currentUnitPrice(state, "salt", content) * (1 + Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100);
+  const price = generalStoreReferenceRetail(state, "salt", content);
   return Math.min(shortage, residentAffordableUnits(state, "salt", price, content));
 }
 
@@ -136,7 +148,7 @@ function saltDailyDemandUnits(state, content) {
 function goodsDailyDemandUnits(state, itemId, content) {
   const demand = Math.max(0, state.goodsDemand?.todayDemandUnits?.[itemId] || 0);
   const shortage = Math.max(0, demand - (state.accounts?.residents?.[itemId] || 0));
-  const price = currentUnitPrice(state, itemId, content) * (1 + Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100);
+  const price = generalStoreReferenceRetail(state, itemId, content);
   return Math.min(shortage, residentAffordableUnits(state, itemId, price, content));
 }
 

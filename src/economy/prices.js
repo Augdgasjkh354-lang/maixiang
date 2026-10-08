@@ -22,7 +22,8 @@ export function currentPriceMap(state, content) {
   return Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, currentUnitPrice(state, itemId, content)]));
 }
 
-export function setCurrentUnitPrice(state, itemId, price, content) {
+// options.autoPricing：批发市场自动调价写价时传 true，此时不算"玩家手动改价"，不重置锚定价。
+export function setCurrentUnitPrice(state, itemId, price, content, options = {}) {
   const value = Math.round(Number(price) * 1000) / 1000;
   if (!Number.isFinite(value) || value <= 0) return { ok: false, reason: "价格须为正的有限数值" };
   // 钳制到官价锚定区间，防止输错数量级或恶意压价（如木材 0.001）扭曲结算；
@@ -40,6 +41,9 @@ export function setCurrentUnitPrice(state, itemId, price, content) {
   state.wholesaleMarket ||= {};
   state.wholesaleMarket.pricesVoucherPerUnit ||= {};
   state.wholesaleMarket.pricesVoucherPerUnit[itemId] = finalValue;
+  // 自动调价开启时，玩家手动改的售价即成为新的锚定价（系数从 1 重新算起）。
+  const auto = state.wholesaleMarket.autoPricing?.[itemId];
+  if (auto?.enabled && !options.autoPricing) auto.anchorVoucherPerUnit = finalValue;
   if (state.market.operatingPlan) state.market.operatingPlan.updatedSerial = -1;
   if (itemId === "bread") {
     state.market.breadPriceWheatPerJin = finalValue;

@@ -15,7 +15,7 @@ import { listCompanyOnExchange, configureListedShareOffer, executeTownBuyback } 
 import { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndustryPrices } from "../economy/prices.js";
 import { setPublicProcurementIntent as setPublicProcurementIntentSystem, clearPublicProcurementIntent as clearPublicProcurementIntentSystem } from "../systems/public-procurement.js";
 import { openShop, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } from "../systems/shops.js";
-import { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, stockpileWholesale as stockpileWholesaleSystem, releaseWholesale as releaseWholesaleSystem } from "../systems/wholesale-market.js";
+import { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, setWholesaleAutoPricing, stockpileWholesale as stockpileWholesaleSystem, releaseWholesale as releaseWholesaleSystem } from "../systems/wholesale-market.js";
 import { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice } from "../systems/shop-pricing.js";
 import { setBuildingOutputTarget } from "../systems/production.js";
 import { setServiceUnitPrice } from "../systems/services.js";
@@ -338,6 +338,11 @@ export function configureWholesalePrice(state, itemId, value, content) {
 // 0.2.3 流通改革：批发市场做市商——收购价独立可调（售价沿用 configureWholesalePrice）。
 export function configureWholesalePurchasePrice(state, itemId, value, content) {
   return setWholesalePurchasePrice(state, itemId, value, content);
+}
+
+// 物价会动：批发市场某商品的自动调价开关（默认关；开启时以当前售价为锚定价）。
+export function configureWholesaleAutoPricing(state, itemId, enabled, content) {
+  return setWholesaleAutoPricing(state, itemId, enabled, content);
 }
 
 // 0.2.3 综合商店动态加价：单店或全镇统一设置目标利润率（0~100%）。
