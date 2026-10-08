@@ -81,6 +81,8 @@ test("0.1.1真实面包链：采购、生产、批发、零售分别记账且实
 
 test("0.1.1多家企业共享同一需求，过剩库存后按周期缩减计划与用工", () => {
   const state = legacyVoucherState({ seed: 1102 });
+  // 基线清理：换券额度固定为旧默认 2 斤，避免新默认 5 斤改变居民需求口径。
+  state.policy.employmentExchangeJin = 2;
   addBuilding(state, "bakery", "011-bakery-a");
   addBuilding(state, "bakery", "011-bakery-b");
   fundTown(state, 100000);
@@ -173,18 +175,20 @@ test("0.1.1综合商店按真实客流增员，且新店员满30日后才允许�
   const opened = simulation.openResidentShop(state, street.id, "bakery", owner.id);
   assert.equal(opened.ok, true, opened.reason);
   const shop = state.shops[opened.shopId];
-  // 基线清理：商人计入接待能力，1 商人 = 60 客流 × 2 斤 = 360000 单位。
-  assert.equal(shopSalesCapacityUnits(state, shop, CONTENT), 360000, "仅商人时应有商人本人的接待能力");
-  // 用户 0.1.11 新增增员经济性门槛：需盈利且资金充足才增员，先注资
+  // 商人计入接待能力；客流按户计，每位客人按一户人家的日用量（shopJinPerCustomer）折算。
+  const perStaffUnits = CONTENT.rules.generalStoreCustomersPerStaff * CONTENT.rules.shopJinPerCustomer * I;
+  assert.equal(shopSalesCapacityUnits(state, shop, CONTENT), perStaffUnits, "仅商人时应有商人本人的接待能力");
+  // 用户 0.1.11 新增增员经济性门槛：需盈利且资金充足才增员，先注资。
+  // 资金门槛 = (店员+商人) × 每人日接待量 × 平均批发价 + 3 日工资；每人 400 斤（20 户 × 20 斤）后，
+  // 2 人的备货门槛约 6000 多粮券（2000 粮券已不够），因此注资 10000 粮券。
   fundTown(state, 100000);
-  assert.equal(transferVouchers(state, "town", `shop:${shop.id}`, 2000 * V, CONTENT, "test_shop_capital", "补足测试增员资金").ok, true);
+  assert.equal(transferVouchers(state, "town", `shop:${shop.id}`, 10000 * V, CONTENT, "test_shop_capital", "补足测试增员资金").ok, true);
   shop.history = Array.from({ length: CONTENT.rules.operatingObservationDays }, (_, serial) => ({
     serial, customerCount: 0, rejectedCustomerCount: 100, soldUnits: 0, profitVoucherUnits: 0
   }));
   prepareShopsForDay(state, CONTENT);
   assert.equal(jobCount(state, `shop:${shop.id}:clerk`), 1);
-  // 基线清理：商人计入，1 店员 + 1 商人 = 120 客流 × 2 斤 = 240 斤。
-  assert.equal(shopSalesCapacityUnits(state, shop, CONTENT), 240 * I, "1名店员加商人对应120客流、按每客2斤折算销售承载量");
+  assert.equal(shopSalesCapacityUnits(state, shop, CONTENT), 2 * perStaffUnits, "1名店员加商人的接待能力是商人一人时的两倍");
 
   state.day += CONTENT.rules.operatingPlanIntervalDays;
   shop.history = Array.from({ length: CONTENT.rules.operatingObservationDays }, (_, serial) => ({

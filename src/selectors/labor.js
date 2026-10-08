@@ -64,7 +64,7 @@ export function selectJobRows(state, content, runtime = null) {
     if (!definition) continue;
     for (const job of definition.jobs || []) {
       const ownership = building.ownership || { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
-      const townLevels = Math.max(0, Math.min(content.rules.buildingMaxLevel || 5, ownership.townLevels ?? building.level ?? 1));
+      const townLevels = Math.max(0, Math.min(content.rules.buildingMaxLevel || 10, ownership.townLevels ?? building.level ?? 1));
       const localCapacity = job.capacityMode === "building" ? job.slots : job.slots * townLevels;
       const managedShop = job.managedBy === "shops";
       rows.push({

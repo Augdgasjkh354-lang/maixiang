@@ -30,7 +30,7 @@ export default {
       jobs: [{ id: "clay_diggers", name: "掘土工", slots: 16, wagePerWorkerDay: 5, note: "每人每日挖3斤陶土", releasePriority: 30 }],
       materialRequirements: [{ itemId: "wood", quantity: 150 }],
       construction: { workDays: 180, recommendedWorkers: 10 },
-      upgrade: { maxLevel: 5, workDays: 180, materialRequirements: [{ itemId: "wood", quantity: 150 }] }
+      upgrade: { maxLevel: 10, workDays: 180, materialRequirements: [{ itemId: "wood", quantity: 150 }] }
     },
     kiln: {
       id: "kiln", name: "陶窑", icon: "🏺", description: "烧制陶器 · 需已有陶土与木柴",
@@ -39,7 +39,7 @@ export default {
       jobs: [{ id: "kiln_workers", name: "窑工", slots: 10, wagePerWorkerDay: 5, note: "每人每日耗4斤陶土、1斤木柴，烧出4件陶器", releasePriority: 40 }],
       materialRequirements: [{ itemId: "wood", quantity: 500 }],
       construction: { workDays: 400, recommendedWorkers: 10 },
-      upgrade: { maxLevel: 5, workDays: 400, materialRequirements: [{ itemId: "wood", quantity: 500 }] }
+      upgrade: { maxLevel: 10, workDays: 400, materialRequirements: [{ itemId: "wood", quantity: 500 }] }
     }
   },
 

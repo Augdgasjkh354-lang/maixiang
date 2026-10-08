@@ -425,10 +425,10 @@ export function drawBuilding(ctx, x, y, size, building, time = 0) {
     drawCottage(ctx, px, py, size);
   }
 
-  const level = Math.max(1, Math.min(5, Math.floor(building.level || 1)));
+  const level = Math.max(1, Math.min(10, Math.floor(building.level || 1)));
   if (level > 1) {
     ctx.save();
-    for (let i = 0; i < level - 1; i++) {
+    for (let i = 0; i < Math.min(level, 5) - 1; i++) { // 5 级以上沿用 5 级的标记数（再多就画出地块了）
       const ax = px + size * (.24 + i * .13);
       const ay = py + size * .82;
       ctx.fillStyle = i % 2 ? "#b7773f" : "#d49a53";

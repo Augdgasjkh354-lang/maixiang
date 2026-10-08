@@ -70,9 +70,15 @@ function ensureShopBooks(shop, content = null) {
   return shop;
 }
 
+// 补齐店铺字段（读旧档、新开店后）。每天、每次店铺数变化各做一次即可，不在每笔买卖里重复遍历全部店铺和商品。
+const ensuredShops = new WeakMap();
+
 export function ensureShops(state, content) {
   state.shops ||= {};
   state.nextShopNumber ||= 1;
+  const stamp = `${state.year}:${state.day}:${Object.keys(state.shops).length}:${state.nextShopNumber}`;
+  if (ensuredShops.get(state.shops) === stamp) return state.shops;
+  ensuredShops.set(state.shops, stamp);
   for (const shop of Object.values(state.shops)) {
     shop.inventory ||= emptyShopInventory(content);
     for (const itemId of Object.keys(content.items)) shop.inventory[itemId] ||= 0;
@@ -197,6 +203,11 @@ function protectedClerkCount(state, shop, content) {
   return syncClerkTenure(state, shop, content).filter(hired => serial - hired < minimum).length;
 }
 
+// 客流按户计（一户一天在一家店算一位客人），一位客人一次买的量按一户人家的日用量估。
+export function shopJinPerCustomer(content) {
+  return content.rules.shopJinPerCustomer ?? 20;
+}
+
 export function shopDailyCustomerCapacity(state, shop, content) {
   if (!shop || shop.status !== "open" || !shopMerchantOnDuty(state, shop)) return 0;
   const def = shopDefinition(content, shop.typeId);
@@ -207,7 +218,7 @@ export function shopDailyCustomerCapacity(state, shop, content) {
     if (shopIsService(shop, content)) return serviceShopCapacityUses(state, shop, content);
     // 非综合商店零售店：按销售能力折算客流（商人60斤/店员120斤，每客2斤），避免恒0导致永远拒售。
     if (def?.kind === "retail") {
-      const perCustomerJin = content.rules.foodPerPersonDay || 2;
+      const perCustomerJin = shopJinPerCustomer(content);
       const merchants = shopMerchantCount(state, shop);
       const clerks = shopClerkCount(state, shop);
       const jin = merchants * (content.rules.shopMerchantSalesCapacityJin || 60) + clerks * (content.rules.shopClerkSalesCapacityJin || 120);
@@ -444,7 +455,7 @@ export function shopSalesCapacityUnits(state, shop, content) {
   }
   if (shopDefinition(content, shop.typeId)?.id === "general") {
     const customers = shopDailyCustomerCapacity(state, shop, content);
-    return Math.round(customers * (content.rules.foodPerPersonDay || 2) * content.precision.inventoryUnitsPerJin);
+    return Math.round(customers * shopJinPerCustomer(content) * content.precision.inventoryUnitsPerJin);
   }
   const clerkCount = shopClerkCount(state, shop);
   const merchantCount = shopMerchantCount(state, shop);
@@ -538,6 +549,11 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
       today.customerHouseholds ||= {};
       today.customerHouseholds[buyerHouseholdId] = true;
       bookAdd(shop.accounts, "customerCount", 1);
+      // 同日较早因断货/限流被记为拒客、之后又在本店成交的家庭：撤销那一次拒客，避免同一家庭同时算成客人和拒客。
+      if (today.rejectedHouseholds?.[buyerHouseholdId]) {
+        delete today.rejectedHouseholds[buyerHouseholdId];
+        bookAdd(shop.accounts, "rejectedCustomerCount", -1);
+      }
     }
   } else {
     bookAdd(shop.accounts, "customerCount", 1);
@@ -553,14 +569,32 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
 export function registerRejectedCustomers(state, shopId, units, content) {
   const shop = state.shops?.[shopId];
   if (!shop || shop.status !== "open" || !(units > 0)) return 0;
-  const perCustomer = Math.max(1, (content.rules.foodPerPersonDay || 2) * content.precision.inventoryUnitsPerJin);
+  const perCustomer = Math.max(1, shopJinPerCustomer(content) * content.precision.inventoryUnitsPerJin);
   const count = Math.ceil(units / perCustomer);
   bookAdd(shop.accounts, "rejectedCustomerCount", count);
   return count;
 }
 
+// 按家庭计的拒客（用户口径：一户一店一天最多算一个拒客，不论缺几样、缺多少）。
+// 已在本店成交的家庭不算拒客；同一家庭当日在本店已记过的拒客不重复记。
+export function registerRejectedHouseholds(state, shopId, householdIds, content) {
+  const shop = state.shops?.[shopId];
+  if (!shop || shop.status !== "open") return 0;
+  ensureShopBooks(shop, content);
+  const day = shop.accounts.day;
+  let count = 0;
+  for (const householdId of new Set(householdIds || [])) {
+    if (!householdId || day.customerHouseholds?.[householdId] || day.rejectedHouseholds?.[householdId]) continue;
+    day.rejectedHouseholds ||= {};
+    day.rejectedHouseholds[householdId] = true;
+    count += 1;
+  }
+  if (count > 0) bookAdd(shop.accounts, "rejectedCustomerCount", count);
+  return count;
+}
+
 // 断货的未满足需求：居民想买、该店却已无货时记入当日口径，次日进货据此放量（不影响当日销量与收入）。
-// 同时计为拒客（店铺增员的需求依据）；单店当日记入量不超过其日接待能力，超出部分不是可实现的需求。
+// 只记单位数；拒客人数由 registerRejectedHouseholds 按家庭计。单店当日记入量不超过其日接待能力，超出部分不是可实现的需求。
 export function registerShopStockoutDemand(state, shopId, itemId, units, content) {
   const shop = state.shops?.[shopId];
   if (!shop || shop.status !== "open" || !(units > 0)) return 0;
@@ -568,7 +602,6 @@ export function registerShopStockoutDemand(state, shopId, itemId, units, content
   const count = Math.min(Math.floor(units), shopSalesCapacityUnits(state, shop, content));
   if (count <= 0) return 0;
   bookAddMap(shop.accounts, "stockoutUnits", itemId, count);
-  registerRejectedCustomers(state, shopId, count, content);
   return count;
 }
 
@@ -902,7 +935,7 @@ function autoAdjustShopClerks(state, shop, content) {
       const wage = shopWage(state, shop, content);
       const avgWholesale = averageWholesalePriceJin(state, shop, content, history);
       const markup = (content.rules.generalStoreMarkupPercent ?? 20) / 100;
-      const marginalJin = perStaff * (content.rules.foodPerPersonDay || 2);
+      const marginalJin = perStaff * shopJinPerCustomer(content);
       const marginalProfit = marginalJin * avgWholesale * markup;
       const profitable = marginalProfit > wage;
       const scale = currencyScale(content);

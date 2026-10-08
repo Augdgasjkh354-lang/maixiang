@@ -244,7 +244,7 @@ export function selectDashboard(state, content, selection) {
     const result = {
       id: building.id,
       typeId: building.typeId,
-      level: Math.max(1, Math.min(content.rules.buildingMaxLevel || 5, building.level || 1)),
+      level: Math.max(1, Math.min(content.rules.buildingMaxLevel || 10, building.level || 1)),
       ownership: { townLevels: ownership.townLevels ?? building.level ?? 1, privateLevels: ownership.privateLevels || 0, listedLevels: ownership.listedLevels || 0 },
       materialInvestments: building.materialInvestments || [],
       plotId: building.plotId,
@@ -311,7 +311,7 @@ export function selectDashboard(state, content, selection) {
       outputTargetJin: building.outputTargetJin || 0,
       mainOutputItemId: definition?.recipeId ? content.recipes[definition.recipeId]?.outputs?.[0]?.itemId || null : null,
       // 人均产出（劳动生产率）：仅产业建筑有；等级加成与熟练度加成拆开展示。
-      ...productivityView(state, building.typeId, Math.max(1, Math.min(content.rules.buildingMaxLevel || 5, building.level || 1)), content)
+      ...productivityView(state, building.typeId, Math.max(1, Math.min(content.rules.buildingMaxLevel || 10, building.level || 1)), content)
     };
     return result;
   });
@@ -640,7 +640,9 @@ export function selectDashboard(state, content, selection) {
         hasPhysicalBank: Boolean(bankBuilding),
         bankBuildingId: bankBuilding?.id || null,
         legacyBankAccess: Boolean(state.monetaryReform?.legacyBankAccess),
-        employmentExchangeJin: state.policy?.employmentExchangeJin ?? 2
+        employmentExchangeJin: state.policy?.employmentExchangeJin ?? content.rules.employmentExchangeDefaultJin ?? 5,
+        employmentExchangeMinimumJin: content.rules.employmentExchangeMinimumJin ?? 0,
+        employmentExchangeMaximumJin: content.rules.employmentExchangeMaximumJin ?? 50
       };
     })() : null,
     currency: needSite ? {

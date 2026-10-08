@@ -127,14 +127,36 @@ export function totalHouseholdAgeBands(state) {
   }, { children: 0, workers: 0, elders: 0 });
 }
 
+// 按岗位缓存"哪些家庭在这个岗位上、各几人"。家庭岗位只经 setHouseholdJobCount 改动，改动时清掉该岗位的缓存；
+// 家庭增减会换掉 byId 对象，缓存随之失效（同 householdList）。返回的数组只读。
+const jobIndexCache = new WeakMap();
+
+function jobIndex(state) {
+  const byId = state.households?.byId;
+  if (!byId) return null;
+  let index = jobIndexCache.get(byId);
+  if (!index) { index = new Map(); jobIndexCache.set(byId, index); }
+  return index;
+}
+
 export function jobAssignments(state, jobKey) {
-  return householdList(state)
+  const index = jobIndex(state);
+  const cached = index?.get(jobKey);
+  if (cached) return cached.rows;
+  const rows = Object.freeze(householdList(state)
     .map(household => ({ householdId: household.id, count: Math.max(0, household.jobs?.[jobKey] || 0) }))
-    .filter(row => row.count > 0);
+    .filter(row => row.count > 0)
+    .map(row => Object.freeze(row)));
+  const count = rows.reduce((sum, row) => sum + row.count, 0);
+  index?.set(jobKey, { rows, count });
+  return rows;
 }
 
 export function jobCount(state, jobKey) {
-  return jobAssignments(state, jobKey).reduce((sum, row) => sum + row.count, 0);
+  const cached = jobIndex(state)?.get(jobKey);
+  if (cached) return cached.count;
+  jobAssignments(state, jobKey);
+  return jobIndex(state)?.get(jobKey)?.count ?? 0;
 }
 
 function currentDayKey(state) {
@@ -190,6 +212,7 @@ export function setHouseholdJobCount(state, householdId, jobKey, requested, cont
   household.jobs ||= {};
   if (target > 0) household.jobs[jobKey] = target;
   else delete household.jobs[jobKey];
+  if (target !== current) jobIndex(state)?.delete(jobKey);
   if (content && target > current) touchHouseholdEmploymentEligibility(state, householdId, content);
   return { ok: true, before: current, after: target };
 }
@@ -356,6 +379,18 @@ export function applyHouseholdDemography(state, changes) {
   return { before, after: totalHouseholdAgeBands(state), employmentReleases };
 }
 
+// 一批逐户收付（发工资、服务消费等）期间先不汇总居民账，结束时统一汇总一次。
+export function withDeferredHouseholdSync(state, content, fn) {
+  const previous = Boolean(state._deferHouseholdSync);
+  state._deferHouseholdSync = true;
+  try {
+    return fn();
+  } finally {
+    state._deferHouseholdSync = previous;
+    if (!previous && state._householdSyncDirty) syncResidentAggregates(state, content);
+  }
+}
+
 export function syncResidentAggregates(state, content) {
   if (!hasHouseholds(state)) return;
   if (state._deferHouseholdSync) { state._householdSyncDirty = true; return; }
@@ -416,7 +451,7 @@ export function householdExchangeAllowanceUnits(state, householdId, content) {
   const exchange = ensureEmploymentExchangeDay(state, content);
   if (!exchange) return Number.MAX_SAFE_INTEGER;
   const policyJin = Math.max(content.rules.employmentExchangeMinimumJin ?? 0,
-    Math.min(content.rules.employmentExchangeMaximumJin ?? 10, Number(state.policy?.employmentExchangeJin ?? content.rules.employmentExchangeDefaultJin ?? 2)));
+    Math.min(content.rules.employmentExchangeMaximumJin ?? 50, Number(state.policy?.employmentExchangeJin ?? content.rules.employmentExchangeDefaultJin ?? 5)));
   const employed = exchange.eligibleByHousehold?.[householdId] || 0;
   const gross = Math.round(employed * policyJin * content.precision.inventoryUnitsPerJin);
   const used = exchange.usedByHousehold[householdId] || 0;

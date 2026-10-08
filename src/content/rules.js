@@ -31,7 +31,7 @@ export const RULES = Object.freeze({
   rentPerResidentDayWheatJin: 1,
   saltFoodReserveDays: 30,
   saltGraceDays: 30,
-  buildingMaxLevel: 5,
+  buildingMaxLevel: 10,
   agricultureTaxDefaultPercent: 40, // 用户 0.1.11 调优（原 50）
   agricultureTaxMaximumPercent: 80,
   agricultureTaxLookbackDays: 30,
@@ -76,9 +76,9 @@ export const RULES = Object.freeze({
     difficultFoodDays: 14,
     comfortableFoodDays: 60
   }),
-  employmentExchangeDefaultJin: 2,
+  employmentExchangeDefaultJin: 5,
   employmentExchangeMinimumJin: 0,
-  employmentExchangeMaximumJin: 10,
+  employmentExchangeMaximumJin: 50,
   publicServiceDemandPopulation: 500,
   publicServiceDefaultWageVoucher: 10,
 
@@ -102,7 +102,9 @@ export const RULES = Object.freeze({
   shopMaxClerks: 20,
   generalStoreMaxClerks: 50,
   generalStoreMarkupPercent: 20,
-  generalStoreCustomersPerStaff: 60, // 基线清理：从40提到60，缓解小额多笔时的接待笔数瓶颈
+  // 一位客人（一户人家）一天在一家店平均买多少斤：决定商店卖货能力（客流 × 这个数）和加店员是否划算。
+  shopJinPerCustomer: 20,
+  generalStoreCustomersPerStaff: 20, // 客流按户计：每名店员（含商人）每天接待 20 户（旧口径一户约算 3 位客人、每人 60，用工规模不变）
   generalStoreMaxDailyCustomers: 2000, // 用户 0.1.11 调优（原 1000）
   // 0.2.3 流通改革：综合商店动态加价（v1 只做综合商店，其他小店保持固定加价）。
   generalStorePricingReviewDays: 7,        // 7 天复核一次
@@ -195,7 +197,7 @@ export const RULES = Object.freeze({
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
   wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.4, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 })
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 })
 });
 
 export const AGRICULTURE = Object.freeze({

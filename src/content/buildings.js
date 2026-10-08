@@ -14,7 +14,7 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 480, recommendedWorkers: 12
     }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 480, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 600 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 480, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 600 }]) })
   }),
   bakery: Object.freeze({
     id: "bakery", name: "面包房", icon: "🥖",
@@ -31,7 +31,7 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 400, recommendedWorkers: 10
     }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
   }),
   lumberyard: Object.freeze({
     id: "lumberyard", name: "伐木场", icon: "🪵",
@@ -49,7 +49,7 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 200, recommendedWorkers: 10
     }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
   saltworks: Object.freeze({
     id: "saltworks", name: "盐场", icon: "🧂",
@@ -68,7 +68,7 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 300, recommendedWorkers: 10
     }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
 
   winery: Object.freeze({
@@ -85,7 +85,7 @@ export const BUILDINGS = Object.freeze({
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
     construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
   }),
   cotton_field: Object.freeze({
     id: "cotton_field", name: "棉田", icon: "☁️",
@@ -101,7 +101,7 @@ export const BUILDINGS = Object.freeze({
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 200 }]),
     construction: Object.freeze({ workDays: 200, recommendedWorkers: 10 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 200 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 200 }]) })
   }),
   weaving_mill: Object.freeze({
     id: "weaving_mill", name: "织坊", icon: "🧵",
@@ -117,7 +117,7 @@ export const BUILDINGS = Object.freeze({
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
     construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
   }),
 
   wholesale_market: Object.freeze({
@@ -130,7 +130,7 @@ export const BUILDINGS = Object.freeze({
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]),
     construction: Object.freeze({ workDays: 700, recommendedWorkers: 14 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 700, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 700, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]) })
   }),
 
   commercial_street: Object.freeze({
@@ -144,7 +144,7 @@ export const BUILDINGS = Object.freeze({
     ]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]),
     construction: Object.freeze({ workDays: 800, recommendedWorkers: 16 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 800, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 800, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]) })
   }),
   // 养殖基地：和商业街一样由居民入驻经营，每级 4 个养殖场位（鸡/鸭/鹅/猪）。
   livestock_base: Object.freeze({
@@ -158,7 +158,7 @@ export const BUILDINGS = Object.freeze({
     ]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]),
     construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]) })
   }),
   // 时代广场：每级 50 个摊位，每摊最多 2 人；允许摆摊人数和摊租在政策里定。
   times_square: Object.freeze({
@@ -171,7 +171,7 @@ export const BUILDINGS = Object.freeze({
     ]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
     construction: Object.freeze({ workDays: 500, recommendedWorkers: 10 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 500, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 500, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
   }),
   town_hall: Object.freeze({
     id: "town_hall", name: "政务厅", icon: "🏛️",
@@ -180,7 +180,7 @@ export const BUILDINGS = Object.freeze({
     jobs: Object.freeze([Object.freeze({ id: "civil_servants", name: "公务员", slots: 10, wagePerWorkerDay: 5, note: "全镇需求按人口计算", releasePriority: 50, globalDemand: "public_service" })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
     construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
   }),
   police_station: Object.freeze({
     id: "police_station", name: "警察局", icon: "🚓",
@@ -189,7 +189,7 @@ export const BUILDINGS = Object.freeze({
     jobs: Object.freeze([Object.freeze({ id: "police", name: "警察", slots: 10, wagePerWorkerDay: 5, note: "全镇需求按人口计算", releasePriority: 50, globalDemand: "public_service" })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
     construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
   }),
   bank: Object.freeze({
     id: "bank", name: "银行", icon: "🏦",
@@ -235,7 +235,7 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 2000, recommendedWorkers: 20
     }),
-    upgrade: Object.freeze({ maxLevel: 5, workDays: 2000, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 2000 }]) })
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 2000, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 2000 }]) })
   }),
 
   villa_complex: Object.freeze({

@@ -126,7 +126,7 @@ export function payPrivateIndustryWages(state, content) {
     accrueWages(state, payroll, jobAssignments(state, key), due, content);
     payroll.cumulativeAccruedVoucherUnits += due;
     // 业主家庭轮流付工资（已消亡家庭跳过），付款时给业主留够口粮。
-    const ownerIds = [...new Set(privateOwners(building, state))].filter(ownerId => isActiveHousehold(state, ownerId));
+    const ownerIds = [...new Set(privateOwners(building, state))].filter(ownerId => { const owner = state.households?.byId?.[ownerId]; return Boolean(owner) && isActiveHousehold(owner); });
     const payers = ownerIds.map(ownerId => ({
       id: `household:${ownerId}`,
       maxWheatUnits: householdConvertibleWheatUnits(state, state.households.byId[ownerId], content, content.rules.householdFoodReserveDays ?? 30)

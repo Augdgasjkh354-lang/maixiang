@@ -105,7 +105,7 @@ export function createMapModel(view, navigation) {
     const tile = world.tiles[`${column},${row}`];
     tile.plotId = plot.id;
     tile.occupied = plot.occupied;
-    tile.resourceFeature = plot.feature || null;
+    tile.resourceFeature = plot.feature === "riverside" ? null : plot.feature || null;
     tile.building = buildingsByPlot.get(plot.id) || null;
     tile.project = projectsByPlot.get(plot.id) || null;
   }

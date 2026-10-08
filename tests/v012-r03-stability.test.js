@@ -103,6 +103,8 @@ test("r03 读取当前版本 paused 存档时清理残留店员岗位，再执�
 
 test("r03 负债店铺停业进入待清算，停止新增费用，补资按工资→租金→税款清偿后才返还资产", () => {
   const state = legacyVoucherState({ seed: 120303 });
+  // 基线清理：换券额度固定为旧默认 2 斤，避免新默认 5 斤改变店员工资与租金的清偿口径。
+  state.policy.employmentExchangeJin = 2;
   const street = addBuilding(state, "commercial_street", "r03-street-liquidation");
   const owner = shopOwner(state, 3000);
   const opened = simulation.openResidentShop(state, street.id, "salt", owner.id);

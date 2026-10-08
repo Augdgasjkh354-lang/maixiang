@@ -33,7 +33,7 @@ export function selectUpgradePreview(state, buildingId, content) {
   const config = definition?.upgrade;
   const level = Math.max(1, building.level || 1);
   if (!config) return { available: false, reason: "此建筑不能升级" };
-  if (level >= (config.maxLevel || content.rules.buildingMaxLevel || 5)) return { available: false, reason: "已达到最高等级", level };
+  if (level >= (config.maxLevel || content.rules.buildingMaxLevel || 10)) return { available: false, reason: "已达到最高等级", level };
   if (projectsForBuilding(state, building).length) return { available: false, reason: "这座建筑已有一处工程在施工", level };
   const required = materialLines(config.materialRequirements, content).map(line => {
     const scale = content.precision.inventoryUnitsPerJin;

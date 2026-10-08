@@ -5,6 +5,9 @@ import { townLandscape, houseArt, wellArt, miniMap } from "./jiangnan-art.js";
 export const MAP_WIDTH = 2400;
 export const MAP_HEIGHT = 1800;
 
+// 资源点（有伐木 / 盐矿图形）；其他带 feature 的地块（如河岸）按空地绘制。
+const RESOURCE_FEATURES = new Set(["logging_resource", "salt_mine"]);
+
 // 兼容：优先读多个在建工程，旧调用方只给单工程 view.project 时也能渲染。
 function viewProjects(view) {
   if (Array.isArray(view.projects)) return view.projects;
@@ -86,6 +89,13 @@ function renderParcel(plot) {
   return `<rect class="plot-parcel" x="${x - 48}" y="${y - 36}" width="96" height="72" rx="12" fill="#f3f1dc" fill-opacity=".5" stroke="#9fa687" stroke-opacity=".7" stroke-width="2" stroke-dasharray="10 7"/>`;
 }
 
+// 河岸空地：水色的虚线框，框内一道浪纹，标明临水。
+function renderRiversideParcel(plot) {
+  const x = plot.x * 12;
+  const y = plot.y * 10;
+  return `<g class="plot-parcel riverside-parcel" transform="translate(${x} ${y})"><rect x="-48" y="-36" width="96" height="72" rx="12" fill="#dcebe5" fill-opacity=".6" stroke="#7fa79d" stroke-opacity=".85" stroke-width="2" stroke-dasharray="10 7"/><path d="M-30 12q7.5-6 15 0t15 0 15 0 15 0" fill="none" stroke="#8fb6b0" stroke-width="3" stroke-linecap="round"/><text x="0" y="-10" text-anchor="middle" font-size="13" font-weight="700" fill="#4f6f68">${escapeHtml(plot.label)}</text></g>`;
+}
+
 function walkingPeople() {
   const people = [
     { x: 456, y: 467, cls: "walker-one", coat: "#5e6c53" },
@@ -154,7 +164,7 @@ export function renderMap(view, nav) {
       .map(plot => renderPlot(plot, plot.id === nav.previewPlotId)).join("")
     : "";
   const resources = !buildMode
-    ? view.plots.filter(plot => plot.feature).map(plot =>
+    ? view.plots.filter(plot => RESOURCE_FEATURES.has(plot.feature)).map(plot =>
         resourceSite(plot, selectedSite === "resource:" + plot.id)).join("")
     : "";
   // 每个在建工程各自标注各自地块。
@@ -165,7 +175,8 @@ export function renderMap(view, nav) {
     return renderProject(row, plot, selected || !selectedSite);
   }).join("");
   const parcels = !buildMode
-    ? view.plots.filter(plot => !plot.feature && !occupied.has(plot.id)).map(renderParcel).join("")
+    ? view.plots.filter(plot => !RESOURCE_FEATURES.has(plot.feature) && !occupied.has(plot.id))
+      .map(plot => plot.feature === "riverside" ? renderRiversideParcel(plot) : renderParcel(plot)).join("")
     : "";
   return `<canvas id="mapTerrainCanvas" class="map-art-canvas" width="${MAP_WIDTH}" height="${MAP_HEIGHT}" aria-hidden="true"></canvas><svg class="world-map" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="麦乡俯视地图" data-season="${view.season.key}" data-paused="${view.paused}">
     ${townLandscape([...occupied])}<g class="plot-parcels" pointer-events="none" aria-hidden="true">${parcels}</g><g class="static-sites">${staticSites(view)}${resources}</g><g class="walker-layer">${walkingPeople()}</g>

@@ -254,8 +254,10 @@ export function retainExistingIndustryPrices(state, content) {
 
 export function setEmploymentExchangeQuota(state, jin, content) {
   const value = Number(jin);
-  if (!Number.isFinite(value) || value < (content.rules.employmentExchangeMinimumJin ?? 0) || value > (content.rules.employmentExchangeMaximumJin ?? 10)) {
-    return { ok: false, reason: "每日换券额度须为0—10斤" };
+  const minimum = content.rules.employmentExchangeMinimumJin ?? 0;
+  const maximum = content.rules.employmentExchangeMaximumJin ?? 50;
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    return { ok: false, reason: `每日换券额度须为${minimum}—${maximum}斤` };
   }
   state.policy.employmentExchangeJin = Math.round(value * 100) / 100;
   return { ok: true, value: state.policy.employmentExchangeJin };

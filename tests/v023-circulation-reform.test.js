@@ -39,7 +39,7 @@ test("0.2.3 批发市场做市商：收购价与售价分离且可分别调整�
   const fresh = simulation.createInitialState({ seed: 2300 });
   const freshMarket = ensureWholesaleMarket(fresh, CONTENT);
   const expected = {
-    flour: { buy: 1.4, sell: 1.8 },
+    flour: { buy: 1.6, sell: 1.8 },
     wood: { buy: 12, sell: 16 },
     bread: { buy: 2, sell: 2.6 },
     salt: { buy: 8, sell: 12 }
@@ -52,7 +52,7 @@ test("0.2.3 批发市场做市商：收购价与售价分离且可分别调整�
   const state = legacyVoucherState({ seed: 2301 });
   addBuilding(state, "wholesale_market", "wm-1");
   const market = ensureWholesaleMarket(state, CONTENT);
-  assert.equal(market.purchasePricesVoucherPerUnit.flour, 1.4);
+  assert.equal(market.purchasePricesVoucherPerUnit.flour, 1.6);
   assert.equal(market.purchasePricesVoucherPerUnit.wood, 12);
   assert.equal(market.purchasePricesVoucherPerUnit.bread, 2);
   assert.equal(market.purchasePricesVoucherPerUnit.salt, 8);

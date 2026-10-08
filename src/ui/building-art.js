@@ -7,7 +7,7 @@ import { modArt } from "../mods/api.js";
  *
  * import { renderBuildingArt, BUILDING_ART_CATALOG } from './maixiang-buildings.js';
  * svg.innerHTML = renderBuildingArt('mill', {level: 1, status:'complete'});
- * 选项：level 1..5；scale 0.1..4；status 'empty'|'construction'|'complete'；progress 0..1。
+ * 选项：level 1..10；scale 0.1..4；status 'empty'|'construction'|'complete'；progress 0..1。
  * empty 返回空字符串；construction 仅显示地基与脚手架；complete 显示建筑。
  * 本库只负责外观，不结算产出、就业、住房或银行业务。
  * 新增建筑：在目录加入类型，在 renderComplete 中添加对应分支。
@@ -121,7 +121,7 @@ default:return house(0,0,1,'',level>=3);
 }}
 export function renderBuildingArt(type,options={}){
 const status=options.status||'complete';if(status==='empty')return '';
-const level=Math.round(clamp(options.level||1,1,5)),scale=clamp(options.scale||1,.1,4);
+const level=Math.round(clamp(options.level||1,1,10)),scale=clamp(options.scale||1,.1,4);
 let body='';
 if(status==='construction'){
 const progress=clamp(options.progress||0,0,1);

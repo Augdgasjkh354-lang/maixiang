@@ -86,7 +86,7 @@ export function validateState(state, content) {
       if (sum !== (state.accounts?.residents?.[itemId] || 0)) errors.push("居民汇总库存与家庭不一致：" + itemId);
     }
   }
-  if (!Number.isFinite(state.policy?.employmentExchangeJin) || state.policy.employmentExchangeJin < 0 || state.policy.employmentExchangeJin > 10) errors.push("就业换券额度无效");
+  if (!Number.isFinite(state.policy?.employmentExchangeJin) || state.policy.employmentExchangeJin < (content.rules.employmentExchangeMinimumJin ?? 0) || state.policy.employmentExchangeJin > (content.rules.employmentExchangeMaximumJin ?? 50)) errors.push("就业换券额度无效");
   if (!Number.isFinite(state.policy?.shopRentVoucher) || state.policy.shopRentVoucher < 0) errors.push("店租设置无效");
   if (!Number.isFinite(state.policy?.shopProfitTaxPercent) || state.policy.shopProfitTaxPercent < 0 || state.policy.shopProfitTaxPercent > (content.rules.shopProfitTaxMaximumPercent || 80)) errors.push("商业利润税设置无效");
 
@@ -387,7 +387,7 @@ export function validateState(state, content) {
       errors.push("建筑实例 ID 或类型无效");
     }
     buildingIds.add(building.id);
-    if (!Number.isInteger(building.level || 1) || (building.level || 1) < 1 || (building.level || 1) > (content.rules.buildingMaxLevel || 5)) {
+    if (!Number.isInteger(building.level || 1) || (building.level || 1) < 1 || (building.level || 1) > (content.rules.buildingMaxLevel || 10)) {
       errors.push("建筑等级无效：" + building.id);
     }
     if (building.materialInvestments !== undefined && (!Array.isArray(building.materialInvestments) ||

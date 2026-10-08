@@ -67,7 +67,7 @@ export function payWages(state, book, payers, content, type, reason) {
     paid += householdPaid;
   }
   state._deferHouseholdSync = previousDefer;
-  if (!previousDefer) syncResidentAggregates(state, content);
+  if (!previousDefer && state._householdSyncDirty) syncResidentAggregates(state, content);
   return { paid, rows };
 }
 

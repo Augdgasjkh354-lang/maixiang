@@ -25,7 +25,7 @@ export default {
       jobs: [{ id: "tea_pickers", name: "采茶工", slots: 12, wagePerWorkerDay: 5, note: "每人每日采 2 斤茶", releasePriority: 30 }],
       materialRequirements: [{ itemId: "wood", quantity: 200 }],
       construction: { workDays: 200, recommendedWorkers: 10 },
-      upgrade: { maxLevel: 5, workDays: 240, materialRequirements: [{ itemId: "wood", quantity: 240 }] }
+      upgrade: { maxLevel: 10, workDays: 240, materialRequirements: [{ itemId: "wood", quantity: 240 }] }
     }
   },
 

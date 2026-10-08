@@ -63,8 +63,8 @@ export function employmentExchangeRemainingUnits(state, content, runtime) {
   const currentKey = `${state.year}:${state.day}`;
   const sameDay = exchange?.dayKey === currentKey;
   const policyJin = Math.max(content.rules.employmentExchangeMinimumJin ?? 0,
-    Math.min(content.rules.employmentExchangeMaximumJin ?? 10,
-      Number(state.policy?.employmentExchangeJin ?? content.rules.employmentExchangeDefaultJin ?? 2)));
+    Math.min(content.rules.employmentExchangeMaximumJin ?? 50,
+      Number(state.policy?.employmentExchangeJin ?? content.rules.employmentExchangeDefaultJin ?? 5)));
   const unitsPerJin = content.precision.inventoryUnitsPerJin;
   let remaining = 0;
   for (const household of households) {

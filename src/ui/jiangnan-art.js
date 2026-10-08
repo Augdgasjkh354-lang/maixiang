@@ -33,9 +33,10 @@ const MAIN_ROAD = 'M70 405Q280 385 480 405T780 383Q970 420 1170 400Q1200 398 121
 const HOUSE_PATHS = ['M548 396Q558 350 552 314', 'M786 398Q792 372 782 352'];
 // 巷道：每列地块之间的竖向小路，弯度固定（deterministic）。
 const WEST_LANE = 190;
-const TRUNK_LANES = [336, 480, 768, 1056];
+// 1200 / 1344 / 1488 为第二期东侧网格新增的巷道（位于列与列之间的缝隙）。
+const TRUNK_LANES = [336, 480, 768, 1056, 1200, 1344, 1488];
 const LANE_XS = [WEST_LANE, ...TRUNK_LANES];
-const LANE_BEND = { 190: -8, 336: 7, 480: -9, 768: 8, 1056: -7 };
+const LANE_BEND = { 190: -8, 336: 7, 480: -9, 768: 8, 1056: -7, 1200: 6, 1344: -6, 1488: 7 };
 // 村落区：除两三棵零星树外保持空旷。
 const VILLAGE = { x0: 220, x1: 1180, y0: 440, y1: 960 };
 // 南林：围绕伐木点与盐矿的密林椭圆。
@@ -91,6 +92,8 @@ export function roadNetwork(plots) {
   const laneDepth = new Map();
   const spurs = [];
   for (const plot of plots) {
+    // 河岸空地临水，不接陆路巷道（将来的码头走水路）。
+    if (plot.feature === "riverside") continue;
     const { x: px, y: py } = plotWorld(plot);
     const lx = laneX(plot);
     const wobble = (hashId(plot.id) % 9) - 4;

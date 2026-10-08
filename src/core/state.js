@@ -210,7 +210,7 @@ export function createInitialState(options) {
       privateProductionTaxPercent: Object.fromEntries(
         Object.keys(content.buildings).map(typeId => [typeId, content.rules.privateProductionTaxDefaultPercent ?? 10])
       ),
-      employmentExchangeJin: content.rules.employmentExchangeDefaultJin ?? 2,
+      employmentExchangeJin: content.rules.employmentExchangeDefaultJin ?? 5,
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
       stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,

@@ -1,6 +1,6 @@
 import { currencyScale } from "../economy/currency.js";
 import { createPaymentCapabilityContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } from "../economy/payment.js";
-import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits } from "./households.js";
+import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, withDeferredHouseholdSync } from "./households.js";
 import { ensureHouseholdLife } from "./household-life.js";
 import { householdBudgets } from "./household-budget.js";
 import { recordShopServiceSale, serviceShopCapacityUses, shopDefinition } from "./shops.js";
@@ -132,6 +132,10 @@ function addComfort(household, amount, content) {
 }
 
 export function processServiceDemand(state, content) {
+  return withDeferredHouseholdSync(state, content, () => processServiceDemandNow(state, content));
+}
+
+function processServiceDemandNow(state, content) {
   const serviceState = ensureServiceState(state);
   const defs = Object.values(content.rules.serviceTypes || {});
   if (!defs.length) return { servedUses: {}, spendingVoucherUnits: 0 };

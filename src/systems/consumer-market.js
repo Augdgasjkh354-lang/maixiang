@@ -8,7 +8,7 @@ import {
 } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { sellCompanyProduct, companySalePrice } from "./companies.js";
-import { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedCustomers, registerShopStockoutDemand } from "./shops.js";
+import { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedHouseholds, registerShopStockoutDemand } from "./shops.js";
 import { shopTradePrices } from "../economy/operating-plan.js";
 import {
   householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits,
@@ -97,7 +97,16 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
   return sellers;
 }
 
-function maximumAffordableUnits(state, household, price, content, reserveDays) {
+// 粗估一户按某价能买多少（粮券 + 今日还能换券的小麦）：不走支付层报价，用于需求统计和二分查找的初值。
+function quickAffordableUnits(state, household, price, content, reserveDays) {
+  if (!(price > 0)) return 0;
+  const wheatUnits = Math.min(householdConvertibleWheatUnits(state, household, content, reserveDays),
+    householdExchangeAllowanceUnits(state, household.id, content));
+  const value = voucherBalance(state, `household:${household.id}`) + voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
+  return Math.max(0, Math.floor(value * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))));
+}
+
+function maximumAffordableUnits(state, household, price, content, reserveDays, cap = Number.POSITIVE_INFINITY) {
   const scale = currencyScale(content);
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   if (price <= 0) return 0;
@@ -109,7 +118,9 @@ function maximumAffordableUnits(state, household, price, content, reserveDays) {
   const canPay = valueUnits => quotePaymentValueUnitsWithContext(paymentContext, valueUnits).full;
   let low = 0;
   // 仅作为二分上界；真正可支付性统一交给支付层判断，避免全粮券阶段误回退小麦。
-  let high = Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale)));
+  let high = Math.min(cap, Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale))));
+  // 常见情况：想买的量本来就付得起，一次报价就够，不用二分。
+  if (high > 0 && canPay(Math.round(high / inventoryScale * price * scale))) return high;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
     const cost = Math.round(mid / inventoryScale * price * scale); // 用于canPay，非死变量
@@ -168,43 +179,58 @@ export function residentPurchasePowerUnits(state, priceVoucherPerPhysicalUnit, c
   return Math.max(0, Math.floor(availableValue / price));
 }
 
-// 未满足需求里居民买得起（按最低售价）的部分。
-function affordableUnmetUnits(state, unmetUnits, minPrice, householdNeed, content) {
+// 未满足需求里居民买得起（按最低售价）的部分：返回单位数与对应的家庭 id 列表。
+// 单位数封顶于 unmetUnits（用于断货口径）；家庭列表不封顶，每户只记一次。
+function affordableUnmetHouseholds(state, unmetUnits, minPrice, householdNeed, content) {
   const reserveDays = content.rules.basicCommerceFoodReserveDays ?? 30;
   const totalPeople = Math.max(1, populationStats(state).total);
   let affordable = 0;
+  const households = [];
   for (const household of householdList(state).filter(isActiveHousehold)) {
-    if (affordable >= unmetUnits) break;
     const need = householdNeed
       ? householdNeed.get(household.id) || 0
       : Math.ceil(unmetUnits * householdPopulation(household) / totalPeople);
     if (need <= 0) continue;
-    affordable += Math.min(need, maximumAffordableUnits(state, household, minPrice, content, reserveDays));
+    const canBuy = Math.min(need, quickAffordableUnits(state, household, minPrice, content, reserveDays));
+    if (canBuy <= 0) continue;
+    affordable += canBuy;
+    households.push(household.id);
   }
-  return Math.min(unmetUnits, affordable);
+  return { units: Math.min(unmetUnits, affordable), households };
 }
 
-// 用户 0.1.11（-5）原 f9：未满足的需求里居民买得起的部分，按各店铺被限流的
-// 库存比例折算成拒客数，记到对应店铺（店铺增员判断的依据之一）。
+// 每户未满足的家庭只归一家店（轮流分配，按售价从低到高排序），避免同一家庭在多店重复计拒客。
+function assignHouseholdsToShops(householdIds, rows) {
+  const shopIds = [...new Set(rows.slice().sort((a, b) => a.price - b.price || String(a.shopId).localeCompare(String(b.shopId))).map(row => row.shopId))];
+  const assigned = new Map(shopIds.map(shopId => [shopId, []]));
+  if (!shopIds.length) return assigned;
+  householdIds.forEach((householdId, index) => assigned.get(shopIds[index % shopIds.length]).push(householdId));
+  return assigned;
+}
+
+// 用户 0.1.11（-5）原 f9：未满足的需求里居民买得起的家庭，按户记拒客（每户每店每日最多 1 人），
+// 分配到被接待能力限流的店铺（店铺增员判断的依据之一）。
 function registerCappedRejection(state, itemId, unmetUnits, capped, householdNeed, content) {
   if (!(unmetUnits > 0) || !capped.length) return;
   const minPrice = Math.min(...capped.map(row => row.price));
-  const affordable = affordableUnmetUnits(state, unmetUnits, minPrice, householdNeed, content);
-  const totalCapped = capped.reduce((sum, row) => sum + row.cappedUnits, 0);
-  for (const row of capped) {
-    const units = Math.min(row.cappedUnits, Math.round(affordable * row.cappedUnits / Math.max(1, totalCapped)));
-    if (units > 0) registerRejectedCustomers(state, row.shopId, units, content);
+  const { households } = affordableUnmetHouseholds(state, unmetUnits, minPrice, householdNeed, content);
+  for (const [shopId, householdIds] of assignHouseholdsToShops(households, capped)) {
+    registerRejectedHouseholds(state, shopId, householdIds, content);
   }
 }
 
-// 断货需求：居民买得起的未满足量，按断货店均分记入各店当日断货需求。
+// 断货需求：居民买得起的未满足量，按断货店均分记入各店当日断货需求（单位数）；
+// 拒客按户分配到断货店，每户每店每日最多 1 人。
 function registerStockoutDemand(state, itemId, unmetUnits, stockouts, householdNeed, content) {
   if (!(unmetUnits > 0) || !stockouts.length) return;
   const minPrice = Math.min(...stockouts.map(row => row.price));
-  const affordable = affordableUnmetUnits(state, unmetUnits, minPrice, householdNeed, content);
-  const allocation = allocateIntegerByWeight(Math.floor(affordable), stockouts, () => 1);
+  const { units, households } = affordableUnmetHouseholds(state, unmetUnits, minPrice, householdNeed, content);
+  const allocation = allocateIntegerByWeight(Math.floor(units), stockouts, () => 1);
   for (const row of allocation.rows || []) {
     if (row.units > 0) registerShopStockoutDemand(state, row.recipient.shopId, itemId, row.units, content);
+  }
+  for (const [shopId, householdIds] of assignHouseholdsToShops(households, stockouts)) {
+    registerRejectedHouseholds(state, shopId, householdIds, content);
   }
 }
 
@@ -243,8 +269,13 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
   desiredUnits = applyRetailElasticity(state, itemId, desiredUnits, content, sellers);
   if (!sellers.length) {
     // 用户 0.1.11（-5）：无可用卖家但有店铺被接待能力限流，记拒客并返回对应原因。
-    registerCappedRejection(state, itemId, Math.max(0, Math.floor(desiredUnits)), cappedSellers, null, content);
-    registerStockoutDemand(state, itemId, Math.max(0, Math.floor(desiredUnits)), stockoutSellers, null, content);
+    // 有指定各户需求时按户口径记拒客，否则按人口估算各户需求。
+    const noSellerRequested = options.householdNeedsUnits || null;
+    const noSellerNeed = noSellerRequested
+      ? new Map(householdList(state).filter(isActiveHousehold).map(household => [household.id, Math.max(0, Math.floor(noSellerRequested[household.id] || 0))]))
+      : null;
+    registerCappedRejection(state, itemId, Math.max(0, Math.floor(desiredUnits)), cappedSellers, noSellerNeed, content);
+    registerStockoutDemand(state, itemId, Math.max(0, Math.floor(desiredUnits)), stockoutSellers, noSellerNeed, content);
     return { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: cappedSellers.length ? "店铺接待能力已满" : "市场没有可售库存" };
   }
 
@@ -283,8 +314,8 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
       const need = householdNeed.get(household.id) || 0;
       if (need <= 0) continue;
       if (seller.type === "household" && seller.householdId === household.id) continue;
-      const affordable = maximumAffordableUnits(state, household, seller.price, content, reserveDays);
-      const units = Math.min(need, sellerLeft, desiredUnits - purchased, affordable);
+      const wanted = Math.min(need, sellerLeft, desiredUnits - purchased);
+      const units = Math.min(wanted, maximumAffordableUnits(state, household, seller.price, content, reserveDays, wanted));
       if (units <= 0) continue;
       const sale = transactSeller(state, seller, household, itemId, units, content, reason);
       if (!sale.ok || sale.quantityUnits <= 0) continue;

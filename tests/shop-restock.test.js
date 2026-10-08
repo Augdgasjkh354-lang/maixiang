@@ -47,13 +47,16 @@ function runDays(state, shopId, days, feed = () => {}) {
   const shop = () => state.shops[shopId];
   const rows = [];
   let soldBefore = 0;
+  let customersBefore = 0;
   for (let d = 0; d < days; d++) {
     feed(d, state);
     const wholesaleAtOpenJin = (state.wholesaleMarket?.inventory?.bread || 0) / I;
     simulation.advanceDay(state);
     const sold = shop().accounts.cumulative.soldUnits.bread || 0;
-    rows.push({ day: d, soldJin: (sold - soldBefore) / I, wholesaleAtOpenJin });
+    const customers = shop().accounts.cumulative.customerCount || 0;
+    rows.push({ day: d, soldJin: (sold - soldBefore) / I, wholesaleAtOpenJin, customers: customers - customersBefore });
     soldBefore = sold;
+    customersBefore = customers;
   }
   return rows;
 }
@@ -65,13 +68,16 @@ test("综合商店断货后次日补货：批发市场突然有 4000 斤面包�
     if (d < 7) s.wholesaleMarket.inventory.bread = (s.wholesaleMarket.inventory.bread || 0) + 60 * I;
     if (d === 7) s.wholesaleMarket.inventory.bread = (s.wholesaleMarket.inventory.bread || 0) + 4000 * I;
   });
-  // 第 7 日到货后，第 8 日（次日）店铺就应按居民需求放量，第 9 日接近接待上限（约 480 斤/日）。
-  // 修复前：第 8 日 154 斤、第 9 日 198 斤，之后每日只增 40-70 斤，第 13 日才达到上限。
-  assert.ok(rows[8].soldJin >= 300, `day 8 bread sold ${rows[8].soldJin} jin, expected >= 300 (restock should follow the unmet demand next day)`);
-  assert.ok(rows[9].soldJin >= 400, `day 9 bread sold ${rows[9].soldJin} jin, expected >= 400`);
-  // 批发市场有货时，店内不应出现零销售日。
+  // 店员 3 + 店主商人 1，每人每日接待 generalStoreCustomersPerStaff 户（客流按户计）。
+  // 到货当天店铺就满客流上限、次日不变，不再逐日爬坡。
+  const customerCap = (3 + 1) * CONTENT.rules.generalStoreCustomersPerStaff;
+  assert.equal(rows[7].customers, customerCap, `day 7 customers ${rows[7].customers}, expected cap ${customerCap} on restock day`);
+  assert.equal(rows[8].customers, customerCap, `day 8 customers ${rows[8].customers}, expected cap ${customerCap} the day after restock`);
+  assert.ok(rows[7].soldJin > 0, "day 7 store should sell on the restock day");
+  assert.ok(rows[7].soldJin >= 0.9 * rows[8].soldJin, `day 7 sold ${rows[7].soldJin} jin, should not ramp up to day 8 (${rows[8].soldJin} jin)`);
+  // 批发市场开门时有货的日子，店内不应出现零销售。
   for (const row of rows.slice(7)) {
-    assert.ok(row.soldJin > 0, `day ${row.day} store sold nothing while wholesale held ${row.wholesaleAtOpenJin} jin`);
+    if (row.wholesaleAtOpenJin > 0) assert.ok(row.soldJin > 0, `day ${row.day} store sold nothing while wholesale held ${row.wholesaleAtOpenJin} jin`);
   }
 });
 

@@ -54,7 +54,7 @@ test("居民购买面粉、面包、盐只认综合商店，综合商店按批�
   assert.equal(prices.retailVoucherPerUnit, 2.4);
 });
 
-test("综合商店50店员、2000客流上限，店员未满30日不能解雇", () => {
+test("综合商店50店员，接待能力按人计（店员+商人 × 20 户），店员未满30日不能解雇", () => {
   const state = legacyVoucherState({ seed: 110802 });
   const street = addBuilding(state, "commercial_street", "r08-street");
   const owner = fundedOwner(state);
@@ -62,14 +62,16 @@ test("综合商店50店员、2000客流上限，店员未满30日不能解雇", 
   assert.equal(opened.ok, true, opened.reason);
   const shop = state.shops[opened.shopId];
   assert.equal(simulation.configureShopClerks(state, shop.id, 50).ok, true);
-  assert.equal(shopDailyCustomerCapacity(state, shop, CONTENT), 2000);
+  // 50 店员 + 1 商人 = 51 人 × 20 户 = 1020 户/日（未触及 generalStoreMaxDailyCustomers 的 2000 上限）。
+  const perStaff = CONTENT.rules.generalStoreCustomersPerStaff;
+  assert.equal(shopDailyCustomerCapacity(state, shop, CONTENT), (50 + 1) * perStaff);
   const early = simulation.configureShopClerks(state, shop.id, 49);
   assert.equal(early.ok, false);
   assert.match(early.reason, /30天/);
   state.day = 30;
   assert.equal(simulation.configureShopClerks(state, shop.id, 49).ok, true);
-  // 基线清理：商人计入接待能力，49 店员 + 1 商人 = 50 人 × 40 = 2000（达上限）。
-  assert.equal(shopDailyCustomerCapacity(state, shop, CONTENT), 2000, "49名店员加商人达2000客流上限");
+  // 49 店员 + 1 商人 = 50 人 × 20 户 = 1000 户/日。
+  assert.equal(shopDailyCustomerCapacity(state, shop, CONTENT), (49 + 1) * perStaff, "49名店员加商人的接待能力");
   assert.equal(simulation.selectDashboard(state, { panel: "site" }).shops.find(row => row.id === shop.id).maxClerks, 50);
 });
 

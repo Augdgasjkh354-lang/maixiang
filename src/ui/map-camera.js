@@ -57,11 +57,12 @@ export function createMapCamera(stage, world) {
     }
   }
 
-  // 初始视野：以小镇为中心（小镇位于地图西部，全部地块与资源点都在这个矩形内）。
-  const TOWN_FRAME = { x: 0, y: 60, width: 1250, height: 990, centerX: 625, centerY: 555 };
+  // 初始视野：以小镇为中心（小镇位于地图西部；东侧与东南新增空地在这个矩形内，南端河岸空地需平移查看）。
+  const TOWN_FRAME = { x: 0, y: 60, width: 1650, height: 1440, centerX: 825, centerY: 780 };
   // 窄屏（手机竖屏）用的近景框：整镇框得太小时，改取建筑更清楚的一块。
   const NARROW_FRAME = { x: 180, y: 200, width: 970, height: 760, centerX: 650, centerY: 560 };
-  const READABLE_TOWN_SCALE = 0.6;
+  // 整镇框随地块扩大而变大，可读下限相应放低；过低时仍改用近景框。
+  const READABLE_TOWN_SCALE = 0.5;
 
   function fitInitial() {
     if (!stage.clientWidth || !stage.clientHeight) return;
