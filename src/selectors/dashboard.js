@@ -31,6 +31,7 @@ import { selectOutsideTownView } from "../systems/outside-town.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { selectTradeAgreementView } from "../systems/trade-agreements.js";
 import { selectLogisticsView } from "../systems/logistics.js";
+import { selectTradeHouseView } from "./trade-houses.js";
 import { householdRecentTotalsReadonly, householdFoodDays } from "../systems/household-life.js";
 import { createDashboardRuntime, employmentExchangeRemainingUnits } from "./dashboard-runtime.js";
 import { selectVillaStats } from "../systems/villas.js";
@@ -536,6 +537,8 @@ export function selectDashboard(state, content, selection) {
     outsideTown: needBusiness ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
     tradeAgreements: needBusiness ? selectTradeAgreementView(state, content, outsideTownId) : null,
     logistics: needBusiness ? selectLogisticsView(state, content) : null,
+    // 贸易行（只读）：每家贸易行今日与近 7 日的买卖、利润、运费、小麦与运力份额。
+    tradeHouses: needBusiness || needSite ? selectTradeHouseView(state, content) : null,
     // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
     wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,

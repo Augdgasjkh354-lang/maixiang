@@ -21,6 +21,7 @@ export const BUILDING_ART_CATALOG = Object.freeze({
   commercial_street:{name:'商业街',connected:true}, town_hall:{name:'政务厅',connected:true},
   livestock_base:{name:'养殖基地',connected:true}, times_square:{name:'时代广场',connected:true},
   police_station:{name:'警察局',connected:true}, social_security_office:{name:'社保局',connected:true},
+  logistics_center:{name:'物流中心',connected:true}, dock:{name:'码头',connected:true}, trade_center:{name:'贸易中心',connected:true},
   school:{name:'学堂',connected:false}, clinic:{name:'医馆',connected:false},
   restaurant:{name:'饭馆',connected:false}, granary:{name:'粮仓',connected:false},
   housing:{name:'民居',connected:false}, tea_house:{name:'茶馆',connected:false}
@@ -93,8 +94,24 @@ const crowd=[[-30,-6,'#6f7f8e'],[10,-4,'#9c6f5a'],[-6,22,'#7e8a6c'],[36,22,'#b59
 const crowdSvg=crowd.map(([x,y,c])=>person(x,y,.8,c)).join('');
 const flag=`<path d="M62-34V20" fill="none" stroke="#79755b" stroke-width="2"/><path d="M62-34l18 5-4 7 4 7-18-5Z" fill="#9a5f48" stroke="#6e4534"/><path d="M60 20h5" stroke="#79755b" stroke-width="2"/>`;
 return `<path d="M${L}L${T}L${g.R}L${B}Z" fill="#e6e1cb" stroke="#8f8a70" stroke-width="1.5"/><path d="${grid}" fill="none" stroke="#bcb697" stroke-width=".8"/>${paifang(4,2)}${flag}${stallSvg}${crowdSvg}`;}
+/* 运力相关：物流中心（敞口仓库 + 箱子 + 手推车）、码头（栈桥 + 小船）、贸易中心（大堂 + 旗幡） */
+function warehouse(){return `<path d="M-52-4L12 18V46L-52 22Z" fill="#f4f0df"/><path d="M12 18L46-3V21L12 46Z" fill="#d5dbcc"/><path d="M-52 8L12 30 46 11" fill="none" stroke="#b4bbaa" stroke-width="1.6"/><path d="M-38 6L-6 15V42L-38 33Z" fill="#7d6a4c"/><path d="M-38 6L-6 15M-38 33L-6 42" stroke="#5e4f37" fill="none"/><path d="M-22 10.5V38.5M-28 24h12" stroke="#5e4f37" stroke-width="1" fill="none"/>${roof(-60,-38,112,40)}`;}
+function crate(x,y,s=1){return `<g transform="translate(${x} ${y}) scale(${s})"><path d="M-7 0l7 3.5 7-3.5v-8l-7-3.5-7 3.5Z" fill="#c9a86f" stroke="#7d6240"/><path d="M-7-8l7 3.5 7-3.5M0-4.5V3.5" fill="none" stroke="#7d6240"/></g>`;}
+function handcart(x,y,s=1){return `<g transform="translate(${x} ${y}) scale(${s})" stroke="#6e5538" stroke-width="1.2"><path d="M-12-2L8-6 12 4 -8 8Z" fill="#b08a5e"/><path d="M-12-2L-22-8M-6 8l-9 8" fill="none" stroke-width="2"/><ellipse cx="-2" cy="12" rx="3.2" ry="3" fill="#5e4a33"/></g>`;}
+function logisticsCenter(level){return warehouse()+crate(-30,40,1)+crate(-19,44,1)+(level>=3?crate(-40,44,1)+crate(-30,30,.9):'')+handcart(30,44,1.1);}
+function dockScene(level){
+const water=`<ellipse cx="18" cy="14" rx="66" ry="30" fill="#b9d3cc" stroke="#7f9f98" stroke-width="1.2"/><path d="M-30 30q6-4 12 0t12 0M20 40q6-4 12 0t12 0M-6 48q6-4 12 0" fill="none" stroke="#8fb6b0" stroke-width="1.4"/>`;
+const pier=`<path d="M-34-8L50 22V34L-34 4Z" fill="#b08a5e" stroke="#6e5538"/><path d="M-20-2.8v12M0 4.2v12M20 11.2v12M36 16.8v12" stroke="#7d6240" fill="none"/><path d="M-30 4v9M-2 14v9M26 24v9" stroke="#5e4a33" stroke-width="2.5" fill="none"/>`;
+const boat=`<path d="M3 44V20" stroke="#5e4a33" stroke-width="1.6" fill="none"/><path d="M3 20l12 16H3Z" fill="#f4efdc" stroke="#8c7657"/><path d="M-12 42h30l-5 9h-20Z" fill="#8a6a4b" stroke="#5e4a33"/><path d="M-12 42h30" stroke="#5e4a33" stroke-width="2"/>`;
+const hut=level>=3?house(-36,-24,.46,'码'):'';
+return water+pier+boat+hut;}
+function banner(x,y,col='#9a5f48'){return `<g transform="translate(${x} ${y})"><path d="M0 0V-44" stroke="#79755b" stroke-width="2" fill="none"/><path d="M0-44l16 4-3 7 3 7-16-4Z" fill="${col}" stroke="#6e4534"/></g>`;}
+function tradeCenter(level){return courtyard()+house(-4,-8,1.05,'贸',true)+banner(-56,-4)+banner(52,-10,'#52685e')+(level>=3?banner(-30,-22,'#b08a5e'):'')+awning(-22,24)+crate(44,44,.9);}
 function renderComplete(type,level){
 switch(type){
+case 'logistics_center':return logisticsCenter(level);
+case 'dock':return dockScene(level);
+case 'trade_center':return tradeCenter(level);
 case 'winery':return house(-8,-6,.92,'酒')+wineJars()+wineFlag();
 case 'cotton_field':return cottonPlot()+thatchShed(-49,12,.6);
 case 'weaving_mill':return house(-8,-6,.92,'织')+clothRack();

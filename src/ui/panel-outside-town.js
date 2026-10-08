@@ -1,4 +1,4 @@
-import { escapeHtml, number } from "./format.js";
+import { escapeHtml, number, moneyUnit } from "./format.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 
 // 一样商品的库存状态：库存远低于/远高于目标天数时标出来，方便判断价格走向。
@@ -54,6 +54,24 @@ function agreementRow(agreement) {
     ? `<button class="secondary" data-agreement-terminate="${escapeHtml(agreement.id)}" data-town="${escapeHtml(agreement.townId || "")}">解约</button>` : "";
   return `<div class="row"><span class="label">${escapeHtml(agreement.itemName || agreement.itemId)}</span>
     <strong class="value">年${number(agreement.annualJin)}${escapeHtml(agreement.unit || "斤")} · 月${number(agreement.monthlyJin)} · 单价${number(agreement.pricePerUnit, 2)} · 余${agreement.yearsLeft}/${agreement.yearsTotal}年 · ${statusText}${breachText}</strong>${terminateButton}</div>`;
+}
+
+// 运力行（docs/TRADE.md「运力」）：池子里今天还能运的斤数，以及日运力的来源构成。
+function freightRow(logistics) {
+  if (!logistics) return "";
+  const src = logistics.capacityBySource || {};
+  return `<div class="row freight-row"><span class="label">运力</span><strong class="value">今日可用 ${number(logistics.poolJin, 0)} 斤 · 日运力 ${number(logistics.dailyCapacityJin, 0)} 斤（外贸房 ${number(src.foreignTradeHouse, 0)} / 物流 ${number(src.logisticsCenter, 0)} / 码头 ${number(src.dock, 0)}）</strong></div>`;
+}
+
+// 贸易行汇总（docs/TRADE.md「贸易中心与贸易行」）：只读 view.tradeHouses 的合计，逐家明细在贸易中心的站点面板。
+function tradeHouseSummary(view) {
+  const th = view.tradeHouses;
+  if (!th || !th.houseCount) return "";
+  const unit = moneyUnit(view);
+  const t = th.todayTotals;
+  const w = th.weekTotals;
+  return `<div class="row freight-row trade-house-summary"><span class="label">贸易行</span><strong class="value">${number(th.houseCount)}家 · 在岗${number(th.staff)}人 · 今日出口 ${number(t.exportTotalJin, 1)} / 进口 ${number(t.importTotalJin, 1)}斤 · 利润 ${number(t.profitVoucher, 2)}${escapeHtml(unit)}</strong></div>
+      <div class="row freight-row"><span class="label">近7日</span><strong class="value">出口 ${number(w.exportTotalJin, 1)} / 进口 ${number(w.importTotalJin, 1)}斤 · 利润 ${number(w.profitVoucher, 2)} · 运费 ${number(w.freightVoucher, 2)}${escapeHtml(unit)}</strong></div>`;
 }
 
 function populationText(ot) {
@@ -116,7 +134,9 @@ export function renderOutsideTown(view) {
       <div class="subtle">${escapeHtml(ot.description)}</div>
     </div>
     <div class="cardlet"><h3>商品行情</h3>
-      <div class="subtle">价格随对方库存变化；大单越卖越便宜。</div>
+      ${freightRow(view.logistics)}
+      ${tradeHouseSummary(view)}
+      <div class="subtle">价格随对方库存变化；大单越卖越便宜。买卖都占运力，运力不足时只能做到池子剩下的量。</div>
     </div>
     ${goods.map(good => goodCard(view, townId, good)).join("")}
     <div class="cardlet"><h3>对外关系</h3>

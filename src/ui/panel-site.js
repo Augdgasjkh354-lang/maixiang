@@ -255,6 +255,9 @@ export function renderSite(view) {
   } else if (building?.typeId === "social_security_office") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${socialSecurityMarkup(view)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
+  } else if (building?.typeId === "logistics_center" || building?.typeId === "dock") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = `${freightSiteMarkup(building)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
   } else if (building?.typeId === "bank") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${bankManagementMarkup(view, true)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
@@ -303,14 +306,17 @@ export function renderSite(view) {
     const cashCard = `<div class="cardlet"><div class="row"><span class="label">累计销售 / 累计收购</span><strong class="value">${number(cumulative.salesVoucherUnits || 0, 0)} / ${number(cumulative.purchaseVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
       <div class="subtle">收付款都走镇库；库存越多收购价自动越低。</div></div>`;
     body = `<div class="status-strip"><span class="status-light working"></span><strong>镇营批发市场 · 做市商</strong><span>${number(building.level)}级</span></div><div class="subtle">各方产品汇入这里，商店和生产者从这里进货；小麦由镇库直管。</div>${buildingStaffingMarkup(view, building)}${cashCard}${marketRows}${developmentMarkup(view, building, development)}`;
-  } else if (building?.typeId === "commercial_street") {
+  } else if (building?.typeId === "commercial_street" || building?.typeId === "trade_center") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    const isTradeCenter = building.typeId === "trade_center";
+    const tradeHouses = view.tradeHouses?.houses || [];
     const shops = (view.shops || []).filter(shop => shop.buildingId === building.id && shop.status !== "closed");
     const occupied = shops.filter(shop => shop.occupiesStreet);
     const capacity = building.level * 2;
     const merchantCount = shops.reduce((sum, shop) => sum + (shop.merchants || 0), 0);
     const clerkCount = shops.reduce((sum, shop) => sum + shop.clerks, 0);
     const shopCards = shops.map(shop => {
+      if (shop.kind === "trade") return tradeShopCard(view, shop, tradeHouses.find(row => row.id === shop.id) || null, unit);
       const staff = (shop.merchants || 0) + shop.clerks;
       const staffControls = shop.status === "open"
         ? `<div class="site-worker-actions"><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="-1" ${shop.merchants <= 1 ? "disabled" : ""}>−</button><strong>商人 ${number(shop.merchants)} / ${number(shop.maxMerchants || 4)}</strong><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="1" ${shop.merchants >= (shop.maxMerchants || 4) || view.labor.idle <= 0 ? "disabled" : ""}>＋</button></div>
@@ -329,8 +335,8 @@ export function renderSite(view) {
       const pricingDetail = shop.pricing?.dynamic ? `<details class="detail-block" data-detail-key="shop-pricing:${escapeHtml(shop.id)}"><summary>动态加价（目标利润率定价）</summary><div class="detail-body">${renderShopPricing(view, shop)}</div></details>` : "";
       return `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)} · ${escapeHtml(shop.typeName)}</strong><span class="badge">${escapeHtml(shop.statusReason)}</span></div><div class="row"><span class="label">今日利润</span><strong class="value">${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>${activity}${staffControls}<details class="detail-block" data-detail-key="shop:${escapeHtml(shop.id)}"><summary>经营详情</summary><div class="detail-body"><div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(shop.ownerName || shop.ownerHouseholdId)}</strong></div><div class="row"><span class="label">店员日薪</span><strong class="value">${number(shop.clerkWageVoucher, 1)}${escapeHtml(unit)}${shop.wageTarget != null ? ` · 行情${number(shop.wageTarget, 1)}` : ""}${shop.wageDiagnosis ? ` · ${escapeHtml(shop.wageDiagnosis)}` : ""}</strong></div>${stock}${serviceDetail}${shop.kind === "service" ? `<div class="row"><span class="label">未成交：没钱 / 容量不足</span><strong class="value">${number(shop.recentUnaffordableUses, 2)} / ${number(shop.recentCapacityUnmetUses, 2)}次</strong></div><div class="row"><span class="label">增1店员能力</span><strong class="value">+${number(shop.nextClerkServiceCapacity)}次/日</strong></div>` : ""}<div class="row"><span class="label">可支付资金</span><strong class="value">${number(shop.cashVoucher, 2)}粮券 · ${number(shop.cashWheatJin || 0, 2)}斤小麦</strong></div><div class="row"><span class="label">今日收入 / 成本</span><strong class="value">${number(shop.revenueDayVoucher, 2)} / ${number(shop.cogsDayVoucher + shop.wageDayVoucher + shop.rentDayVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">欠薪 / 欠租 / 欠税</span><strong class="value">${number(shop.wageArrearsVoucher, 2)} / ${number(shop.rentArrearsVoucher, 2)} / ${number(shop.taxArrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>${action}</div></details>${pricingDetail}</div>`;
     }).join("");
-    const openButtons = occupied.length < capacity ? `<div class="site-actions"><button class="secondary" data-shop-open="general" data-shop-building="${escapeHtml(building.id)}">开综合商店</button><button class="secondary" data-shop-open="haircut" data-shop-building="${escapeHtml(building.id)}">开理发店</button><button class="secondary" data-shop-open="repair" data-shop-building="${escapeHtml(building.id)}">开修补铺</button><button class="secondary" data-shop-open="tea" data-shop-building="${escapeHtml(building.id)}">开茶馆</button><button class="secondary" data-shop-open="school" data-shop-building="${escapeHtml(building.id)}">开学堂</button><button class="secondary" data-shop-open="restaurant" data-shop-building="${escapeHtml(building.id)}">开饭店</button></div>` : "";
-    body = `<div class="status-strip"><span class="status-light working"></span><strong>商业街</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">占用店铺</span><strong class="value">${number(occupied.length)} / ${number(capacity)}间</strong></div><div class="row"><span class="label">商人 / 店员</span><strong class="value">${number(merchantCount)} / ${number(clerkCount)}人</strong></div>${openButtons}${shopCards || `<div class="subtle">暂无居民入驻。</div>`}${developmentMarkup(view, building, development)}`;
+    const openButtons = occupied.length < capacity ? (isTradeCenter ? `<div class="site-actions"><button class="secondary" data-shop-open="trading_house" data-shop-building="${escapeHtml(building.id)}">开贸易行</button></div>` : `<div class="site-actions"><button class="secondary" data-shop-open="general" data-shop-building="${escapeHtml(building.id)}">开综合商店</button><button class="secondary" data-shop-open="haircut" data-shop-building="${escapeHtml(building.id)}">开理发店</button><button class="secondary" data-shop-open="repair" data-shop-building="${escapeHtml(building.id)}">开修补铺</button><button class="secondary" data-shop-open="tea" data-shop-building="${escapeHtml(building.id)}">开茶馆</button><button class="secondary" data-shop-open="school" data-shop-building="${escapeHtml(building.id)}">开学堂</button><button class="secondary" data-shop-open="restaurant" data-shop-building="${escapeHtml(building.id)}">开饭店</button></div>`) : "";
+    body = `<div class="status-strip"><span class="status-light working"></span><strong>${isTradeCenter ? "贸易中心" : "商业街"}</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">占用店铺</span><strong class="value">${number(occupied.length)} / ${number(capacity)}间</strong></div><div class="row"><span class="label">商人 / 店员</span><strong class="value">${number(merchantCount)} / ${number(clerkCount)}人</strong></div>${openButtons}${shopCards || `<div class="subtle">暂无居民入驻。</div>`}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="policy">查看租税政策</button>`;
   } else if (building?.typeId === "livestock_base") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
@@ -417,6 +423,45 @@ export function renderSite(view) {
   // mod 给这种建筑追加的卡片（mod.js 的 ui.buildingSections）。
   const modSections = building ? MODS.map(mod => mod.ui?.buildingSections?.[building.typeId]?.(view, building, view.mods?.[mod.id]) || "").join("") : "";
   return `<button class="site-back" data-back>‹ 返回镇图</button><h2>${escapeHtml(title)}</h2><div class="cardlet">${body}${modSections}${actions ? `<div class="site-actions">${actions}</div>` : ""}</div>`;
+}
+
+// 贸易行：没有零售货架，改为买卖情况（docs/TRADE.md「贸易中心与贸易行」）；店员与商人仍可手动增减。
+function tradeShopCard(view, shop, house, unit) {
+  const today = house?.today || { exportTotalJin: 0, importTotalJin: 0, freightVoucher: 0, profitVoucher: 0, usedJin: 0, trades: 0 };
+  const week = house?.week || { exportTotalJin: 0, importTotalJin: 0, freightVoucher: 0, profitVoucher: 0 };
+  const open = shop.status === "open";
+  const statusText = !open ? escapeHtml(shop.statusReason || "未营业") : (today.trades > 0 ? "营业中" : "暂无可做的买卖");
+  const staff = (shop.merchants || 0) + shop.clerks;
+  const maxClerks = shop.maxClerks || 20;
+  const maxMerchants = shop.maxMerchants || 4;
+  const staffControls = open
+    ? `<div class="site-worker-actions"><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="-1" ${shop.merchants <= 1 ? "disabled" : ""}>−</button><strong>商人 ${number(shop.merchants)} / ${number(maxMerchants)}</strong><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="1" ${shop.merchants >= maxMerchants || view.labor.idle <= 0 ? "disabled" : ""}>＋</button></div>
+      <div class="site-worker-actions"><button class="step-btn" data-shop-clerk="${escapeHtml(shop.id)}" data-step="-1" ${shop.clerks <= 0 ? "disabled" : ""}>−</button><strong>店员 ${number(shop.clerks)} / ${number(maxClerks)}</strong><button class="step-btn" data-shop-clerk="${escapeHtml(shop.id)}" data-step="1" ${shop.clerks >= maxClerks || view.labor.idle <= 0 ? "disabled" : ""}>＋</button></div>`
+    : "";
+  const action = shop.status === "liquidating"
+    ? `<button class="secondary" data-shop-fund="${escapeHtml(shop.id)}">业主补资清偿</button>`
+    : `<button class="secondary" data-shop-close="${escapeHtml(shop.id)}">停业</button>`;
+  const money = value => `${number(value, 2)}${escapeHtml(unit)}`;
+  return `<div class="cardlet trade-shop"><div class="row"><strong>${escapeHtml(shop.name)} · ${escapeHtml(shop.typeName)}</strong><span class="badge">${statusText}</span></div>
+    <div class="row"><span class="label">在岗 / 接待</span><strong class="value">${number(staff)}人 · 店员上限 ${number(maxClerks)}</strong></div>
+    <div class="row"><span class="label">今日出口 / 进口</span><strong class="value">${number(today.exportTotalJin, 1)} / ${number(today.importTotalJin, 1)}斤</strong></div>
+    <div class="row"><span class="label">近7日出口 / 进口</span><strong class="value">${number(week.exportTotalJin, 1)} / ${number(week.importTotalJin, 1)}斤</strong></div>
+    <div class="row"><span class="label">运费 今日 / 近7日</span><strong class="value">${money(today.freightVoucher)} / ${money(week.freightVoucher)}</strong></div>
+    <div class="row"><span class="label">利润 今日 / 近7日</span><strong class="value">${money(today.profitVoucher)} / ${money(week.profitVoucher)}</strong></div>
+    <div class="row"><span class="label">持有小麦</span><strong class="value">${number(house?.wheatJin || 0, 1)}斤</strong></div>
+    ${staffControls}
+    <details class="detail-block" data-detail-key="shop:${escapeHtml(shop.id)}"><summary>经营详情</summary><div class="detail-body"><div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(shop.ownerName || shop.ownerHouseholdId)}</strong></div><div class="row"><span class="label">运力份额 今日 / 用量</span><strong class="value">${number(house?.shareJin || 0, 1)} / ${number(today.usedJin, 1)}斤</strong></div><div class="row"><span class="label">今日预算</span><strong class="value">${number(house?.budgetJin || 0, 1)}斤</strong></div>${house?.cashVoucher != null ? `<div class="row"><span class="label">可支付资金</span><strong class="value">${money(house.cashVoucher)}</strong></div>` : ""}<div class="row"><span class="label">欠薪 / 欠租 / 欠税</span><strong class="value">${number(shop.wageArrearsVoucher || 0, 2)} / ${number(shop.rentArrearsVoucher || 0, 2)} / ${number(shop.taxArrearsVoucher || 0, 2)}${escapeHtml(unit)}</strong></div></div></details>
+    <div class="site-actions">${action}</div></div>`;
+}
+
+// 物流中心 / 码头：本座运力 = 在岗人数 × 每人每日运力（docs/TRADE.md「运力」），计入全镇日运力池。
+function freightSiteMarkup(building) {
+  const perWorker = building.typeId === "dock" ? CONTENT.rules.dockJinPerWorker : CONTENT.rules.logisticsJinPerWorker;
+  const workers = (building.jobs || []).reduce((sum, job) => sum + (job.workers || 0), 0);
+  const ready = building.status?.status === "ready";
+  return `<div class="status-strip"><span class="status-light ${ready ? "working" : "idle"}"></span><strong>${escapeHtml(building.status?.label || "")}</strong></div>`
+    + `<div class="row"><span class="label">本座运力</span><strong class="value">在岗${number(workers)}人 × ${number(perWorker)}斤 = ${number(workers * perWorker)}斤/日</strong></div>`
+    + `<div class="subtle">运力计入全镇日运力池，外贸交易与长期协定都从池里扣；没有人在岗就没有运力。</div>`;
 }
 
 function developmentMarkup(view, building, development) {

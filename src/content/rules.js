@@ -42,6 +42,12 @@ export const RULES = Object.freeze({
   // 私人贸易行运费（券/斤）：走物流中心与外贸房运力的部分；走码头的部分按 dockFreightVoucherPerJin。
   freightVoucherPerJin: 0.06,
   dockFreightVoucherPerJin: 0.03,
+  // 贸易中心 / 贸易行（docs/TRADE.md「贸易中心与贸易行」）：贸易行每天按店员数定成交量，另受当日运力的份额限制。
+  tradeHouseTargetMarginPercent: 10, // 单斤利润率（卖价 − 买价 − 运费）达到这个百分比（相对买价+运费）才做
+  tradeHouseJinPerClerk: 100, // 每名店员（含商人）每天可成交的斤数
+  tradeHouseCapacityShare: 0.5, // 各贸易行合计最多占当日运力的这个比例，按店员数分配；另一半留给镇里
+  tradeHouseExportMinStockDays: 10, // 批发市场存量不到这么多天销量时，不出口这样货（保本地供应）
+  tradeHouseImportShortageDays: 3, // 批发市场存量不到这么多天销量时视为紧缺（界面标记用）
   agricultureTaxDefaultPercent: 40, // 用户 0.1.11 调优（原 50）
   agricultureTaxMaximumPercent: 80,
   agricultureTaxLookbackDays: 30,
@@ -226,6 +232,9 @@ export const RULES = Object.freeze({
     stall: Object.freeze({ id: "stall", name: "集市", kind: "stall", hostBuildingTypeId: "times_square", maxClerks: 0,
       startupVoucher: 200, perKeeperSalesJin: 25, markupPercent: 10, // markupPercent 只在镇上没有综合商店时用
       settlementDays: 1, workingCapitalReserveDays: 2 }),
+    // 贸易行：开在贸易中心，店主与店员每天自己做外镇买卖（systems/trading-houses.js），不卖给居民。
+    trading_house: Object.freeze({ id: "trading_house", name: "贸易行", kind: "trade", hostBuildingTypeId: "trade_center", maxClerks: 20,
+      startupVoucher: 300, workingCapitalReserveDays: 2 }),
     // 兼容旧调用；新开店会统一归一为综合商店。
     grain: Object.freeze({ id: "grain", name: "粮店", kind: "legacy_retail", itemId: "wheat", aliasOf: "general" }),
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),

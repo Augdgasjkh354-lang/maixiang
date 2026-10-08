@@ -146,6 +146,20 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({ workDays: 800, recommendedWorkers: 16 }),
     upgrade: Object.freeze({ maxLevel: 10, workDays: 800, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]) })
   }),
+  // 贸易中心：和商业街一样的宿主建筑，镇长在铺位上开"贸易行"（店铺 kind "trade"）；贸易行每天自己做外镇买卖（docs/TRADE.md）。
+  trade_center: Object.freeze({
+    id: "trade_center", name: "贸易中心", icon: "⚖️",
+    description: "居民开贸易行 · 每级2间铺位 · 贸易行每天做外镇买卖",
+    maxInstances: 6,
+    shopHost: Object.freeze({ slotsPerLevel: 2 }),
+    jobs: Object.freeze([
+      Object.freeze({ id: "merchants", name: "商人", slots: 8, wagePerWorkerDay: 5, note: "每间贸易行最多4名商人，由店铺支付", releasePriority: 60, managedBy: "shops", shopRole: "merchant" }),
+      Object.freeze({ id: "shop_clerks", name: "店员", slots: 100, wagePerWorkerDay: 5, note: "每间贸易行最多20名店员，由店铺支付", releasePriority: 70, managedBy: "shops", shopRole: "clerk" })
+    ]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]),
+    construction: Object.freeze({ workDays: 800, recommendedWorkers: 16 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 800, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1200 }]) })
+  }),
   // 养殖基地：和商业街一样由居民入驻经营，每级 4 个养殖场位（鸡/鸭/鹅/猪）。
   livestock_base: Object.freeze({
     id: "livestock_base", name: "养殖基地", icon: "🐖",

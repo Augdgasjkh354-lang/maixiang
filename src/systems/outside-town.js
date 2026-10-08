@@ -147,13 +147,13 @@ export function unitPrice(town, good, direction, stock = null) {
   return direction === "sell" ? mid * (1 - half) : mid * (1 + half);
 }
 
-function goodOf(profile, itemId) {
+export function goodOf(profile, itemId) {
   const good = profile.goods[itemId];
   return good ? { ...good, id: itemId } : null;
 }
 
 // 逐段计价：返回这批货总共值多少斤小麦。
-function quoteValue(town, good, direction, quantity) {
+export function quoteValue(town, good, direction, quantity) {
   let stock = town.stocks[good.id] || 0;
   const step = quantity / SLICES;
   let value = 0;
@@ -177,7 +177,7 @@ export function sellableStock(town, good) {
 }
 
 // 我们卖 quantity 时外镇最多付得起多少：二分出货款不超过可付小麦的数量。
-function affordableSellQuantity(town, profile, good, quantity) {
+export function affordableSellQuantity(town, profile, good, quantity) {
   const budget = payableWheatJin(town, profile);
   if (quoteValue(town, good, "sell", quantity) <= budget) return quantity;
   let low = 0;

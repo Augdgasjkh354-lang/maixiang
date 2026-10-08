@@ -29,6 +29,7 @@ import { arrangePrivateWorkers, processPrivateIndustries, resetPrivateDaily, res
 import { emptyFinancialFlowPeriod } from "../economy/financial-flows.js";
 import { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } from "./companies.js";
 import { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } from "./shops.js";
+import { settleTradingHouses } from "./trading-houses.js";
 import { refreshOperatingPlan, recordConsumerDay } from "../economy/operating-plan.js";
 import { archiveHouseholdLifeYear, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } from "./household-life.js";
 import { settleBankDay } from "./bank.js";
@@ -184,6 +185,8 @@ export const CORE_DAILY_STEPS = [
   { id: "repairWood", run: buyRepairWoodForResidents },
   { id: "goodsTrade", run: buyGoodsForResidents },
   { id: "services", run: processServiceDemand },
+  // 贸易行：店主与店员每天自己做外镇买卖（docs/TRADE.md）；在居民买完之后、外镇日结之前，用剩下的运力与批发存货。
+  { id: "tradeHouses", run: settleTradingHouses },
 
   // ── 生活：吃饭、吃盐、舒心值、家庭日账
   { id: "meal", run: (state, content, day) => consumeDailyRations(state, day.peopleAtStart.total, content) },

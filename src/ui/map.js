@@ -143,8 +143,11 @@ function renderProject(project, plot, selected) {
 function renderPlot(plot, preview) {
   const x = plot.x * 12;
   const y = plot.y * 10;
-  return `<g class="plot-target${preview ? " preview" : ""}" data-plot="${escapeHtml(plot.id)}" role="button" tabindex="0" aria-label="选择${escapeHtml(plot.label)}开工" transform="translate(${x} ${y})">
+  // 河岸地块：只有码头、外贸房等能选，标出水纹以便一眼认出。
+  const riverside = plot.feature === "riverside";
+  return `<g class="plot-target${preview ? " preview" : ""}${riverside ? " riverside-site" : ""}" data-plot="${escapeHtml(plot.id)}" role="button" tabindex="0" aria-label="选择${escapeHtml(plot.label)}开工" transform="translate(${x} ${y})">
     <ellipse class="plot-hit" cx="0" cy="0" rx="53" ry="44"/><ellipse class="plot-outline" cx="0" cy="0" rx="53" ry="41"/>
+    ${riverside ? `<path class="riverside-wave" d="M-30 22q7.5-6 15 0t15 0 15 0 15 0"/>` : ""}
     <path class="plot-cross" d="M-9 0h18M0-9v18"/><text class="plot-name" x="0" y="58">${escapeHtml(plot.label)}</text>
   </g>`;
 }

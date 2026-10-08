@@ -13,7 +13,7 @@ import {
 import { shopTradePrices, recentAverage } from "../economy/operating-plan.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { accrueWages, payWages, wageArrears, wageBook } from "./employer.js";
-import { buyWholesaleForOwner, hasWholesaleMarket } from "./wholesale-market.js";
+import { buyWholesaleForOwner, hasWholesaleMarket, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
 import {
   ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory,
@@ -40,7 +40,9 @@ function blankShopPeriod() {
     customerCount: 0,
     rejectedCustomerCount: 0,
     profitVoucherUnits: 0,
-    distributedVoucherUnits: 0
+    distributedVoucherUnits: 0,
+    // 贸易行运费（粮券）：运费付给镇库，计入利润（见 systems/trading-houses.js）。
+    freightVoucherUnits: 0
   };
 }
 
@@ -164,7 +166,7 @@ function shopOccupiesStreet(shop) {
 function merchantJobKey(shop) { return `shop:${shop.id}:merchant`; }
 function clerkJobKey(shop) { return `shop:${shop.id}:clerk`; }
 
-function shopMerchantCount(state, shop) { return jobCount(state, merchantJobKey(shop)); }
+export function shopMerchantCount(state, shop) { return jobCount(state, merchantJobKey(shop)); }
 
 function shopMerchantOnDuty(state, shop) {
   // 集体经营（时代广场）：有人在摊上就算营业，不认某一户店主。
@@ -173,7 +175,7 @@ function shopMerchantOnDuty(state, shop) {
   return Boolean(owner && isActiveHousehold(owner) && (owner.jobs?.[merchantJobKey(shop)] || 0) >= 1 && shopMerchantCount(state, shop) > 0);
 }
 
-function shopClerkCount(state, shop) { return jobCount(state, clerkJobKey(shop)); }
+export function shopClerkCount(state, shop) { return jobCount(state, clerkJobKey(shop)); }
 
 function shopSerial(state, content) {
   return (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
@@ -449,6 +451,8 @@ export function shopSalesCapacityUnits(state, shop, content) {
   if (!shop || shop.status !== "open" || !shopMerchantOnDuty(state, shop) || shopIsService(shop, content)) return 0;
   const kind = shopKind(shop, content);
   if (kind === "farm") return 0;
+  // 贸易行的接待能力 = 店员与商人人数 × 每人可成交斤数（docs/TRADE.md）。
+  if (kind === "trade") return Math.round((shopClerkCount(state, shop) + shopMerchantCount(state, shop)) * (content.rules.tradeHouseJinPerClerk || 100) * content.precision.inventoryUnitsPerJin);
   if (kind === "stall") {
     const def = shopDefinition(content, shop.typeId);
     return Math.round(shopMerchantCount(state, shop) * (def.perKeeperSalesJin ?? 25) * content.precision.inventoryUnitsPerJin);
@@ -477,6 +481,13 @@ export function serviceShopCapacityUses(state, shop, content) {
 function shopWorkingCapitalReserve(state, shop, content) {
   const def = shopDefinition(content, shop.typeId);
   const days = def?.workingCapitalReserveDays ?? content.rules.shopWorkingCapitalReserveDays ?? 7;
+  if (def?.kind === "trade") {
+    // 贸易行留几天买卖周转金：按全部可买卖商品的平均批发售价估值。
+    if (!hasWholesaleMarket(state)) return 0;
+    const prices = wholesaleMonopolyItemIds(content).map(itemId => wholesaleUnitPrice(state, itemId, content)).filter(p => p > 0);
+    const averagePrice = prices.length ? prices.reduce((sum, p) => sum + p, 0) / prices.length : 0;
+    return Math.round(shopSalesCapacityUnits(state, shop, content) / content.precision.inventoryUnitsPerJin * averagePrice * days * currencyScale(content));
+  }
   if (def?.kind === "service") {
     const service = content.rules.serviceTypes?.[def.serviceId];
     // 与零售店口径一致：全额日销能力×单价×天数（之前无故打25折）。
@@ -1221,15 +1232,19 @@ export function finishShopsDay(state, content, forceSettlement = false) {
     const activity = sold + serviceUses;
     const arrears = (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0);
     const farmDef = shopKind(shop, content) === "farm" ? shopDefinition(content, shop.typeId) : null;
+    // 贸易行没有零售货架：存货按全部品类计（买卖当日即出，平时多为 0）。
     const retailStock = farmDef
       ? (shop.inventory[farmDef.productItemId] || 0) + (shop.inventory[farmDef.feedItemId] || 0)
-      : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
+      : shopKind(shop, content) === "trade"
+        ? Object.values(shop.inventory || {}).reduce((sum, units) => sum + Math.max(0, units || 0), 0)
+        : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
     const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
     if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
     else if (maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
+    else if (shopKind(shop, content) === "trade") shop.statusReason = activity > 0 ? "营业中" : "暂无可做的买卖";
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";
     else shop.statusReason = "营业中";

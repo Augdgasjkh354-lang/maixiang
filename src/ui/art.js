@@ -1,5 +1,8 @@
 import { MODS } from "../mods/registry.js";
 import { modArt } from "../mods/api.js";
+import { renderBuildingArt } from "./building-art.js";
+// 运力建筑的卡片图标直接用地图上的同款绘制（缩小），免得建造面板里退回通用民居。
+const SHARED_ART_CARD_TYPES = new Set(["logistics_center", "dock", "trade_center"]);
 export function uiIcon(name, className = "ui-icon") {
   const paths = {
     people: '<circle cx="9" cy="8" r="3"/><path d="M3 20c.5-3.4 2.4-5 6-5s5.5 1.6 6 5M16 5.4a3 3 0 0 1 0 5.8M17 15c2.3.4 3.6 2 4 5"/>',
@@ -24,6 +27,7 @@ export function buildingSymbol(type, state = "idle", ghost = false) {
   // mod 建筑：用 mod 提供的地图美术缩小成卡片图标。
   const fromMod = modArt(MODS, type);
   if (fromMod) return `<g class="${classes}"><g transform="translate(50 64) scale(.5)">${fromMod({ level: 1 })}</g></g>`;
+  if (SHARED_ART_CARD_TYPES.has(type)) return `<g class="${classes}"><g transform="translate(50 64) scale(.5)">${renderBuildingArt(type, { level: 1 })}</g></g>`;
   if (type === "mill") {
     return `<g class="${classes}">
       <ellipse class="building-shadow" cx="50" cy="101" rx="38" ry="7"/>

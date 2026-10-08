@@ -27,6 +27,7 @@ import { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumeric
 import { createDashboardViewCache } from "./dashboard-view-cache.js";
 import { APP_VERSION, BUILD_ID } from "../content/version.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
+import { freightLimitNote } from "./freight-note.js";
 
 function closest(element, selector) {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
@@ -302,6 +303,7 @@ export function mountGame(root) {
       case "residents": return renderResidents(view);
       case "business": return renderEconomy(view);
       case "policy": return renderPolicy(view);
+      // 贸易行的买卖数字只在经营面板的视图里；站点面板单独补上（只读）。
       case "site": return renderSite(view);
       case "settings": return renderSettings(view, null, settingsUi());
       default: return "";
@@ -1324,6 +1326,15 @@ export function mountGame(root) {
       changed(true); render(true);
       return;
     }
+    const shopClerk = closest(target, "[data-shop-clerk][data-step]");
+    if (shopClerk && state) {
+      const shop = buildView().shops.find(row => row.id === shopClerk.dataset.shopClerk);
+      if (!shop) return;
+      const result = simulation.configureShopClerks(state, shop.id, shop.clerks + Number(shopClerk.dataset.step));
+      if (!result.ok) { showToast(result.reason); return; }
+      changed(true); render(true);
+      return;
+    }
     const stallRentFree = closest(target, "[data-stall-rent-free]");
     if (stallRentFree && state) {
       const result = simulation.setStallRentFree(state, Number(stallRentFree.dataset.stallRentFree));
@@ -1678,6 +1689,7 @@ export function mountGame(root) {
       const outsideView = buildView()?.outsideTowns?.find(row => row.id === townId);
       const outsideTownName = outsideView?.name || simulation.content.outsideTowns?.[townId]?.name || "外镇";
       const outsideGood = outsideView?.goods?.find(good => good.itemId === itemId);
+      const poolBeforeJin = buildView()?.logistics?.poolJin;
       const result = simulation.tradeWithOutsideTown(state, direction, itemId, parsed.value, townId);
       if (!result?.ok) {
         setDraftError(key, result?.reason || "交易失败", input);
@@ -1688,9 +1700,10 @@ export function mountGame(root) {
       render(true);
       const itemName = outsideGood?.name || itemId;
       const itemUnit = outsideGood?.unit || "斤";
-      showToast(direction === "sell"
+      const freightNote = freightLimitNote(parsed.value, result.quantityJin, poolBeforeJin);
+      showToast((direction === "sell"
         ? `已向${outsideTownName}卖出${number(result.quantityJin, 1)}${itemUnit}${itemName}，得小麦${number(result.valueJin, 1)}斤，均价${number(result.priceWheatPerUnit, 2)}斤/${itemUnit}。`
-        : `已从${outsideTownName}买入${number(result.quantityJin, 1)}${itemUnit}${itemName}，支付小麦${number(result.valueJin, 1)}斤，均价${number(result.priceWheatPerUnit, 2)}斤/${itemUnit}。`);
+        : `已从${outsideTownName}买入${number(result.quantityJin, 1)}${itemUnit}${itemName}，支付小麦${number(result.valueJin, 1)}斤，均价${number(result.priceWheatPerUnit, 2)}斤/${itemUnit}。`) + freightNote);
       return;
     }
     const wheatLoanButton = closest(target, "[data-wheat-loan-issue]");

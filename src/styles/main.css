@@ -220,6 +220,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 .plot-name { fill: #fff4cf; font: 700 13px sans-serif; text-anchor: middle; opacity: .86; paint-order: stroke; stroke: #4e5a38; stroke-width: 4px; }
 .plot-target:hover .plot-outline, .plot-target:focus .plot-outline, .plot-target.preview .plot-outline { fill: #ffe89457; stroke: #ffe08a; stroke-dasharray: none; }
 .plot-target.preview .plot-outline { stroke-width: 6; }
+/* 河岸地块（只能建码头、外贸房）：水色外框 + 浪纹，区别于普通空地。 */
+.plot-target.riverside-site .plot-outline { fill: #cfe8e222; stroke: #9fd0c6; stroke-dasharray: 2 6; }
+.plot-target.riverside-site .plot-name { fill: #d9f1ec; stroke: #2f5f58; }
+.plot-target.riverside-site .riverside-wave { fill: none; stroke: #9fd0c6; stroke-width: 3; stroke-linecap: round; opacity: .8; }
+.plot-target.riverside-site:hover .plot-outline, .plot-target.riverside-site:focus .plot-outline, .plot-target.riverside-site.preview .plot-outline { fill: #7fbfb358; stroke: #bfe9e0; stroke-dasharray: none; }
 .selected-preview { pointer-events: none; }
 .preview-shadow { fill: #e5c76765; stroke: #fff1b2; stroke-width: 3; stroke-dasharray: 6 6; }
 .north-mark path { fill: none; stroke: #fff2c9; stroke-width: 4; stroke-linejoin: round; }
@@ -285,6 +290,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 .row { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
 .row + .row { margin-top: 5px; }
 .label { color: var(--muted); font-size: 13px; line-height: 1.4; }
+/* 运力行：标签不换行，数字区靠左排，窄屏也不把"运力"拆成两行。 */
+.freight-row { align-items: flex-start; }
+.freight-row .label { white-space: nowrap; }
+.freight-row .value { text-align: right; }
 .value { color: var(--deep-green); font-size: 14px; font-weight: 750; text-align: right; }
 .value.large { font: 750 18px "Noto Serif SC", "Songti SC", serif; }
 .subtle { margin-top: 5px; color: #7a745f; font-size: 12px; line-height: 1.45; }
