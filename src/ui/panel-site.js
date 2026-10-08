@@ -180,29 +180,26 @@ function timesSquareMarkup(view, building, development) {
   const slots = square.slots ?? building.level * (CONTENT.buildings.times_square.shopHost?.slotsPerLevel || 50);
   const stallLimit = view.policy?.stallKeeperLimit ?? square.keeperLimit ?? 50;
   const rentVoucher = view.policy?.stallRentVoucher ?? square.rentVoucher ?? 2;
-  // 营业中的摊位在前；收摊清算中的单独标出。
-  const stalls = (view.shops || []).filter(shop => shop.buildingId === building.id && shop.kind === "stall" && shop.status !== "closed")
-    .sort((a, b) => (a.status === "liquidating") - (b.status === "liquidating") || b.soldDayJin - a.soldDayJin);
-  const maxKeepers = CONTENT.rules.shopTypes.stall?.maxMerchants || 2;
-  const cooldown = (square.cooldownDays || 0) > 0
-    ? `<div class="shortage-banner visible">近期摆摊亏损，${number(square.cooldownDays)}天内没人来摆</div>` : "";
-  const stallRows = stalls.slice(0, 10).map(shop =>
-    `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)}</strong><span class="badge">${shop.status === "liquidating" ? "收摊清算中" : `${number(shop.merchants)} / ${number(shop.maxMerchants || maxKeepers)}人`}</span></div><div class="subtle">今日卖货${number(shop.soldDayJin, 1)}斤 · 今日利润${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</div></div>`
-  ).join("");
-  const moreStalls = stalls.length > 10 ? `<div class="subtle">另有${number(stalls.length - 10)}个摊位未列出。</div>` : "";
+  const payout = square.payout;
+  const goods = (square.inventoryRows || []).map(row => `<div class="row"><span class="label">${escapeHtml(row.itemName)}</span><strong class="value">存${number(row.stock, 1)} · 日均售${number(row.averageDailySales, 1)} · 售${number(row.retailVoucher, 2)}${escapeHtml(unit)}</strong></div>`).join("");
+  const market = `<div class="cardlet"><div class="row"><strong>集市</strong><span class="badge">${escapeHtml(square.statusReason || "未开放摆摊")}</span></div>
+    <div class="row"><span class="label">摆摊人数 / 上限</span><strong class="value">${number(square.keepers || 0)} / ${number(square.keeperCap ?? stallLimit)}人</strong></div>
+    <div class="row"><span class="label">占用摊位 / 总数</span><strong class="value">${number(square.stallsUsed || 0)} / ${number(slots)}</strong></div>
+    <div class="row"><span class="label">今日卖货 / 卖货能力</span><strong class="value">${number(square.soldDayJin || 0, 1)} / ${number(square.capacityJin || 0, 0)}斤</strong></div>
+    <div class="row"><span class="label">今日收入 / 摊租</span><strong class="value">${number(square.revenueDayVoucher || 0, 2)} / ${number(square.rentDayVoucher || 0, 2)}${escapeHtml(unit)}</strong></div>
+    <div class="row"><span class="label">今日利润 / 7日均</span><strong class="value">${number(square.profitDayVoucher || 0, 2)} / ${number(square.averageDailyProfitVoucher || 0, 2)}${escapeHtml(unit)}</strong></div>
+    <div class="row"><span class="label">最近一次分红（每人）</span><strong class="value">${payout ? `${number(payout.min, 2)}—${number(payout.max, 2)}${escapeHtml(unit)} · ${number(payout.households)}户` : "—"}</strong></div>
+    <div class="row"><span class="label">累计分给摆摊家庭</span><strong class="value">${number(square.distributedTotalVoucher || 0, 1)}${escapeHtml(unit)}</strong></div>
+    ${(square.townAdvanceVoucher || 0) > 0 ? `<div class="row"><span class="label">待还镇库垫款</span><strong class="value">${number(square.townAdvanceVoucher, 1)}${escapeHtml(unit)}</strong></div>` : ""}
+    ${goods ? `<details class="detail-block" data-detail-key="stall-goods:${escapeHtml(building.id)}"><summary>货品</summary><div class="detail-body">${goods}</div></details>` : ""}
+  </div>`;
   return `<div class="status-strip"><span class="status-light working"></span><strong>时代广场</strong><span>${number(building.level)}级</span></div>
-    <div class="row"><span class="label">摊位 已用 / 总数</span><strong class="value">${number(square.stalls || 0)} / ${number(slots)}</strong></div>
-    <div class="row"><span class="label">摊贩 / 允许摆摊人数</span><strong class="value">${number(square.keepers || 0)} / ${number(stallLimit)}人</strong></div>
-    <div class="row"><span class="label">今日卖货</span><strong class="value">${number(square.soldDayJin || 0, 1)}斤</strong></div>
-    <div class="row"><span class="label">今日摊位合计利润</span><strong class="value">${number(square.profitDayVoucher || 0, 2)}${escapeHtml(unit)}</strong></div>
-    <div class="row"><span class="label">每摊日均利润</span><strong class="value">${number(square.averageDailyProfitVoucher || 0, 2)}${escapeHtml(unit)}</strong></div>
-    ${cooldown}
+    ${market}
     <div class="cardlet"><div class="setting-title">摆摊政策</div>
       <div class="row"><span class="label">允许摆摊人数（全镇）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-limit:square", kind: "stall-limit", target: "stalls", value: stallLimit, label: "允许摆摊人数", integer: true, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>人</b></div></div>
       <div class="row"><span class="label">摊租（每摊每日）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent:square", kind: "stall-rent", target: "stalls", value: rentVoucher, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${escapeHtml(unit)}</b></div></div>
-      <div class="subtle">待业家庭自动来摆，只卖日用品不卖主食；每摊每日最多卖${number(square.dailySalesCapJin || 50)}斤，每摊最多${number(maxKeepers)}人，比商店便宜。</div>
-    </div>
-    ${stalls.length ? `<h3>摊位</h3>${stallRows}${moreStalls}` : `<div class="subtle">暂无摊位，有闲人的家庭会自动来摆。</div>`}${developmentMarkup(view, building, development)}`;
+      <div class="subtle">待业的人自动来摆，按销量增减人手；只卖日用品不卖主食，每人每日最多卖${number(square.perKeeperSalesJin || 25)}斤（一摊2人），比商店便宜。每天的利润按人头分给摆摊家庭，各户随机多拿少拿两成。</div>
+    </div>${developmentMarkup(view, building, development)}`;
 }
 
 export function renderSite(view) {

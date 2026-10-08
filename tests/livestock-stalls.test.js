@@ -77,46 +77,68 @@ test("养殖场按商店缺口加人：需求大于一人产量时会雇饲养�
   assert.ok(hands >= 2, `猪肉需求约 ${Math.round(3300 * 8 / 365)} 斤/日，应雇多名饲养员，实际 ${hands}`);
 });
 
-test("摊位：只卖日用品、比商店便宜、每摊每日最多 50 斤、摊租默认 2", () => {
+function keepersOf(state, shop) {
+  return Object.values(state.households.byId).reduce((sum, h) => sum + (h.jobs?.[`shop:${shop.id}:merchant`] || 0), 0);
+}
+
+function collective(state) {
+  return Object.values(state.shops).find(s => s.typeId === "stall" && s.collective);
+}
+
+test("时代广场：一个集体集市，只卖日用品、比商店便宜、每人每日最多 25 斤、按摊交租", () => {
   const { state, plaza } = town(6104);
   state.wholesaleMarket.inventory.wine = 2000 * I;
-  const opened = simulation.openResidentShop(state, plaza, "stall");
-  assert.equal(opened.ok, true, opened.reason);
-  const stall = state.shops[opened.shopId];
-  assert.equal(state.policy.stallRentVoucher, 2);
   assert.ok(!simulation.openResidentShop(state, plaza, "general").ok, "时代广场不能开综合商店");
-  simulation.advanceDays(state, 1);
-  const cap = shopSalesCapacityUnits(state, stall, CONTENT);
-  assert.ok(cap <= 50 * I && cap > 0);
-  const stallPrice = shopTradePrices(state, "stall", CONTENT, "wine", stall).retailVoucherPerUnit;
+  simulation.advanceDays(state, 2);
+  const stalls = Object.values(state.shops).filter(s => s.typeId === "stall");
+  assert.equal(stalls.length, 1, "一座广场只有一个集体集市");
+  const market = stalls[0];
+  assert.equal(market.collective, true);
+  assert.equal(state.policy.stallRentVoucher, 2);
+  const stallPrice = shopTradePrices(state, "stall", CONTENT, "wine", market).retailVoucherPerUnit;
   const storePrice = shopTradePrices(state, "general", CONTENT, "wine", Object.values(state.shops).find(s => s.typeId === "general")).retailVoucherPerUnit;
-  assert.ok(stallPrice < storePrice, `摊位价 ${stallPrice} 应低于商店价 ${storePrice}`);
-  for (let day = 0; day < 10; day++) {
+  assert.ok(stallPrice < storePrice, `集市价 ${stallPrice} 应低于商店价 ${storePrice}`);
+  for (let day = 0; day < 15; day++) {
+    const keepers = keepersOf(state, market); // 摊租按早上在摊的人数收
     simulation.advanceDay(state);
-    const sold = Object.values(stall.accounts.day.soldUnits || {}).reduce((a, b) => a + b, 0);
-    assert.ok(sold <= 50 * I, "每摊每日最多 50 斤");
-    assert.ok(Object.keys(stall.accounts.day.soldUnits || {}).every(itemId => CONTENT.rules.householdGoods[itemId]), "只卖日用品");
+    const sold = Object.values(market.accounts.day.soldUnits || {}).reduce((a, b) => a + b, 0);
+    assert.ok(sold <= keepers * 25 * I + 1, "每人每日最多 25 斤");
+    assert.ok(Object.keys(market.accounts.day.soldUnits || {}).every(itemId => CONTENT.rules.householdGoods[itemId]), "只卖日用品");
+    assert.equal(market.accounts.day.rentExpenseVoucherUnits || 0, Math.ceil(keepers / 2) * 2 * V, "按占用摊位交租，每摊 2");
   }
-  assert.ok((stall.accounts.cumulative.rentExpenseVoucherUnits || 0) >= 2 * V * 10);
+  assert.ok((market.accounts.cumulative.soldUnits?.wine || 0) > 0, "集市卖出了酒");
   valid(state);
 });
 
-test("摊位自动来摆、不超过允许人数；调低允许人数会撤摊；每摊最多 2 人", () => {
+test("集市利润按人头 ×0.8—1.2 随机分给摆摊家庭；摆摊人数不超过允许人数", () => {
   const { state } = town(6105);
   state.wholesaleMarket.inventory.wine = 5000 * I;
   state.wholesaleMarket.inventory.cloth = 500 * I;
   assert.equal(simulation.setStallKeeperLimit(state, 6).ok, true);
-  simulation.advanceDays(state, 20);
-  const keepers = () => Object.values(state.shops).filter(s => s.typeId === "stall" && s.status === "open")
-    .reduce((sum, s) => sum + Object.values(state.households.byId).reduce((a, h) => a + (h.jobs?.[`shop:${s.id}:merchant`] || 0), 0), 0);
-  const stalls = Object.values(state.shops).filter(s => s.typeId === "stall" && s.status === "open");
-  assert.ok(stalls.length > 0, "有闲人的家庭自动来摆摊");
-  assert.ok(keepers() <= 6);
-  for (const s of stalls) assert.ok(Object.values(state.households.byId).reduce((a, h) => a + (h.jobs?.[`shop:${s.id}:merchant`] || 0), 0) <= 2);
+  const before = new Map(Object.values(state.households.byId).map(h => [h.id, h.voucherUnits || 0]));
+  simulation.advanceDays(state, 40);
+  const market = collective(state);
+  assert.ok(keepersOf(state, market) > 0 && keepersOf(state, market) <= 6);
+  assert.ok((market.accounts.cumulative.distributedVoucherUnits || 0) > 0, "利润分给了摆摊家庭");
+  const payout = market.plan.lastPayout;
+  assert.ok(payout && payout.maxPerKeeperUnits <= payout.minPerKeeperUnits * 1.5 + 1, "各户每人所得相差不超过 0.8—1.2 的范围");
+  assert.ok(before.size > 0);
   simulation.setStallKeeperLimit(state, 0);
-  simulation.advanceDays(state, 2);
-  assert.equal(keepers(), 0, "允许人数为 0 时全部收摊");
-  assert.ok(!Object.values(state.shops).some(s => s.typeId === "stall" && s.status === "closed"), "清算完的摊位删档");
+  simulation.advanceDays(state, 1);
+  assert.equal(keepersOf(state, market), 0, "允许人数为 0 时没人摆摊");
+  valid(state);
+});
+
+test("旧档里按户开的摊位读档后收摊清算，换成集体集市", () => {
+  const { state, plaza } = town(6107);
+  state.wholesaleMarket.inventory.wine = 2000 * I;
+  const household = Object.values(state.households.byId).find(h => (h.voucherUnits || 0) > 500 * V);
+  const legacyId = "shop-legacy";
+  state.shops[legacyId] = { ...structuredClone(state.shops[Object.keys(state.shops)[0]]), id: legacyId, name: "旧摊", typeId: "stall", buildingId: plaza,
+    collective: undefined, ownerHouseholdId: household.id, cashVoucherUnits: 0, cashWheatUnits: 0, inventory: {}, inventoryCostVoucherUnits: {}, history: [] };
+  simulation.advanceDays(state, 3);
+  assert.ok(!state.shops[legacyId], "旧摊清算完删档");
+  assert.ok(collective(state), "建了集体集市");
   valid(state);
 });
 
@@ -133,4 +155,20 @@ test("肉是日用品：吃了加舒心值，四种肉都在综合商店货架�
     assert.ok(CONTENT.rules.householdGoods[itemId], itemId);
     assert.ok(CONTENT.rules.shopTypes.general.itemIds.includes(itemId), itemId);
   }
+});
+
+test("拆除时代广场：集市自动结束，余钱和货不凭空消失，状态合法", () => {
+  const { state, plaza } = town(6108);
+  state.wholesaleMarket.inventory.wine = 2000 * I;
+  simulation.advanceDays(state, 10);
+  assert.ok(collective(state));
+  const preview = simulation.selectDemolitionPreview ? simulation.selectDemolitionPreview(state, plaza) : null;
+  if (preview) assert.equal(preview.available, true, preview.reason);
+  const result = simulation.demolishBuilding(state, plaza);
+  assert.equal(result.ok, true, result.reason);
+  assert.ok(!collective(state), "集市已结束");
+  assert.ok(Object.values(state.households.byId).every(h => !Object.keys(h.jobs || {}).some(key => key.includes(":merchant") && !state.shops[key.split(":")[1]])), "摊贩都回到待业");
+  valid(state);
+  simulation.advanceDays(state, 2);
+  valid(state);
 });

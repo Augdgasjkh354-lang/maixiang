@@ -6,6 +6,7 @@ import { selectHousing } from "../selectors/housing.js";
 import { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcurementIntent, checkTownMaterialShortfall } from "./public-procurement.js";
 import { householdList, releaseJobFromHousehold } from "./households.js";
 import { staffProject } from "./construction.js";
+import { windUpCollectiveShop } from "./shops.js";
 
 function materialLines(rows, content) {
   return (rows || []).map(row => ({
@@ -134,7 +135,7 @@ export function selectDemolitionPreview(state, buildingId, content) {
   if (building.typeId === "stock_exchange" && Object.values(state.companies || {}).some(company => company.listing?.listed)) {
     return { available: false, reason: "仍有上市公司，交易所承担挂牌与股权记录，不能拆除" };
   }
-  if (content.buildings[building.typeId]?.shopHost && Object.values(state.shops || {}).some(shop => shop.buildingId === buildingId && shop.status !== "closed")) return { available: false, reason: `请先关闭${content.buildings[building.typeId].name}内的店铺` };
+  if (content.buildings[building.typeId]?.shopHost && Object.values(state.shops || {}).some(shop => shop.buildingId === buildingId && shop.status !== "closed" && !shop.collective)) return { available: false, reason: `请先关闭${content.buildings[building.typeId].name}内的店铺` };
   if (["field", "granary", "houses"].includes(building.typeId)) return { available: false, reason: "基础村舍、麦田和粮仓不能拆除" };
   const definition = content.buildings[building.typeId];
   const materials = (building.materialInvestments || []).filter(row => row.quantityUnits > 0)
@@ -182,6 +183,7 @@ export function demolishBuilding(state, buildingId, content) {
       if (jobKey.startsWith(buildingId + "::")) releaseJobFromHousehold(state, household.id, jobKey);
     }
   }
+  for (const shop of Object.values(state.shops || {})) if (shop.buildingId === buildingId && shop.collective) windUpCollectiveShop(state, shop, content);
   state.buildings = state.buildings.filter(row => row.id !== buildingId);
   recordEvent(state, `${preview.name}已拆除，${preview.workers}名工人转为待业；工资、欠薪与经营历史继续保留。`, content, { day: state.day + 1 });
   return { ok: true, preview };

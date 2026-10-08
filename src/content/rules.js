@@ -83,11 +83,8 @@ export const RULES = Object.freeze({
 
   shopRentDefaultVoucher: 1,
   stallRentDefaultVoucher: 2,
-  // 时代广场摊位：每日最多新开几摊；近 N 日平均日利润低于 0 的摊位收摊。
+  // 时代广场集市：默认允许摆摊人数。
   stallKeeperDefaultLimit: 50,
-  stallMaxOpensPerDay: 5,
-  stallReviewDays: 10,
-  stallCooldownDays: 30,
   shopProfitTaxDefaultPercent: 10,
   shopProfitTaxMaximumPercent: 80,
   shopSettlementDays: 30,
@@ -173,9 +170,10 @@ export const RULES = Object.freeze({
     duck_farm: Object.freeze({ id: "duck_farm", name: "养鸭场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "duck", feedItemId: "wheat", feedPerUnit: 2.5, outputPerWorkerDay: 5 }),
     goose_farm: Object.freeze({ id: "goose_farm", name: "养鹅场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "goose", feedItemId: "wheat", feedPerUnit: 3, outputPerWorkerDay: 4 }),
     pig_farm: Object.freeze({ id: "pig_farm", name: "养猪场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "pork", feedItemId: "wheat", feedPerUnit: 3, outputPerWorkerDay: 5 }),
-    // 摊位：开在时代广场。待业家庭自动来摆，从批发市场进少量日用品（不卖主食），每摊每日最多卖 50 斤。
-    stall: Object.freeze({ id: "stall", name: "摊位", kind: "stall", hostBuildingTypeId: "times_square", maxMerchants: 2, maxClerks: 0,
-      startupVoucher: 60, dailySalesCapJin: 50, perKeeperSalesJin: 30, markupPercent: 10 }),
+    // 时代广场集市：一座广场一个集体摊位，待业的人自动来摆，人数按销量增减（不超过允许人数）。
+    // 从批发市场进少量日用品（不卖主食），每人每日最多卖 25 斤（一摊 2 人 50 斤），按摊交租；每天的利润按人头 ×0.8—1.2 随机分给摆摊家庭。
+    stall: Object.freeze({ id: "stall", name: "集市", kind: "stall", hostBuildingTypeId: "times_square", maxClerks: 0,
+      startupVoucher: 200, perKeeperSalesJin: 25, markupPercent: 10, settlementDays: 1, workingCapitalReserveDays: 2 }),
     // 兼容旧调用；新开店会统一归一为综合商店。
     grain: Object.freeze({ id: "grain", name: "粮店", kind: "legacy_retail", itemId: "wheat", aliasOf: "general" }),
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),

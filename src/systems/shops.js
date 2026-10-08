@@ -4,6 +4,7 @@ import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { recordEvent } from "../economy/ledger.js";
+import { nextRandom } from "../core/random.js";
 import {
   householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold,
   syncResidentAggregates,
@@ -160,6 +161,8 @@ function clerkJobKey(shop) { return `shop:${shop.id}:clerk`; }
 function shopMerchantCount(state, shop) { return jobCount(state, merchantJobKey(shop)); }
 
 function shopMerchantOnDuty(state, shop) {
+  // 集体经营（时代广场）：有人在摊上就算营业，不认某一户店主。
+  if (shop.collective) return shopMerchantCount(state, shop) > 0;
   const owner = state.households?.byId?.[shop.ownerHouseholdId];
   return Boolean(owner && isActiveHousehold(owner) && (owner.jobs?.[merchantJobKey(shop)] || 0) >= 1 && shopMerchantCount(state, shop) > 0);
 }
@@ -237,6 +240,10 @@ export function syncShopEmployment(state, content) {
     if (shop.status === "closed" || shop.status === "liquidating") {
       setJobCount(state, merchantJobKey(shop), 0, null);
       releaseAllShopClerks(state, shop);
+      continue;
+    }
+    if (shop.collective) {
+      if (shop.status === "paused") { shop.status = "open"; shop.statusReason = "准备营业"; }
       continue;
     }
     const owner = state.households?.byId?.[shop.ownerHouseholdId];
@@ -433,8 +440,7 @@ export function shopSalesCapacityUnits(state, shop, content) {
   if (kind === "farm") return 0;
   if (kind === "stall") {
     const def = shopDefinition(content, shop.typeId);
-    const jin = Math.min(def.dailySalesCapJin ?? 50, shopMerchantCount(state, shop) * (def.perKeeperSalesJin ?? 30));
-    return Math.round(jin * content.precision.inventoryUnitsPerJin);
+    return Math.round(shopMerchantCount(state, shop) * (def.perKeeperSalesJin ?? 25) * content.precision.inventoryUnitsPerJin);
   }
   if (shopDefinition(content, shop.typeId)?.id === "general") {
     const customers = shopDailyCustomerCapacity(state, shop, content);
@@ -458,8 +464,8 @@ export function serviceShopCapacityUses(state, shop, content) {
 }
 
 function shopWorkingCapitalReserve(state, shop, content) {
-  const days = content.rules.shopWorkingCapitalReserveDays || 7;
   const def = shopDefinition(content, shop.typeId);
+  const days = def?.workingCapitalReserveDays ?? content.rules.shopWorkingCapitalReserveDays ?? 7;
   if (def?.kind === "service") {
     const service = content.rules.serviceTypes?.[def.serviceId];
     // 与零售店口径一致：全额日销能力×单价×天数（之前无故打25折）。
@@ -472,7 +478,8 @@ function shopWorkingCapitalReserve(state, shop, content) {
     const wageVoucher = shopClerkCount(state, shop) * shopWage(state, shop, content);
     return Math.round((feedVoucher + wageVoucher) * days * currencyScale(content));
   }
-  const itemIds = activeRetailItemIds(state, shop, content);
+  // 集市只进少量货，但不能因为当下批发市场缺货就把周转金全分掉：按全部经营品类估价。
+  const itemIds = def?.kind === "stall" ? shopRetailItemIds(shop, content) : activeRetailItemIds(state, shop, content);
   if (!itemIds.length) return 0;
   const wholesalePrices = itemIds.map(itemId => shopTradePrices(state, shop.typeId, content, itemId)?.wholesaleVoucherPerUnit || 0).filter(p => p > 0);
   // 排除0价，避免无批发价商品拉低均值（之前简单平均含0）。
@@ -664,7 +671,8 @@ function accrueDailyLiabilities(state, shop, content) {
   const clerkAssignments = jobAssignments(state, clerkJobKey(shop));
   // 基线清理：店主本人兼任商人不领固定工资，拿利润而非工资；只有外聘商人才领工资。
   const ownerId = shop.ownerHouseholdId;
-  const merchantWage = Math.round(merchantAssignments
+  // 集体摊位的摊贩不领工资，分利润。
+  const merchantWage = shop.collective ? 0 : Math.round(merchantAssignments
     .filter(row => row.householdId !== ownerId)
     .reduce((sum, row) => sum + row.count, 0) * merchantRate * scale);
   const clerkWage = Math.round(clerkAssignments.reduce((sum, row) => sum + row.count, 0) * clerkRate * scale);
@@ -673,9 +681,11 @@ function accrueDailyLiabilities(state, shop, content) {
   const rentVoucher = shopKind(shop, content) === "stall"
     ? (state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2)
     : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
-  const rent = Math.max(0, Math.round(rentVoucher * scale));
+  // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
+  const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
+  const rent = Math.max(0, Math.round(rentVoucher * rentUnits * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
-  accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
+  if (!shop.collective) accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
   accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
   shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
   shop.liabilities.rentVoucherUnits += rent;
@@ -709,7 +719,7 @@ function payDailyLiabilities(state, shop, content) {
 }
 
 export function settleShopTaxAndDistribution(state, shop, content, force = false, options = {}) {
-  const interval = content.rules.shopSettlementDays || 30;
+  const interval = shopDefinition(content, shop.typeId)?.settlementDays || content.rules.shopSettlementDays || 30;
   if (!force && shop.settlement.days < interval) return { settled: false };
   const periodProfit = shop.settlement.profitVoucherUnits || 0;
   const net = periodProfit + (shop.settlement.lossCarryVoucherUnits || 0);
@@ -739,7 +749,9 @@ export function settleShopTaxAndDistribution(state, shop, content, force = false
   const distributable = options.allowDistribution === false ? 0 : maximumFullyPayableValueUnits(state, `shop:${shop.id}`,
     Math.min(Math.max(0, shop.retainedEarningsVoucherUnits || 0), availableCash), content);
   let distributed = 0;
-  if (distributable > 0) {
+  if (distributable > 0 && shop.collective) {
+    distributed = distributeCollectiveProfit(state, shop, distributable, content);
+  } else if (distributable > 0) {
     const result = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${shop.ownerHouseholdId}`, currentPaymentComposition(state, distributable), content,
       "shop_profit_distribution", `${shop.name}向商人家庭分配利润`, { requireFull: true });
     if (result.ok) {
@@ -909,6 +921,103 @@ function autoAdjustShopClerks(state, shop, content) {
   adjustShopWage(state, shop, content, market);
 }
 
+// ---------------------------------------------------------------- 集体经营（时代广场）
+
+// 建一个集体经营的店（不属于某一户）。镇库垫付启动资金，从利润里先还。
+export function openCollectiveShop(state, building, typeId, content) {
+  ensureShops(state, content);
+  const def = shopDefinition(content, typeId);
+  const shopId = `shop-${state.nextShopNumber++}`;
+  const shop = {
+    id: shopId, name: `${building.name || content.buildings[building.typeId]?.name || ""}集市`, buildingId: building.id, typeId,
+    collective: true, primaryItemId: null, itemId: null, itemIds: [], serviceId: null, ownerHouseholdId: null,
+    cashVoucherUnits: 0, cashWheatUnits: 0, inventory: emptyShopInventory(content), inventoryCostVoucherUnits: {},
+    status: "open", statusReason: "准备营业", openedYear: state.year, openedDay: state.day + 1, badDays: 0,
+    accounts: { day: blankShopPeriod(), year: blankShopPeriod(), cumulative: blankShopPeriod() },
+    liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 },
+    settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
+    retainedEarningsVoucherUnits: 0, townAdvanceVoucherUnits: 0,
+    initialCapital: { valueUnits: 0, voucherValueUnits: 0, wheatValueUnits: 0 }
+  };
+  state.shops[shopId] = shop;
+  ensureShopBooks(shop, content);
+  const advance = Math.round((def?.startupVoucher ?? 200) * currencyScale(content));
+  const paid = settleMonetaryPayment(state, "town", `shop:${shopId}`, currentPaymentComposition(state, advance), content,
+    "collective_shop_advance", `镇库垫付${shop.name}启动资金`, { requireFull: false });
+  shop.townAdvanceVoucherUnits = paid.paidValueUnits || 0;
+  return shop;
+}
+
+// 集市没钱也没货、垫款已还清时，镇库再垫一次启动资金，避免永久停摆。
+export function refundCollectiveIfStranded(state, shop, content) {
+  if (!shop?.collective || (shop.townAdvanceVoucherUnits || 0) > 0) return false;
+  const stock = shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory?.[itemId] || 0), 0);
+  const cash = maximumPayableValueUnits(state, `shop:${shop.id}`, content);
+  const advance = Math.round((shopDefinition(content, shop.typeId)?.startupVoucher ?? 200) * currencyScale(content));
+  if (stock > 0 || cash >= advance / 4) return false;
+  const paid = settleMonetaryPayment(state, "town", `shop:${shop.id}`, currentPaymentComposition(state, advance), content,
+    "collective_shop_advance", `镇库再次垫付${shop.name}周转金`, { requireFull: false });
+  shop.townAdvanceVoucherUnits = paid.paidValueUnits || 0;
+  return shop.townAdvanceVoucherUnits > 0;
+}
+
+// 广场拆除时结束集市：结清欠款、先还镇库垫款、余钱按人头分给摆摊家庭、剩货归镇库，然后删档。
+export function windUpCollectiveShop(state, shop, content) {
+  if (!shop?.collective) return false;
+  payDailyLiabilities(state, shop, content);
+  const cash = maximumFullyPayableValueUnits(state, `shop:${shop.id}`, maximumPayableValueUnits(state, `shop:${shop.id}`, content), content);
+  if (cash > 0) distributeCollectiveProfit(state, shop, cash, content);
+  setJobCount(state, merchantJobKey(shop), 0, null);
+  for (const [itemId, units] of Object.entries(shop.inventory || {})) {
+    if (units <= 0) continue;
+    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + units;
+    shop.inventory[itemId] = 0;
+  }
+  const leftover = maximumPayableValueUnits(state, `shop:${shop.id}`, content);
+  if (leftover > 0) settleMonetaryPayment(state, `shop:${shop.id}`, "town", currentPaymentComposition(state, leftover), content,
+    "collective_shop_close", `${shop.name}结束，余款归镇库`, { requireFull: false });
+  delete state.shops[shop.id];
+  return true;
+}
+
+// 集体利润分配：先还镇库垫款，余下按各户在摊人数 ×（0.8—1.2 随机）分给摆摊家庭。返回分出去的总额（含还款）。
+function distributeCollectiveProfit(state, shop, amount, content) {
+  let left = amount;
+  let paidOut = 0;
+  const owed = shop.townAdvanceVoucherUnits || 0;
+  if (owed > 0) {
+    const repay = Math.min(owed, left);
+    const result = settleMonetaryPayment(state, `shop:${shop.id}`, "town", currentPaymentComposition(state, repay), content,
+      "collective_shop_repay", `${shop.name}归还镇库垫款`, { requireFull: true });
+    // 还垫款是还债，不是分利润，不动未分配利润。
+    if (result.ok) { shop.townAdvanceVoucherUnits = owed - repay; left -= repay; paidOut += repay; }
+  }
+  const rows = jobAssignments(state, merchantJobKey(shop)).filter(row => row.count > 0)
+    .map(row => ({ householdId: row.householdId, count: row.count, weight: row.count * (0.8 + 0.4 * nextRandom(state)) }));
+  const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
+  if (left <= 0 || !rows.length || totalWeight <= 0) return paidOut;
+  let assigned = 0;
+  const payouts = [];
+  rows.forEach((row, index) => {
+    const share = index === rows.length - 1 ? left - assigned : Math.floor(left * row.weight / totalWeight);
+    assigned += share;
+    if (share <= 0) return;
+    const result = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${row.householdId}`, currentPaymentComposition(state, share), content,
+      "collective_profit_share", `${shop.name}给摆摊家庭分利润`, { requireFull: true });
+    if (!result.ok) return;
+    paidOut += share;
+    shop.retainedEarningsVoucherUnits -= share;
+    addBookValue(shop, "distributedVoucherUnits", share);
+    payouts.push(share / row.count);
+  });
+  if (payouts.length) shop.plan.lastPayout = {
+    households: payouts.length,
+    minPerKeeperUnits: Math.min(...payouts), maxPerKeeperUnits: Math.max(...payouts),
+    averagePerKeeperUnits: payouts.reduce((a, b) => a + b, 0) / payouts.length
+  };
+  return paidOut;
+}
+
 // ---------------------------------------------------------------- 养殖场（kind: "farm"）
 
 // 在场劳力：养殖户（商人）和饲养员都干活。
@@ -1058,7 +1167,7 @@ export function finishShopsDay(state, content, forceSettlement = false) {
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";
     else shop.statusReason = "营业中";
-    if (shop.badDays >= (content.rules.shopClosureBadDays || 30) && activity <= 0) {
+    if (!shop.collective && shop.badDays >= (content.rules.shopClosureBadDays || 30) && activity <= 0) {
       const closing = closeShop(state, shop.id, content, true);
       rows.push({ shopId: shop.id, closed: true, liquidationPending: closing.liquidationPending, settlement });
     } else rows.push({ shopId: shop.id, closed: false, settlement });
@@ -1246,7 +1355,7 @@ export function shopSummaries(state, content) {
     else if (kind === "retail" && avgSalesUnits <= 0) operatingStatus = "暂无销量";
     else if (Number.isFinite(shop.plan?.targetClerks) && shop.plan.targetClerks < shopClerkCount(state, shop)) operatingStatus = "用工偏多";
     return {
-      id: shop.id, name: shop.name, buildingId: shop.buildingId, typeId: shop.typeId, typeName: def?.name || shop.typeId, kind,
+      id: shop.id, name: shop.name, buildingId: shop.buildingId, typeId: shop.typeId, typeName: def?.name || shop.typeId, kind, collective: Boolean(shop.collective),
       itemId: primary, itemName: primary ? (content.items[primary]?.name || primary) : "", itemIds, inventoryRows, serviceId,
       serviceName: serviceId ? (content.rules.serviceTypes?.[serviceId]?.name || serviceId) : null,
       ownerHouseholdId: shop.ownerHouseholdId, ownerName: state.households?.byId?.[shop.ownerHouseholdId]?.name || shop.ownerHouseholdId, merchantHouseholdId: shop.ownerHouseholdId, merchantOnDuty: shopMerchantOnDuty(state, shop),
@@ -1298,20 +1407,33 @@ export function shopSummaries(state, content) {
   });
 }
 
-// 时代广场总览（只读）：每座广场的摊位数、摊贩人数、今日卖货与利润。
+// 时代广场总览（只读）：每座广场的集体摊位一张卡片。
 export function stallSquareSummaries(state, content, summaries = shopSummaries(state, content)) {
   const limit = Math.max(0, Math.floor(state.policy?.stallKeeperLimit ?? content.rules.stallKeeperDefaultLimit ?? 50));
+  const scale = currencyScale(content);
+  const invScale = content.precision.inventoryUnitsPerJin;
+  const def = content.rules.shopTypes?.stall;
   return (state.buildings || []).filter(building => building.typeId === "times_square").map(building => {
-    const stalls = summaries.filter(row => row.kind === "stall" && row.buildingId === building.id && (row.status === "open" || row.status === "paused"));
+    const row = summaries.find(item => item.kind === "stall" && item.buildingId === building.id && item.collective && item.status !== "closed") || null;
+    const source = row ? state.shops?.[row.id] : null;
+    const keepers = row?.merchants || 0;
+    const payout = source?.plan?.lastPayout || null;
     return {
-      buildingId: building.id, slots: shopHostSlots(building, content), stalls: stalls.length,
-      keepers: stalls.reduce((sum, row) => sum + row.merchants, 0), keeperLimit: limit,
+      buildingId: building.id, shopId: row?.id || null, slots: shopHostSlots(building, content),
+      stallsUsed: Math.ceil(keepers / 2), keepers, keeperLimit: limit, keeperCap: Math.min(limit, shopHostSlots(building, content) * 2),
       rentVoucher: state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2,
-      soldDayJin: stalls.reduce((sum, row) => sum + Object.values(state.shops?.[row.id]?.accounts?.day?.soldUnits || {}).reduce((a, b) => a + b, 0), 0) / content.precision.inventoryUnitsPerJin,
-      profitDayVoucher: stalls.reduce((sum, row) => sum + row.profitDayVoucher, 0),
-      averageDailyProfitVoucher: stalls.length ? stalls.reduce((sum, row) => sum + row.averageDailyProfitVoucher, 0) / stalls.length : 0,
-      cooldownDays: Math.max(0, (state.stallMarket?.cooldownUntilSerial || 0) - ((state.year - 1) * content.rules.daysPerYear + state.day)),
-      dailySalesCapJin: content.rules.shopTypes?.stall?.dailySalesCapJin ?? 50
+      perKeeperSalesJin: def?.perKeeperSalesJin ?? 25, capacityJin: row?.capacityJin || 0,
+      soldDayJin: row?.soldDayJin || 0, averageDailySalesJin: row?.averageDailySales || 0,
+      revenueDayVoucher: row?.revenueDayVoucher || 0, rentDayVoucher: row?.rentDayVoucher || 0,
+      profitDayVoucher: row?.profitDayVoucher || 0, averageDailyProfitVoucher: row?.averageDailyProfitVoucher || 0,
+      distributedDayVoucher: (source?.accounts?.day?.distributedVoucherUnits || 0) / scale,
+      distributedTotalVoucher: (source?.accounts?.cumulative?.distributedVoucherUnits || 0) / scale,
+      payout: payout ? { households: payout.households, min: payout.minPerKeeperUnits / scale, max: payout.maxPerKeeperUnits / scale, average: payout.averagePerKeeperUnits / scale } : null,
+      townAdvanceVoucher: (source?.townAdvanceVoucherUnits || 0) / scale,
+      inventoryRows: (row?.inventoryRows || []).filter(item => item.stock > 0 || item.averageDailySales > 0),
+      statusReason: row?.statusReason || "未开放摆摊",
+      stockJin: (row?.inventoryRows || []).reduce((sum, item) => sum + item.stock, 0),
+      cashVoucher: row?.cashValue || 0
     };
   });
 }

@@ -220,7 +220,6 @@ export function createInitialState(options) {
         year: 0, day: index, rateBps: 5000, baseline: true
       }))
     },
-    stallMarket: { cooldownUntilSerial: 0 },
     wholesaleMarket: {
       inventory: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0])),
       inventoryCostVoucherUnits: Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0])),
