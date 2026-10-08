@@ -1274,6 +1274,7 @@ export function shopSummaries(state, content) {
       wageDayVoucher: (shop.accounts.day.wageExpenseVoucherUnits || 0) / scale,
       rentDayVoucher: (shop.accounts.day.rentExpenseVoucherUnits || 0) / scale,
       profitDayVoucher: (shop.accounts.day.profitVoucherUnits || 0) / scale,
+      soldDayJin: Object.values(shop.accounts.day.soldUnits || {}).reduce((sum, units) => sum + units, 0) / invScale,
       wageArrearsVoucher: (shop.liabilities.wageVoucherUnits || 0) / scale,
       rentArrearsVoucher: (shop.liabilities.rentVoucherUnits || 0) / scale,
       taxArrearsVoucher: (shop.liabilities.taxVoucherUnits || 0) / scale,
@@ -1301,7 +1302,7 @@ export function shopSummaries(state, content) {
 export function stallSquareSummaries(state, content, summaries = shopSummaries(state, content)) {
   const limit = Math.max(0, Math.floor(state.policy?.stallKeeperLimit ?? content.rules.stallKeeperDefaultLimit ?? 50));
   return (state.buildings || []).filter(building => building.typeId === "times_square").map(building => {
-    const stalls = summaries.filter(row => row.kind === "stall" && row.buildingId === building.id && row.status !== "closed");
+    const stalls = summaries.filter(row => row.kind === "stall" && row.buildingId === building.id && (row.status === "open" || row.status === "paused"));
     return {
       buildingId: building.id, slots: shopHostSlots(building, content), stalls: stalls.length,
       keepers: stalls.reduce((sum, row) => sum + row.merchants, 0), keeperLimit: limit,

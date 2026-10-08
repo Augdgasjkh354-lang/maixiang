@@ -435,6 +435,12 @@ export function mountGame(root) {
     } else if (kind === "shop-rent") {
       result = simulation.setShopRent(state, parsed.value);
       successMessage = `营业店铺日租已设为${number(parsed.value, 2)}小麦等值。`;
+    } else if (kind === "stall-limit") {
+      result = simulation.setStallKeeperLimit(state, parsed.value);
+      successMessage = `允许摆摊人数已设为${number(parsed.value)}人。`;
+    } else if (kind === "stall-rent") {
+      result = simulation.setStallRent(state, parsed.value);
+      successMessage = `摊租已设为每摊每日${number(parsed.value, 2)}小麦等值。`;
     } else if (kind === "shop-profit-tax") {
       result = simulation.setShopProfitTax(state, parsed.value);
       successMessage = `商业利润税已设为${number(parsed.value, 2)}%。`;

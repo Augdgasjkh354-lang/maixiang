@@ -63,6 +63,11 @@ export function productionStatus(state, building, content) {
   const definition = content.buildings[building.typeId];
   if (!definition || !definition.recipeId || result.status === "no_recipe") {
     // 用户 0.1.11：无配方建筑按在岗情况显示已落成/运作中/待安排人手。
+    // 商业街、养殖基地、时代广场：人手归各店铺管，按有没有店在营业显示。
+    if (definition?.shopHost) {
+      const open = Object.values(state.shops || {}).some(shop => shop.buildingId === building.id && shop.status === "open");
+      return { ...result, label: open ? "营业中" : "待入驻" };
+    }
     const jobs = definition?.jobs || [];
     const workers = jobs.reduce((sum, job) => sum + readJobCount(state, jobKeyForBuilding(building.id, job.id)), 0);
     return { ...result, label: !jobs.length ? "已落成" : workers > 0 ? "运作中" : "待安排人手" };

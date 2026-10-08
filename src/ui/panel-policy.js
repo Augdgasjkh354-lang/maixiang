@@ -13,6 +13,7 @@ export function renderPolicy(view) {
   const buildingTypeIds = new Set((view.buildings || []).map(b => b.typeId));
   const hasCommerce = buildingTypeIds.has("commercial_street") || buildingTypeIds.has("public_housing") || (view.shops || []).length > 0;
   const hasIndustry = industries.some(([id]) => buildingTypeIds.has(id));
+  const hasStall = buildingTypeIds.has("times_square");
   const shopTax = (view.shops || []).reduce((sum, row) => sum + (row.lastTaxVoucher || 0), 0);
   const relief = view.relief || {};
   const reform = view.monetaryReform;
@@ -31,6 +32,8 @@ export function renderPolicy(view) {
   return `${reformCard}
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
       <div class="row"><span class="label">营业店铺日租</span><div class="setting-input">${renderNumericInput(view, { key: "shop-rent", kind: "shop-rent", target: "shops", value: view.policy.shopRentVoucher ?? 1, label: "每间营业店铺每日租金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
+      ${hasStall ? `<div class="row"><span class="label">摊位日租</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent", kind: "stall-rent", target: "stalls", value: view.policy.stallRentVoucher ?? 2, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
+      <div class="row"><span class="label">允许摆摊人数</span><div class="setting-input">${renderNumericInput(view, { key: "stall-limit", kind: "stall-limit", target: "stalls", value: view.policy.stallKeeperLimit ?? 50, label: "允许摆摊人数", integer: true, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>人</b></div></div>` : ""}
       <div class="row"><span class="label">商业利润税</span><div class="setting-input">${renderNumericInput(view, { key: "shop-tax", kind: "shop-profit-tax", target: "shops", value: view.policy.shopProfitTaxPercent ?? 10, label: "商业利润税", minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>
       
       <div class="row"><span class="label">今日住宅实收租金</span><strong class="value">${number(view.housing.lastRentDay?.collectedVoucher || 0,1)}${moneyUnit}</strong></div>

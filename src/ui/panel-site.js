@@ -129,6 +129,82 @@ function reclaimSection(view) {
     <details class="detail-block" data-detail-key="reclaim-history"><summary>开荒账目</summary><div class="detail-body"><div class="row"><span class="label">今日 / 本年 / 累计</span><strong class="value">${number(reclaim.day?.acres)} / ${number(reclaim.year?.acres)} / ${number(reclaim.cumulative?.acres)}亩</strong></div><div class="row"><span class="label">累计工日</span><strong class="value">${number(reclaim.cumulative?.workDays)}工日</strong></div><div class="row"><span class="label">镇库累计开荒工资</span><strong class="value">${number(reclaim.cumulative?.paidVoucher, 2)}${escapeHtml(unit)}</strong></div>${last ? `<div class="row"><span class="label">上次开荒</span><strong class="value">${number(last.year)}年${number(last.day)}日 · ${number(last.acres)}亩 / ${number(last.workDays)}工日</strong></div>` : ""}<div class="subtle">${recent}</div></div></details>`;
 }
 
+// 养殖基地：每座养殖场一张卡，结构同商业街店铺卡。
+const FARM_TYPE_IDS = ["chicken_farm", "duck_farm", "goose_farm", "pig_farm"];
+
+function farmCardMarkup(view, shop, unit) {
+  const farm = shop.farm || {};
+  const maxOwners = shop.maxMerchants || 4;
+  const staffControls = shop.status === "open"
+    ? `<div class="site-worker-actions"><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="-1" aria-label="减少养殖户" ${shop.merchants <= 1 ? "disabled" : ""}>−</button><strong>养殖户 ${number(shop.merchants)} / ${number(maxOwners)}</strong><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="1" aria-label="增加养殖户" ${shop.merchants >= maxOwners || view.labor.idle <= 0 ? "disabled" : ""}>＋</button></div>
+      <div class="row"><span class="label">饲养员（自动增减）</span><strong class="value">${number(shop.clerks)} / ${number(shop.maxClerks || 20)}人${shop.staffingDiagnosis ? ` · ${escapeHtml(shop.staffingDiagnosis)}` : ""}</strong></div>`
+    : "";
+  const action = shop.status === "liquidating"
+    ? `<button class="secondary" data-shop-fund="${escapeHtml(shop.id)}">业主补资清偿</button>`
+    : `<button class="secondary" data-shop-close="${escapeHtml(shop.id)}">停业</button>`;
+  return `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)} · ${escapeHtml(shop.typeName)}</strong><span class="badge">${escapeHtml(shop.statusReason)}</span></div>
+    <div class="row"><span class="label">今日利润</span><strong class="value">${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>${staffControls}
+    <div class="row"><span class="label">日产能 / 今日产量</span><strong class="value">${number(farm.capacityJin, 1)} / ${number(farm.producedDayJin, 1)}斤</strong></div>
+    <div class="row"><span class="label">肉存货 / 饲料存量</span><strong class="value">${number(farm.productStockJin, 1)} / ${number(farm.feedStockJin, 1)}斤</strong></div>
+    <div class="row"><span class="label">今日卖给商店</span><strong class="value">${number(farm.storeSoldDayJin, 1)}斤</strong></div>
+    <div class="row"><span class="label">售价</span><strong class="value">${number(farm.priceVoucher, 2)}${escapeHtml(unit)}/斤</strong></div>
+    <div class="subtle">每名饲养员日产${number(farm.outputPerWorkerDay)}斤${escapeHtml(farm.productName || "")}，每斤耗${number(farm.feedPerUnit, 1)}斤${escapeHtml(farm.feedName || "")}。</div>
+    <details class="detail-block" data-detail-key="shop:${escapeHtml(shop.id)}"><summary>经营详情</summary><div class="detail-body">
+      <div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(shop.ownerName || shop.ownerHouseholdId)}</strong></div>
+      <div class="row"><span class="label">饲养员日薪</span><strong class="value">${number(shop.clerkWageVoucher, 1)}${escapeHtml(unit)}${shop.wageTarget != null ? ` · 行情${number(shop.wageTarget, 1)}` : ""}${shop.wageDiagnosis ? ` · ${escapeHtml(shop.wageDiagnosis)}` : ""}</strong></div>
+      <div class="row"><span class="label">可支付资金</span><strong class="value">${number(shop.cashVoucher, 2)}粮券 · ${number(shop.cashWheatJin || 0, 2)}斤小麦</strong></div>
+      <div class="row"><span class="label">今日收入 / 成本</span><strong class="value">${number(shop.revenueDayVoucher, 2)} / ${number(shop.cogsDayVoucher + shop.wageDayVoucher + shop.rentDayVoucher, 2)}${escapeHtml(unit)}</strong></div>
+      <div class="row"><span class="label">欠薪 / 欠租 / 欠税</span><strong class="value">${number(shop.wageArrearsVoucher, 2)} / ${number(shop.rentArrearsVoucher, 2)} / ${number(shop.taxArrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>
+      ${action}
+    </div></details></div>`;
+}
+
+function livestockBaseMarkup(view, building, development) {
+  const unit = moneyUnit(view);
+  const farms = (view.shops || []).filter(shop => shop.buildingId === building.id && shop.status !== "closed");
+  const slots = building.level * (CONTENT.buildings.livestock_base.shopHost?.slotsPerLevel || 4);
+  const ownerCount = farms.reduce((sum, shop) => sum + (shop.merchants || 0), 0);
+  const clerkCount = farms.reduce((sum, shop) => sum + (shop.clerks || 0), 0);
+  const openButtons = farms.length < slots
+    ? `<div class="site-actions">${FARM_TYPE_IDS.map(typeId => `<button class="secondary" data-shop-open="${typeId}" data-shop-building="${escapeHtml(building.id)}">开${escapeHtml(CONTENT.rules.shopTypes[typeId].name)}</button>`).join("")}</div>`
+    : "";
+  return `<div class="status-strip"><span class="status-light working"></span><strong>养殖基地</strong><span>${number(building.level)}级</span></div>
+    <div class="row"><span class="label">场位 已用 / 总数</span><strong class="value">${number(farms.length)} / ${number(slots)}</strong></div>
+    <div class="row"><span class="label">养殖户 / 饲养员</span><strong class="value">${number(ownerCount)} / ${number(clerkCount)}人</strong></div>
+    ${openButtons}${farms.map(shop => farmCardMarkup(view, shop, unit)).join("") || `<div class="subtle">暂无养殖场，场位空着。</div>`}${developmentMarkup(view, building, development)}`;
+}
+
+function timesSquareMarkup(view, building, development) {
+  const unit = moneyUnit(view);
+  const square = (view.stallSquares || []).find(row => row.buildingId === building.id) || {};
+  const slots = square.slots ?? building.level * (CONTENT.buildings.times_square.shopHost?.slotsPerLevel || 50);
+  const stallLimit = view.policy?.stallKeeperLimit ?? square.keeperLimit ?? 50;
+  const rentVoucher = view.policy?.stallRentVoucher ?? square.rentVoucher ?? 2;
+  // 营业中的摊位在前；收摊清算中的单独标出。
+  const stalls = (view.shops || []).filter(shop => shop.buildingId === building.id && shop.kind === "stall" && shop.status !== "closed")
+    .sort((a, b) => (a.status === "liquidating") - (b.status === "liquidating") || b.soldDayJin - a.soldDayJin);
+  const maxKeepers = CONTENT.rules.shopTypes.stall?.maxMerchants || 2;
+  const cooldown = (square.cooldownDays || 0) > 0
+    ? `<div class="shortage-banner visible">近期摆摊亏损，${number(square.cooldownDays)}天内没人来摆</div>` : "";
+  const stallRows = stalls.slice(0, 10).map(shop =>
+    `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)}</strong><span class="badge">${shop.status === "liquidating" ? "收摊清算中" : `${number(shop.merchants)} / ${number(shop.maxMerchants || maxKeepers)}人`}</span></div><div class="subtle">今日卖货${number(shop.soldDayJin, 1)}斤 · 今日利润${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</div></div>`
+  ).join("");
+  const moreStalls = stalls.length > 10 ? `<div class="subtle">另有${number(stalls.length - 10)}个摊位未列出。</div>` : "";
+  return `<div class="status-strip"><span class="status-light working"></span><strong>时代广场</strong><span>${number(building.level)}级</span></div>
+    <div class="row"><span class="label">摊位 已用 / 总数</span><strong class="value">${number(square.stalls || 0)} / ${number(slots)}</strong></div>
+    <div class="row"><span class="label">摊贩 / 允许摆摊人数</span><strong class="value">${number(square.keepers || 0)} / ${number(stallLimit)}人</strong></div>
+    <div class="row"><span class="label">今日卖货</span><strong class="value">${number(square.soldDayJin || 0, 1)}斤</strong></div>
+    <div class="row"><span class="label">今日摊位合计利润</span><strong class="value">${number(square.profitDayVoucher || 0, 2)}${escapeHtml(unit)}</strong></div>
+    <div class="row"><span class="label">每摊日均利润</span><strong class="value">${number(square.averageDailyProfitVoucher || 0, 2)}${escapeHtml(unit)}</strong></div>
+    ${cooldown}
+    <div class="cardlet"><div class="setting-title">摆摊政策</div>
+      <div class="row"><span class="label">允许摆摊人数（全镇）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-limit:square", kind: "stall-limit", target: "stalls", value: stallLimit, label: "允许摆摊人数", integer: true, minimum: 0, maximum: 100000, className: "setting-editor" })}<b>人</b></div></div>
+      <div class="row"><span class="label">摊租（每摊每日）</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent:square", kind: "stall-rent", target: "stalls", value: rentVoucher, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${escapeHtml(unit)}</b></div></div>
+      <div class="subtle">待业家庭自动来摆，只卖日用品不卖主食；每摊每日最多卖${number(square.dailySalesCapJin || 50)}斤，每摊最多${number(maxKeepers)}人，比商店便宜。</div>
+    </div>
+    ${stalls.length ? `<h3>摊位</h3>${stallRows}${moreStalls}` : `<div class="subtle">暂无摊位，有闲人的家庭会自动来摆。</div>`}${developmentMarkup(view, building, development)}`;
+}
+
 export function renderSite(view) {
   const unit = moneyUnit(view);
   const site = view.selectedSite || "field";
@@ -244,6 +320,12 @@ export function renderSite(view) {
     const openButtons = occupied.length < capacity ? `<div class="site-actions"><button class="secondary" data-shop-open="general" data-shop-building="${escapeHtml(building.id)}">开综合商店</button><button class="secondary" data-shop-open="haircut" data-shop-building="${escapeHtml(building.id)}">开理发店</button><button class="secondary" data-shop-open="repair" data-shop-building="${escapeHtml(building.id)}">开修补铺</button><button class="secondary" data-shop-open="tea" data-shop-building="${escapeHtml(building.id)}">开茶馆</button><button class="secondary" data-shop-open="school" data-shop-building="${escapeHtml(building.id)}">开学堂</button><button class="secondary" data-shop-open="restaurant" data-shop-building="${escapeHtml(building.id)}">开饭店</button></div>` : "";
     body = `<div class="status-strip"><span class="status-light working"></span><strong>商业街</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">占用店铺</span><strong class="value">${number(occupied.length)} / ${number(capacity)}间</strong></div><div class="row"><span class="label">商人 / 店员</span><strong class="value">${number(merchantCount)} / ${number(clerkCount)}人</strong></div>${openButtons}${shopCards || `<div class="subtle">暂无居民入驻。</div>`}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="policy">查看租税政策</button>`;
+  } else if (building?.typeId === "livestock_base") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = livestockBaseMarkup(view, building, development);
+  } else if (building?.typeId === "times_square") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = timesSquareMarkup(view, building, development);
   } else if (building?.typeId === "public_housing") {
     const home = building.housing;
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
