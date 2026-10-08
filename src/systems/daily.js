@@ -46,6 +46,7 @@ import { settleOwnershipTakeovers } from "./ownership-takeover.js";
 import { settleIpoApplications } from "./ipo.js";
 import { settleOwnerUpgrades } from "./building-development.js";
 import { stepLogistics } from "./logistics.js";
+import { isWealthTaxDay, recordYearGini, resetRedistributionDay, resetRedistributionYear, settleEscheat, settleWealthTax } from "./redistribution.js";
 
 // ---------------------------------------------------------------- 账本翻页
 
@@ -68,6 +69,7 @@ function resetDayBooks(state, content) {
     industry.day = { producedUnits: {}, soldUnits: 0, revenueWheatUnits: 0, operatingWagesWheatUnits: 0 };
   }
   resetPrivateDaily(state);
+  resetRedistributionDay(state);
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
   if (state.agriculture?.reclaim) state.agriculture.reclaim.day = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
 }
@@ -93,6 +95,7 @@ function resetYearBooks(state, content) {
   resetShopYear(state, content);
   resetWholesaleYear(state, content);
   resetLaborCompetitionYear(state);
+  resetRedistributionYear(state);
   state.financialFlows.year = emptyFinancialFlowPeriod();
   if (state.fiscal) state.fiscal.year = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
   if (state.agriculture?.reclaim) state.agriculture.reclaim.year = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
@@ -224,6 +227,9 @@ export const CORE_DAILY_STEPS = [
     settleStockMarketDay(state, content);
     settleHouseholdStockBuying(state, content);
   } },
+  // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天一次（金融之后，家底已结算）；家产归公每日再扫一遍，补取不回的存款。
+  { id: "wealthTax", when: isWealthTaxDay, run: settleWealthTax },
+  { id: "escheat", run: settleEscheat },
 
   // ── 翻日：节气、秋收
   { id: "harvest", run: (state, content) => {
@@ -240,6 +246,8 @@ export const CORE_DAILY_STEPS = [
     const peopleBefore = populationStats(state);
     day.demography = advancePopulation(state, content);
     syncShopEmployment(state, content);
+    // 年末基尼系数（人口变动之后、翻年之前）。
+    recordYearGini(state, content, state.year);
     const peopleAfter = populationStats(state);
     const report = buildAnnualReport(state, content, {
       householdLifeYear, peopleBefore, peopleAfter, demography: day.demography, closingQeq: totalQeqUnits(state, content)

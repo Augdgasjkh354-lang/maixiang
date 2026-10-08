@@ -168,7 +168,7 @@ test("换岗后旧欠薪仍属于形成欠薪时的原债权家庭", () => {
   assert.equal(state.payroll.creditorClaims[jobKey][a.id], 0);
 });
 
-test("无人家庭停止生活消费和福利，但资产与应收欠薪继续保留", () => {
+test("无人家庭停止生活消费和福利；家产当日归镇库（再分配第 2 条），应收欠薪债权继续保留", () => {
   const state = simulation.createInitialState({ seed: 130105 });
   const [empty, receiver] = householdList(state).slice(0, 2);
   releaseExcessHouseholdEmployment(state);
@@ -186,10 +186,15 @@ test("无人家庭停止生活消费和福利，但资产与应收欠薪继续�
   syncResidentAggregates(state, CONTENT);
   const beforeInventory = structuredClone(empty.inventory);
   const beforeVouchers = empty.voucherUnits;
+  const escheatBefore = state.redistribution?.cumulative?.escheatHouseholds || 0;
   simulation.advanceDay(state);
   assert.equal(householdPopulation(empty), 0);
-  assert.deepEqual(empty.inventory, beforeInventory, "无人家庭不再发生生活消费");
-  assert.equal(empty.voucherUnits, beforeVouchers, "无人家庭不领取普通福利，也不会无故丢失资产");
+  // 整户失效：粮券与库存在日结的家产归公步骤划给镇库（docs/REDISTRIBUTION.md 第 2 条），不再有生活消费与福利。
+  assert.equal(empty.voucherUnits, 0, "无人家庭的粮券归镇库");
+  assert.ok(beforeVouchers > 0, "测试前该户有粮券");
+  assert.equal(empty.inventory.wheat, 0, "无人家庭的小麦归镇库");
+  assert.ok(beforeInventory.wheat > 0);
+  assert.equal((state.redistribution?.cumulative?.escheatHouseholds || 0) > escheatBefore, true, "记入家产归公");
   assert.equal(state.payroll.creditorClaims.legacy_test[empty.id], 9 * V, "无人家庭旧工资债权仍可追踪");
   assertPopulationAuthority(state);
 });

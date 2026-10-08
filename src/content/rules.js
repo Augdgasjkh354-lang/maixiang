@@ -1,6 +1,9 @@
 // 存档结构版本：只在彻底不兼容时才加一。日常加字段不用改（读档会自动补默认值，见 persistence/save-compat.js）。
 export const SAVE_VERSION = 17;
 
+// 戏园只招待富户：家庭宽裕度（household-budget.js 的 affluence）达到此值才去。服务定义里的 minAffluence 读它。
+const THEATER_MIN_AFFLUENCE = 1.5;
+
 export const RULES = Object.freeze({
   saveVersion: SAVE_VERSION,
   daysPerYear: 365,
@@ -186,6 +189,11 @@ export const RULES = Object.freeze({
   // 家底只算粮券 + 留够到下次秋收再加 harvestBufferDays 天口粮后多出的小麦；服务预算 = 家底 / wealthSpendDays × serviceShare；
   // 主食里面粉、面包的比例 = 标准比例 × 宽裕度（最多 stapleUpgradeMax 倍）。
   householdBudget: Object.freeze({ referenceWealthPerCapita: 60, maxAffluence: 3, wealthSpendDays: 60, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5 }),
+  // 戏园的门槛：宽裕度低于此值的家庭不去戏园（不产生需求，也不计入"需求未满足"）。
+  // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天收一次；基尼系数逐年记录最多保留 50 年。
+  wealthTaxPeriodDays: 30,
+  giniHistoryLimit: 50,
+  theaterMinAffluence: THEATER_MIN_AFFLUENCE,
   // 日用品：annualPerPerson 是正常人家（宽裕度 1）的年人均量；实际量 × 宽裕度^incomeElasticity（必需品弹性小，享受品大）；
   // comfortMaximum 是用到标准量时的舒心值加成，多用边际递减（最多 1.5 倍）。
   householdGoods: Object.freeze({
@@ -201,7 +209,10 @@ export const RULES = Object.freeze({
     repair: Object.freeze({ id: "repair", name: "修补铺", basis: "household", cycleDays: 30, priceVoucher: 8, merchantCapacity: 14, clerkCapacity: 18, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 0.7 }),
     tea: Object.freeze({ id: "tea", name: "茶馆", basis: "person", cycleDays: 5, priceVoucher: 3, merchantCapacity: 40, clerkCapacity: 48, consumables: Object.freeze([]), comfort: 0.6, incomeSensitivity: 1.6 }),
     school: Object.freeze({ id: "school", name: "学堂", basis: "child", cycleDays: 1, priceVoucher: 1, adjustablePrice: true, merchantCapacity: 50, clerkCapacity: 50, maxCapacity: 100, employeeOnlyCapacity: true, consumables: Object.freeze([]), comfort: 0.4, incomeSensitivity: 0.8 }),
-    restaurant: Object.freeze({ id: "restaurant", name: "饭店", basis: "person", cycleDays: 5, priceVoucher: 4, merchantCapacity: 50, clerkCapacity: 50, employeeOnlyCapacity: true, consumables: Object.freeze([{ itemId: "wheat", quantity: 2 }]), mealReplacement: true, comfort: 1.0, incomeSensitivity: 1.0 })
+    restaurant: Object.freeze({ id: "restaurant", name: "饭店", basis: "person", cycleDays: 5, priceVoucher: 4, merchantCapacity: 50, clerkCapacity: 50, employeeOnlyCapacity: true, consumables: Object.freeze([{ itemId: "wheat", quantity: 2 }]), mealReplacement: true, comfort: 1.0, incomeSensitivity: 1.0 }),
+    // 戏园：富户的消遣。票价 6 券（茶馆的两倍），收入弹性 2.5，实际门槛约 15 券/场（票价 × 弹性，与茶馆同一口径，超出家庭日预算就买不起）；
+    // 人工密集：每个店员只接待 6 人（茶馆 48 人）；舒心值 1.2（茶馆 0.6）。只有宽裕度 ≥ minAffluence 的家庭去。
+    theater: Object.freeze({ id: "theater", name: "戏园", basis: "person", cycleDays: 10, priceVoucher: 6, merchantCapacity: 10, clerkCapacity: 6, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 2.5, minAffluence: THEATER_MIN_AFFLUENCE })
   }),
 
   // v0.1.1 operating-plan parameters. Demand planning refreshes in coarse cycles to avoid daily hire/fire churn.
@@ -219,6 +230,7 @@ export const RULES = Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
+    theater: Object.freeze({ id: "theater", name: "戏园", kind: "service", serviceId: "theater" }),
     school: Object.freeze({ id: "school", name: "学堂", kind: "service", serviceId: "school" }),
     restaurant: Object.freeze({ id: "restaurant", name: "饭店", kind: "service", serviceId: "restaurant" }),
     // 养殖场：开在养殖基地。商人和饲养员一起养，每人每日出 outputPerWorkerDay 斤肉，每斤肉吃 feedPerUnit 斤小麦。

@@ -24,6 +24,29 @@ export function validateState(state, content) {
       if (!Number.isFinite(logistics[key]) || logistics[key] < 0) errors.push("运力账户无效：" + key);
     }
   }
+  // 再分配政策与账（docs/REDISTRIBUTION.md）：富人税门槛递增、税率 0–20%；遗产税率 0–50%；账目为非负整数。
+  const wealthTax = state?.policy?.wealthTax;
+  if (wealthTax) {
+    const thresholds = wealthTax.thresholds;
+    const rates = wealthTax.ratesPercent;
+    if (!Array.isArray(thresholds) || thresholds.length !== 3 || thresholds.some(value => !Number.isFinite(value) || value <= 0) ||
+        !(thresholds[0] < thresholds[1] && thresholds[1] < thresholds[2])) errors.push("富人税门槛无效");
+    if (!Array.isArray(rates) || rates.length !== 3 || rates.some(value => !Number.isFinite(value) || value < 0 || value > 20)) errors.push("富人税税率无效");
+  }
+  const inheritancePercent = state?.policy?.inheritanceTaxPercent;
+  if (inheritancePercent !== undefined && (!Number.isFinite(inheritancePercent) || inheritancePercent < 0 || inheritancePercent > 50)) errors.push("遗产税率无效");
+  const redistribution = state?.redistribution;
+  if (redistribution) {
+    for (const period of PERIODS) {
+      for (const [key, value] of Object.entries(redistribution[period] || {})) {
+        if (!Number.isSafeInteger(value) || value < 0) errors.push("再分配账无效：" + period + "/" + key);
+      }
+    }
+    if (redistribution.giniHistory !== undefined && (!Array.isArray(redistribution.giniHistory) ||
+        redistribution.giniHistory.some(row => !Number.isInteger(row?.year) || !Number.isFinite(row?.gini) || row.gini < 0 || row.gini > 1))) {
+      errors.push("基尼历史无效");
+    }
+  }
   const saveVersion = content.rules.saveVersion || 3;
   if (!state || state.schemaVersion !== saveVersion || state.version !== saveVersion) {
     errors.push("存档版本不是" + saveVersion);

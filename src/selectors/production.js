@@ -14,7 +14,8 @@ export function townWheatReserveUnits(state, content) {
 // 无市场、非统购品时返回 Infinity。
 export function townOutputMarketBatchCap(state, recipe, content) {
   const main = recipe?.outputs?.[0];
-  if (!main || !(recipe.inputs || []).length || !wholesaleMonopolyItemIds(content).includes(main.itemId)) return Number.POSITIVE_INFINITY;
+  // 采集类默认不设闸门；配方标了 demandGated（如丝绸）的照样按市场余量减产。
+  if (!main || (!(recipe.inputs || []).length && !recipe.demandGated) || !wholesaleMonopolyItemIds(content).includes(main.itemId)) return Number.POSITIVE_INFINITY;
   const room = townOutputMarketRoomUnits(state, main.itemId, content);
   if (!Number.isFinite(room)) return Number.POSITIVE_INFINITY;
   const perBatch = Math.max(1, Math.round(main.quantity * content.precision.inventoryUnitsPerJin));

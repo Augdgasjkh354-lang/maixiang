@@ -20,6 +20,7 @@ import { previewTownMaterialProcurement, selectPublicProcurementDemand } from ".
 import { currentPriceMap, currentUnitPrice } from "../economy/prices.js";
 import { computeLaborMarket } from "../systems/labor-market.js";
 import { computeWealthStats } from "../systems/wealth-stats.js";
+import { selectInequality } from "./inequality.js";
 import { currencyScale, validateCurrencyInvariant, voucherBalance } from "../economy/currency.js";
 import { hasBankAccess } from "../economy/payment.js";
 import { WAGE_CONTROL_CIVIL_ROLE_IDS } from "../systems/payroll.js";
@@ -472,6 +473,7 @@ export function selectDashboard(state, content, selection) {
     laborUnemploymentHighPercent: content.rules.laborUnemploymentHighPercent ?? 8,
     laborUnemploymentLowPercent: content.rules.laborUnemploymentLowPercent ?? 5,
     wealthNow: computeWealthStats(state, content),
+    inequality: needResidents ? selectInequality(state, content) : null,
     economy: {
       history: state.economyHistory || [],
       poachYear: state.laborCompetition?.year?.moves || 0,

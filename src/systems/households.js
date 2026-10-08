@@ -370,13 +370,19 @@ export function applyHouseholdDemography(state, changes) {
   const retirees = Math.max(0, Math.floor(changes.retirees || 0));
   const births = Math.max(0, Math.floor(changes.births || 0));
   reduceBand(state, "children", childDeaths);
-  reduceBand(state, "workers", workerDeaths);
-  reduceBand(state, "elders", elderDeaths);
+  const workerLoss = reduceBand(state, "workers", workerDeaths);
+  const elderLoss = reduceBand(state, "elders", elderDeaths);
   moveBand(state, "workers", "elders", retirees);
   moveBand(state, "children", "workers", adults);
   addBirths(state, births);
   const employmentReleases = releaseExcessHouseholdEmployment(state);
-  return { before, after: totalHouseholdAgeBands(state), employmentReleases };
+  // 每户去世的成年人数（劳动力 + 老人），供遗产税与家产归公使用（docs/REDISTRIBUTION.md 第 2 条）。
+  const adultDeathsByHousehold = {};
+  for (const household of householdList(state)) {
+    const count = (workerLoss.get(household.id) || 0) + (elderLoss.get(household.id) || 0);
+    if (count > 0) adultDeathsByHousehold[household.id] = count;
+  }
+  return { before, after: totalHouseholdAgeBands(state), employmentReleases, adultDeathsByHousehold };
 }
 
 // 一批逐户收付（发工资、服务消费等）期间先不汇总居民账，结束时统一汇总一次。

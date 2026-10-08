@@ -501,7 +501,10 @@ function shopWorkingCapitalReserve(state, shop, content) {
     return Math.round((feedVoucher + wageVoucher) * days * currencyScale(content));
   }
   // 集市只进少量货，但不能因为当下批发市场缺货就把周转金全分掉：按全部经营品类估价。
-  const itemIds = def?.kind === "stall" ? shopRetailItemIds(shop, content) : activeRetailItemIds(state, shop, content);
+  // 集市按它真正在卖的货估价（有存货或批发市场有货的品类），不让丝绸这类贵货把周转金抬到分不出利润。
+  const itemIds = def?.kind === "stall"
+    ? shopRetailItemIds(shop, content).filter(itemId => (shop.inventory?.[itemId] || 0) > 0 || (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0)
+    : activeRetailItemIds(state, shop, content);
   if (!itemIds.length) return 0;
   const wholesalePrices = itemIds.map(itemId => shopTradePrices(state, shop.typeId, content, itemId)?.wholesaleVoucherPerUnit || 0).filter(p => p > 0);
   // 排除0价，避免无批发价商品拉低均值（之前简单平均含0）。

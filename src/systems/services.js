@@ -30,6 +30,16 @@ function rotated(list, offset) {
   return list.slice(start).concat(list.slice(0, start));
 }
 
+// 服务的购买门槛：定义里有 minAffluence（宽裕度下限，如戏园 1.5）则只有达到的家庭会去；没有则人人可去。
+function serviceOpenToAffluence(def, affluence) {
+  const minimum = Number(def.minAffluence) || 0;
+  return minimum <= 0 || affluence >= minimum;
+}
+
+function householdAffluenceFor(state, household, content) {
+  return householdBudgets(state, content).get(household.id)?.affluence ?? 0;
+}
+
 function basisCount(household, def) {
   if (def.basis === "household") return 1;
   if (def.basis === "child") return Math.max(0, household.ageBands?.children || 0);
@@ -83,7 +93,14 @@ export function accrueServiceDemand(state, content) {
     activeIds.add(household.id);
     const demand = serviceState.demandByHousehold[household.id] ||= {};
     const carry = serviceState.carryByHousehold[household.id] ||= {};
+    const affluence = householdAffluenceFor(state, household, content);
     for (const def of Object.values(defs)) {
+      // 不够门槛的家庭不产生这项需求（清零，不留旧账）。
+      if (!serviceOpenToAffluence(def, affluence)) {
+        demand[def.id] = 0;
+        carry[def.id] = 0;
+        continue;
+      }
       const basis = basisCount(household, def);
       const denominator = Math.max(1, def.cycleDays);
       const numerator = Math.max(0, carry[def.id] || 0) + basis * DEMAND_SCALE * elapsedDays;
@@ -155,6 +172,7 @@ function processServiceDemandNow(state, content) {
     if (price <= 0) continue;
     let shopCursor = 0;
     for (const household of households) {
+      if (!serviceOpenToAffluence(def, householdAffluenceFor(state, household, content))) continue;
       let due = Math.floor(outstandingMilli(state, household.id, def.id) / DEMAND_SCALE);
       if (due <= 0) continue;
       const dailyNeed = Math.min(due, Math.max(1, basisCount(household, def)));

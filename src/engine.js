@@ -11,7 +11,8 @@ import {
   setEmployment, buildAt, toggleAutomaticRelief,
   setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl,
   setBankPolicy, issueGovernmentBond,
-  setSocialSecurityPolicy, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax,
+  setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax,
+  setWealthTax, setInheritanceTax,
   setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers,
   setAutosaveMonths,
   sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares,
@@ -102,6 +103,7 @@ export function createSimulation(content) {
     setWageControl: function (state, patch) {
       return setWageControl(state, patch);
     },
+    setEmployerSocialSharePercent: function (state, percent) { return setEmployerSocialSharePercent(state, percent); },
     setSocialSecurityPolicy: function (state, patch) {
       return setSocialSecurityPolicy(state, patch);
     },
@@ -130,6 +132,8 @@ export function createSimulation(content) {
       return terminateTradeAgreement(state, id, definitions);
     },
     setAgricultureTax: function (state, percent) { return setAgricultureTax(state, percent); },
+    setWealthTax: function (state, patch) { return setWealthTax(state, patch); },
+    setInheritanceTax: function (state, percent) { return setInheritanceTax(state, percent); },
     setPrivateProductionTax: function (state, typeId, percent) { return setPrivateProductionTax(state, typeId, percent, definitions); },
     setOperatingRightPrice: function (state, buildingId, price) { return setOperatingRightPrice(state, buildingId, price); },
     selectOperatingRightPreview: function (state, buildingId, price) { return selectOperatingRightPreview(state, buildingId, definitions, price); },

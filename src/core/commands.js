@@ -25,9 +25,10 @@ import { setVillaPolicy as setVillaPolicySystem } from "../systems/villas.js";
 import { setBankPolicy as setBankPolicySystem } from "../systems/bank.js";
 import { issueGovernmentBond as issueGovernmentBondSystem } from "../systems/bonds.js";
 import { setWageControlPolicy as setWageControlPolicySystem } from "../systems/payroll.js";
-import { setSocialSecurityPolicy as setSocialSecurityPolicySystem, injectSocialSecurity as injectSocialSecuritySystem, repaySocialSecurityDebt as repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares } from "../systems/social-security.js";
+import { setSocialSecurityPolicy as setSocialSecurityPolicySystem, injectSocialSecurity as injectSocialSecuritySystem, repaySocialSecurityDebt as repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares, setEmployerSocialSharePercent as setEmployerSocialSharePercentSystem } from "../systems/social-security.js";
 import { tradeWithOutsideTown as tradeWithOutsideTownSystem, issueWheatLoan as issueWheatLoanSystem } from "../systems/outside-town.js";
 import { signTradeAgreement as signTradeAgreementSystem, terminateTradeAgreement as terminateTradeAgreementSystem } from "../systems/trade-agreements.js";
+import { setWealthTaxPolicy, setInheritanceTaxPolicy } from "../systems/redistribution.js";
 
 export function setWageRate(state, roleId, dailyJin, content) {
   const value = Number(dailyJin);
@@ -81,6 +82,11 @@ export function setWageControl(state, patch) {
   return setWageControlPolicySystem(state, patch || {});
 }
 
+// 雇主替员工缴社保的比例（0—100%，默认 100）。
+export function setEmployerSocialSharePercent(state, percent) {
+  return setEmployerSocialSharePercentSystem(state, percent);
+}
+
 export function setSocialSecurityPolicy(state, patch) {
   return setSocialSecurityPolicySystem(state, patch || {});
 }
@@ -116,6 +122,15 @@ export function socialBuyShares(state, companyId, shares, content) {
 
 export function socialSellShares(state, companyId, shares, content) {
   return fundSellShares(state, companyId, shares, content);
+}
+
+// 再分配政策（docs/REDISTRIBUTION.md）：富人税门槛与税率、遗产税率。
+export function setWealthTax(state, patch) {
+  return setWealthTaxPolicy(state, patch || {});
+}
+
+export function setInheritanceTax(state, percent) {
+  return setInheritanceTaxPolicy(state, percent);
 }
 
 export function setAgricultureTax(state, percent) {

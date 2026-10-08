@@ -1,10 +1,10 @@
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, maximumPayableValueUnits, normalizePaymentObligation, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
-import { syncResidentAggregates, householdList, isActiveHousehold, householdEmploymentCount, householdConvertibleWheatUnits } from "./households.js";
+import { syncResidentAggregates, householdList, isActiveHousehold, householdConvertibleWheatUnits } from "./households.js";
 
 // 社保基金：独立钱包（支付账户 "social"），粮券存 cashVoucherUnits、实物小麦存 cashWheatUnits。
-// - 收缴：从本日实际发放的工资按人头代扣，家庭 → 基金。
+// - 收缴：每人每天按人头缴费；雇主承担 employerSharePercent%（默认全额），其余由员工家庭自付（见 collectSocialContributions）。
 // - 发放：养老金、失业金（基金开启时）由基金支付；基金不足时镇库垫付，垫付额记入基金对国库的负债。
 // - 镇库注资同样记为负债；基金可主动还款给镇库。
 // - 基金可在交易所买卖上市公司股份（company.fundShares），按持股比例参与年度利润分配。
@@ -13,6 +13,7 @@ import { syncResidentAggregates, householdList, isActiveHousehold, householdEmpl
 export const SOCIAL_OWNER = "social";
 export const DEFAULT_SS_DAILY_JIN = 1;
 export const DEFAULT_SS_PENSION_JIN = 2;
+export const DEFAULT_EMPLOYER_SHARE_PERCENT = 100;
 
 export function ensureSocialSecurity(state) {
   state.socialSecurity ||= {};
@@ -29,6 +30,8 @@ export function ensureSocialSecurity(state) {
   ss.totalCollectedUnits ??= 0;
   ss.totalPaidUnits ??= 0;
   ss.totalDividendUnits ??= 0;
+  ss.employerSharePercent ??= DEFAULT_EMPLOYER_SHARE_PERCENT;
+  ss.employerArrears ||= {};
   return ss;
 }
 
@@ -62,6 +65,21 @@ export function setSocialSecurityPolicy(state, patch) {
     ss.pensionPerElderJin = value;
   }
   return { ok: true, socialSecurity: { enabled: ss.enabled, dailyPerWorkerJin: ss.dailyPerWorkerJin, pensionPerElderJin: ss.pensionPerElderJin } };
+}
+
+// 政策命令：雇主承担社保的比例（0–100，整数或一位小数）。
+export function setEmployerSocialSharePercent(state, percent) {
+  const blocked = requireOffice(state);
+  if (blocked) return blocked;
+  const raw = typeof percent === "string" ? percent.trim() : percent;
+  const value = typeof raw === "number" || (typeof raw === "string" && raw !== "") ? Number(raw) : NaN;
+  const tenths = value * 10;
+  if (!Number.isFinite(value) || value < 0 || value > 100 || Math.abs(tenths - Math.round(tenths)) > 1e-9) {
+    return { ok: false, reason: "雇主承担比例须为0–100之间的整数或一位小数" };
+  }
+  const ss = ensureSocialSecurity(state);
+  ss.employerSharePercent = Math.round(tenths) / 10;
+  return { ok: true, employerSharePercent: ss.employerSharePercent };
 }
 
 // 镇库注资：真实转账到基金钱包，并记为基金欠国库的负债。
@@ -134,36 +152,237 @@ export function chargeFundForRelief(state, valueUnits, content) {
   return { fromFund, owed };
 }
 
-// 工资代扣：payDailyWages 在发放完毕后调用。
-// 每日社保缴费：所有在岗劳动力（务农、镇营、民营、公司、店铺都算）每人每天缴 dailyPerWorkerJin，
-// 在当天各雇主发完工资之后、由所在家庭统一缴纳。用粮券或小麦付，不动家庭口粮储备；付不起的部分当天免缴。
+// ---------------------------------------------------------------- 雇主缴社保（docs/REDISTRIBUTION.md 第 3 节）
+//
+// 每人每天 dailyPerWorkerJin；雇主替员工承担 employerSharePercent%（默认 100），其余由员工所在家庭自付。
+// 雇主按岗位键认定（岗位键构造见 selectors/labor.js）：
+//   `${建筑}::${岗位}`             按建筑当前主人（buildingOwner）：镇营 → 镇库；民营 → 业主家庭；公司 → 公司
+//   `${建筑}::${岗位}::private`    民营 → 业主家庭
+//   `${建筑}::${岗位}::listed`     公司 → 该建筑的公司
+//   `shop:${店铺}:merchant|clerk`  店铺 → 店铺；业主本人在自家店里当商人 = 自雇；集体摊位（时代广场）商人不领工资 = 自雇
+//   务农（无 "::" 的岗位键）及认不出的键 → 自雇，全额由家庭自己交
+// 雇主（或自雇的家庭）付不起的雇主部分记入 ss.employerArrears[雇主]：不算欠薪、不触发收回；下次有钱时先补缴。
+
+export const SOCIAL_EMPLOYER_TOWN = "town";
+const SHOP_JOB_KEY = /^shop:([^:]+):(merchant|clerk)$/;
+const SELF_EMPLOYED = Object.freeze({ employer: null, kind: "self" });
+
+function employerSharePercent(ss) {
+  const value = Number(ss?.employerSharePercent ?? DEFAULT_EMPLOYER_SHARE_PERCENT);
+  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : DEFAULT_EMPLOYER_SHARE_PERCENT;
+}
+
+function shopCanEmploy(record) {
+  return Boolean(record) && !record.collective && record.status !== "closed";
+}
+
+// 雇主账户名是否仍然存在："town" | "household:<id>" | "company:<id>" | "shop:<id>"。
+function employerExists(state, owner) {
+  if (owner === SOCIAL_EMPLOYER_TOWN) return true;
+  const id = owner.slice(owner.indexOf(":") + 1);
+  if (owner.startsWith("household:")) return isActiveHousehold(state.households?.byId?.[id]);
+  if (owner.startsWith("company:")) return Boolean(state.companies?.[id]);
+  if (owner.startsWith("shop:")) return shopCanEmploy(state.shops?.[id]);
+  return false;
+}
+
+function employerKindOf(owner) {
+  if (owner === SOCIAL_EMPLOYER_TOWN) return "town";
+  if (owner.startsWith("household:")) return "private";
+  if (owner.startsWith("company:")) return "company";
+  if (owner.startsWith("shop:")) return "shop";
+  return null;
+}
+
+function employerName(state, owner) {
+  if (owner === SOCIAL_EMPLOYER_TOWN) return "镇库";
+  const id = owner.slice(owner.indexOf(":") + 1);
+  if (owner.startsWith("household:")) return state.households?.byId?.[id]?.name || id;
+  if (owner.startsWith("company:")) return state.companies?.[id]?.name || id;
+  if (owner.startsWith("shop:")) return state.shops?.[id]?.name || id;
+  return owner;
+}
+
+// 一天内的雇主认定缓存：楼栋索引只建一次，岗位键按键缓存（同一键对所有家庭的结果相同）。
+function socialEmployerContext(state) {
+  const buildingsById = new Map();
+  for (const building of state.buildings || []) buildingsById.set(building.id, building);
+  const companyByBuilding = new Map();
+  for (const company of Object.values(state.companies || {})) {
+    if (company?.buildingId && !companyByBuilding.has(company.buildingId)) companyByBuilding.set(company.buildingId, company);
+  }
+  return { buildingsById, companyByBuilding, byKey: new Map() };
+}
+
+function employerInfo(state, owner, extra = {}) {
+  return employerExists(state, owner) ? { employer: owner, kind: employerKindOf(owner), ...extra } : SELF_EMPLOYED;
+}
+
+function resolveSocialEmployerUncached(state, jobKey, ctx) {
+  const shop = SHOP_JOB_KEY.exec(jobKey);
+  if (shop) {
+    const record = state.shops?.[shop[1]];
+    return shopCanEmploy(record)
+      ? { employer: `shop:${shop[1]}`, kind: "shop", ownerHouseholdId: record.ownerHouseholdId || null }
+      : SELF_EMPLOYED;
+  }
+  const parts = String(jobKey).split("::");
+  if (parts.length !== 2 && parts.length !== 3) return SELF_EMPLOYED;
+  const building = ctx.buildingsById.get(parts[0]);
+  if (!building) return SELF_EMPLOYED;
+  if (parts.length === 3) {
+    if (parts[2] === "private") {
+      const id = (building.privateOwners || [])[0];
+      return id ? employerInfo(state, `household:${id}`) : SELF_EMPLOYED;
+    }
+    if (parts[2] === "listed") {
+      const company = ctx.companyByBuilding.get(building.id);
+      return company ? employerInfo(state, `company:${company.id}`) : SELF_EMPLOYED;
+    }
+    return SELF_EMPLOYED;
+  }
+  // 整栋一个主人（docs/OWNERSHIP.md）。这里直接读 ownership，不引 systems/ownership.js，免得
+  // selectors/labor → … → social-security → ownership → selectors/labor 形成循环依赖。
+  if ((building.ownership?.privateLevels || 0) > 0) {
+    const ownerId = (building.privateOwners || [])[0];
+    return ownerId ? employerInfo(state, `household:${ownerId}`) : SELF_EMPLOYED;
+  }
+  if ((building.ownership?.listedLevels || 0) > 0) {
+    const company = ctx.companyByBuilding.get(building.id);
+    return company ? employerInfo(state, `company:${company.id}`) : SELF_EMPLOYED;
+  }
+  return employerInfo(state, SOCIAL_EMPLOYER_TOWN);
+}
+
+function resolveSocialEmployer(state, jobKey, ctx) {
+  let info = ctx.byKey.get(jobKey);
+  if (!info) {
+    info = resolveSocialEmployerUncached(state, jobKey, ctx);
+    ctx.byKey.set(jobKey, info);
+  }
+  return info;
+}
+
+// 查询某户某岗位键的雇主认定（供界面与测试）：{ employer, kind, self }；self 为真表示这户全额自付。
+export function socialEmployerForJobKey(state, householdId, jobKey) {
+  const household = state.households?.byId?.[householdId];
+  const info = resolveSocialEmployerUncached(state, jobKey, socialEmployerContext(state));
+  return { employer: info.employer, kind: info.kind, self: household ? isSocialSelfEmployed(info, household) : true };
+}
+
+// 该岗位的工人对这户来说是否"自雇"（没有雇主，或雇主就是这户自己）。
+function isSocialSelfEmployed(info, household) {
+  if (!info.employer) return true;
+  if (info.employer === `household:${household.id}`) return true;
+  return info.kind === "shop" && info.ownerHouseholdId === household.id;
+}
+
+// 每日社保缴费。在当天发完工资之后执行，分两段结算：
+//   1. 雇主段：每个雇主汇总本日应缴的雇主部分，连同此前欠缴一并一次付清；付不起的记入 employerArrears。
+//   2. 家庭段：各户自付部分（员工部分未被雇主承担的份额，加上自雇全额），付不起的当天免缴。
+// 用粮券或小麦付；家庭作为雇主或自付方时不动口粮储备。
 export function collectSocialContributions(state, content) {
   const ss = ensureSocialSecurity(state);
   if (!ss.enabled) return { collectedValueUnits: 0 };
   const perWorker = Math.round(Math.max(0, Number(ss.dailyPerWorkerJin) || 0) * currencyScale(content));
   if (perWorker <= 0) return { collectedValueUnits: 0 };
+  const sharePercent = employerSharePercent(ss);
+  const reserveDays = content.rules.householdFoodReserveDays ?? 30;
+  const arrears = ss.employerArrears ||= {};
+  for (const owner of Object.keys(arrears)) {
+    if (!(arrears[owner] > 0) || !employerExists(state, owner)) delete arrears[owner];
+  }
+
+  const ctx = socialEmployerContext(state);
+  const employerRows = new Map(); // 雇主账户名 → { due, workers }
+  const householdSelf = new Map(); // 家庭 id → { units, employed }
   let workers = 0;
   let due = 0;
-  let collected = 0;
-  const previousDefer = Boolean(state._deferHouseholdSync);
-  state._deferHouseholdSync = true;
+  let employerDue = 0;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
-    const employed = householdEmploymentCount(household);
-    if (employed <= 0) continue;
-    const amount = employed * perWorker;
-    workers += employed;
-    due += amount;
-    const result = settleMonetaryPayment(state, `household:${household.id}`, SOCIAL_OWNER, currentPaymentComposition(state, amount), content,
-      "social_security_contribution", `${household.name}缴纳社保（${employed}名在岗劳动力）`,
-      { requireFull: false, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) });
-    collected += result.paidValueUnits || 0;
+    let selfUnits = 0;
+    let employed = 0;
+    for (const [jobKey, raw] of Object.entries(household.jobs || {})) {
+      const count = Math.max(0, Math.floor(Number(raw) || 0));
+      if (count <= 0) continue;
+      const amount = count * perWorker;
+      employed += count;
+      workers += count;
+      due += amount;
+      const info = resolveSocialEmployer(state, jobKey, ctx);
+      if (isSocialSelfEmployed(info, household)) {
+        selfUnits += amount;
+        continue;
+      }
+      const share = Math.round(amount * sharePercent / 100);
+      selfUnits += amount - share;
+      employerDue += share;
+      const row = employerRows.get(info.employer) || { due: 0, workers: 0 };
+      row.due += share;
+      row.workers += count;
+      employerRows.set(info.employer, row);
+    }
+    if (selfUnits > 0) householdSelf.set(household.id, { units: selfUnits, employed });
   }
+
+  const previousDefer = Boolean(state._deferHouseholdSync);
+  state._deferHouseholdSync = true;
+
+  // 1. 雇主段：本日应缴 + 此前欠缴，一次付清。
+  let employerCollected = 0;
+  let arrearsPaid = 0;
+  const employerOwners = new Set([...employerRows.keys(), ...Object.keys(arrears)]);
+  for (const owner of employerOwners) {
+    const row = employerRows.get(owner) || { due: 0, workers: 0 };
+    const before = arrears[owner] || 0;
+    const owed = before + row.due;
+    let paid = 0;
+    if (owed > 0) {
+      const payerId = owner.startsWith("household:") ? owner.slice("household:".length) : null;
+      const payer = payerId ? state.households?.byId?.[payerId] : null;
+      const reason = row.workers > 0
+        ? `${employerName(state, owner)}为${row.workers}名员工缴纳社保`
+        : `${employerName(state, owner)}补缴社保欠款`;
+      const result = settleMonetaryPayment(state, owner, SOCIAL_OWNER, currentPaymentComposition(state, owed), content,
+        "social_security_employer_contribution", reason,
+        { requireFull: false, maxWheatUnits: payer ? householdConvertibleWheatUnits(state, payer, content, reserveDays) : undefined });
+      paid = result.paidValueUnits || 0;
+    }
+    const fromArrears = Math.min(paid, before);
+    const fromToday = paid - fromArrears;
+    const shortfall = row.due - fromToday;
+    const left = before - fromArrears + shortfall;
+    if (left > 0) arrears[owner] = left;
+    else delete arrears[owner];
+    employerCollected += paid;
+    arrearsPaid += fromArrears;
+  }
+
+  // 2. 家庭段：员工自付部分，付不起的当天免缴。
+  let householdCollected = 0;
+  for (const [householdId, { units, employed }] of householdSelf) {
+    const household = state.households?.byId?.[householdId];
+    if (!household) continue;
+    const result = settleMonetaryPayment(state, `household:${householdId}`, SOCIAL_OWNER, currentPaymentComposition(state, units), content,
+      "social_security_contribution", `${household.name}缴纳社保（${employed}名在岗劳动力的员工自付部分）`,
+      { requireFull: false, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, reserveDays) });
+    householdCollected += result.paidValueUnits || 0;
+  }
+
   state._deferHouseholdSync = previousDefer;
   if (!previousDefer) syncResidentAggregates(state, content);
+
+  const collected = employerCollected + householdCollected;
   ss.totalCollectedUnits += collected;
-  ss.lastContribution = { workers, dueValueUnits: due, collectedValueUnits: collected };
-  return { workers, dueValueUnits: due, collectedValueUnits: collected };
+  const arrearsTotal = Object.values(arrears).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
+  ss.lastContribution = {
+    workers, dueValueUnits: due, collectedValueUnits: collected,
+    employerDueValueUnits: employerDue, employerCollectedValueUnits: employerCollected, employerArrearsPaidValueUnits: arrearsPaid,
+    householdDueValueUnits: due - employerDue, householdCollectedValueUnits: householdCollected,
+    employerArrearsValueUnits: arrearsTotal
+  };
+  return { ...ss.lastContribution };
 }
 
 // 每日养老金：按老人人数发到所在家庭。
@@ -265,6 +484,16 @@ export function selectSocialSecurityStats(state, content) {
         townAvailable: Math.max(0, (company.townShares || 0) - (company.shareSale?.offeredShares || 0))
       };
     });
+  const arrearsByKind = { town: 0, private: 0, company: 0, shop: 0 };
+  const debtors = [];
+  for (const [owner, value] of Object.entries(ss.employerArrears || {})) {
+    const kind = employerKindOf(owner);
+    if (!kind || !(value > 0)) continue;
+    arrearsByKind[kind] += value;
+    debtors.push({ owner, kind, name: employerName(state, owner), arrearsJin: jin(value) });
+  }
+  debtors.sort((a, b) => b.arrearsJin - a.arrearsJin || (a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : 0));
+  const last = ss.lastContribution || {};
   return {
     hasOffice: hasSocialSecurityOffice(state),
     enabled: Boolean(ss.enabled),
@@ -281,6 +510,21 @@ export function selectSocialSecurityStats(state, content) {
     totalRepaidJin: jin(ss.totalRepaidUnits),
     totalCollectedJin: jin(ss.totalCollectedUnits),
     totalPaidJin: jin(ss.totalPaidUnits),
-    totalDividendJin: jin(ss.totalDividendUnits)
+    totalDividendJin: jin(ss.totalDividendUnits),
+    employerSharePercent: employerSharePercent(ss),
+    employerArrearsJin: jin(Object.values(arrearsByKind).reduce((sum, value) => sum + value, 0)),
+    employerArrearsByKindJin: Object.fromEntries(Object.entries(arrearsByKind).map(([kind, value]) => [kind, jin(value)])),
+    topEmployerDebtors: debtors.slice(0, 5),
+    lastContribution: {
+      workers: last.workers || 0,
+      dueJin: jin(last.dueValueUnits),
+      collectedJin: jin(last.collectedValueUnits),
+      employerDueJin: jin(last.employerDueValueUnits),
+      employerCollectedJin: jin(last.employerCollectedValueUnits),
+      employerArrearsPaidJin: jin(last.employerArrearsPaidValueUnits),
+      householdDueJin: jin(last.householdDueValueUnits),
+      householdCollectedJin: jin(last.householdCollectedValueUnits),
+      employerArrearsJin: jin(last.employerArrearsValueUnits)
+    }
   };
 }

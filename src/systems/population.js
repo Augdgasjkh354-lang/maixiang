@@ -6,6 +6,7 @@ import { recordEvent } from "../economy/ledger.js";
 import { selectHousing } from "../selectors/housing.js";
 import { applyHouseholdDemography, totalHouseholdAgeBands } from "./households.js";
 import { syncShopEmployment } from "./shops.js";
+import { settleYearEstates, snapshotEstates } from "./redistribution.js";
 
 function deathRate(age) {
   if (age < 5) return 0.004;
@@ -107,9 +108,13 @@ export function advancePopulation(state, content) {
   addToCohort(state.cohorts, 0, "f", births - maleBirths);
   const marriages = marrySingles(state.cohorts);
 
+  // 遗产税要用去世前的家底与成年人数，所以在家庭人口变动之前取快照（税率为 0 时不取）。
+  const estateSnapshot = snapshotEstates(state, content);
   const householdChange = applyHouseholdDemography(state, { childDeaths, workerDeaths, elderDeaths, adults, retirees, births });
   const employmentAdjustments = reconcileEmployment(state, content);
   syncShopEmployment(state, content);
+  // 遗产税（有成年人去世的家庭）与家产归公（整户失效，全部归镇库 / 镇营）。
+  const estates = settleYearEstates(state, content, estateSnapshot, householdChange.adultDeathsByHousehold);
   assertHouseholdBandsMatchCohorts(state);
 
   const workersAtClose = populationStats(state).workers;
@@ -128,5 +133,5 @@ export function advancePopulation(state, content) {
     const cut = change.before - change.after;
     recordEvent(state, change.reason + "：" + jobName + "由" + change.before + "人调为" + change.after + "人" + (cut > 0 ? "，释放" + cut + "个岗位。" : "。"), content);
   }
-  return { births, deaths, marriages, releasedJobs, employmentAdjustments, laborChange, householdAllocation: householdChange };
+  return { births, deaths, marriages, releasedJobs, employmentAdjustments, laborChange, householdAllocation: householdChange, estates };
 }
