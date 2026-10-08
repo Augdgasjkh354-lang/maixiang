@@ -14,6 +14,7 @@ function itemRow(view, shop, row) {
   return `<div class="cardlet">
     <div class="row"><span class="label">${escapeHtml(row.name)}进价</span><strong class="value">${number(row.wholesaleVoucherPerUnit, 3)} 斤/单位</strong></div>
     <div class="row"><span class="label">现售价</span><div class="setting-input">${renderNumericInput(view, { key: `shop-retail:${shop.shopId}:${row.itemId}`, kind: "shop-retail-price", target: `${shop.shopId}:${row.itemId}`, value: number(row.retailVoucherPerUnit, 3), label: priceLabel, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>斤/${escapeHtml(unit)}</b></div></div>
+    <div class="row"><span class="label">价格系数</span><strong class="value">×${number(row.priceFactor ?? 1, 2)}${row.priceFactorReason ? ` <span class="subtle">${escapeHtml(row.priceFactorReason)}</span>` : ""}${row.clearance ? ` <span class="badge red">清仓</span>` : ""}</strong></div>
     <div class="row"><span class="label">实际利润率</span><strong class="value">${escapeHtml(marginText(row.actualMarginPercent))}</strong></div>
     <div class="row"><span class="label">目标利润率</span><strong class="value">${number(row.targetMarginPercent, 1)}%</strong></div>
     <div class="row"><span class="label">近30天均价 / 弹性系数</span><strong class="value">${number(row.averagePriceVoucherPerUnit || 0, 3)} / ${number(row.demandMultiplier, 2)}</strong></div>

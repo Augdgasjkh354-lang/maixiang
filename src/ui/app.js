@@ -1559,6 +1559,18 @@ export function mountGame(root) {
       showToast(`${isStockpile ? "已从批发市场收储" : "已向批发市场投放"}${number(result.movedJin, 2)}${itemUnit}。`);
       return;
     }
+    // 批发市场逐品自动调价开关：开启时以当前售价为锚定价，失败原因走 toast。
+    const autoPriceButton = closest(target, "[data-wholesale-autoprice]");
+    if (autoPriceButton && state) {
+      const itemId = autoPriceButton.dataset.wholesaleAutoprice;
+      const enabled = autoPriceButton.dataset.next === "true";
+      const result = simulation.configureWholesaleAutoPricing(state, itemId, enabled);
+      if (!result?.ok) { showToast(result?.reason || "自动调价设置失败", 3600); return; }
+      changed(true);
+      render(true);
+      showToast(enabled ? `已开启自动调价，锚定价${number(result.anchorVoucherPerUnit, 3)}。` : "已关闭自动调价，售价保持当前水平。");
+      return;
+    }
     // 0.2.3 流通改革：把目标利润率一键应用到所有综合商店。
     const marginAllButton = closest(target, "[data-shop-margin-all]");
     if (marginAllButton && state) {

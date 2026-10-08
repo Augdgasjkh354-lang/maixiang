@@ -264,10 +264,14 @@ export function renderSite(view) {
     const market = view.wholesaleMarket || { inventory: {}, pricesVoucherPerUnit: {}, purchasePricesVoucherPerUnit: {}, dailyTownAllocation: {}, cashflow: null };
     const trends = view.wholesaleTrends || {};
     const tradeableIds = wholesaleItemIds(CONTENT);
+    const autoBandPercent = CONTENT.rules.priceAdjust?.wholesaleBandPercent ?? 30;
     const marketRowsAll = tradeableIds.map(itemId => {
       const name = view.itemNames?.[itemId] || itemId;
       const itemUnit = view.itemUnits?.[itemId] || "斤";
       const moveKey = `wholesale-move:${itemId}`;
+      // 自动调价只对批发市场做市的商品存在（见 wholesaleSummary 的 autoPricing 视图）；没有该行则不显示开关。
+      const autoRow = market.autoPricing?.[itemId];
+      const autoPriceRow = autoRow ? `<div class="row"><span class="label">自动调价</span><div class="setting-input"><button class="secondary" aria-pressed="${autoRow.enabled ? "true" : "false"}" data-wholesale-autoprice="${escapeHtml(itemId)}" data-next="${autoRow.enabled ? "false" : "true"}">${autoRow.enabled ? "自动调价：开" : "自动调价：关"}</button>${autoRow.enabled ? `<span class="subtle">锚定价 ${number(autoRow.anchorVoucherPerUnit, 3)}，浮动 ±${number(autoBandPercent)}%${autoRow.reason ? ` · ${escapeHtml(autoRow.reason)}` : ""}</span>` : ""}</div></div>` : "";
       const moveShown = view.numericDrafts?.[moveKey]?.value ?? "";
       const purchasePrice = market.purchasePricesVoucherPerUnit?.[itemId] ?? 0;
       const purchaseIndex = market.purchasePriceIndex?.[itemId] ?? 1;
@@ -290,6 +294,7 @@ export function renderSite(view) {
         <div class="row"><span class="label">收购价（向公司/民营）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-buy:${itemId}`, kind: "wholesale-purchase-price", target: itemId, value: market.purchasePriceReferenceVoucherPerUnit?.[itemId] ?? purchasePrice, label: `${name}收购价基准`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
         <div class="row"><span class="label">当前实际收购价</span><strong class="value">${number(purchasePrice, 3)} <span class="subtle">${escapeHtml(feedbackText)}</span></strong></div>
         <div class="row"><span class="label">售价（卖给综合商店）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-price:${itemId}`, kind: "wholesale-price", target: itemId, value: market.pricesVoucherPerUnit?.[itemId] ?? 1, label: `${name}售价`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
+        ${autoPriceRow}
         <div class="row"><span class="label">镇库每日固定调拨</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-allocation:${itemId}`, kind: "wholesale-allocation", target: itemId, value: market.dailyTownAllocation?.[itemId] || 0, label: `${name}每日调拨量`, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>${escapeHtml(itemUnit)}/日</b></div></div>
         <div class="business-form-row"><label>单次调运<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(moveShown)}" aria-label="${escapeHtml(name)}单次调运量" data-draft-key="${escapeHtml(moveKey)}" data-draft-kind="stage" data-draft-label="${escapeHtml(name)}单次调运量" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-stockpile="${escapeHtml(itemId)}">收储入镇库</button><button class="secondary" data-wholesale-release="${escapeHtml(itemId)}">镇库投放</button></div></div></div>`;
     }).join("");
