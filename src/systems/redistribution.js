@@ -18,7 +18,7 @@ import { recordEvent, recordLedger, makeTransactionId } from "../economy/ledger.
 import { bookAdd, ensureBook } from "../economy/books.js";
 import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, syncResidentAggregates, withDeferredHouseholdSync } from "./households.js";
-import { householdWealthUnits } from "./household-budget.js";
+import { daysUntilHarvest, householdWealthUnits } from "./household-budget.js";
 import { wholesalePrice, householdWealth } from "./wealth-stats.js";
 import { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
 import { transferWageClaimsToTown, wageBook } from "./employer.js";
@@ -154,7 +154,9 @@ function collectFromHouseholds(state, content, rows, type, label) {
         currentPaymentComposition(state, dueUnits), content, type, `${household.name}${label}`,
         {
           requireFull: false,
-          maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30)
+          // 只动"到下次秋收再加 30 天"以外的余粮（和家底口径一致），不让收税吃掉下一季口粮。
+          maxWheatUnits: householdConvertibleWheatUnits(state, household, content,
+            daysUntilHarvest(state, content) + (content.rules.householdBudget?.harvestBufferDays ?? 30))
         });
       const paid = result.paidValueUnits || 0;
       collected += paid;
