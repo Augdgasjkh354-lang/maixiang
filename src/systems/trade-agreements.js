@@ -2,6 +2,7 @@ import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.
 import { addInventory, quantityToUnits, unitsToQuantity } from "../economy/inventory.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { takeWholesaleInventoryForExport, hasWholesaleMarket } from "./wholesale-market.js";
+import { freightCapacityUnits, takeFreightCapacity } from "./logistics.js";
 import {
   AGREEMENTS_PER_STAFF, RELATIONS_DISTRUST, RELATIONS_TRUSTED,
   buildingOperational, buildingStaffOnDuty, changeRelations, currentPrice, deliverToOutsideTown,
@@ -117,6 +118,22 @@ function penaltyFor(agreement, town) {
   return round2(agreement.annualJin * agreement.pricePerUnit * rate);
 }
 
+// 违约一次：从镇库扣赔偿（不够就记欠）、关系分下降、违约次数 +1；连续违约到上限就单方面解约。
+// 库存不足和运力不足都走这里，只是事件文字不同。
+function breachAgreement(state, agreement, town, profile, content, { itemName, ledgerReason, eventLead }) {
+  const paid = payBreachPenalty(state, town, penaltyFor(agreement, town), content, ledgerReason);
+  agreement.breachCount = (agreement.breachCount || 0) + 1;
+  changeRelations(town, -AGREEMENT_BREACH_RELATIONS_LOSS);
+  const owedText = paid.shortfallJin > 0 ? `，镇库小麦不足，尚欠${Math.round(paid.shortfallJin)}斤` : "";
+  recordEvent(state, `${eventLead}，向${profile.name}赔付小麦${Math.round(paid.paidJin)}斤${owedText}。`, content);
+  if (agreement.breachCount < AGREEMENT_BREACH_LIMIT) return { terminated: false };
+  agreement.status = "terminated";
+  agreement.terminatedYear = state.year;
+  agreement.terminatedDay = state.day;
+  recordEvent(state, `${profile.name}连续${AGREEMENT_BREACH_LIMIT}个月未收到${itemName}，单方面解约。`, content);
+  return { terminated: true };
+}
+
 export function settleTradeAgreementsMonth(state, content) {
   const rows = ensureTradeAgreements(state);
   const result = { delivered: 0, breached: 0, partnerBreached: 0, terminated: 0, revenueJin: 0, settled: false };
@@ -130,23 +147,19 @@ export function settleTradeAgreementsMonth(state, content) {
     if (!profile || !town || town.tradeClosed) continue;
     const itemName = content.items[agreement.itemId]?.name || agreement.itemId;
     const wantUnits = quantityToUnits(agreement.monthlyJin, content);
-    const takenUnits = hasWholesaleMarket(state) ? (takeWholesaleInventoryForExport(state, agreement.itemId, wantUnits, content)?.units || 0) : 0;
-    if (takenUnits < wantUnits) {
+    // 运力：本月能运出的量不超过运力池余量（运力不够的部分在下面按违约处理）。
+    const askUnits = Math.min(wantUnits, freightCapacityUnits(state, content));
+    const takenUnits = hasWholesaleMarket(state) && askUnits > 0 ? (takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content)?.units || 0) : 0;
+    if (takenUnits < askUnits) {
+      // 库存不足：整月交付取消，按违约处理（与运力无关）。
       returnToMarket(state, agreement.itemId, takenUnits);
-      const paid = payBreachPenalty(state, town, penaltyFor(agreement, town), content,
-        `长期协定违约赔偿（${itemName}，欠${unitsToQuantity(wantUnits - takenUnits, content)}）`);
-      agreement.breachCount = (agreement.breachCount || 0) + 1;
-      changeRelations(town, -AGREEMENT_BREACH_RELATIONS_LOSS);
+      const breach = breachAgreement(state, agreement, town, profile, content, {
+        itemName,
+        ledgerReason: `长期协定违约赔偿（${itemName}，欠${unitsToQuantity(wantUnits - takenUnits, content)}）`,
+        eventLead: `长期协定未按期交付${itemName}`
+      });
       result.breached += 1;
-      const owedText = paid.shortfallJin > 0 ? `，镇库小麦不足，尚欠${Math.round(paid.shortfallJin)}斤` : "";
-      recordEvent(state, `长期协定未按期交付${itemName}，向${profile.name}赔付小麦${Math.round(paid.paidJin)}斤${owedText}。`, content);
-      if (agreement.breachCount >= AGREEMENT_BREACH_LIMIT) {
-        agreement.status = "terminated";
-        agreement.terminatedYear = state.year;
-        agreement.terminatedDay = state.day;
-        result.terminated += 1;
-        recordEvent(state, `${profile.name}连续${AGREEMENT_BREACH_LIMIT}个月未收到${itemName}，单方面解约。`, content);
-      }
+      if (breach.terminated) result.terminated += 1;
       continue;
     }
     const actualJin = unitsToQuantity(takenUnits, content);
@@ -158,14 +171,29 @@ export function settleTradeAgreementsMonth(state, content) {
       recordEvent(state, `${profile.name}余粮不足，本月长期协定未能付款，交付顺延。`, content);
       continue;
     }
-    town.wheatStockJin = round2(town.wheatStockJin - orderJin);
-    addInventory(state, "town", "wheat", orderJin, `对${profile.name}长期协定交付${itemName}所得`, "trade_export", content);
-    deliverToOutsideTown(town, agreement.itemId, actualJin);
-    recordTradeStats(town, "sell", orderJin);
+    if (takenUnits > 0) {
+      town.wheatStockJin = round2(town.wheatStockJin - orderJin);
+      addInventory(state, "town", "wheat", orderJin, `对${profile.name}长期协定交付${itemName}所得`, "trade_export", content);
+      deliverToOutsideTown(town, agreement.itemId, actualJin);
+      recordTradeStats(town, "sell", orderJin);
+      takeFreightCapacity(state, actualJin, content);
+      agreement.totalDeliveredJin = round2((agreement.totalDeliveredJin || 0) + actualJin);
+      result.delivered += 1;
+      result.revenueJin = round2(result.revenueJin + orderJin);
+    }
+    if (takenUnits < wantUnits) {
+      // 运力不够：能运的已经运出，余下的按违约处理（赔偿、关系分、违约次数，与库存不足相同）。
+      const shortJin = unitsToQuantity(wantUnits - takenUnits, content);
+      const breach = breachAgreement(state, agreement, town, profile, content, {
+        itemName,
+        ledgerReason: `长期协定违约赔偿（${itemName}，运力不足欠${shortJin}）`,
+        eventLead: `长期协定运力不足，${itemName}本月只运出${Math.round(actualJin)}斤（欠${Math.round(shortJin)}斤）`
+      });
+      result.breached += 1;
+      if (breach.terminated) result.terminated += 1;
+      continue;
+    }
     agreement.breachCount = 0;
-    agreement.totalDeliveredJin = round2((agreement.totalDeliveredJin || 0) + actualJin);
-    result.delivered += 1;
-    result.revenueJin = round2(result.revenueJin + orderJin);
   }
   return result;
 }

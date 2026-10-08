@@ -47,10 +47,10 @@ test("there are 4 riverside plots, labelled 河岸 and kept off ordinary buildin
   for (const plot of riverside) assert.ok(!ordinary.includes(plot.id));
 });
 
-test("riverside plots stay empty: no regular building definition requires them", () => {
+test("riverside plots: only the dock requires them; the foreign trade house may also use them", () => {
   const users = Object.values(CONTENT.buildings).filter(def => def.requiredPlotFeature === "riverside");
-  // 目前没有河岸建筑；有了之后这里会改为正向断言。
-  assert.equal(users.length, 0);
+  assert.deepEqual(users.map(def => def.id), ["dock"]);
+  assert.deepEqual([...CONTENT.buildings.foreign_trade_house.allowedPlotFeatures], ["riverside"]);
 });
 
 test("an old save without the new plots loads with every plot from content", () => {

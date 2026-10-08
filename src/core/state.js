@@ -309,6 +309,8 @@ export function createInitialState(options) {
     outsideTowns: createOutsideTowns(content),
     // 长期贸易协定：外贸房签约，每月从批发市场交货。
     tradeAgreements: [],
+    // 运力池（docs/TRADE.md）：每日按日运力补充，出货进货都从池里扣；history 记最近 30 天。
+    logistics: { poolJin: 0, usedToday: 0, history: [] },
     laborCompetition: { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] },
     goodsDemand: { todayDemandUnits: {}, day: {}, year: {} },
     industryExperience: {},

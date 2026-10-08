@@ -6,6 +6,8 @@ import { readJobCount } from "../selectors/labor.js";
 import { setJobCount } from "./households.js";
 import { syncOwnershipLevels } from "./ownership.js";
 
+const PLOT_FEATURE_NAMES = { salt_mine: "盐矿", riverside: "河岸" };
+
 // 建筑工总量即各工程投入人数之和；不再有“一次一个工程”的人为上限。
 export function totalProjectWorkers(state) {
   return (state.projects || []).reduce(function (sum, project) {
@@ -62,8 +64,12 @@ export function startConstruction(state, typeId, plotId, content, options = {}) 
   const plot = state.plots.find(function (item) { return item.id === plotId; });
   if (!plot) return { ok: false, reason: "请在地图空地上选址" };
   if (definition.requiredPlotFeature && plot.feature !== definition.requiredPlotFeature) {
-    const featureName = definition.requiredPlotFeature === "salt_mine" ? "盐矿" : "南部森林资源点";
+    const featureName = PLOT_FEATURE_NAMES[definition.requiredPlotFeature] || "南部森林资源点";
     return { ok: false, reason: definition.name + "只能建在" + featureName + "地块" };
+  }
+  // 河岸地块只接受在建筑定义里列出 riverside 的建筑（码头、外贸房）。
+  if (plot.feature === "riverside" && !(definition.allowedPlotFeatures || []).includes("riverside")) {
+    return { ok: false, reason: "河岸地块只能建码头或外贸房" };
   }
   if (state.buildings.some(function (building) { return building.plotId === plotId; })) {
     return { ok: false, reason: "这块地已经有建筑" };

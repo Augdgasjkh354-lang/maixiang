@@ -4,6 +4,7 @@ import { addInventory, changeInventory, quantityToUnits, unitsToQuantity } from 
 import { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } from "../content/outside-towns.js";
 import { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } from "./wholesale-market.js";
 import { jobCount } from "./households.js";
+import { freightCapacityUnits, freightPoolJin, takeFreightCapacity } from "./logistics.js";
 
 // 外镇：所有外镇共用这一套"库存驱动"算法，每个镇的差别只在 content/outside-towns.js 的档案里。
 //
@@ -347,12 +348,15 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   if (direction === "buy" && !good.sellsToUs) return { ok: false, reason: `${profile.name}不出售${item.name}` };
   let qty = Number(quantityJin);
   if (!Number.isFinite(qty) || qty <= 0) return { ok: false, reason: "数量必须大于0" };
+  // 运力：货物（进出口都算）从运力池扣斤数；池子不够就只做到池子剩下的量，池子空了直接拒绝。
+  if (freightPoolJin(state) < 0.01) return { ok: false, reason: `运力不足：今天最多还能运${Math.floor(freightPoolJin(state) * 100) / 100}斤` };
+  const freightUnits = freightCapacityUnits(state, content);
   const transactionId = makeTransactionId(state);
 
   if (direction === "sell") {
     qty = affordableSellQuantity(town, profile, good, qty);
     if (qty < 0.01) return { ok: false, reason: `${profile.name}口粮储备以外的小麦不够，付不起这笔货款` };
-    const qtyUnits = quantityToUnits(qty, content);
+    const qtyUnits = Math.min(quantityToUnits(qty, content), freightUnits);
     if (qtyUnits <= 0) return { ok: false, reason: "数量过小" };
     // 货源：先批发市场，不足再镇库；镇库也不够就把市场已出的货退回。
     let fromMarketUnits = 0;
@@ -369,6 +373,8 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
       }
     }
     const actualJin = unitsToQuantity(qtyUnits, content);
+    // 货已经能发出（之后不再有可能失败的步骤）才扣运力。
+    takeFreightCapacity(state, actualJin, content);
     const valueJin = round2(quoteValue(town, good, "sell", actualJin));
     town.wheatStockJin = round2(Math.max(0, town.wheatStockJin - valueJin));
     deliverToOutsideTown(town, itemId, actualJin);
@@ -377,12 +383,14 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
     return { ok: true, direction, itemId, quantityJin: actualJin, valueJin, priceWheatPerUnit: round2(valueJin / actualJin) };
   }
 
-  qty = Math.min(qty, Math.floor(sellableStock(town, good) * 100) / 100);
+  qty = Math.min(qty, Math.floor(sellableStock(town, good) * 100) / 100, freightUnits / content.precision.inventoryUnitsPerJin);
   if (qty < 0.01) return { ok: false, reason: `${profile.name}的${item.name}只够自用，暂不外卖` };
   const valueJin = round2(quoteValue(town, good, "buy", qty));
   const payUnits = quantityToUnits(valueJin, content);
   const pay = changeInventory(state, "town", "wheat", -payUnits, `从${profile.name}进口${item.name}付款`, "trade_import", content, transactionId);
   if (!pay.ok) return { ok: false, reason: "镇库小麦不足以支付" };
+  // 付款已成功，之后不再失败：这时才扣运力。
+  takeFreightCapacity(state, qty, content);
   town.wheatStockJin = round2(town.wheatStockJin + valueJin);
   town.stocks[itemId] = round2(town.stocks[itemId] - qty);
   addInventory(state, "town", itemId, qty, `从${profile.name}进口${item.name}`, "trade_import", content);

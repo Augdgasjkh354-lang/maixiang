@@ -19,6 +19,8 @@ function tradingState(seed = 4401) {
     plotId: plot.id, x: plot.x, y: plot.y, materialInvestments: [], completed: { year: 1, day: 1 }
   });
   setJobCount(state, "ftrade::trade_staff", 2, CONTENT);
+  // 测试夹具：运力池给足，交易量不受运力限制（运力本身的测试见 logistics.test.js）。
+  state.logistics.poolJin = 1000000;
   state.accounts.town.salt = (state.accounts.town.salt || 0) + 50000 * I;
   state.accounts.town.flour = (state.accounts.town.flour || 0) + 50000 * I;
   return state;

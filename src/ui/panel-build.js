@@ -60,8 +60,8 @@ function buildCard(option, selectedBuild, wageRates, unit) {
   ).join("<br>");
   const jobsHtml = jobs || "无固定岗位";
   const location = option.requiredPlotFeature
-    ? (option.requiredPlotFeature === "salt_mine" ? "盐矿资源点" : "南部森林资源点")
-    : "任一空地";
+    ? ({ salt_mine: "盐矿资源点", riverside: "河岸地块" }[option.requiredPlotFeature] || "南部森林资源点")
+    : (option.allowedPlotFeatures || []).includes("riverside") ? "任一空地或河岸" : "任一空地";
   const shortage = materialShortageText(option.materials);
   const action = planned
     ? `<div class="meter"><span style="width:${percent(planned.workDone / planned.workRequired * 100)}"></span></div><div class="subtle">在建${number(option.pendingCount)}处 · 建筑工${number(planned.workers)}人 · ${planned.estimatedDays ? `预计${number(planned.estimatedDays)}天完工` : "缺建筑工"}</div>`

@@ -44,6 +44,7 @@ import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./an
 import { settleOwnershipTakeovers } from "./ownership-takeover.js";
 import { settleIpoApplications } from "./ipo.js";
 import { settleOwnerUpgrades } from "./building-development.js";
+import { stepLogistics } from "./logistics.js";
 
 // ---------------------------------------------------------------- 账本翻页
 
@@ -142,6 +143,9 @@ export const CORE_DAILY_STEPS = [
       rateBps: Math.round((state.policy.agricultureTaxPercent ?? 50) * 100) });
     state.policy.agricultureTaxRecent = state.policy.agricultureTaxRecent.slice(-(content.rules.agricultureTaxLookbackDays || 30));
   } },
+
+  // 运力池：用工排好之后按在岗的外贸房、物流中心、码头补充当日运力（docs/TRADE.md）；之后的贸易步骤都从池里扣。
+  { id: "logistics", run: stepLogistics },
 
   // ── 发钱：救济优先，再发工资（先还旧欠薪），再失业金、养老金
   { id: "relief", run: (state, content, day) => applyAutomaticRelief(state, day.peopleAtStart.total, content) },

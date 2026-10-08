@@ -217,11 +217,34 @@ export const BUILDINGS = Object.freeze({
   }),
   foreign_trade_house: Object.freeze({
     id: "foreign_trade_house", name: "外贸房", icon: "🚢",
-    description: "对民镇贸易、长期协定与关系维护 · 至少1人在岗才能接单、关系分才回升 · 全镇限建一座",
+    description: "对民镇贸易、长期协定与关系维护 · 至少1人在岗才能接单、关系分才回升 · 全镇限建一座 · 可建在河岸地块",
     maxInstances: 1,
+    allowedPlotFeatures: Object.freeze(["riverside"]),
     jobs: Object.freeze([Object.freeze({ id: "trade_staff", name: "外贸职员", slots: 8, capacityMode: "building", wagePerWorkerDay: 5, note: "每人每月可跟2笔长期协定", releasePriority: 55 })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
     construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 })
+  }),
+  // 物流中心：脚夫搬运，每人每日运力 rules.logisticsJinPerWorker；每级 20 个岗位，可建多座。
+  logistics_center: Object.freeze({
+    id: "logistics_center", name: "物流中心", icon: "🛒",
+    description: "脚夫搬运 · 每级20个脚夫岗位 · 每人每日运力60斤 · 可建多座",
+    maxInstances: 6,
+    jobs: Object.freeze([Object.freeze({ id: "porters", name: "脚夫", slots: 20, wagePerWorkerDay: 5, note: "每人每日运力60斤", releasePriority: 55 })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]),
+    construction: Object.freeze({ workDays: 600, recommendedWorkers: 12 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 600, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]) })
+  }),
+  // 码头：只能建在河岸地块；码头工每人每日运力 rules.dockJinPerWorker（脚夫的 2 倍）。
+  dock: Object.freeze({
+    id: "dock", name: "码头", icon: "⚓",
+    description: "河岸码头 · 每级20个码头工岗位 · 每人每日运力120斤 · 只能建在河岸地块",
+    maxInstances: 4,
+    requiredPlotFeature: "riverside",
+    allowedPlotFeatures: Object.freeze(["riverside"]),
+    jobs: Object.freeze([Object.freeze({ id: "dockers", name: "码头工", slots: 20, wagePerWorkerDay: 5, note: "每人每日运力120斤", releasePriority: 55 })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 2000 }]),
+    construction: Object.freeze({ workDays: 1000, recommendedWorkers: 16 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 800, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1500 }]) })
   }),
 
   public_housing: Object.freeze({

@@ -30,6 +30,7 @@ import { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFee
 import { selectOutsideTownView } from "../systems/outside-town.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { selectTradeAgreementView } from "../systems/trade-agreements.js";
+import { selectLogisticsView } from "../systems/logistics.js";
 import { householdRecentTotalsReadonly, householdFoodDays } from "../systems/household-life.js";
 import { createDashboardRuntime, employmentExchangeRemainingUnits } from "./dashboard-runtime.js";
 import { selectVillaStats } from "../systems/villas.js";
@@ -95,9 +96,10 @@ export function selectConstructionOptions(state, content, context = {}) {
       Math.min(definition.construction.recommendedWorkers, unassignedBuilders + labor.idle)));
     const estimatedDays = previewBuilders > 0 ? Math.ceil(definition.construction.workDays / previewBuilders) : null;
     const builderWage = state.employment.wageRates?.builders ?? content.roles.builders?.wagePerWorkerDay ?? 5;
+    // 必须地块的建筑只看该类地块；其余看普通空地，外加定义里允许的特殊地块（河岸：外贸房）。
     const allowedPlots = definition.requiredPlotFeature
       ? runtime.plotsByFeature.get(definition.requiredPlotFeature) || []
-      : runtime.ordinaryPlots;
+      : [...runtime.ordinaryPlots, ...(definition.allowedPlotFeatures || []).flatMap(feature => runtime.plotsByFeature.get(feature) || [])];
     const openPlots = allowedPlots.filter(function (plot) {
       return !runtime.buildingByPlotId.has(plot.id) &&
         !projects.some(project => project.plotId === plot.id);
@@ -530,6 +532,7 @@ export function selectDashboard(state, content, selection) {
     outsideTownId: outsideTownId,
     outsideTown: needBusiness ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
     tradeAgreements: needBusiness ? selectTradeAgreementView(state, content, outsideTownId) : null,
+    logistics: needBusiness ? selectLogisticsView(state, content) : null,
     // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
     wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,

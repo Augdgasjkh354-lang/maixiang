@@ -32,6 +32,16 @@ export const RULES = Object.freeze({
   saltFoodReserveDays: 30,
   saltGraceDays: 30,
   buildingMaxLevel: 10,
+  // 运力（docs/TRADE.md「运力」「运费」）：单位斤。外贸房在岗给基础运力；物流中心、码头按在岗人数给运力。
+  tradeBaseCapacityJin: 300,
+  logisticsJinPerWorker: 60,
+  // 码头工每人每天运力是脚夫的 2 倍。
+  dockJinPerWorker: 120,
+  // 运力池最多攒这么多天的日运力，没用完的可以攒着。
+  freightPoolMaxDays: 30,
+  // 私人贸易行运费（券/斤）：走物流中心与外贸房运力的部分；走码头的部分按 dockFreightVoucherPerJin。
+  freightVoucherPerJin: 0.06,
+  dockFreightVoucherPerJin: 0.03,
   agricultureTaxDefaultPercent: 40, // 用户 0.1.11 调优（原 50）
   agricultureTaxMaximumPercent: 80,
   agricultureTaxLookbackDays: 30,

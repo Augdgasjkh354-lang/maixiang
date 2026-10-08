@@ -18,6 +18,12 @@ export function validateState(state, content) {
       if (!Number.isSafeInteger(ss[key] || 0) || (ss[key] || 0) < 0) errors.push("社保基金账户无效：" + key);
     }
   }
+  const logistics = state?.logistics;
+  if (logistics) {
+    for (const key of ["poolJin", "usedToday"]) {
+      if (!Number.isFinite(logistics[key]) || logistics[key] < 0) errors.push("运力账户无效：" + key);
+    }
+  }
   const saveVersion = content.rules.saveVersion || 3;
   if (!state || state.schemaVersion !== saveVersion || state.version !== saveVersion) {
     errors.push("存档版本不是" + saveVersion);
