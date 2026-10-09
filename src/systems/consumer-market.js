@@ -101,7 +101,10 @@ function quickAffordableUnits(state, household, price, content, reserveDays) {
   if (!(price > 0)) return 0;
   const wheatUnits = Math.min(householdConvertibleWheatUnits(state, household, content, reserveDays),
     householdExchangeAllowanceUnits(state, household.id, content));
-  const value = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
+  // 以粮换券还受镇库券池限制（与支付层同口径），券池见底时不能把富余小麦算作买得起。
+  const wheatValue = voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
+  const exchangeValue = state.monetaryReform?.stage === "voucher" ? Math.min(wheatValue, Math.max(0, state.currency?.balances?.town || 0)) : wheatValue;
+  const value = spendableVoucherUnits(state, `household:${household.id}`) + exchangeValue;
   return Math.max(0, Math.floor(value * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))));
 }
 
@@ -349,7 +352,8 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
     paidVoucherUnits: paid,
     sellerRows,
     reason: purchased < desiredUnits
-      ? (purchased >= stockUnits ? "市场库存不足，按现有库存部分成交" : "居民粮券或今日换券额度限制了成交量")
+      ? (purchased >= stockUnits ? "市场库存不足，按现有库存部分成交"
+        : state.monetaryReform?.stage === "voucher" && (state.currency?.balances?.town || 0) <= 0 ? "镇库券池已空，居民的小麦换不到粮券" : "居民粮券或今日换券额度限制了成交量")
       : "按需求成交"
   };
 }

@@ -89,6 +89,9 @@ export function transferBuildingOwnership(state, building, newOwner, content) {
   building.ownership = ownershipFor(kind, level);
   if (kind === "household") building.privateOwners = [newOwner.id];
   else delete building.privateOwners;
+  // 转为民营的日子（开张期招人用，systems/employment-contracts.js 的 inOpeningPeriod）。
+  if (kind === "household") building.privateSince = { year: state.year, day: state.day };
+  else delete building.privateSince;
   // 民营工资是业主自己定的，换主人后新业主从镇营行情起步。
   delete building.privateWage;
   if (kind === "company") {

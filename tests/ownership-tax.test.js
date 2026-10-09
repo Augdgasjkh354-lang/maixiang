@@ -9,6 +9,7 @@ import { processPrivateBuilding } from "../src/systems/private-industry.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { renderPolicy } from "../src/ui/panel-policy.js";
 import { renderSite } from "../src/ui/panel-site.js";
+import { pendingWages } from "../src/systems/employer.js";
 import { grantResidentVouchers, setResidentInventoryJin, richestHousehold } from "./helpers-v16.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
 
@@ -28,16 +29,17 @@ test("农业税0%、50%、80%与年中调税按农事日平均分粮", () => {
   for (const [rate, town, resident] of [[0, 0, 9000000], [50, 4500000, 4500000], [80, 7200000, 1800000]]) {
     const state = simulation.createInitialState();
     simulation.setAgricultureTax(state, rate);
-    simulation.advanceDays(state, 274);
+    simulation.advanceDays(state, CONTENT.rules.growingDays);
     const harvest = state.agriculture.taxHistory.at(-1);
     assert.equal(harvest.townUnits / CONTENT.precision.inventoryUnitsPerJin, town);
     assert.equal(harvest.residentUnits / CONTENT.precision.inventoryUnitsPerJin, resident);
   }
   const mixed = simulation.createInitialState();
   simulation.setAgricultureTax(mixed, 0);
-  simulation.advanceDays(mixed, 137);
+  const half = CONTENT.rules.growingDays / 2;
+  simulation.advanceDays(mixed, half);
   simulation.setAgricultureTax(mixed, 80);
-  simulation.advanceDays(mixed, 137);
+  simulation.advanceDays(mixed, half);
   const harvest = mixed.agriculture.taxHistory.at(-1);
   assert.equal(harvest.averageRateBps, 4000);
   assert.equal(harvest.townUnits + harvest.residentUnits, harvest.totalUnits);
@@ -120,8 +122,11 @@ test("民营盐场按需求渐进用工并按实物税分账，工资债务不�
   assert.ok(state.accounts.town.wheat >= townWheat);
   assert.equal(state.payroll.lastDay.expectedWheatJin, 0);
   assert.equal(jobCount(state, `${salt.id}::salt_workers::private`), CONTENT.rules.newBusinessTrialWorkers);
-  assert.ok(state.privateEconomy.payrollByBuilding[salt.id].arrearsVoucherUnits > 0);
-  assert.ok(state.privateEconomy.payrollByBuilding[salt.id].arrearsVoucherUnits < 20 * CONTENT.precision.currencyUnitsPerVoucher, "允许家庭按就业额度换券后，只保留未付工资债务");
+  // 月薪：民营默认 25 号发薪，首日计提的工资只进本月待发，还没到期，因此还没有欠薪。
+  const saltPayroll = state.privateEconomy.payrollByBuilding[salt.id];
+  assert.equal(saltPayroll.arrearsVoucherUnits, 0, "未到发薪日，还没有欠薪");
+  assert.ok(pendingWages(saltPayroll) > 0, "当日计提的民营工资进本月待发");
+  assert.ok(pendingWages(saltPayroll) < 20 * CONTENT.precision.currencyUnitsPerVoucher, "待发工资只是当日计提的一小部分");
   assert.equal(state.currency.ledger.some(row => row.type === "private_wage_payment" && row.from === "town"), false, "民营工资不能由镇库代付");
   // 基线清理：失业救济口径按当年人口/劳动力模型演进而变，这里只锁定"有在册失业人口可领"。
   assert.ok(state.policy.lastDay.eligible > 0);

@@ -69,6 +69,9 @@ test("r04 商人岗位失效暂停时立即遣散店员，旧欠薪保留，保�
       "r04_test_drain", "测试抽干店铺现金").ok, true);
   }
   prepareShopsForDay(state, CONTENT);
+  // 月薪：本月工资先进待发；推进到下个月 25 号（店铺默认发薪日）时镇库之外的店铺付不出，才形成欠薪。
+  state.day = (Math.floor(state.day / CONTENT.rules.monthDays) + 1) * CONTENT.rules.monthDays + 24;
+  prepareShopsForDay(state, CONTENT);
   const wageBeforePause = shop.liabilities.wageVoucherUnits;
   assert.ok(wageBeforePause > 0, "需先形成旧欠薪以验证暂停不抹债权");
 
@@ -82,7 +85,11 @@ test("r04 商人岗位失效暂停时立即遣散店员，旧欠薪保留，保�
   assert.deepEqual(simulation.configureShopClerks(state, shop.id, 0), { ok: true, assigned: 0, paused: true });
 
   prepareShopsForDay(state, CONTENT);
-  assert.equal(shop.liabilities.wageVoucherUnits, wageBeforePause, "暂停后不再新增店员工资，旧欠薪仍保留");
+  // 暂停时待发工资立即到期并入欠薪；之后不再新增：再过一天欠薪不变。
+  const wageAfterPause = shop.liabilities.wageVoucherUnits;
+  assert.ok(wageAfterPause >= wageBeforePause, "暂停不抹旧欠薪");
+  prepareShopsForDay(state, CONTENT);
+  assert.equal(shop.liabilities.wageVoucherUnits, wageAfterPause, "暂停后不再新增店员工资");
 
   const storage = memoryStorage();
   assert.equal(saveState(storage, state, CONTENT), true);
@@ -91,10 +98,10 @@ test("r04 商人岗位失效暂停时立即遣散店员，旧欠薪保留，保�
   assert.equal(loadedShop.status, "paused");
   assert.equal(jobCount(loaded, merchantKey(loadedShop)), 0);
   assert.equal(jobCount(loaded, clerkKey(loadedShop)), 0);
-  assert.equal(loadedShop.liabilities.wageVoucherUnits, wageBeforePause);
+  assert.equal(loadedShop.liabilities.wageVoucherUnits, wageAfterPause);
   simulation.advanceDay(loaded);
   assert.equal(loadedShop.status, "paused");
-  assert.equal(loadedShop.liabilities.wageVoucherUnits, wageBeforePause);
+  assert.equal(loadedShop.liabilities.wageVoucherUnits, wageAfterPause);
   assert.equal(simulation.validateState(loaded).valid, true, simulation.validateState(loaded).errors.join("；"));
 });
 

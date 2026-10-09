@@ -179,6 +179,8 @@ export function createInitialState(options) {
     schemaVersion: content.rules.saveVersion || 3,
     year: 1,
     day: 0,
+    // 存档时的日历天数（一年几天）；旧存档没有这个字段，读档时按 365 天换算日期。
+    calendarDaysPerYear: content.rules.daysPerYear,
     accounts: emptyAccounts(content),
     cohorts: createInitialCohorts(),
     employment: {

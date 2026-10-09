@@ -121,7 +121,7 @@ function spreadRate(town) {
 export const IMPORT_DISCOUNT_AFTER_YEARS = 3;
 
 function stockYears(town, good, stock) {
-  const yearNeed = dailyNeed(town, good) * 365;
+  const yearNeed = dailyNeed(town, good) * 360;
   return yearNeed > 0 ? Math.max(0, stock) / yearNeed : Infinity;
 }
 
@@ -249,7 +249,7 @@ export function advanceOutsideTownDay(state, content) {
       const used = Math.min(stock, need);
       stock -= used;
       // 自产品超过目标 2 倍、进口品超过 5 年用量的部分才开始损耗。
-      const cap = good.sellsToUs ? targetStock(town, good) * STOCK_SPOIL_MULTIPLE : need * 365 * 5;
+      const cap = good.sellsToUs ? targetStock(town, good) * STOCK_SPOIL_MULTIPLE : need * 360 * 5;
       if (stock > cap) stock -= (stock - cap) * 0.02;
       town.stocks[itemId] = round2(stock);
       const satisfied = need > 0 ? used / need : 1;
@@ -263,7 +263,7 @@ export function advanceOutsideTownDay(state, content) {
     town.supply.food = Math.round(((town.supply.food ?? 1) * SUPPLY_MEMORY + (foodNeed > 0 ? eaten / foodNeed : 1) * (1 - SUPPLY_MEMORY)) * 1e4) / 1e4;
     score += Math.max(0, 1 - weightUsed) * town.supply.food;
     // 存粮超过一年口粮的部分每天损耗 0.1%（约一年三成：霉变、酿酒、转卖），防止小麦无限堆积。
-    const wheatCap = foodNeed * 365;
+    const wheatCap = foodNeed * 360;
     if (town.wheatStockJin > wheatCap) town.wheatStockJin = round2(town.wheatStockJin - (town.wheatStockJin - wheatCap) * 0.001);
     // 繁荣度向"供应满足率 × 100"靠拢（约百日走完一半）：样样不缺是 100，只有口粮没有盐木只有 45 左右。
     const target = 100 * score;

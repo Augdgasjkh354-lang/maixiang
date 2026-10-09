@@ -339,7 +339,7 @@ function escheatHousehold(state, household, content) {
     const definition = content.buildings[building.typeId];
     const job = definition?.jobs?.[0];
     const book = state.privateEconomy?.payrollByBuilding?.[building.id];
-    if (book && job) transferWageClaimsToTown(state, wageBook(book), jobKeyForBuilding(building.id, job.id));
+    if (book && job) transferWageClaimsToTown(state, wageBook(book), jobKeyForBuilding(building.id, job.id), content);
     if (state.privateEconomy?.payrollByBuilding) delete state.privateEconomy.payrollByBuilding[building.id];
     transferBuildingOwnership(state, building, { kind: "town", id: null }, content);
     if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[building.id];

@@ -1,3 +1,4 @@
+import { RULES } from "../content/rules.js";
 import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { allocateIntegerByWeight } from "../core/allocation.js";
 
@@ -210,7 +211,39 @@ export function touchHouseholdEmploymentEligibility(state, householdId, content)
   exchange.peakEmploymentCount = totalEmployment;
 }
 
-export function setHouseholdJobCount(state, householdId, jobKey, requested, content = null) {
+// 入职记录：household.jobSince[jobKey] = 每个在岗者的入职日序（从小到大，一人一项）。
+// 正式员工规则（systems/employment-contracts.js）用它判断能不能辞退（满 30 天）。旧存档没有记录的人视为早已入职。
+function absoluteDay(state) {
+  return (Math.max(1, state.year || 1) - 1) * RULES.daysPerYear + (state.day || 0);
+}
+
+export function jobTenureDays(state, household, jobKey) {
+  const count = Math.max(0, household?.jobs?.[jobKey] || 0);
+  const since = Array.isArray(household?.jobSince?.[jobKey]) ? household.jobSince[jobKey] : [];
+  const now = absoluteDay(state);
+  // 记录比人数少的部分（旧存档）当作入职很久。
+  const known = since.slice(-count).map(day => Math.max(0, now - day));
+  return [...Array(Math.max(0, count - known.length)).fill(Number.MAX_SAFE_INTEGER), ...known];
+}
+
+function updateJobSince(state, household, jobKey, before, after, removeOldest) {
+  if (after === before) return;
+  household.jobSince ||= {};
+  let since = Array.isArray(household.jobSince[jobKey]) ? household.jobSince[jobKey].slice(-before) : [];
+  if (after > before) {
+    // 旧存档补齐：缺的视为早已入职（记 -Infinity 不能存 JSON，用 0）。
+    while (since.length < before) since.unshift(0);
+    const today = absoluteDay(state);
+    for (let i = before; i < after; i += 1) since.push(today);
+  } else {
+    while (since.length < before) since.unshift(0);
+    since = removeOldest ? since.slice(before - after) : since.slice(0, after);
+  }
+  if (after > 0) household.jobSince[jobKey] = since;
+  else delete household.jobSince[jobKey];
+}
+
+export function setHouseholdJobCount(state, householdId, jobKey, requested, content = null, options = {}) {
   const household = state.households?.byId?.[householdId];
   if (!household) return { ok: false, reason: "家庭不存在" };
   const target = Math.max(0, Math.floor(Number(requested) || 0));
@@ -219,6 +252,7 @@ export function setHouseholdJobCount(state, householdId, jobKey, requested, cont
   // 只拦增岗：减岗（含劳动力减少后释放超额岗位、整户去世释放全部岗位）永远允许。
   if (target > current && other + target > householdWorkingAge(household)) return { ok: false, reason: "该家庭没有足够待业劳动力" };
   household.jobs ||= {};
+  updateJobSince(state, household, jobKey, current, target, Boolean(options.removeOldest));
   if (target > 0) household.jobs[jobKey] = target;
   else delete household.jobs[jobKey];
   if (target !== current) jobIndex(state)?.delete(jobKey);

@@ -42,7 +42,7 @@ test("外镇进口品：不到 3 年存货按正常价收购，超过 3 年才�
   const sold = simulation.tradeWithOutsideTown(state, "sell", "salt", 10000);
   assert.equal(sold.ok, true, sold.reason);
   assert.equal(currentPrice(state, CONTENT, "minzhen", "salt", "sell"), before, "存货不足 3 年，收购价不变");
-  const yearNeed = town.population * PROFILE.goods.salt.needPerPersonDay * 365;
+  const yearNeed = town.population * PROFILE.goods.salt.needPerPersonDay * CONTENT.rules.daysPerYear;
   town.stocks.salt = yearNeed * 3.5;
   assert.ok(currentPrice(state, CONTENT, "minzhen", "salt", "sell") < before, "囤够 3 年以上开始压价");
   town.stocks.salt = 0;
@@ -87,7 +87,7 @@ test("关税已删除；外贸房无人值守不能交易", () => {
 
 test("盐木长期断供时外镇繁荣度下降但人口不减，供应充足时繁荣、人口增长更快、耕地每年扩大", () => {
   const starved = tradingState(4404);
-  runDays(starved, 365 * 5);
+  runDays(starved, CONTENT.rules.daysPerYear * 5);
   const s = starved.outsideTowns.minzhen;
   assert.ok(s.prosperity < 50, `断供繁荣度应低于50，实际${s.prosperity}`);
   assert.ok(s.population >= PROFILE.population, "人口只增不减");
@@ -95,7 +95,7 @@ test("盐木长期断供时外镇繁荣度下降但人口不减，供应充足�
 
   const fed = tradingState(4404);
   const town = fed.outsideTowns.minzhen;
-  for (let i = 0; i < 365 * 5; i++) {
+  for (let i = 0; i < CONTENT.rules.daysPerYear * 5; i++) {
     runDays(fed, 1);
     for (const [itemId, profile] of Object.entries(PROFILE.goods)) {
       if (profile.sellsToUs !== false) continue;
@@ -110,8 +110,8 @@ test("盐木长期断供时外镇繁荣度下降但人口不减，供应充足�
 test("秋收按耕地×亩产×天气入库，余粮不会无限堆积", () => {
   const state = tradingState(4405);
   const town = state.outsideTowns.minzhen;
-  runDays(state, 365 * 12);
-  const yearFood = town.population * PROFILE.foodPerPersonDayJin * 365;
+  runDays(state, CONTENT.rules.daysPerYear * 12);
+  const yearFood = town.population * PROFILE.foodPerPersonDayJin * CONTENT.rules.daysPerYear;
   assert.ok(town.lastYear.harvestJin > 0);
   assert.ok(town.wheatStockJin < yearFood * 4, `小麦存量应有上限，实际${town.wheatStockJin}`);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));

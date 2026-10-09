@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
 import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js";
 import { grantResidentVouchers } from "./helpers-v16.js";
-import { shopSalesCapacityUnits } from "../src/systems/shops.js";
+import { shopSalesCapacityUnits, stallItemIds } from "../src/systems/shops.js";
 import { shopTradePrices } from "../src/economy/operating-plan.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
@@ -64,8 +64,8 @@ test("养殖场喂小麦出肉，直接卖给综合商店，居民买到肉；�
     assert.ok((farm.accounts.cumulative.consumedUnits?.wheat || 0) > 0, `${farm.name}应耗饲料`);
     assert.ok((farm.accounts.cumulative.storeSoldUnits?.[product] || 0) > 0, `${farm.name}应卖给商店`);
   }
-  assert.ok((state.shops[storeId].accounts.cumulative.soldUnits?.pork || 0) > 0, "商店卖出猪肉");
-  assert.ok((state.goodsDemand.year.purchasedUnits?.pork || 0) > 0, "居民买到猪肉");
+  // 肉是主食：居民买肉走主食口径（market.js），综合商店只卖给居民，卖出即居民买到。
+  assert.ok((state.shops[storeId].accounts.cumulative.soldUnits?.pork || 0) > 0, "商店卖出猪肉（居民买到）");
   valid(state);
 });
 
@@ -74,7 +74,7 @@ test("养殖场按商店缺口加人：需求大于一人产量时会雇饲养�
   const id = simulation.openResidentShop(state, base, "pig_farm").shopId;
   simulation.advanceDays(state, 40);
   const hands = Object.values(state.households.byId).reduce((sum, h) => sum + (h.jobs?.[`shop:${id}:clerk`] || 0), 0);
-  assert.ok(hands >= 2, `猪肉需求约 ${Math.round(3300 * 8 / 365)} 斤/日，应雇多名饲养员，实际 ${hands}`);
+  assert.ok(hands >= 2, `猪肉需求约 ${Math.round(3300 * 8 / CONTENT.rules.daysPerYear)} 斤/日，应雇多名饲养员，实际 ${hands}`);
 });
 
 function keepersOf(state, shop) {
@@ -85,7 +85,7 @@ function collective(state) {
   return Object.values(state.shops).find(s => s.typeId === "stall" && s.collective);
 }
 
-test("时代广场：一个集体集市，只卖日用品、比商店便宜、每人每日最多 25 斤、按摊交租", () => {
+test("时代广场：一个集体集市，只卖日用品和肉、与商店同价、每人每日最多 25 斤、按摊交租", () => {
   const { state, plaza } = town(6104);
   state.wholesaleMarket.inventory.wine = 2000 * I;
   assert.ok(!simulation.openResidentShop(state, plaza, "general").ok, "时代广场不能开综合商店");
@@ -97,13 +97,13 @@ test("时代广场：一个集体集市，只卖日用品、比商店便宜、�
   assert.equal(state.policy.stallRentVoucher, 2);
   const stallPrice = shopTradePrices(state, "stall", CONTENT, "wine", market).retailVoucherPerUnit;
   const storePrice = shopTradePrices(state, "general", CONTENT, "wine", Object.values(state.shops).find(s => s.typeId === "general")).retailVoucherPerUnit;
-  assert.ok(stallPrice < storePrice, `集市价 ${stallPrice} 应低于商店价 ${storePrice}`);
+  assert.equal(stallPrice, storePrice, `集市价 ${stallPrice} 应与商店价 ${storePrice} 相同（stallUndercutPercent 为 0）`);
   for (let day = 0; day < 15; day++) {
     const keepers = keepersOf(state, market); // 摊租按早上在摊的人数收
     simulation.advanceDay(state);
     const sold = Object.values(market.accounts.day.soldUnits || {}).reduce((a, b) => a + b, 0);
     assert.ok(sold <= keepers * 25 * I + 1, "每人每日最多 25 斤");
-    assert.ok(Object.keys(market.accounts.day.soldUnits || {}).every(itemId => CONTENT.rules.householdGoods[itemId]), "只卖日用品");
+    assert.ok(Object.keys(market.accounts.day.soldUnits || {}).every(itemId => stallItemIds(CONTENT).includes(itemId)), "只卖日用品和肉");
     assert.equal(market.accounts.day.rentExpenseVoucherUnits || 0, Math.ceil(keepers / 2) * 2 * V, "按占用摊位交租，每摊 2");
   }
   assert.ok((market.accounts.cumulative.soldUnits?.wine || 0) > 0, "集市卖出了酒");
@@ -150,11 +150,22 @@ test("摊租可调，负数被拒", () => {
   assert.equal(simulation.setStallKeeperLimit(state, -2).ok, false);
 });
 
-test("肉是日用品：吃了加舒心值，四种肉都在综合商店货架上", () => {
+test("肉是主食：四种肉不再是日用品，都在综合商店货架上，吃了加 meatComfort 且计入口粮", () => {
   for (const itemId of MEATS) {
-    assert.ok(CONTENT.rules.householdGoods[itemId], itemId);
+    assert.equal(CONTENT.rules.householdGoods[itemId], undefined, `${itemId} 不应再是日用品`);
     assert.ok(CONTENT.rules.shopTypes.general.itemIds.includes(itemId), itemId);
+    assert.equal(CONTENT.items[itemId].edible, true, itemId);
+    assert.equal(CONTENT.items[itemId].category, "food", itemId);
+    assert.deepEqual(CONTENT.items[itemId].qeq, { numerator: 2, denominator: 1 }, `${itemId} 1 斤顶 2 斤口粮`);
   }
+  const { state, base, storeId } = town(6111, { square: false });
+  simulation.openResidentShop(state, base, "chicken_farm");
+  simulation.advanceDays(state, 40);
+  const comforts = Object.values(state.households.byId).map(h => h.life?.lastFactors?.meatComfort || 0);
+  assert.ok(comforts.some(v => v > 0), "吃到肉的家庭应有 meatComfort 舒心值");
+  assert.ok(comforts.every(v => v <= CONTENT.rules.meatStaple.comfortMaximum + 1e-9), "meatComfort 不超过上限");
+  assert.ok((state.shops[storeId].accounts.cumulative.soldUnits?.chicken || 0) > 0, "综合商店卖出鸡肉");
+  valid(state);
 });
 
 test("拆除时代广场：集市自动结束，余钱和货不凭空消失，状态合法", () => {
@@ -185,11 +196,11 @@ test("集市免租：三个月/半年/一年/三年，免租期内不交摊租�
   assert.equal(simulation.setStallRentFree(state, 0).ok, true, "可以取消");
   simulation.advanceDays(state, 5);
   assert.ok((market.accounts.cumulative.rentExpenseVoucherUnits || 0) > 0, "取消后恢复收租");
-  for (const days of [182, 365, 1095]) assert.equal(simulation.setStallRentFree(state, days).ok, true);
+  for (const days of CONTENT.rules.stallRentFreeOptionsDays.slice(1)) assert.equal(simulation.setStallRentFree(state, days).ok, true);
   valid(state);
 });
 
-test("集市批发特价三档：进价每斤少 0.1/0.2/0.4，差价记为补贴；售价比综合商店低一点、不低于进价", () => {
+test("集市批发特价三档：进价每斤少 0.1/0.2/0.4，差价记为补贴；售价与综合商店同价、不低于进价", () => {
   const { state } = town(6110);
   state.wholesaleMarket.inventory.wine = 3000 * I;
   simulation.advanceDays(state, 2);
@@ -201,7 +212,9 @@ test("集市批发特价三档：进价每斤少 0.1/0.2/0.4，差价记为补�
     const prices = shopTradePrices(state, "stall", CONTENT, "wine", market);
     assert.ok(Math.abs(prices.wholesaleVoucherPerUnit - (list - cut)) < 1e-9, `第${tier}档进价`);
     const storePrice = shopTradePrices(state, "general", CONTENT, "wine", store).retailVoucherPerUnit;
-    assert.ok(prices.retailVoucherPerUnit < storePrice && prices.retailVoucherPerUnit >= prices.wholesaleVoucherPerUnit);
+    // 集市售价跟综合商店同价（stallUndercutPercent 为 0），特价再低也不低于进价。
+    assert.ok(Math.abs(prices.retailVoucherPerUnit - storePrice) < 1e-9, `第${tier}档售价 ${prices.retailVoucherPerUnit} 应与商店价 ${storePrice} 相同`);
+    assert.ok(prices.retailVoucherPerUnit >= prices.wholesaleVoucherPerUnit);
   }
   assert.equal(simulation.setStallDiscountTier(state, 4).ok, false);
   simulation.advanceDays(state, 10);

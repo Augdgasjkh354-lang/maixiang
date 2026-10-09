@@ -75,6 +75,9 @@ export function consumeDailyRations(state, population, content) {
     let breadQeq = 0;
     for (const move of plan.moves) if (move.itemId === "bread") breadQeq += move.qeqUnits;
     recordHouseholdInKind(state, household.id, "breadConsumedQeqUnits", breadQeq, content);
+    let meatQeq = 0;
+    for (const move of plan.moves) if (content.items[move.itemId]?.livestock) meatQeq += move.qeqUnits;
+    if (meatQeq > 0) recordHouseholdInKind(state, household.id, "meatConsumedQeqUnits", meatQeq, content);
     for (const move of plan.moves) {
       household.inventory[move.itemId] -= move.quantityUnits;
       const row = aggregate.get(move.itemId) || { itemId: move.itemId, quantityUnits: 0, qeqUnits: 0, roundingExcessQeqUnits: 0 };

@@ -5,7 +5,7 @@ import { recordHouseholdInKind } from "./household-life.js";
 import { householdAffluence } from "./household-budget.js";
 
 // 日用品（酒、布、肉等）：配置在 rules.householdGoods。
-// 每户当天想要的量 = 人口 × 年人均标准量 / 365 × 宽裕度^收入弹性（宽裕度见 household-budget.js：
+// 每户当天想要的量 = 人口 × 年人均标准量 / 一年天数 × 宽裕度^收入弹性（宽裕度见 household-budget.js：
 // 正常人家 1 倍，穷户接近 0，富户最多数倍）。买在主食和盐之后；用了加舒心值，超过标准量的部分边际递减；
 // 买不到不扣分——这是生活改善，不是新的生存压力。
 // 赶集：家里存货不够今天用时才去买，一次买够 householdGoodsShoppingDays（5）天的量；平时从存货里用。

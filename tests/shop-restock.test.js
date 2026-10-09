@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
-import { householdList, householdIdleWorkers } from "../src/systems/households.js";
+import { householdList, householdIdleWorkers, jobCount } from "../src/systems/households.js";
 import { grantResidentVouchers } from "./helpers-v16.js";
 import { transferVouchers } from "../src/economy/currency.js";
 
@@ -14,7 +14,8 @@ const V = CONTENT.precision.currencyUnitsPerVoucher;
 // 期间居民想买的面包大量落空，批发市场的面包也一直堆着。
 // 修复后：断货的未满足需求计入进货口径，次日即按需求补货。
 
-function setupStore(seed, { producers = false } = {}) {
+// settledStore：店铺开张期已过（开张期每天招人，店员数会逐日变化；本用例只测进货口径，店员数要固定）。
+function setupStore(seed, { producers = false, settledStore = false } = {}) {
   const state = simulation.createInitialState({ seed });
   grantResidentVouchers(state, 300000, CONTENT);
   simulation.issueGrainVouchers(state, "town", 200000);
@@ -22,8 +23,10 @@ function setupStore(seed, { producers = false } = {}) {
   const place = (id, typeId, { town = 0, priv = 0 }) => {
     const plot = freePlot(CONTENT.buildings[typeId].requiredPlotFeature || null);
     assert.ok(plot, `no plot for ${typeId}`);
+    // 民营建筑须记录民营开张日（ownership.js 卖给民营时写入）：新开张的民营每天可招够人。
+    const privateSince = priv > 0 ? { year: 1, day: 0 } : undefined;
     state.buildings.push({ id, typeId, level: 2, ownership: { townLevels: town, privateLevels: priv, listedLevels: 0 },
-      plotId: plot.id, x: plot.x, y: plot.y, materialInvestments: [], completed: { year: 1, day: 1 } });
+      plotId: plot.id, x: plot.x, y: plot.y, materialInvestments: [], completed: { year: 1, day: 1 }, privateSince });
   };
   place("wholesale_market", "wholesale_market", { town: 2 });
   place("commercial_street", "commercial_street", { town: 2 });
@@ -35,6 +38,7 @@ function setupStore(seed, { producers = false } = {}) {
   const street = state.buildings.find(b => b.id === "commercial_street");
   const opened = simulation.openResidentShop(state, street.id, "general", owner.id);
   assert.ok(opened.ok, opened.reason);
+  if (settledStore) state.shops[opened.shopId].openedDay -= CONTENT.rules.openingPeriodDays + 1;
   simulation.configureShopClerks(state, opened.shopId, 3);
   transferVouchers(state, "town", `shop:${opened.shopId}`, 20000 * V, CONTENT, "t", "t");
   simulation.setEmployment(state, `wholesale_market::${CONTENT.buildings.wholesale_market.jobs[0].id}`, 3);
@@ -62,15 +66,16 @@ function runDays(state, shopId, days, feed = () => {}) {
 }
 
 test("综合商店断货后次日补货：批发市场突然有 4000 斤面包，店铺不再爬坡数日", () => {
-  const { state, shopId } = setupStore(91);
+  const { state, shopId } = setupStore(91, { settledStore: true });
   // 第 0-6 日每日只到 60 斤面包（供货不足，店铺断货），第 7 日批发市场一次性到 4000 斤。
   const rows = runDays(state, shopId, 12, (d, s) => {
     if (d < 7) s.wholesaleMarket.inventory.bread = (s.wholesaleMarket.inventory.bread || 0) + 60 * I;
     if (d === 7) s.wholesaleMarket.inventory.bread = (s.wholesaleMarket.inventory.bread || 0) + 4000 * I;
   });
-  // 店员 3 + 店主商人 1，每人每日接待 generalStoreCustomersPerStaff 户（客流按户计）。
+  // 店员 + 店主商人（店铺已过开张期，人数只在月初审核时变动，12 日内不变），每人每日接待 generalStoreCustomersPerStaff 户（客流按户计）。
   // 到货当天店铺就满客流上限、次日不变，不再逐日爬坡。
-  const customerCap = (3 + 1) * CONTENT.rules.generalStoreCustomersPerStaff;
+  const staff = jobCount(state, `shop:${shopId}:clerk`) + jobCount(state, `shop:${shopId}:merchant`);
+  const customerCap = staff * CONTENT.rules.generalStoreCustomersPerStaff;
   assert.equal(rows[7].customers, customerCap, `day 7 customers ${rows[7].customers}, expected cap ${customerCap} on restock day`);
   assert.equal(rows[8].customers, customerCap, `day 8 customers ${rows[8].customers}, expected cap ${customerCap} the day after restock`);
   assert.ok(rows[7].soldJin > 0, "day 7 store should sell on the restock day");
@@ -85,10 +90,9 @@ test("综合商店进货口径修复后，30 日利润不低于修复前基线�
   const { state, shopId } = setupStore(91, { producers: true });
   runDays(state, shopId, 30);
   const shop = state.shops[shopId];
-  // 修复前基线（同场景 30 日，修复前代码）：店铺利润 10140 券，面包售出 18199 斤，拒客 7744 人次。
-  // 修复后多卖出的面包毛利为正，定价、租金与税规则不变，利润只能持平或更高。
+  // 修复前基线：店铺利润 10140 券。本场景没有肉卖家，没买到的肉算回面粉面包，利润不受肉份额影响。
   const profit = shop.accounts.cumulative.profitVoucherUnits / V;
-  assert.ok(profit >= 10140 - 1, `store profit ${profit} below pre-fix baseline 10140`);
+  assert.ok(profit >= 10140, `store profit ${profit} below pre-fix baseline 10140`);
   assert.equal(shop.status, "open");
   assert.equal(simulation.validateState(state).valid, true);
 });

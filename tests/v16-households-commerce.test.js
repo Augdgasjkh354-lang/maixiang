@@ -12,6 +12,7 @@ import { transferTownToWholesale } from "../src/systems/wholesale-market.js";
 import { exportState, importState } from "../src/persistence/storage.js";
 import { grantResidentVouchers } from "./helpers-v16.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
+import { pendingWages } from "../src/systems/employer.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -209,8 +210,13 @@ test("店铺欠薪欠租会保留，长期无法经营自动停业并释放商�
   }
   prepareShopsForDay(state, CONTENT);
   // 基线清理：店主商人不领固定工资，仅2店员计 2×5×V（默认日薪 10→5 斤，8cf03ae）。
-  assert.equal(shop.liabilities.wageVoucherUnits, 10 * V);
+  // 月薪：这笔工资先进待发（店铺默认 25 号发薪），下个月 25 号付不出才形成欠薪。
+  assert.equal(pendingWages(shop.liabilities), 10 * V);
+  assert.equal(shop.liabilities.wageVoucherUnits, 0);
   assert.equal(shop.liabilities.rentVoucherUnits, 1 * V);
+  state.day = (Math.floor(state.day / CONTENT.rules.monthDays) + 1) * CONTENT.rules.monthDays + 24;
+  prepareShopsForDay(state, CONTENT);
+  assert.equal(shop.liabilities.wageVoucherUnits, 10 * V);
   shop.badDays = CONTENT.rules.shopClosureBadDays - 1;
   const result = finishShopsDay(state, CONTENT).find(row => row.shopId === shop.id);
   assert.equal(result.closed, true);

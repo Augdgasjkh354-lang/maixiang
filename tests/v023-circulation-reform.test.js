@@ -132,7 +132,11 @@ test("0.2.3 镇营建筑工资由镇库发放（批发市场没有独立现金�
   assert.equal(simulation.issueGrainVouchers(state, "town", 1000).ok, true);
   const townCashBefore = voucherBalance(state, "town");
   payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
-  assert.ok(voucherBalance(state, "town") < townCashBefore, "镇库应为镇营建筑发工资");
+  // 月薪：当日工资只计提进待发，镇库在下个月 5 号发放。
+  assert.equal(voucherBalance(state, "town"), townCashBefore, "当日不发工资");
+  state.day = (Math.floor(state.day / CONTENT.rules.monthDays) + 1) * CONTENT.rules.monthDays + 4;
+  payDailyWages(state, employmentSnapshot(state, CONTENT), CONTENT);
+  assert.ok(voucherBalance(state, "town") < townCashBefore, "镇库应在发薪日为镇营建筑发工资");
   assert.equal(state.wholesaleMarket.cashVoucherUnits, undefined);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
   assert.equal(simulation.validateCurrencyInvariant(state).valid, true);

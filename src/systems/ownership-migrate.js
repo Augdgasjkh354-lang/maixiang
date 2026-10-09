@@ -185,7 +185,7 @@ function settleCompanyAssets(state, company, content) {
   if (wageArrears(book) > 0) payWages(state, book, `company:${company.id}`, content, "ownership_takeover_wage", `${company.name}整栋归属换算先偿付欠薪`);
   if (wageArrears(book) > 0) payWages(state, book, "town", content, "ownership_takeover_town_advance", `${company.name}欠薪由镇库垫付`);
   const job = content.buildings[company.typeId]?.jobs?.[0];
-  if (job && wageArrears(book) > 0) transferWageClaimsToTown(state, book, jobKeyForBuilding(company.buildingId, job.id));
+  if (job && wageArrears(book) > 0) transferWageClaimsToTown(state, book, jobKeyForBuilding(company.buildingId, job.id), content);
   company.payroll.arrearsVoucherUnits = wageArrears(book);
   const payerId = `company:${company.id}`;
   const cash = maximumFullyPayableValueUnits(state, payerId, maximumPayableValueUnits(state, payerId, content), content);

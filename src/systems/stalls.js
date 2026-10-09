@@ -3,7 +3,7 @@
 // 总人数不超过政策里的"允许摆摊人数"，也不超过广场摊位数 × 2。
 // 进货、卖货、按摊交租、利润税走店铺那套；每天的利润按人头 ×（0.8—1.2 随机）分给摆摊家庭（见 shops.js）。
 import { jobCount, setJobCount } from "./households.js";
-import { closeShop, ensureShops, openCollectiveShop, refundCollectiveIfStranded, shopDefinition, shopHostSlots } from "./shops.js";
+import { closeShop, ensureShops, farmsHaveStock, openCollectiveShop, refundCollectiveIfStranded, shopDefinition, shopHostSlots, stallItemIds } from "./shops.js";
 
 const ADJUST_DAYS = 3;
 const START_KEEPERS = 2;
@@ -25,7 +25,7 @@ function average(rows, pick) {
 }
 
 function goodsAvailable(state, content) {
-  return Object.keys(content.rules.householdGoods || {}).some(itemId => (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0);
+  return stallItemIds(content).some(itemId => (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (content.items[itemId]?.livestock && farmsHaveStock(state, itemId, content)));
 }
 
 // 每座广场保证有且只有一个集体摊位；旧版本按户开的摊位收摊清算，清算完删档。

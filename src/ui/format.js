@@ -74,3 +74,19 @@ export function effectiveTownWage(view, roleId, baseWage) {
   const factor = (control.civilRoleIds || []).includes(roleId) ? control.civil : control.industry;
   return (Number(baseWage) || 0) * (Number.isFinite(Number(factor)) ? Number(factor) : 1);
 }
+
+// 工资一律按月显示：月薪 = 日薪 × monthDays，括号里附日薪（输入框仍按日薪）。
+export function monthlyWageText(view, dailyWage, digits = 1) {
+  const days = Number(view?.monthDays) || 30;
+  const daily = Number(dailyWage) || 0;
+  return `月薪 ${number(daily * days, digits)}${moneyUnit(view)}（日薪 ${number(daily, digits)}）`;
+}
+
+export function monthlyWageValue(view, dailyWage, digits = 1) {
+  return number((Number(dailyWage) || 0) * (Number(view?.monthDays) || 30), digits);
+}
+
+// 发薪日文字；没有发薪日信息时返回空串。
+export function payDayText(day) {
+  return Number.isFinite(day) ? `每月${day}号发薪` : "";
+}

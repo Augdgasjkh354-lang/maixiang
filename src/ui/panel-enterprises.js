@@ -1,4 +1,4 @@
-import { escapeHtml, number, moneyUnit } from "./format.js";
+import { escapeHtml, number, moneyUnit, monthlyWageValue, payDayText } from "./format.js";
 
 function draftValue(view, key, fallback) {
   return escapeHtml(view.numericDrafts?.[key]?.value ?? String(fallback ?? ""));
@@ -77,10 +77,11 @@ function renderOperationControls(view, company) {
   const products = company.productRows || [];
   return `<h4>独立经营</h4>
     <div class="business-form-grid">
-      <label>日薪${stagedInput(view, { key: wageKey, label: "公司日薪", value: company.settings?.wagePerWorkerDay ?? 5, minimum: 0 })}<small>${escapeHtml(unit)}/人日</small></label>
+      <label>日薪${stagedInput(view, { key: wageKey, label: "公司日薪", value: company.settings?.wagePerWorkerDay ?? 5, minimum: 0 })}<small>${escapeHtml(unit)}/人日 · 月薪${monthlyWageValue(view, company.settings?.wagePerWorkerDay ?? 5, 1)}${escapeHtml(unit)}</small></label>
       <label>目标用工${stagedInput(view, { key: targetKey, label: "公司目标用工", value: company.plannedWorkers, integer: true, minimum: 0, maximum: company.capacity })}<small>人</small></label>
     </div>
     <div class="business-sticky-actions"><button class="secondary" data-company-wage="${escapeHtml(company.id)}">设置工资</button><button class="secondary" data-company-target="${escapeHtml(company.id)}">设置用工</button></div>
+    <div class="row"><span class="label">${escapeHtml(payDayText(company.wages?.payDay) || "发薪日")} · 待发 / 欠薪</span><strong class="value">${number(company.wages?.pendingWagesVoucher || 0, 2)} / ${number(company.wages?.wageArrearsVoucher || 0, 2)}${escapeHtml(unit)}</strong></div>
     ${products.map(row => `<div class="business-form-row"><label>${escapeHtml(row.name)}售价${stagedInput(view, { key: `company:${company.id}:price:${row.itemId}`, label: `${row.name}售价`, value: row.salePrice, positive: true })}<small>${escapeHtml(unit)}/斤</small></label><button class="secondary" data-company-price="${escapeHtml(company.id)}" data-item-id="${escapeHtml(row.itemId)}">设置</button></div>`).join("")}
     <div class="business-form-row"><label>追加注资${stagedInput(view, { key: capitalKey, label: "追加经营资金（小麦等值）", value: 1000, positive: true })}</label><button class="secondary" data-company-capital="${escapeHtml(company.id)}">注资</button></div>
     <div class="business-sticky-actions"><button class="secondary danger" data-company-liquidate="${escapeHtml(company.id)}">全部划回并清算</button></div>`;

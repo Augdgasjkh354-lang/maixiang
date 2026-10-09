@@ -90,6 +90,7 @@ function splitOne(state, original, number, content) {
     if (moved > 0) { deposits[original.id] -= moved; deposits[household.id] = moved; }
   }
   splitJobs(original, household);
+  if (Number.isFinite(original.meatHabit)) household.meatHabit = original.meatHabit;
   const satisfaction = original.life?.satisfaction;
   if (Number.isFinite(satisfaction)) household.life = { satisfaction };
   return household;

@@ -134,7 +134,7 @@ test("年度利润只在新年首日结算上一年，保存恢复不会重复�
   assert.equal(restoredCompany.annualSettlement.distributedVoucherUnits, distribution);
 });
 
-test("365日实际利润估值包含停工日，不只按有生产日期年化", () => {
+test("全年（daysPerYear 天）实际利润估值包含停工日，不只按有生产日期年化", () => {
   const state = legacyVoucherState();
   addBuilding(state, "saltworks", "valuation-salt", 1);
   const formed = formCompany(state, "valuation-salt", { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 0 });
@@ -147,8 +147,8 @@ test("365日实际利润估值包含停工日，不只按有生产日期年化",
   const valuation = companyActualProfitValuation(state, company, CONTENT);
   assert.equal(valuation.observedDays, 100);
   assert.equal(valuation.actualProfitVoucherUnits, 1000 * V);
-  assert.equal(valuation.annualizedProfitVoucherUnits, 3650 * V, "100日窗口中只有1日盈利，也必须按完整100个日历日年化");
-  assert.equal(valuation.fiveYearReferenceVoucherUnits, 18250 * V);
+  assert.equal(valuation.annualizedProfitVoucherUnits, 10 * CONTENT.rules.daysPerYear * V, "100日窗口中只有1日盈利，也必须按完整100个日历日年化");
+  assert.equal(valuation.fiveYearReferenceVoucherUnits, 50 * CONTENT.rules.daysPerYear * V);
 });
 
 

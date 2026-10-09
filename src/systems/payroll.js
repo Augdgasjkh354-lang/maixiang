@@ -1,3 +1,4 @@
+import { payDayFor } from "./paydays.js";
 import { addWageExpense } from "../economy/business.js";
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
@@ -116,23 +117,15 @@ function payDailyWagesNow(state, laborAtStart, content) {
     }));
   });
   const workerPay = [];
-  const oldClaimTotals = {};
-  const arrearsPaidByKey = {};
-  const currentPaidByKey = {};
-  const currentDue = {};
+  // 月薪（systems/employer.js）：每天计提进本月待发，镇库每月 5 号结清上月及以前的待发；过了发薪日付不清的才是欠薪。
+  payroll.creditorPending ||= {};
+  const bookFor = payrollKey => ({
+    claimsVoucherUnits: payroll.creditorClaims[payrollKey] ||= {},
+    claimsPayment: payroll.creditorPaymentClaims[payrollKey] ||= {},
+    pendingByMonth: payroll.creditorPending[payrollKey] ||= {}
+  });
 
-  // 历史债权先独立偿付，不依赖当前岗位、工资设置或建筑是否还存在。
-  const bookFor = payrollKey => ({ claimsVoucherUnits: payroll.creditorClaims[payrollKey] ||= {}, claimsPayment: payroll.creditorPaymentClaims[payrollKey] ||= {} });
-  for (const payrollKey of Object.keys(payroll.creditorClaims).sort()) {
-    const book = bookFor(payrollKey);
-    oldClaimTotals[payrollKey] = wageArrears(book);
-    const construction = payrollKey.startsWith("builders::");
-    const paid = payWages(state, book, "town", content, construction ? "construction_wage_arrears_payment" : "wage_arrears_payment", "偿付原债权家庭历史欠薪").paid;
-    arrears[payrollKey] = Math.max(0, (arrears[payrollKey] || 0) - paid);
-    arrearsPaidByKey[payrollKey] = paid;
-  }
-
-  // 历史债权处理后，才计提今天的工资费用与家庭债权；不会因偿还旧债重复计费。
+  // 计提今天的工资费用与家庭待发。
   for (const row of rows) {
     const baseRate = Number.isFinite(row.wagePerWorkerDay) ? row.wagePerWorkerDay : (state.employment.wageRates?.[row.roleId] ?? 0);
     // 工资统一调控：按公务员类 / 镇营产业类系数调整实际计提日薪。
@@ -142,42 +135,41 @@ function payDailyWagesNow(state, laborAtStart, content) {
     const isConstruction = row.key === "builders";
     const project = isConstruction && row.projectInstanceId
       ? (state.projects || []).find(item => item.instanceId === row.projectInstanceId) : null;
-    const credit = 0;
-    const payable = due;
     const payrollKey = isConstruction && project ? "builders::" + project.instanceId : row.key;
-    oldClaimTotals[payrollKey] ??= 0;
-    arrearsPaidByKey[payrollKey] ||= 0;
-    accrueWages(state, bookFor(payrollKey), jobAssignments(state, row.key), payable, content);
-    currentDue[payrollKey] = (currentDue[payrollKey] || 0) + payable;
-    arrears[payrollKey] = (arrears[payrollKey] || 0) + payable;
-    recordWageExpense(state, row, payable, isConstruction ? "construction" : "operating", content);
-    workerPay.push({ key: row.key, payrollKey, scope: row.scope, roleId: row.roleId, buildingId: row.buildingId || (isConstruction ? project?.instanceId : null), buildingName: row.buildingName || (isConstruction ? "施工工程" : null), name: row.name, count: row.count, rate, due, credit, payable });
+    accrueWages(state, bookFor(payrollKey), jobAssignments(state, row.key), due, content);
+    recordWageExpense(state, row, due, isConstruction ? "construction" : "operating", content);
+    workerPay.push({ key: row.key, payrollKey, scope: row.scope, roleId: row.roleId, buildingId: row.buildingId || (isConstruction ? project?.instanceId : null), buildingName: row.buildingName || (isConstruction ? "施工工程" : null), name: row.name, count: row.count, rate, due, credit: 0, payable: due });
   }
 
-  // 再处理当日工资。若同一债权家庭仍有历史余额，统一债权表天然保持旧债在前一次偿付后留下的余额，且改革缺券键仍使用同一债权键。
-  const paidByHousehold = {};
-  for (const row of workerPay) {
-    const result = payWages(state, bookFor(row.payrollKey), "town", content,
-      row.key === "builders" ? "construction_wage_payment" : "wage_payment", "支付具体债权家庭本日工资");
-    const paidKey = result.paid;
-    arrears[row.payrollKey] = Math.max(0, (arrears[row.payrollKey] || 0) - paidKey);
-    const paidRows = (paidByHousehold[row.payrollKey] ||= {});
-    for (const { householdId, units } of result.rows) paidRows[householdId] = (paidRows[householdId] || 0) + units;
-    const historicalRemainingBeforeCurrent = Math.max(0, (oldClaimTotals[row.payrollKey] || 0) - (arrearsPaidByKey[row.payrollKey] || 0));
-    const historicalPaidNow = Math.min(historicalRemainingBeforeCurrent, paidKey);
-    arrearsPaidByKey[row.payrollKey] = (arrearsPaidByKey[row.payrollKey] || 0) + historicalPaidNow;
-    currentPaidByKey[row.payrollKey] = (currentPaidByKey[row.payrollKey] || 0) + Math.max(0, paidKey - historicalPaidNow);
+  // 发薪：所有工资账（含已结束工程的旧账）到了发薪日都结清；付不清的计入欠薪，之后每天补付。
+  const payDay = payDayFor(state, "town");
+  const arrearsBefore = {};
+  const maturedByKey = {};
+  const paidByKey = {};
+  for (const payrollKey of new Set([...Object.keys(payroll.creditorClaims), ...Object.keys(payroll.creditorPending)])) {
+    const book = bookFor(payrollKey);
+    arrearsBefore[payrollKey] = wageArrears(book);
+    const construction = payrollKey.startsWith("builders::");
+    const result = payWages(state, book, "town", content, construction ? "construction_wage_payment" : "wage_payment", "镇库发放工资", { payDay });
+    maturedByKey[payrollKey] = result.matured || 0;
+    paidByKey[payrollKey] = result.paid || 0;
+    arrears[payrollKey] = wageArrears(book);
+    if (!arrears[payrollKey]) delete arrears[payrollKey];
   }
-
-
-  const arrearsPaid = Object.values(arrearsPaidByKey).reduce((a,b)=>a+b,0);
-  const currentPaid = Object.values(currentPaidByKey).reduce((a,b)=>a+b,0);
-  const unpaidCurrent = Object.values(currentDue).reduce((a,b)=>a+b,0) - currentPaid;
-  const outstanding = Object.values(arrears).reduce((a,b)=>a+b,0);
-  const expected = rows.reduce((sum, row) => {
-    const baseRate = Number.isFinite(row.wagePerWorkerDay) ? row.wagePerWorkerDay : (state.employment.wageRates?.[row.roleId] ?? 0);
-    return sum + Math.round(Math.max(0, row.count * baseRate * wageControlFactor(state, row.roleId)) * scale);
-  }, 0);
+  // 今天付的钱先算作还旧欠薪，再算作本月到期工资；"新增欠薪" = 今天到期却没付上的部分。
+  const arrearsPaidByKey = {};
+  const currentPaidByKey = {};
+  for (const payrollKey of Object.keys(paidByKey)) {
+    const fromArrears = Math.min(arrearsBefore[payrollKey] || 0, paidByKey[payrollKey]);
+    arrearsPaidByKey[payrollKey] = fromArrears;
+    currentPaidByKey[payrollKey] = paidByKey[payrollKey] - fromArrears;
+  }
+  const arrearsPaid = Object.values(arrearsPaidByKey).reduce((a, b) => a + b, 0);
+  const currentPaid = Object.values(currentPaidByKey).reduce((a, b) => a + b, 0);
+  const maturedToday = Object.values(maturedByKey).reduce((a, b) => a + b, 0);
+  const unpaidCurrent = Math.max(0, maturedToday - currentPaid);
+  const outstanding = Object.values(arrears).reduce((a, b) => a + b, 0);
+  const expected = workerPay.reduce((sum, row) => sum + row.due, 0);
   const totalPaid = arrearsPaid + currentPaid;
   for (const group of [payroll.totals, payroll.year]) {
     group.paidVoucherUnits = (group.paidVoucherUnits || 0) + totalPaid;
@@ -190,12 +182,12 @@ function payDailyWagesNow(state, laborAtStart, content) {
   }
   payroll.totals.unpaidBalanceVoucherUnits = outstanding; payroll.totals.unpaidBalanceWheatUnits = outstanding;
   payroll.lastDay = {
-    workers: workerPay.map(row => ({ key: row.key, payrollKey: row.payrollKey, roleId: row.roleId, buildingId: row.buildingId, name: row.buildingName ? row.buildingName + " · " + row.name : row.name, count: row.count, dailyRateVoucher: row.rate, dailyRateJin: row.rate, expectedVoucher: row.due / scale, expectedWheatJin: row.due / scale, prepaidCreditVoucher: row.credit / scale, prepaidCreditWheatJin: row.credit / scale, currentPaidVoucher: (currentPaidByKey[row.payrollKey] || 0) / scale, currentPaidWheatJin: (currentPaidByKey[row.payrollKey] || 0) / scale, arrearsPaidVoucher: (arrearsPaidByKey[row.payrollKey] || 0) / scale, arrearsPaidWheatJin: (arrearsPaidByKey[row.payrollKey] || 0) / scale, unpaidCurrentVoucher: Math.max(0, row.payable - (currentPaidByKey[row.payrollKey] || 0)) / scale, unpaidCurrentWheatJin: Math.max(0, row.payable - (currentPaidByKey[row.payrollKey] || 0)) / scale, arrearsBalanceVoucher: (arrears[row.payrollKey] || 0) / scale, arrearsBalanceWheatJin: (arrears[row.payrollKey] || 0) / scale })),
+    workers: workerPay.map(row => ({ key: row.key, payrollKey: row.payrollKey, roleId: row.roleId, buildingId: row.buildingId, name: row.buildingName ? row.buildingName + " · " + row.name : row.name, count: row.count, dailyRateVoucher: row.rate, dailyRateJin: row.rate, expectedVoucher: row.due / scale, expectedWheatJin: row.due / scale, prepaidCreditVoucher: row.credit / scale, prepaidCreditWheatJin: row.credit / scale, currentPaidVoucher: (currentPaidByKey[row.payrollKey] || 0) / scale, currentPaidWheatJin: (currentPaidByKey[row.payrollKey] || 0) / scale, arrearsPaidVoucher: (arrearsPaidByKey[row.payrollKey] || 0) / scale, arrearsPaidWheatJin: (arrearsPaidByKey[row.payrollKey] || 0) / scale, unpaidCurrentVoucher: Math.max(0, (maturedByKey[row.payrollKey] || 0) - (currentPaidByKey[row.payrollKey] || 0)) / scale, unpaidCurrentWheatJin: Math.max(0, (maturedByKey[row.payrollKey] || 0) - (currentPaidByKey[row.payrollKey] || 0)) / scale, arrearsBalanceVoucher: (arrears[row.payrollKey] || 0) / scale, arrearsBalanceWheatJin: (arrears[row.payrollKey] || 0) / scale })),
     expectedVoucher: expected / scale, expectedWheatJin: expected / scale, currentPaidVoucher: currentPaid / scale, currentPaidWheatJin: currentPaid / scale,
     arrearsPaidVoucher: arrearsPaid / scale, arrearsPaidWheatJin: arrearsPaid / scale, totalPaidVoucher: totalPaid / scale, totalPaidWheatJin: totalPaid / scale,
     unpaidCurrentVoucher: Math.max(0, unpaidCurrent) / scale, unpaidCurrentWheatJin: Math.max(0, unpaidCurrent) / scale, arrearsBalanceVoucher: outstanding / scale, arrearsBalanceWheatJin: outstanding / scale
   };
-  if (unpaidCurrent > 0) recordEvent(state, `镇库支付能力不足，本日新增欠薪 ${(unpaidCurrent / scale).toLocaleString("zh-CN")}斤小麦等值。`, content, {
+  if (unpaidCurrent > 0) recordEvent(state, `镇库支付能力不足，发薪日新增欠薪 ${(unpaidCurrent / scale).toLocaleString("zh-CN")}斤小麦等值。`, content, {
     day: state.day + 1, mergeKey: "town-wage-arrears", mergeWindowDays: 3, amount: unpaidCurrent,
     mergedText: (count, amount) => `近3日镇库支付能力不足，累计新增欠薪 ${(amount / scale).toLocaleString("zh-CN")}斤小麦等值（${count}次）。`
   });

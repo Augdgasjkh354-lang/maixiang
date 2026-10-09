@@ -24,6 +24,31 @@ export function stapleDemandShares(content) {
   };
 }
 
+// 肉当主食：口粮当量里肉的占比，随宽裕度上升，最多 maxShare（rules.meatStaple）。
+export function meatStapleShare(affluence, content) {
+  const rule = content.rules.meatStaple;
+  if (!rule || !(affluence > 0)) return 0;
+  const maxAffluence = content.rules.householdBudget?.maxAffluence ?? 3;
+  const ratio = Math.min(1, affluence / Math.max(1e-9, maxAffluence));
+  return Math.max(0, Math.min(rule.maxShare ?? 0.75, (rule.maxShare ?? 0.75) * Math.pow(ratio, rule.exponent ?? 2.5)));
+}
+
+// 吃肉习惯：按近 habitDays（90）天平均宽裕度（指数平滑）定吃多少肉，秋收前后余粮起落时饮食慢慢变，不跟着当天的家底跳。
+// 每天买主食时更新一次，存在 household.meatHabit；没有记录（新户、旧存档）时从当天宽裕度起步。
+export function updateMeatHabit(household, affluence, content) {
+  const days = Math.max(1, content.rules.meatStaple?.habitDays ?? 90);
+  const prior = Number.isFinite(household.meatHabit) ? household.meatHabit : affluence;
+  household.meatHabit = Math.round((prior + (affluence - prior) / days) * 10000) / 10000;
+  return household.meatHabit;
+}
+
+function meatWeights(content) {
+  const weights = content.rules.meatStaple?.weights || {};
+  const rows = Object.entries(weights).filter(([itemId, weight]) => content.items[itemId]?.edible && weight > 0);
+  const total = rows.reduce((sum, [, weight]) => sum + weight, 0);
+  return total > 0 ? rows.map(([itemId, weight]) => [itemId, weight / total]) : [];
+}
+
 // 单项主食按"每户缺口"购买：每户目标口粮当量减去自家已有的，缺多少买多少。
 function buyStapleItem(state, content, itemId, familyTargetQeq) {
   const price = currentUnitPrice(state, itemId, content);
@@ -67,27 +92,52 @@ function buyStapleItem(state, content, itemId, familyTargetQeq) {
   };
 }
 
-// 主食：口粮默认吃自家小麦；家里越宽裕（household-budget 的宽裕度），越多换成面粉、面包
-// （标准比例 × 宽裕度，最多 stapleUpgradeMax 倍）。先买面包，没买到的改买面粉，还不够的买小麦。
+// 主食：口粮默认吃自家小麦；家里越宽裕（household-budget 的宽裕度），越多换成肉、面粉、面包
+// （肉的占比见 meatStapleShare；其余口粮里面粉面包 = 标准比例 × 宽裕度，最多 stapleUpgradeMax 倍）。
+// 先买肉，没买到的算回其余口粮按面粉面包比例吃；再买面包，没买到的改买面粉；还不够的买小麦。
 export function buyStaplesForResidents(state, population, content) {
   const shares = stapleDemandShares(content);
   const maxUpgrade = content.rules.householdBudget?.stapleUpgradeMax ?? 1.5;
   const dailyQeqPerPerson = content.rules.foodPerPersonDay * content.precision.qeqUnitsPerJin;
+  const meats = meatWeights(content);
   const plan = { bread: new Map(), flour: new Map(), wheat: new Map() };
+  const meatPlan = new Map(meats.map(([itemId]) => [itemId, new Map()]));
+  const rows = [];
+  const active = householdList(state).filter(isActiveHousehold);
+  const meatTarget = new Map();
+  for (const household of active) {
+    const need = householdPopulation(household) * dailyQeqPerPerson;
+    const affluence = householdAffluence(state, household, content);
+    const meatTotal = meats.length ? Math.floor(need * meatStapleShare(updateMeatHabit(household, affluence, content), content)) : 0;
+    let meat = 0;
+    for (const [itemId, weight] of meats) {
+      const qeq = Math.floor(meatTotal * weight);
+      if (qeq > 0) { meatPlan.get(itemId).set(household.id, qeq); meat += qeq; }
+    }
+    meatTarget.set(household.id, meat);
+  }
+  // 先买肉；没买到的部分算回其余口粮，按面粉面包的正常比例吃（没肉的镇子不会因此少吃面包）。
+  const meatShort = new Map();
+  for (const [itemId] of meats) {
+    const row = buyStapleItem(state, content, itemId, meatPlan.get(itemId));
+    rows.push(row);
+    for (const [id, qeq] of row.shortfallQeq) meatShort.set(id, (meatShort.get(id) || 0) + qeq);
+  }
   let upgradeShareSum = 0;
   let people = 0;
-  for (const household of householdList(state).filter(isActiveHousehold)) {
+  for (const household of active) {
     const need = householdPopulation(household) * dailyQeqPerPerson;
     const upgrade = Math.min(maxUpgrade, householdAffluence(state, household, content));
-    const bread = Math.min(need, Math.floor(need * shares.bread * upgrade));
-    const flour = Math.min(need - bread, Math.floor(need * shares.flour * upgrade));
+    const meat = Math.max(0, (meatTarget.get(household.id) || 0) - (meatShort.get(household.id) || 0));
+    const rest = need - meat;
+    const bread = Math.min(rest, Math.floor(rest * shares.bread * upgrade));
+    const flour = Math.min(rest - bread, Math.floor(rest * shares.flour * upgrade));
     plan.bread.set(household.id, bread);
     plan.flour.set(household.id, flour);
-    plan.wheat.set(household.id, need - bread - flour);
-    upgradeShareSum += (bread + flour) / Math.max(1, need) * householdPopulation(household);
+    plan.wheat.set(household.id, rest - bread - flour);
+    upgradeShareSum += (meat + bread + flour) / Math.max(1, need) * householdPopulation(household);
     people += householdPopulation(household);
   }
-  const rows = [];
   const breadRow = buyStapleItem(state, content, "bread", plan.bread);
   rows.push(breadRow);
   for (const [id, qeq] of breadRow.shortfallQeq) plan.flour.set(id, (plan.flour.get(id) || 0) + qeq);
@@ -95,7 +145,8 @@ export function buyStaplesForResidents(state, population, content) {
   rows.push(flourRow);
   for (const [id, qeq] of flourRow.shortfallQeq) plan.wheat.set(id, (plan.wheat.get(id) || 0) + qeq);
   rows.push(buyStapleItem(state, content, "wheat", plan.wheat));
-  rows.sort((a, b) => ["wheat", "flour", "bread"].indexOf(a.itemId) - ["wheat", "flour", "bread"].indexOf(b.itemId));
+  const order = ["wheat", "flour", "bread", ...meats.map(([itemId]) => itemId)];
+  rows.sort((a, b) => order.indexOf(a.itemId) - order.indexOf(b.itemId));
   const totalQeq = rows.reduce((sum, row) => sum + row.targetQeq, 0) || 1;
   for (const row of rows) row.targetShare = row.targetQeq / totalQeq;
   state.market.upgradeShare = upgradeShareSum / Math.max(1, people);

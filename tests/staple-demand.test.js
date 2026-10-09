@@ -61,10 +61,13 @@ test("主食：宽裕人家把口粮换成面粉、面包（标准比例 × 宽�
   const need = residentPeople(rich) * CONTENT.rules.foodPerPersonDay;
   const rows = buyStaplesForResidents(rich, population, CONTENT).staples.rows;
   const byId = Object.fromEntries(rows.map(row => [row.itemId, row]));
-  // 很富：宽裕度封顶，面粉、面包各 0.2 × 1.5 = 0.3。
+  // 很富：宽裕度封顶，面粉、面包各 0.2 × 1.5 = 0.3。肉占口粮 0.75，但本夹具没有肉卖家，没买到的肉算回其余口粮，面粉面包照常比例。
+  const meatTargetJin = ["chicken", "duck", "goose", "pork"].reduce((sum, itemId) => sum + byId[itemId].targetQeqJin, 0);
+  assert.ok(Math.abs(meatTargetJin - need * 0.75) < 2, `肉目标 ${meatTargetJin} 应为口粮的 75%`);
   assert.ok(Math.abs(byId.bread.targetQeqJin - need * 0.3) < 1, `面包目标 ${byId.bread.targetQeqJin}`);
   assert.ok(Math.abs(byId.flour.targetQeqJin - need * 0.3) < 1, `面粉目标 ${byId.flour.targetQeqJin}`);
-  for (const row of rows) assert.ok(row.purchasedJin > 0, `${row.itemId} 应当发生购买`);
+  for (const itemId of ["bread", "flour", "wheat"]) assert.ok(byId[itemId].purchasedJin > 0, `${itemId} 应当发生购买`);
+  for (const itemId of ["chicken", "duck", "goose", "pork"]) assert.equal(byId[itemId].purchasedJin, 0, `${itemId} 无卖家，不应购买`);
   assert.equal(itemQeqUnitsPerInventoryUnit(CONTENT.items.bread, CONTENT), 5);
 
   const poor = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE, bread: 3000 * SCALE });

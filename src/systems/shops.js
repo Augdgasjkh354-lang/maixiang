@@ -1,3 +1,5 @@
+import { inOpeningPeriod } from "./employment-contracts.js";
+import { payDayFor } from "./paydays.js";
 import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { householdIdOf } from "../economy/accounts.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
@@ -13,7 +15,7 @@ import {
 } from "./households.js";
 import { shopTradePrices, recentAverage } from "../economy/operating-plan.js";
 import { currentUnitPrice } from "../economy/prices.js";
-import { accrueWages, payWages, wageArrears, wageBook } from "./employer.js";
+import { accrueWages, payWages, pendingWages, wageArrears, wageBook } from "./employer.js";
 import { buyWholesaleForOwner, hasWholesaleMarket, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
 import { farmSalePriceVoucher } from "./farm-pricing.js";
@@ -123,10 +125,10 @@ export function shopDefinition(content, typeId) {
 function activeRetailItemIds(state, shop, content) {
   return shopRetailItemIds(shop, content).filter(itemId => !content.items[itemId]?.optionalRetail
     || (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (state.accounts?.town?.[itemId] || 0) > 0 || (shop.inventory?.[itemId] || 0) > 0
-    || (shopDefinition(content, shop.typeId)?.id === "general" && farmsHaveStock(state, itemId, content)));
+    || ((shopDefinition(content, shop.typeId)?.id === "general" || shopDefinition(content, shop.typeId)?.kind === "stall") && farmsHaveStock(state, itemId, content)));
 }
 
-function farmsHaveStock(state, itemId, content) {
+export function farmsHaveStock(state, itemId, content) {
   return Object.values(state.shops || {}).some(other => other.status === "open"
     && shopDefinition(content, other.typeId)?.kind === "farm" && (other.inventory?.[itemId] || 0) > 0);
 }
@@ -134,9 +136,15 @@ function farmsHaveStock(state, itemId, content) {
 export function shopRetailItemIds(shop, content) {
   const def = shopDefinition(content, shop?.typeId);
   if (def?.kind === "retail") return [...(def.itemIds || [])];
-  // 摊位只卖日用品（rules.householdGoods），不卖主食。
-  if (def?.kind === "stall") return Object.keys(content.rules.householdGoods || {}).filter(itemId => content.items[itemId]);
+  if (def?.kind === "stall") return stallItemIds(content);
   return [];
+}
+
+// 集市卖日用品（rules.householdGoods）和肉（像菜市场，肉直接从养殖场进），不卖面粉面包盐。
+export function stallItemIds(content) {
+  const goods = Object.keys(content.rules.householdGoods || {}).filter(itemId => content.items[itemId]);
+  const meats = Object.keys(content.items).filter(itemId => content.items[itemId]?.livestock && !goods.includes(itemId));
+  return [...goods, ...meats];
 }
 
 export function shopKind(shop, content) {
@@ -566,8 +574,28 @@ export function setShopClerks(state, shopId, requested, content) {
     hired.length = 0; hired.push(...protectedHires, ...eligible);
   }
   shop.staffing.clerkHiredSerials = hired.slice(0, assigned);
+  // 正式员工：店铺减店员是辞退，按店员日薪付 severanceWageDays 天补偿；付不起记欠薪（systems/employment-contracts.js 同一口径）。
+  let severanceVoucherUnits = 0;
+  if (assigned < before && !shop.collective) {
+    const perWorker = Math.round(shopWage(state, shop, content) * Math.max(0, content.rules.severanceWageDays ?? 30) * currencyScale(content));
+    wageBook(shop.liabilities ||= {});
+    for (const row of result.releasedRows || []) {
+      const due = perWorker * row.count;
+      if (due <= 0) continue;
+      const paid = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${row.householdId}`, currentPaymentComposition(state, due), content,
+        "severance_payment", `${shop.name}辞退店员补偿`, { requireFull: false }).paidValueUnits || 0;
+      if (due > paid) {
+        shop.liabilities.claimsVoucherUnits[row.householdId] = (shop.liabilities.claimsVoucherUnits[row.householdId] || 0) + (due - paid);
+        shop.liabilities.claimsPayment[row.householdId] = addPaymentObligation(shop.liabilities.claimsPayment[row.householdId], currentPaymentComposition(state, due - paid));
+      }
+      addBookValue(shop, "severanceVoucherUnits", due);
+      applyProfit(shop, -due);
+      severanceVoucherUnits += due;
+    }
+    shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
+  }
   syncShopEmployment(state, content);
-  return { ok: true, assigned: shopClerkCount(state, shop) };
+  return { ok: true, assigned: shopClerkCount(state, shop), severanceVoucherUnits };
 }
 
 export function shopSalesCapacityUnits(state, shop, content) {
@@ -803,7 +831,7 @@ export function procureShopInventory(state, shop, content) {
       const capacityTrial = Math.floor(capacity / Math.max(1, itemIds.length) * 0.5);
       const trial = hasItemSalesHistory ? 0 : (capacityTrial > 0 ? capacityTrial : 20 * invScale);
       const expected = Math.max(avgItemSales, trial);
-      itemTargets.push({ itemId, targetUnits: Math.max(trial, Math.round(expected * targetDays)) });
+      itemTargets.push({ itemId, targetUnits: Math.max(trial, Math.round(expected * targetDays)), dailyUnits: Math.round(expected) });
     }
     // 摊位只进少量货：所有商品合计不超过 2 天的卖货上限。
     if (def?.kind === "stall") {
@@ -825,8 +853,8 @@ export function procureShopInventory(state, shop, content) {
     const need = Math.max(0, row.targetUnits - (shop.inventory[row.itemId] || 0));
     if (need <= 0) { purchasedByItem[row.itemId] = 0; continue; }
     hadNeed = true;
-    // 综合商店先从养殖场进肉，不够再找批发市场。
-    const fromFarms = def?.id === "general" && content.items[row.itemId]?.livestock ? buyFromFarms(state, shop, row.itemId, need, content) : 0;
+    // 综合商店和集市先从养殖场进肉，不够再找批发市场。
+    const fromFarms = (def?.id === "general" || def?.kind === "stall") && content.items[row.itemId]?.livestock ? buyFromFarms(state, shop, row.itemId, need, content, row.dailyUnits) : 0;
     const purchase = need - fromFarms > 0
       ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`,
         { discountPerUnit: shop.collective ? stallDiscountPerUnit(state, content) : 0 })
@@ -903,7 +931,9 @@ function payLiability(state, shop, key, destination, content, type, reason) {
 }
 
 function payDailyLiabilities(state, shop, content) {
-  payWages(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`);
+  // 营业中按发薪日结；暂停、清算、收摊（非营业）时所有待发工资立即到期，进入欠薪清偿顺序。
+  const options = shop.status === "open" ? { payDay: payDayFor(state, `shop:${shop.id}`) } : {};
+  payWages(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`, options);
   shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
   payLiability(state, shop, "rentVoucherUnits", "town", content, "shop_rent_payment", `${shop.name}支付店租`);
   payLiability(state, shop, "taxVoucherUnits", "town", content, "shop_profit_tax_payment", `${shop.name}缴纳商业利润税`);
@@ -935,7 +965,9 @@ export function settleShopTaxAndDistribution(state, shop, content, force = false
   shop.settlement.profitVoucherUnits = 0;
   payDailyLiabilities(state, shop, content);
   const reserve = options.allowDistribution === false ? 0 : shopWorkingCapitalReserve(state, shop, content);
-  const liabilities = (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0);
+  // 月薪：已干活还没到发薪日的工资也要先留出来，不能当利润分走（否则发薪日付不起、欠薪关门）。
+  const liabilities = (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0)
+    + pendingWages(shop.liabilities);
   const availableCash = options.allowDistribution === false ? 0 : Math.max(0, maximumPayableValueUnits(state, `shop:${shop.id}`, content) - reserve - liabilities);
   const distributable = options.allowDistribution === false ? 0 : maximumFullyPayableValueUnits(state, `shop:${shop.id}`,
     Math.min(Math.max(0, shop.retainedEarningsVoucherUnits || 0), availableCash), content);
@@ -972,7 +1004,7 @@ function archiveShopDay(state, shop, content) {
     profitVoucherUnits: shop.accounts?.day?.profitVoucherUnits || 0 };
   shop.history ||= [];
   shop.history.push(row);
-  const limit = Math.max(14, (content.rules.operatingObservationDays || 7) * 4);
+  const limit = Math.max(14, (content.rules.operatingObservationDays || 7) * 4, content.rules.hiringDemandWindowDays || 60);
   if (shop.history.length > limit) shop.history.splice(0, shop.history.length - limit);
   shop.plan ||= {};
   shop.plan.lastArchivedSerial = serial;
@@ -1016,14 +1048,18 @@ function averageWholesalePriceJin(state, shop, content, history) {
 
 function autoAdjustShopClerks(state, shop, content) {
   const serial = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
-  const interval = Math.max(1, content.rules.operatingPlanIntervalDays || 3);
+  // 正式员工：每月 1 号审核一次（新店第一次立即审核），一次最多增减一人。
   shop.plan ||= { lastAdjustedSerial: -1 };
-  if (shop.plan.lastAdjustedSerial >= 0 && serial - shop.plan.lastAdjustedSerial < interval) return;
+  // 开张期（开店后 openingPeriodDays 天内）每天审核，尽快招够人。
+  const opening = inOpeningPeriod(state, content, { year: shop.openedYear, day: (shop.openedDay ?? 1) - 1 });
+  if (shop.plan.lastAdjustedSerial >= 0 && !opening && (state.day % (content.rules.monthDays || 30)) !== 0) return;
   shop.plan.lastAdjustedSerial = serial;
   const kind = shopKind(shop, content);
   if (kind === "stall") return;
-  const observation = Math.max(1, content.rules.operatingObservationDays || 7);
+  // 需求看过去 hiringDemandWindowDays（60）天；新店有 7 天记录就可以判断。
+  const observation = Math.max(1, content.rules.hiringDemandWindowDays || 60);
   const history = (shop.history || []).slice(-observation);
+  const minHistory = Math.min(observation, Math.max(1, content.rules.operatingObservationDays || 7));
   const current = shopClerkCount(state, shop);
   const wage = state.employment.wageRates?.shop_clerks ?? content.rules.shopClerkDefaultWageVoucher ?? 10;
   let target = current;
@@ -1051,7 +1087,7 @@ function autoAdjustShopClerks(state, shop, content) {
       ? (extraRevenue > wage ? "容量不足，可增员" : "增员后不盈利")
       : (unaffordable > 0 ? "居民支付不起" : "需求不足");
     // 只把真实成交与“有支付能力但容量不足”的需求用于扩招，不把支付不起形成的积压当作需求。
-    if (history.length >= observation) {
+    if (history.length >= minHistory) {
       if (extraRevenue > wage && capacityUnmet > 0 && expected > currentCapacity * (content.rules.shopClerkUtilizationHireThreshold || 0.85)) target = current + 1;
       const withoutLast = Math.max(merchantCapacity, currentCapacity - clerkCapacity);
       if (current > 0 && capacityUnmet <= 0 && expected < withoutLast * (content.rules.shopClerkUtilizationReleaseThreshold || 0.45)) target = current - 1;
@@ -1085,10 +1121,10 @@ function autoAdjustShopClerks(state, shop, content) {
       const nonOwnerMerchants = Math.max(0, merchants - (shop.ownerHouseholdId ? 1 : 0));
       const wageAfter = (current + 1) * wage + nonOwnerMerchants * merchantWage;
       const funded = fundsVoucher >= headsAfter * marginalJin * avgWholesale + wageAfter * 3;
-      if (history.length >= observation && avgRejected > 0 && desiredClerks > current && profitable && funded) {
+      if (history.length >= minHistory && avgRejected > 0 && desiredClerks > current && profitable && funded) {
         target = Math.min(current + 1, desiredClerks);
       }
-      if (history.length >= observation && current > 0 && avgRejected <= 0 && desiredClerks < current) target = current - 1;
+      if (history.length >= minHistory && current > 0 && avgRejected <= 0 && desiredClerks < current) target = current - 1;
       shop.plan.expectedDailyCustomers = expected;
       shop.plan.staffingDiagnosis = avgRejected > 0
         ? (!profitable ? "客流超载，但增员不盈利" : !funded ? "客流超载，资金不足暂不增员" : "客流超载，可增员")
@@ -1096,6 +1132,13 @@ function autoAdjustShopClerks(state, shop, content) {
     } else {
       shop.plan.expectedDailySalesUnits = avgSalesUnits;
     }
+  }
+  // 平时一次最多增减一人；近 30 天亏损时可以一次辞退到需要的人数（仍须满 30 天、付得起补偿）。
+  target = Math.max(recentlyLosing(shop) ? target : current - 1, Math.min(current + 1, target));
+  // 付得起补偿才辞退（与 employment-contracts.js 的 reviewStaffing 同一规则）：一次辞几个人就要付得起几份补偿。
+  if (target < current && !shop.collective) {
+    const severance = Math.round(shopWage(state, shop, content) * Math.max(0, content.rules.severanceWageDays ?? 30) * currencyScale(content));
+    if (severance > 0) target = Math.max(target, current - Math.floor(maximumPayableValueUnits(state, `shop:${shop.id}`, content) / severance));
   }
   target = Math.max(protectedClerkCount(state, shop, content), Math.min(shopClerkLimit(shop, content), target));
   if (target !== current) setShopClerks(state, shop.id, target, content);
@@ -1259,15 +1302,25 @@ function farmTargetHands(state, shop, content, history) {
   const output = (merchants + current) * perWorker;
   if (history.length < 3) target = Math.max(current, 1);
   else if (desiredOutput > output * 1.1) target = Math.min(desiredHands, current + Math.min(2, content.rules.operatingWorkerAdjustMaxPerCycle || 2));
-  else if (desiredOutput < output * 0.9 && current > 0) target = Math.max(desiredHands, current - 1);
+  // 正式员工辞退要付一个月补偿：需求明显不足（低于产能 70%）才减人，免得随存货波动反复招辞。
+  else if (desiredOutput < output * 0.7 && current > 0) target = recentlyLosing(shop) ? desiredHands : Math.max(desiredHands, current - 1);
   // 只在多雇一人划算（每人产值减饲料高于日薪）且资金够付 3 天工资时加人。
   const wage = shopWage(state, shop, content);
   const marginJin = def.outputPerWorkerDay * (farmSalePriceVoucher(state, shop, content) - def.feedPerUnit * currentUnitPrice(state, def.feedItemId, content));
   const fundsVoucher = maximumPayableValueUnits(state, `shop:${shop.id}`, content) / currencyScale(content);
-  if (target > current && (marginJin <= wage || fundsVoucher < (target - current) * wage * 3)) target = current;
+  // 资金闸门：钱够付新增人手 3 天工资才加人；商店有缺货时钱不够也可以加一人（工资月结，先干活卖了肉再发），免得没人干活→没收入→招不了人的死锁。
+  if (target > current && marginJin <= wage) target = current;
+  else if (target > current && fundsVoucher < (target - current) * wage * 3) target = avgUnmet > 0 ? current + 1 : current;
   shop.plan.expectedDailySalesUnits = avgSold;
   shop.plan.staffingDiagnosis = target > current ? "供不应求，加人" : target < current ? "存货积压，减人" : "产销平衡";
   return target;
+}
+
+// 近 30 天是否亏损（正式员工：亏损的雇主可以一次辞退多余的人）。
+function recentlyLosing(shop) {
+  const rows = (shop.history || []).slice(-30);
+  if (rows.length < 7) return false;
+  return rows.reduce((sum, row) => sum + (Number(row.profitVoucherUnits) || 0), 0) < 0;
 }
 
 // 贸易行店员目标（与商业街店铺一样自己增减人）：看近 7 天成交额度用了多少。
@@ -1317,7 +1370,7 @@ function tradeHouseTargetClerks(state, shop, content) {
 }
 
 // 综合商店向养殖场进货：先买最便宜的场（同价先买存货多的），每场按自己的定价（farm-pricing.js）。返回买到的库存单位。
-function buyFromFarms(state, store, itemId, wantedUnits, content) {
+function buyFromFarms(state, store, itemId, wantedUnits, content, dailyUnits = wantedUnits) {
   const farms = Object.values(state.shops || {}).filter(shop => shop.status === "open"
     && shopDefinition(content, shop.typeId)?.kind === "farm" && (shop.inventory?.[itemId] || 0) > 0)
     .map(farm => ({ farm, price: farmSalePriceVoucher(state, farm, content) }))
@@ -1348,7 +1401,8 @@ function buyFromFarms(state, store, itemId, wantedUnits, content) {
     bought += units;
   }
   // 商店没买够：把缺口记到经营这种肉的养殖场上，养殖场据此加人。
-  const unmet = wantedUnits - bought;
+  // 只记一天的量：进货目标含几天备货，开张头几天全记成缺口会让养殖场按几倍需求招人。
+  const unmet = Math.min(wantedUnits - bought, Math.max(0, dailyUnits));
   const producers = Object.values(state.shops || {}).filter(shop => shop.status === "open" && shopDefinition(content, shop.typeId)?.productItemId === itemId);
   if (unmet > 0 && producers.length) for (const farm of producers) addBookMap(farm, "unmetUnits", itemId, Math.floor(unmet / producers.length));
   return bought;
@@ -1364,7 +1418,9 @@ export function prepareShopsForDay(state, content) {
   for (const shop of operating) autoAdjustShopClerks(state, shop, content);
   syncShopEmployment(state, content);
   const rows = [];
-  for (const shop of operating) {
+  // 集市先进货：它卖得少（摊位人手封顶），先拿一点养殖场的肉；综合商店需求大，排在后面会把肉全包走、集市进不到货。
+  const procureOrder = [...operating].sort((a, b) => (shopKind(a, content) === "stall" ? 0 : 1) - (shopKind(b, content) === "stall" ? 0 : 1));
+  for (const shop of procureOrder) {
     ensureShopBooks(shop, content);
     shop.settlement.days += 1;
     accrueDailyLiabilities(state, shop, content);
@@ -1445,7 +1501,9 @@ export function resetShopYear(state, content) {
 }
 
 function shopLiabilityTotal(shop) {
-  return (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0);
+  // 待发工资也是负债（清算时会到期），不能让店带着未发工资关门。
+  return (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0)
+    + pendingWages(shop.liabilities);
 }
 
 function finalizeShopLiquidation(state, shop, content) {

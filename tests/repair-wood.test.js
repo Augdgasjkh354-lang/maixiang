@@ -27,7 +27,8 @@ test("规则：每户每年斤数存在，开局户数随人口（每户约 5 �
   assert.equal(households, Math.round(population / CONTENT.rules.initialHouseholdSize), "开局户数 = 人口 ÷ initialHouseholdSize");
   // 每户年斤数是规则常数：250 户的日需求仍约为 5 斤（参照值），实际开局户数按其线性换算。
   const referenceDaily = 250 * RATE / DAYS;
-  assert.ok(Math.abs(referenceDaily - 5) < 0.01, `250 户日需求应约为 5 斤，实际 ${referenceDaily}`);
+  // 全年 360 天：250 × 7.3 ÷ 360 ≈ 5.07 斤，取 ±0.1 作"约 5 斤"。
+  assert.ok(Math.abs(referenceDaily - 5) < 0.1, `250 户日需求应约为 5 斤，实际 ${referenceDaily}`);
   const daily = households * RATE / DAYS;
   assert.ok(Math.abs(daily - households * referenceDaily / 250) < 1e-9);
 });
@@ -49,7 +50,7 @@ test("户数翻倍，需求大致翻倍", () => {
 });
 
 test("小数需求通过结转累积，不会因每日取整而丢失", () => {
-  // 1 户每年 7.3 斤，365 日整除不了：单日取整为 0 的日子也要在年内兑现。
+  // 1 户每年 7.3 斤，全年天数整除不了：单日取整为 0 的日子也要在年内兑现。
   const { total } = yearOfTargets(1);
   assert.equal(Math.round(total), Math.round(RATE * SCALE));
   // 结转跨年延续：从已有结转开始，年末合计仍按理论值计。
@@ -61,11 +62,11 @@ test("小数需求通过结转累积，不会因每日取整而丢失", () => {
 test("真实日结：buyRepairWoodForResidents 写入当日目标并推进结转", () => {
   const state = simulation.createInitialState();
   const households = activeHouseholds(state).length;
-  // 首日目标 = floor(户数 × 每户年斤数 × 单位精度 ÷ 365)，余数进结转（户数随人口，不再固定 250 户）。
+  // 首日目标 = floor(户数 × 每户年斤数 × 单位精度 ÷ 全年天数)，余数进结转（户数随人口，不再固定 250 户）。
   const numerator = households * RATE * SCALE;
   simulation.advanceDay(state);
   const last = state.housing.lastRepairWoodDay;
-  assert.equal(last.targetUnits, Math.floor(numerator / DAYS), "首日目标 = 户数 × 每户年斤数 ÷ 365");
+  assert.equal(last.targetUnits, Math.floor(numerator / DAYS), "首日目标 = 户数 × 每户年斤数 ÷ 全年天数");
   assert.ok(Math.abs(state.housing.repairWoodCarry - numerator % DAYS) < 1e-6, "余数进结转");
   assert.equal(typeof state.housing.repairWoodCarry, "number");
   assert.ok(Number.isFinite(last.purchasedUnits) && last.purchasedUnits >= 0);

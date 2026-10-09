@@ -155,6 +155,9 @@ test("换岗后旧欠薪仍属于形成欠薪时的原债权家庭", () => {
   const jobKey = `${mill.id}::millers`;
   assert.equal(setHouseholdJobCount(state, a.id, jobKey, 1, CONTENT).ok, true);
   payDailyWages(state, simulation.selectJobRows(state), CONTENT);
+  // 月薪：本月工资先进待发；下个月 5 号到期时镇库没钱，形成具体家庭的欠薪。
+  state.day = (Math.floor(state.day / CONTENT.rules.monthDays) + 1) * CONTENT.rules.monthDays + 4;
+  payDailyWages(state, simulation.selectJobRows(state), CONTENT);
   const oldClaim = state.payroll.creditorClaims[jobKey][a.id];
   assert.ok(oldClaim > 0);
   assert.equal(releaseJobFromHousehold(state, a.id, jobKey, 1), 1);

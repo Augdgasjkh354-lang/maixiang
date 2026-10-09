@@ -209,11 +209,17 @@ function bigCapacityFixture(seed, clerks) {
   return fixture;
 }
 
-test("自动增员：近 7 天额度用满、卡在人手上、多一人有利可图 → 加 2 人", () => {
+test("自动增员：近 7 天额度用满、卡在人手上、多一人有利可图 → 每月初加一人，连续两个月初共加 2 人", () => {
   // 店主 + 1 店员 = 2 人 × 300 = 600 斤额度，份额 720 斤；全部用完，每斤利润 0.05 券（一人日增利润 15 券 > 日薪 10）。
+  // 用工每月 1 号审核一次，一次最多增减一人（systems/employment-contracts.js reviewStaffing）。
   const { state, shop } = bigCapacityFixture(9208, 1);
   const current = shopClerkCount(state, shop);
   assert.equal(current, 1);
+  state.day += (CONTENT.rules.monthDays - (state.day % CONTENT.rules.monthDays)) % CONTENT.rules.monthDays;
+  shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30 });
+  prepareShopsForDay(state, CONTENT);
+  assert.equal(shopClerkCount(state, shop), current + 1, `月初审核一次只加一人，诊断：${shop.plan.staffingDiagnosis}`);
+  state.day += CONTENT.rules.monthDays;
   shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30 });
   prepareShopsForDay(state, CONTENT);
   assert.equal(shopClerkCount(state, shop), current + 2, `应加 2 人，诊断：${shop.plan.staffingDiagnosis}`);
