@@ -312,7 +312,7 @@ export function createInitialState(options) {
     fiscal: emptyFiscalState(),
     housing: { villageCapacity: content.rules.housingCapacity, repairWoodCarry: 0 },
     villas: { sold: [], taxArrearsValueUnits: {}, stats: { soldTotal: 0, revenueValueUnits: 0, taxCollectedValueUnits: 0, taxArrearsValueUnits: 0 } },
-    socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
+    socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, farmerSubsidyPerFarmerJin: 0, totalSubsidyUnits: 0, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
     // 再分配账（富人税、遗产税、家产归公）：day/year/cumulative 三段，见 systems/redistribution.js；giniHistory 逐年基尼。
     redistribution: { day: {}, year: {}, cumulative: {}, lastRun: null, giniHistory: [] },
     outsideTowns: createOutsideTowns(content),

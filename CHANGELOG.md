@@ -1,3 +1,7 @@
+## 未发布 · 社保农民补贴
+
+- 社保基金新增支出"农民补贴"：政策页"每农民每日补贴"（`socialSecurity.farmerSubsidyPerFarmerJin`，默认 0，即不改变旧行为），按各户在岗务农人数每日发到家庭；与养老金同一套付款规则，基金不足时镇库垫付并计为基金负债。累计支出见"累计收支"（`totalSubsidyUnits`）。代码在 `systems/social-security.js` 的 `payFarmerSubsidies`，日结步骤 `farmerSubsidy` 紧随养老金。
+
 ## 0.2.3-r31 · 月历、月薪、正式员工、肉当主食
 
 - 日历：一年 12 个月 × 30 天 = 360 天，界面显示"第N年 · M月D日 · 季"；秋收在第 270 天。旧存档的日子按比例换算，读档提示会说明。

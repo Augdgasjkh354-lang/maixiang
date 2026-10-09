@@ -2837,7 +2837,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod19 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-abdb002";
+       const BUILD_ID = "0203-0de320b";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -7345,7 +7345,7 @@ function emptyRentPeriod() {
     fiscal: emptyFiscalState(),
     housing: { villageCapacity: content.rules.housingCapacity, repairWoodCarry: 0 },
     villas: { sold: [], taxArrearsValueUnits: {}, stats: { soldTotal: 0, revenueValueUnits: 0, taxCollectedValueUnits: 0, taxArrearsValueUnits: 0 } },
-    socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
+    socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, farmerSubsidyPerFarmerJin: 0, totalSubsidyUnits: 0, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
     // 再分配账（富人税、遗产税、家产归公）：day/year/cumulative 三段，见 systems/redistribution.js；giniHistory 逐年基尼。
     redistribution: { day: {}, year: {}, cumulative: {}, lastRun: null, giniHistory: [] },
     outsideTowns: createOutsideTowns(content),
@@ -7708,6 +7708,7 @@ const { syncResidentAggregates, householdList, isActiveHousehold, householdConve
 const SOCIAL_OWNER = "social";
        const DEFAULT_SS_DAILY_JIN = 1;
        const DEFAULT_SS_PENSION_JIN = 2;
+       const DEFAULT_SS_FARMER_SUBSIDY_JIN = 0;
        const DEFAULT_EMPLOYER_SHARE_PERCENT = 100;
 
        function ensureSocialSecurity(state) {
@@ -7716,6 +7717,7 @@ const SOCIAL_OWNER = "social";
   ss.enabled ??= false;
   ss.dailyPerWorkerJin ??= DEFAULT_SS_DAILY_JIN;
   ss.pensionPerElderJin ??= DEFAULT_SS_PENSION_JIN;
+  ss.farmerSubsidyPerFarmerJin ??= DEFAULT_SS_FARMER_SUBSIDY_JIN;
   ss.cashVoucherUnits ??= 0;
   ss.cashWheatUnits ??= 0;
   ss.debtToTownUnits ??= 0;
@@ -7725,6 +7727,7 @@ const SOCIAL_OWNER = "social";
   ss.totalCollectedUnits ??= 0;
   ss.totalPaidUnits ??= 0;
   ss.totalDividendUnits ??= 0;
+  ss.totalSubsidyUnits ??= 0;
   ss.employerSharePercent ??= DEFAULT_EMPLOYER_SHARE_PERCENT;
   ss.employerArrears ||= {};
   return ss;
@@ -7743,7 +7746,7 @@ function requireOffice(state) {
   return maximumPayableValueUnits(state, SOCIAL_OWNER, content);
 }
 
-// 政策命令：开关 / 缴费标准 / 养老金标准。
+// 政策命令：开关 / 缴费标准 / 养老金标准 / 农民补贴标准。
        function setSocialSecurityPolicy(state, patch) {
   const blocked = requireOffice(state);
   if (blocked) return blocked;
@@ -7759,7 +7762,15 @@ function requireOffice(state) {
     if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "养老金须为有限的非负数" };
     ss.pensionPerElderJin = value;
   }
-  return { ok: true, socialSecurity: { enabled: ss.enabled, dailyPerWorkerJin: ss.dailyPerWorkerJin, pensionPerElderJin: ss.pensionPerElderJin } };
+  if (patch.farmerSubsidyPerFarmerJin !== undefined) {
+    const value = Number(patch.farmerSubsidyPerFarmerJin);
+    if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "农民补贴须为有限的非负数" };
+    ss.farmerSubsidyPerFarmerJin = value;
+  }
+  return { ok: true, socialSecurity: {
+    enabled: ss.enabled, dailyPerWorkerJin: ss.dailyPerWorkerJin, pensionPerElderJin: ss.pensionPerElderJin,
+    farmerSubsidyPerFarmerJin: ss.farmerSubsidyPerFarmerJin
+  } };
 }
 
 // 政策命令：雇主承担社保的比例（0–100，整数或一位小数）。
@@ -8109,6 +8120,36 @@ function isSocialSelfEmployed(info, household) {
   return { paidValueUnits: paid, fromFundValueUnits: fromFund, dueValueUnits: due };
 }
 
+// 每日农民补贴：按在岗务农人数（household.jobs.farmers）发到所在家庭，与养老金同一套基金付款规则。
+       function payFarmerSubsidies(state, content) {
+  const ss = ensureSocialSecurity(state);
+  if (!ss.enabled) return { paidValueUnits: 0, fromFundValueUnits: 0, dueValueUnits: 0 };
+  const perFarmer = Math.round(Math.max(0, Number(ss.farmerSubsidyPerFarmerJin) || 0) * currencyScale(content));
+  if (perFarmer <= 0) return { paidValueUnits: 0, fromFundValueUnits: 0, dueValueUnits: 0 };
+  let paid = 0;
+  let fromFund = 0;
+  let due = 0;
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household)) continue;
+    const farmers = Math.max(0, Math.floor(Number(household.jobs?.farmers) || 0));
+    if (farmers <= 0) continue;
+    due += farmers * perFarmer;
+    const result = payFromFund(state, household.id, farmers * perFarmer, content, "farmer_subsidy", `社保基金发放农民补贴${farmers}位农民`);
+    paid += result.paidValueUnits;
+    fromFund += result.fromFund;
+  }
+  if (paid > 0) {
+    ss.totalSubsidyUnits += paid;
+    recordLedger(state, {
+      type: "farmer_subsidy", transactionId: makeTransactionId(state), source: "social_security_fund", destination: "residents",
+      itemId: "money_value", quantityUnits: paid, qeqUnits: 0,
+      reason: `本日发放农民补贴${paid}小麦等值单位（基金承担${fromFund}，镇库垫付${paid - fromFund}）`
+    }, content);
+    syncResidentAggregates(state, content);
+  }
+  return { paidValueUnits: paid, fromFundValueUnits: fromFund, dueValueUnits: due };
+}
+
 // ---------------------------------------------------------------- 股票
 
 function listedCompany(state, companyId) {
@@ -8194,6 +8235,7 @@ function listedCompany(state, companyId) {
     enabled: Boolean(ss.enabled),
     dailyPerWorkerJin: ss.dailyPerWorkerJin ?? DEFAULT_SS_DAILY_JIN,
     pensionPerElderJin: ss.pensionPerElderJin ?? DEFAULT_SS_PENSION_JIN,
+    farmerSubsidyPerFarmerJin: ss.farmerSubsidyPerFarmerJin ?? DEFAULT_SS_FARMER_SUBSIDY_JIN,
     cashJin: jin(ss.cashVoucherUnits) + (ss.cashWheatUnits || 0) / wheatScale,
     voucherJin: jin(ss.cashVoucherUnits),
     wheatJin: (ss.cashWheatUnits || 0) / wheatScale,
@@ -8205,6 +8247,7 @@ function listedCompany(state, companyId) {
     totalRepaidJin: jin(ss.totalRepaidUnits),
     totalCollectedJin: jin(ss.totalCollectedUnits),
     totalPaidJin: jin(ss.totalPaidUnits),
+    totalSubsidyJin: jin(ss.totalSubsidyUnits),
     totalDividendJin: jin(ss.totalDividendUnits),
     employerSharePercent: employerSharePercent(ss),
     employerArrearsJin: jin(Object.values(arrearsByKind).reduce((sum, value) => sum + value, 0)),
@@ -8223,7 +8266,7 @@ function listedCompany(state, companyId) {
     }
   };
 }
-return { SOCIAL_OWNER, DEFAULT_SS_DAILY_JIN, DEFAULT_SS_PENSION_JIN, DEFAULT_EMPLOYER_SHARE_PERCENT, ensureSocialSecurity, hasSocialSecurityOffice, fundValueUnits, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, payFromFund, chargeFundForRelief, SOCIAL_EMPLOYER_TOWN, socialEmployerForJobKey, collectSocialContributions, payPensions, fundBuyShares, fundSellShares, recordFundDividend, selectSocialSecurityStats };
+return { SOCIAL_OWNER, DEFAULT_SS_DAILY_JIN, DEFAULT_SS_PENSION_JIN, DEFAULT_SS_FARMER_SUBSIDY_JIN, DEFAULT_EMPLOYER_SHARE_PERCENT, ensureSocialSecurity, hasSocialSecurityOffice, fundValueUnits, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, payFromFund, chargeFundForRelief, SOCIAL_EMPLOYER_TOWN, socialEmployerForJobKey, collectSocialContributions, payPensions, payFarmerSubsidies, fundBuyShares, fundSellShares, recordFundDividend, selectSocialSecurityStats };
 })();
 
 // ===== systems/payroll.js =====
@@ -18377,6 +18420,12 @@ function validateState(state, content) {
     for (const key of ["cashVoucherUnits", "cashWheatUnits", "debtToTownUnits"]) {
       if (!Number.isSafeInteger(ss[key] || 0) || (ss[key] || 0) < 0) errors.push("社保基金账户无效：" + key);
     }
+    if (ss.farmerSubsidyPerFarmerJin !== undefined && (!Number.isFinite(ss.farmerSubsidyPerFarmerJin) || ss.farmerSubsidyPerFarmerJin < 0)) {
+      errors.push("农民补贴标准无效");
+    }
+    if (ss.totalSubsidyUnits !== undefined && (!Number.isSafeInteger(ss.totalSubsidyUnits) || ss.totalSubsidyUnits < 0)) {
+      errors.push("农民补贴累计无效");
+    }
   }
   const logistics = state?.logistics;
   if (logistics) {
@@ -21512,7 +21561,7 @@ const { advancePopulation } = __mxmod90;
 const { selectHousing } = __mxmod51;
 const { settleHousingRent, buyRepairWoodForResidents } = __mxmod91;
 const { settleVillaPurchases, settleVillaPropertyTax } = __mxmod70;
-const { collectSocialContributions, payPensions } = __mxmod42;
+const { collectSocialContributions, payFarmerSubsidies, payPensions } = __mxmod42;
 const { advanceOutsideTownDay, settleOutsideTownYear, settleWheatLoansYear } = __mxmod38;
 const { settleTradeAgreementsMonth, settleTradeAgreementsYear } = __mxmod73;
 const { resetLaborCompetitionYear } = __mxmod44;
@@ -21661,6 +21710,7 @@ const yearEndsToday = (state, content) => state.day + 1 >= content.rules.daysPer
   { id: "socialContribution", run: collectSocialContributions },
   { id: "unemployment", run: (state, content, day) => payUnemploymentBenefit(state, day.laborAtStart, content) },
   { id: "pension", run: payPensions },
+  { id: "farmerSubsidy", run: payFarmerSubsidies },
 
   // ── 生产：施工 → 镇营（原料从批发市场领，产品交回）→ 民营（每栋产出后立即入市）→ 公司，产品都进批发市场
   { id: "construction", run: advanceConstruction },
@@ -27924,6 +27974,7 @@ function socialSecurityMarkup(view) {
       <label class="toggle"><input id="socialSecurityEnabled" type="checkbox" ${ss.enabled ? "checked" : ""}><span>开启社保基金</span></label>
       <div class="row"><span class="label">每劳动力每日缴纳</span><div class="setting-input">${input("social-daily", "social-daily", ss.dailyPerWorkerJin, "社保每日缴费")}<b>斤</b></div></div>
       <div class="row"><span class="label">每老人每日养老金</span><div class="setting-input">${input("social-pension", "social-pension", ss.pensionPerElderJin, "养老金标准")}<b>斤</b></div></div>
+      <div class="row"><span class="label">每农民每日补贴</span><div class="setting-input">${input("social-farmer-subsidy", "social-farmer-subsidy", ss.farmerSubsidyPerFarmerJin ?? 0, "农民补贴标准")}<b>斤</b></div></div>
       <div class="row"><span class="label">雇主承担比例（替员工交社保）</span><div class="setting-input">${input("social-employer-share", "social-employer-share", ss.employerSharePercent ?? 100, "雇主承担比例", { maximum: 100 })}<b>%</b></div></div>
       <div class="subtle">开启后失业金也由基金发放；基金不够时镇库垫付，计入负债。雇主付不起的社保记为欠缴，之后有钱优先补缴。</div>
     </div>
@@ -27937,7 +27988,7 @@ function socialSecurityMarkup(view) {
     </div>
     <details class="detail-block" data-detail-key="social-totals"><summary>累计收支</summary><div class="detail-body">
       <div class="row"><span class="label">缴费收入 / 分红收入</span><strong class="value">${number(ss.totalCollectedJin, 1)} / ${number(ss.totalDividendJin, 1)}斤</strong></div>
-      <div class="row"><span class="label">养老金与失业金支出</span><strong class="value">${number(ss.totalPaidJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">养老金、失业金与农民补贴支出</span><strong class="value">${number(ss.totalPaidJin, 1)}斤（其中农民补贴${number(ss.totalSubsidyJin, 1)}斤）</strong></div>
       <div class="row"><span class="label">注资 / 镇库垫付 / 已还</span><strong class="value">${number(ss.totalInjectedJin, 1)} / ${number(ss.totalAdvancedJin, 1)} / ${number(ss.totalRepaidJin, 1)}斤</strong></div>
     </div></details>
     ${holdings ? `<h3>股票投资</h3>${holdings}` : `<div class="cardlet subtle">暂无上市公司可投资。</div>`}`;
@@ -29025,6 +29076,9 @@ function guardSimulation(engine, beforeCall) {
     } else if (kind === "social-pension") {
       result = simulation.setSocialSecurityPolicy(state, { pensionPerElderJin: parsed.value });
       successMessage = `养老金已设为每老人每日${number(parsed.value, 2)}斤。`;
+    } else if (kind === "social-farmer-subsidy") {
+      result = simulation.setSocialSecurityPolicy(state, { farmerSubsidyPerFarmerJin: parsed.value });
+      successMessage = `农民补贴已设为每农民每日${number(parsed.value, 2)}斤。`;
     } else if (kind === "social-employer-share") {
       result = simulation.setEmployerSocialSharePercent(state, parsed.value);
       successMessage = `雇主承担社保比例已设为${number(parsed.value, 0)}%。`;

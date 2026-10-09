@@ -5,7 +5,7 @@ import { syncResidentAggregates, householdList, isActiveHousehold, householdConv
 
 // 社保基金：独立钱包（支付账户 "social"），粮券存 cashVoucherUnits、实物小麦存 cashWheatUnits。
 // - 收缴：每人每天按人头缴费；雇主承担 employerSharePercent%（默认全额），其余由员工家庭自付（见 collectSocialContributions）。
-// - 发放：养老金、失业金（基金开启时）由基金支付；基金不足时镇库垫付，垫付额记入基金对国库的负债。
+// - 发放：养老金、失业金、农民补贴（基金开启时）由基金支付；基金不足时镇库垫付，垫付额记入基金对国库的负债。
 // - 镇库注资同样记为负债；基金可主动还款给镇库。
 // - 基金可在交易所买卖上市公司股份（company.fundShares），按持股比例参与年度利润分配。
 // - 设置与操作入口在社保局建筑；未建社保局时不能调整，旧档已开启的基金照常运转。
@@ -13,6 +13,7 @@ import { syncResidentAggregates, householdList, isActiveHousehold, householdConv
 export const SOCIAL_OWNER = "social";
 export const DEFAULT_SS_DAILY_JIN = 1;
 export const DEFAULT_SS_PENSION_JIN = 2;
+export const DEFAULT_SS_FARMER_SUBSIDY_JIN = 0;
 export const DEFAULT_EMPLOYER_SHARE_PERCENT = 100;
 
 export function ensureSocialSecurity(state) {
@@ -21,6 +22,7 @@ export function ensureSocialSecurity(state) {
   ss.enabled ??= false;
   ss.dailyPerWorkerJin ??= DEFAULT_SS_DAILY_JIN;
   ss.pensionPerElderJin ??= DEFAULT_SS_PENSION_JIN;
+  ss.farmerSubsidyPerFarmerJin ??= DEFAULT_SS_FARMER_SUBSIDY_JIN;
   ss.cashVoucherUnits ??= 0;
   ss.cashWheatUnits ??= 0;
   ss.debtToTownUnits ??= 0;
@@ -30,6 +32,7 @@ export function ensureSocialSecurity(state) {
   ss.totalCollectedUnits ??= 0;
   ss.totalPaidUnits ??= 0;
   ss.totalDividendUnits ??= 0;
+  ss.totalSubsidyUnits ??= 0;
   ss.employerSharePercent ??= DEFAULT_EMPLOYER_SHARE_PERCENT;
   ss.employerArrears ||= {};
   return ss;
@@ -48,7 +51,7 @@ export function fundValueUnits(state, content) {
   return maximumPayableValueUnits(state, SOCIAL_OWNER, content);
 }
 
-// 政策命令：开关 / 缴费标准 / 养老金标准。
+// 政策命令：开关 / 缴费标准 / 养老金标准 / 农民补贴标准。
 export function setSocialSecurityPolicy(state, patch) {
   const blocked = requireOffice(state);
   if (blocked) return blocked;
@@ -64,7 +67,15 @@ export function setSocialSecurityPolicy(state, patch) {
     if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "养老金须为有限的非负数" };
     ss.pensionPerElderJin = value;
   }
-  return { ok: true, socialSecurity: { enabled: ss.enabled, dailyPerWorkerJin: ss.dailyPerWorkerJin, pensionPerElderJin: ss.pensionPerElderJin } };
+  if (patch.farmerSubsidyPerFarmerJin !== undefined) {
+    const value = Number(patch.farmerSubsidyPerFarmerJin);
+    if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "农民补贴须为有限的非负数" };
+    ss.farmerSubsidyPerFarmerJin = value;
+  }
+  return { ok: true, socialSecurity: {
+    enabled: ss.enabled, dailyPerWorkerJin: ss.dailyPerWorkerJin, pensionPerElderJin: ss.pensionPerElderJin,
+    farmerSubsidyPerFarmerJin: ss.farmerSubsidyPerFarmerJin
+  } };
 }
 
 // 政策命令：雇主承担社保的比例（0–100，整数或一位小数）。
@@ -414,6 +425,36 @@ export function payPensions(state, content) {
   return { paidValueUnits: paid, fromFundValueUnits: fromFund, dueValueUnits: due };
 }
 
+// 每日农民补贴：按在岗务农人数（household.jobs.farmers）发到所在家庭，与养老金同一套基金付款规则。
+export function payFarmerSubsidies(state, content) {
+  const ss = ensureSocialSecurity(state);
+  if (!ss.enabled) return { paidValueUnits: 0, fromFundValueUnits: 0, dueValueUnits: 0 };
+  const perFarmer = Math.round(Math.max(0, Number(ss.farmerSubsidyPerFarmerJin) || 0) * currencyScale(content));
+  if (perFarmer <= 0) return { paidValueUnits: 0, fromFundValueUnits: 0, dueValueUnits: 0 };
+  let paid = 0;
+  let fromFund = 0;
+  let due = 0;
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household)) continue;
+    const farmers = Math.max(0, Math.floor(Number(household.jobs?.farmers) || 0));
+    if (farmers <= 0) continue;
+    due += farmers * perFarmer;
+    const result = payFromFund(state, household.id, farmers * perFarmer, content, "farmer_subsidy", `社保基金发放农民补贴${farmers}位农民`);
+    paid += result.paidValueUnits;
+    fromFund += result.fromFund;
+  }
+  if (paid > 0) {
+    ss.totalSubsidyUnits += paid;
+    recordLedger(state, {
+      type: "farmer_subsidy", transactionId: makeTransactionId(state), source: "social_security_fund", destination: "residents",
+      itemId: "money_value", quantityUnits: paid, qeqUnits: 0,
+      reason: `本日发放农民补贴${paid}小麦等值单位（基金承担${fromFund}，镇库垫付${paid - fromFund}）`
+    }, content);
+    syncResidentAggregates(state, content);
+  }
+  return { paidValueUnits: paid, fromFundValueUnits: fromFund, dueValueUnits: due };
+}
+
 // ---------------------------------------------------------------- 股票
 
 function listedCompany(state, companyId) {
@@ -499,6 +540,7 @@ export function selectSocialSecurityStats(state, content) {
     enabled: Boolean(ss.enabled),
     dailyPerWorkerJin: ss.dailyPerWorkerJin ?? DEFAULT_SS_DAILY_JIN,
     pensionPerElderJin: ss.pensionPerElderJin ?? DEFAULT_SS_PENSION_JIN,
+    farmerSubsidyPerFarmerJin: ss.farmerSubsidyPerFarmerJin ?? DEFAULT_SS_FARMER_SUBSIDY_JIN,
     cashJin: jin(ss.cashVoucherUnits) + (ss.cashWheatUnits || 0) / wheatScale,
     voucherJin: jin(ss.cashVoucherUnits),
     wheatJin: (ss.cashWheatUnits || 0) / wheatScale,
@@ -510,6 +552,7 @@ export function selectSocialSecurityStats(state, content) {
     totalRepaidJin: jin(ss.totalRepaidUnits),
     totalCollectedJin: jin(ss.totalCollectedUnits),
     totalPaidJin: jin(ss.totalPaidUnits),
+    totalSubsidyJin: jin(ss.totalSubsidyUnits),
     totalDividendJin: jin(ss.totalDividendUnits),
     employerSharePercent: employerSharePercent(ss),
     employerArrearsJin: jin(Object.values(arrearsByKind).reduce((sum, value) => sum + value, 0)),

@@ -496,6 +496,9 @@ export function mountGame(root) {
     } else if (kind === "social-pension") {
       result = simulation.setSocialSecurityPolicy(state, { pensionPerElderJin: parsed.value });
       successMessage = `养老金已设为每老人每日${number(parsed.value, 2)}斤。`;
+    } else if (kind === "social-farmer-subsidy") {
+      result = simulation.setSocialSecurityPolicy(state, { farmerSubsidyPerFarmerJin: parsed.value });
+      successMessage = `农民补贴已设为每农民每日${number(parsed.value, 2)}斤。`;
     } else if (kind === "social-employer-share") {
       result = simulation.setEmployerSocialSharePercent(state, parsed.value);
       successMessage = `雇主承担社保比例已设为${number(parsed.value, 0)}%。`;

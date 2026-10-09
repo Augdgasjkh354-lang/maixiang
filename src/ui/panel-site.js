@@ -98,6 +98,7 @@ function socialSecurityMarkup(view) {
       <label class="toggle"><input id="socialSecurityEnabled" type="checkbox" ${ss.enabled ? "checked" : ""}><span>开启社保基金</span></label>
       <div class="row"><span class="label">每劳动力每日缴纳</span><div class="setting-input">${input("social-daily", "social-daily", ss.dailyPerWorkerJin, "社保每日缴费")}<b>斤</b></div></div>
       <div class="row"><span class="label">每老人每日养老金</span><div class="setting-input">${input("social-pension", "social-pension", ss.pensionPerElderJin, "养老金标准")}<b>斤</b></div></div>
+      <div class="row"><span class="label">每农民每日补贴</span><div class="setting-input">${input("social-farmer-subsidy", "social-farmer-subsidy", ss.farmerSubsidyPerFarmerJin ?? 0, "农民补贴标准")}<b>斤</b></div></div>
       <div class="row"><span class="label">雇主承担比例（替员工交社保）</span><div class="setting-input">${input("social-employer-share", "social-employer-share", ss.employerSharePercent ?? 100, "雇主承担比例", { maximum: 100 })}<b>%</b></div></div>
       <div class="subtle">开启后失业金也由基金发放；基金不够时镇库垫付，计入负债。雇主付不起的社保记为欠缴，之后有钱优先补缴。</div>
     </div>
@@ -111,7 +112,7 @@ function socialSecurityMarkup(view) {
     </div>
     <details class="detail-block" data-detail-key="social-totals"><summary>累计收支</summary><div class="detail-body">
       <div class="row"><span class="label">缴费收入 / 分红收入</span><strong class="value">${number(ss.totalCollectedJin, 1)} / ${number(ss.totalDividendJin, 1)}斤</strong></div>
-      <div class="row"><span class="label">养老金与失业金支出</span><strong class="value">${number(ss.totalPaidJin, 1)}斤</strong></div>
+      <div class="row"><span class="label">养老金、失业金与农民补贴支出</span><strong class="value">${number(ss.totalPaidJin, 1)}斤（其中农民补贴${number(ss.totalSubsidyJin, 1)}斤）</strong></div>
       <div class="row"><span class="label">注资 / 镇库垫付 / 已还</span><strong class="value">${number(ss.totalInjectedJin, 1)} / ${number(ss.totalAdvancedJin, 1)} / ${number(ss.totalRepaidJin, 1)}斤</strong></div>
     </div></details>
     ${holdings ? `<h3>股票投资</h3>${holdings}` : `<div class="cardlet subtle">暂无上市公司可投资。</div>`}`;

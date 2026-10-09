@@ -203,11 +203,12 @@ const ACTIONS = {
   },
   // 社保基金（场景捷径：没有社保局时直接放一座建成的，免得每个场景都排工期）
   setSocialSecurityPolicy: {
-    desc: "社保基金政策 {enabled?, dailyPerWorkerJin?, pensionPerElderJin?}",
+    desc: "社保基金政策 {enabled?, dailyPerWorkerJin?, pensionPerElderJin?, farmerSubsidyPerFarmerJin?}",
     run: (sim, state, a) => ensureSocialOffice(state) && sim.setSocialSecurityPolicy(state, {
       ...(a.enabled !== undefined ? { enabled: a.enabled } : {}),
       ...(a.dailyPerWorkerJin !== undefined ? { dailyPerWorkerJin: a.dailyPerWorkerJin } : {}),
       ...(a.pensionPerElderJin !== undefined ? { pensionPerElderJin: a.pensionPerElderJin } : {}),
+      ...(a.farmerSubsidyPerFarmerJin !== undefined ? { farmerSubsidyPerFarmerJin: a.farmerSubsidyPerFarmerJin } : {}),
     }),
   },
   injectSocialSecurity: {

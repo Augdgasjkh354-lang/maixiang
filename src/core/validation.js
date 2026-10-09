@@ -17,6 +17,12 @@ export function validateState(state, content) {
     for (const key of ["cashVoucherUnits", "cashWheatUnits", "debtToTownUnits"]) {
       if (!Number.isSafeInteger(ss[key] || 0) || (ss[key] || 0) < 0) errors.push("社保基金账户无效：" + key);
     }
+    if (ss.farmerSubsidyPerFarmerJin !== undefined && (!Number.isFinite(ss.farmerSubsidyPerFarmerJin) || ss.farmerSubsidyPerFarmerJin < 0)) {
+      errors.push("农民补贴标准无效");
+    }
+    if (ss.totalSubsidyUnits !== undefined && (!Number.isSafeInteger(ss.totalSubsidyUnits) || ss.totalSubsidyUnits < 0)) {
+      errors.push("农民补贴累计无效");
+    }
   }
   const logistics = state?.logistics;
   if (logistics) {

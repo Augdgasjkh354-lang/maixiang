@@ -60,7 +60,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 运力 / 贸易行 | `systems/logistics.js` 管运力池（外贸房基础 + 物流中心 + 码头），所有对外镇的货都要 `takeFreightCapacity`；镇里自己的货不付运费。贸易中心的贸易行是 kind `trade` 的店铺（`systems/trading-houses.js`），自己做进出口（偏向出口，进口利润门槛更高）、付运费和关税给镇库，像商业街店铺一样自己增减店员。河岸地块只建码头和外贸房。详见 `docs/TRADE.md` |
 | 再分配 | `systems/redistribution.js`：富人税（人均家底三档超额累进，每 30 天）、遗产税（年终按去世成年人份额）、整户无人家产归镇库；基尼与逐年曲线在 `selectors/inequality.js`。社保由雇主替员工交（`socialSecurity.employerSharePercent`，岗位 → 雇主映射在 `social-security.js`）。服务可设 `minAffluence`（戏园只有宽裕人家去）。详见 `docs/REDISTRIBUTION.md` |
 | 整户无人 | 家产归镇库（`redistribution.js` 的 `escheatHousehold`）；别墅退回空置再卖；开的店不清算，由本店商人 → 店员 → 家底最厚的一户接手（`shops.js` 的 `transferShopOwnership`），旧档里的孤儿店在日结店铺步骤里自动接手 |
-| 社保基金 | 独立钱包（支付账户 `social`），操作入口在社保局建筑。养老金、失业金由基金付，不够时镇库垫付并记为基金欠国库的债；镇库注资也记债，基金可还款；基金可买卖上市公司股票（`company.fundShares`）并分红 |
+| 社保基金 | 独立钱包（支付账户 `social`），操作入口在社保局建筑。养老金、失业金、农民补贴（按在岗务农人数发，`farmerSubsidyPerFarmerJin`，默认 0）由基金付，不够时镇库垫付并记为基金欠国库的债；镇库注资也记债，基金可还款；基金可买卖上市公司股票（`company.fundShares`）并分红 |
 
 | 产业 | 有 `industryTier` 的建筑（0 原料：伐木场/盐场/棉田，mod 的茶园/陶土坑/桑园；1 加工：磨坊/酒坊/织坊/陶窑；2 成品：面包房）。镇营加工（有原料投入、或配方标 `demandGated` 的）按市场需求减产：批发市场存够 30 天销量就停（`selectors/production.js` 的 `townOutputGate`），磨坊、酒坊不把镇库小麦用到 180 天口粮以下。所有"哪些建筑能民营/成立公司/设生产税"都由 `content/buildings.js` 的 `industryTypeIds` / `isIndustryType` 推导，经营计划从下游往上游排。加新产业 = 加 item + recipe + 带 industryTier 的建筑 |
 | 养殖基地 / 时代广场 | 都是"店铺"的宿主建筑（建筑定义带 `shopHost.slotsPerLevel`），复用店铺的店主、商人、店员、工资、租金、利润税、清算。养殖场是 `kind: "farm"` 的店铺（`systems/livestock.js` 每天喂麦出肉，直供综合商店 `buyFromFarms`，余量进批发市场；`systems/farm-pricing.js` 按存货自主定价、存货够 7 天停养，售价不低于饲料加人工成本）；时代广场是一个集体集市（`kind: "stall"`、`collective: true` 的店铺，不属于某一户；`systems/stalls.js` 按销量增减摆摊人数，卖 `householdGoods` 和肉（`shops.js` 的 `stallItemIds`，肉与综合商店一样直接从养殖场进，集市先进货），与综合商店同价，每人每日 25 斤，利润每天按人头 ×0.8—1.2 随机分给摆摊家庭） |
@@ -121,6 +121,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 
 - 逻辑改动：`node --test` + 跑一个相关场景（`scenarios/` 里有现成的）。
 - 界面改动：打包后用浏览器（或 Playwright）打开 `index.html`，点"新游戏"实际操作一遍。打包冒烟只跑模拟、不渲染界面，界面报错它查不出来。
+- 验收以"账平"为准（`validateState` 通过、钱粮无凭空增减）。模拟最多跑 3 年，不跑 10 年；数值校准类需求另说。
 - 写测试或脚本时，场景里可以直接给镇库加木材来跳过开局（`state.accounts.town.wood += 数量 * content.precision.inventoryUnitsPerJin`）。
 
 ## 协作
@@ -129,7 +130,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 
 ### 分工（主 agent 调度子 agent）
 
-主 agent 负责拆任务、审子 agent 的产出、合并提交；能交出去的尽量交给便宜快速的子 agent（Haiku），多个子 agent 并行。
+主 agent 只做难事：设计判断、规划拆任务、核心经济逻辑、疑难问题、最终把关与提交。**基础执行性工作一律交给便宜快速的子 agent（Haiku）**，包括写代码、写测试、跑 `node --test`、打包、跑场景对比、浏览器冒烟、初审 diff；多个子 agent 并行。
 
 | 任务 | 谁做 | 子 agent 思考程度 |
 |---|---|---|
@@ -141,7 +142,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 派子 agent 时：
 - 写清楚要改哪些文件、不许碰哪些文件（并行的子 agent 不改同一个文件）、验收标准（测试、场景数字）。
 - 并行时子 agent 只用精确替换改文件，不整篇重写；默认不提交，由主 agent 审完统一提交。若让子 agent 提交，只能 `git add` 自己改的文件，禁止 `git add -A`。
-- 子 agent 交回后，主 agent 必须看代码 diff、跑全部测试，界面改动要亲自在浏览器里点一遍。
+- 子 agent 交回后，另派子 agent 跑全部测试、打包、跑相关场景、界面改动在浏览器里点一遍并出报告；主 agent 读报告，对设计相关的关键改动抽查 diff，不亲自重复执行这些机械步骤。
 - 不达标先退回给原子 agent 返工（指出具体问题和验收标准）；同一任务连续两次返工仍不达标，主 agent 亲自接手。
-- 能交给子 agent 的尽量交，主 agent 的精力留给设计判断和审查。
+- 能交给子 agent 的尽量交，主 agent 的精力留给设计判断、规划和最终决策。
 - 版本历史见 `CHANGELOG.md`，各子系统设计见 `docs/`。

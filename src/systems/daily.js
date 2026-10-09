@@ -21,7 +21,7 @@ import { advancePopulation } from "./population.js";
 import { selectHousing } from "../selectors/housing.js";
 import { settleHousingRent, buyRepairWoodForResidents } from "./housing.js";
 import { settleVillaPurchases, settleVillaPropertyTax } from "./villas.js";
-import { collectSocialContributions, payPensions } from "./social-security.js";
+import { collectSocialContributions, payFarmerSubsidies, payPensions } from "./social-security.js";
 import { advanceOutsideTownDay, settleOutsideTownYear, settleWheatLoansYear } from "./outside-town.js";
 import { settleTradeAgreementsMonth, settleTradeAgreementsYear } from "./trade-agreements.js";
 import { resetLaborCompetitionYear } from "./labor-market.js";
@@ -173,6 +173,7 @@ export const CORE_DAILY_STEPS = [
   { id: "socialContribution", run: collectSocialContributions },
   { id: "unemployment", run: (state, content, day) => payUnemploymentBenefit(state, day.laborAtStart, content) },
   { id: "pension", run: payPensions },
+  { id: "farmerSubsidy", run: payFarmerSubsidies },
 
   // ── 生产：施工 → 镇营（原料从批发市场领，产品交回）→ 民营（每栋产出后立即入市）→ 公司，产品都进批发市场
   { id: "construction", run: advanceConstruction },
