@@ -1456,6 +1456,9 @@ function settleTownOwesHouseholds(state, content) {
 
 export function finishShopsDay(state, content, forceSettlement = false) {
   settleTownOwesHouseholds(state, content);
+  // 清算中的店铺每天都要推进（closeShop 的清算逻辑：能付的先付，满 30 天仍欠账则核销关门）。
+  // 名单在营业店结账前取，今天才转入清算的店已在营业循环里处理过，不重复推进。
+  const liquidating = Object.values(ensureShops(state, content)).filter(shop => shop.status === "liquidating");
   const rows = [];
   for (const shop of Object.values(ensureShops(state, content)).filter(shop => shop.status === "open")) {
     payDailyLiabilities(state, shop, content);
@@ -1491,6 +1494,11 @@ export function finishShopsDay(state, content, forceSettlement = false) {
   for (const shop of Object.values(state.shops).filter(shop => shop.status === "paused")) {
     payDailyLiabilities(state, shop, content);
     rows.push({ shopId: shop.id, closed: false, paused: true, settlement: { settled: false } });
+  }
+  for (const shop of liquidating) {
+    const closing = closeShop(state, shop.id, content, true);
+    rows.push({ shopId: shop.id, closed: closing.liquidationPending === false, liquidating: true,
+      liquidationPending: closing.liquidationPending, settlement: { settled: false } });
   }
   syncShopEmployment(state, content);
   return rows;
@@ -1545,6 +1553,8 @@ export function closeShop(state, shopId, content, automatic = false) {
     recordEvent(state, `${shop.name}${automatic ? "长期无法经营，进入清算" : "停业并进入清算"}。`, content, { day: state.day + 1 });
   }
   payDailyLiabilities(state, shop, content);
+  // 旧档的清算店铺可能没有起算日：从读到的这一天起重新计 30 天，不能因缺字段立即核销。
+  if (shop.status === "liquidating" && !Number.isFinite(shop.liquidatingSinceSerial)) shop.liquidatingSinceSerial = shopSerial(state, content);
   // 清算超过30天仍有负债，核销坏账强制关闭（之前无破产路径，会永久僵死）。
   const liquidatingDays = shopSerial(state, content) - (shop.liquidatingSinceSerial || 0);
   if (shop.status === "liquidating" && shopLiabilityTotal(shop) > 0 && liquidatingDays >= 30) {
