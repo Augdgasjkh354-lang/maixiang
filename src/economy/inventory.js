@@ -48,9 +48,15 @@ function syncResidentInventoryMirror(state, content) {
   if (!hasHouseholdAccounts(state)) return;
   state.accounts ||= {};
   state.accounts.residents ||= {};
-  for (const itemId of Object.keys(content.items)) {
-    state.accounts.residents[itemId] = householdRows(state).reduce((sum, household) => sum + (household.inventory?.[itemId] || 0), 0);
+  // 一次遍历全部家庭（原来每种物品各遍历一遍，选择器里最热的一处）；结果与逐品求和相同。
+  const itemIds = Object.keys(content.items);
+  const totals = Object.fromEntries(itemIds.map(itemId => [itemId, 0]));
+  for (const household of householdRows(state)) {
+    const inventory = household.inventory;
+    if (!inventory) continue;
+    for (const itemId of itemIds) totals[itemId] += inventory[itemId] || 0;
   }
+  for (const itemId of itemIds) state.accounts.residents[itemId] = totals[itemId];
 }
 
 const accountObject = accountInventory;
