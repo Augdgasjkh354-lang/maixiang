@@ -64,7 +64,7 @@ test("站点：贸易中心显示开贸易行入口与贸易行卡片（无零�
   assert.ok(html.includes("trade-shop"), "缺少贸易行卡片");
   assert.ok(html.includes("暂无可做的买卖"), "新开的贸易行应显示暂无可做的买卖");
   assert.ok(html.includes("近7日出口 / 进口") && html.includes("运费 今日 / 近7日") && html.includes("持有小麦"));
-  assert.ok(html.includes("data-shop-clerk"), "店员手动增减按钮缺失");
+  assert.ok(!html.includes("data-shop-clerk") && html.includes("（自动）"), "贸易行店员由系统自动增减，不再有手动按钮");
   assert.ok(!html.includes("shop-stock-grid"), "贸易行不应有零售货架");
 });
 

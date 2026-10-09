@@ -16,6 +16,7 @@ import { currentUnitPrice } from "../economy/prices.js";
 import { accrueWages, payWages, wageArrears, wageBook } from "./employer.js";
 import { buyWholesaleForOwner, hasWholesaleMarket, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
+import { farmSalePriceVoucher } from "./farm-pricing.js";
 import {
   ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory,
   updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop
@@ -1029,6 +1030,8 @@ function autoAdjustShopClerks(state, shop, content) {
   let expected = 0;
   if (kind === "farm") {
     target = farmTargetHands(state, shop, content, history);
+  } else if (kind === "trade") {
+    target = tradeHouseTargetClerks(state, shop, content);
   } else if (shopIsService(shop, content)) {
     const def = shopDefinition(content, shop.typeId);
     const service = content.rules.serviceTypes?.[def?.serviceId];
@@ -1244,8 +1247,8 @@ function farmTargetHands(state, shop, content, history) {
   const current = shopClerkCount(state, shop);
   const merchants = shopMerchantCount(state, shop);
   const perWorker = def.outputPerWorkerDay * content.precision.inventoryUnitsPerJin;
-  // 只看卖给商店的量：卖给批发市场的是处理积压，不算需求。
-  const avgSold = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.storeSoldUnitsByItem?.[def.productItemId] || 0), 0) / history.length : 0;
+  // 卖给商店和批发市场（摊位、外贸从那里拿货）都算需求。
+  const avgSold = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.soldUnitsByItem?.[def.productItemId] || 0), 0) / history.length : 0;
   const avgUnmet = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.unmetUnitsByItem?.[def.productItemId] || 0), 0) / history.length : 0;
   const stock = shop.inventory?.[def.productItemId] || 0;
   // 按比例排产：目标日产 = 商店日均进货 + 一半缺口 + 存货差（目标 2 天销量）分 5 天补；差 10% 以内不动，每周期最多 +2 / −1。
@@ -1259,7 +1262,7 @@ function farmTargetHands(state, shop, content, history) {
   else if (desiredOutput < output * 0.9 && current > 0) target = Math.max(desiredHands, current - 1);
   // 只在多雇一人划算（每人产值减饲料高于日薪）且资金够付 3 天工资时加人。
   const wage = shopWage(state, shop, content);
-  const marginJin = def.outputPerWorkerDay * (currentUnitPrice(state, def.productItemId, content) - def.feedPerUnit * currentUnitPrice(state, def.feedItemId, content));
+  const marginJin = def.outputPerWorkerDay * (farmSalePriceVoucher(state, shop, content) - def.feedPerUnit * currentUnitPrice(state, def.feedItemId, content));
   const fundsVoucher = maximumPayableValueUnits(state, `shop:${shop.id}`, content) / currencyScale(content);
   if (target > current && (marginJin <= wage || fundsVoucher < (target - current) * wage * 3)) target = current;
   shop.plan.expectedDailySalesUnits = avgSold;
@@ -1267,17 +1270,63 @@ function farmTargetHands(state, shop, content, history) {
   return target;
 }
 
-// 综合商店向养殖场进货：按养殖场存货多少依次买，价格取市场价（批发价）。返回买到的库存单位。
+// 贸易行店员目标（与商业街店铺一样自己增减人）：看近 7 天成交额度用了多少。
+// 额度用满（≥85%）、额度卡在人手上（没到运力份额）、多一人的成交利润高于日薪且付得起 3 天工资 → 加人（每周期最多 +2）；
+// 用不到 40% 或亏损 → 减一人。
+function tradeHouseTargetClerks(state, shop, content) {
+  const observation = Math.max(1, content.rules.operatingObservationDays || 7);
+  const rows = (shop.tradeLog || []).slice(-observation);
+  const current = shopClerkCount(state, shop);
+  shop.plan ||= {};
+  if (rows.length < observation) {
+    shop.plan.staffingDiagnosis = "观察中";
+    return current;
+  }
+  const avg = key => rows.reduce((sum, row) => sum + Math.max(0, Number(row[key]) || 0), 0) / rows.length;
+  const used = avg("usedJin");
+  const budget = avg("budgetJin");
+  const share = avg("shareJin");
+  const profitVoucher = rows.reduce((sum, row) => sum + (Number(row.profitVoucherUnits) || 0), 0) / rows.length / currencyScale(content);
+  const perClerk = content.rules.tradeHouseJinPerClerk ?? 300;
+  const wage = shopWage(state, shop, content);
+  const utilization = budget > 0 ? used / budget : 0;
+  const staffBound = budget + 1e-6 < share;
+  const marginalProfit = used > 0 ? profitVoucher / used * perClerk : 0;
+  // 可动用资金含店里的支付小麦（贸易行出口收的是小麦）。
+  const fundsVoucher = maximumPayableValueUnits(state, `shop:${shop.id}`, content) / currencyScale(content);
+  let target = current;
+  let diagnosis = "生意与人手匹配";
+  if (profitVoucher < 0 && current > 0) {
+    target = current - 1;
+    diagnosis = "亏损，减人";
+  } else if (utilization >= 0.85 && staffBound && marginalProfit > wage) {
+    const add = Math.min(2, content.rules.operatingWorkerAdjustMaxPerCycle || 2);
+    if (fundsVoucher >= (current + add) * wage * 3) {
+      target = current + add;
+      diagnosis = "生意做不完，加人";
+    } else diagnosis = "生意做不完，资金不足暂不加人";
+  } else if (utilization >= 0.85 && !staffBound) {
+    diagnosis = "运力份额已满，加人无用";
+  } else if (utilization < 0.4 && current > 0) {
+    target = current - 1;
+    diagnosis = used > 0 ? "生意清淡，减人" : "暂无可做的买卖，减人";
+  }
+  shop.plan.staffingDiagnosis = diagnosis;
+  shop.plan.expectedDailyTradeJin = used;
+  return target;
+}
+
+// 综合商店向养殖场进货：先买最便宜的场（同价先买存货多的），每场按自己的定价（farm-pricing.js）。返回买到的库存单位。
 function buyFromFarms(state, store, itemId, wantedUnits, content) {
   const farms = Object.values(state.shops || {}).filter(shop => shop.status === "open"
     && shopDefinition(content, shop.typeId)?.kind === "farm" && (shop.inventory?.[itemId] || 0) > 0)
-    .sort((a, b) => (b.inventory[itemId] || 0) - (a.inventory[itemId] || 0) || a.id.localeCompare(b.id));
-  const price = currentUnitPrice(state, itemId, content);
-  if (!(price > 0)) return 0;
+    .map(farm => ({ farm, price: farmSalePriceVoucher(state, farm, content) }))
+    .sort((a, b) => a.price - b.price || (b.farm.inventory[itemId] || 0) - (a.farm.inventory[itemId] || 0) || a.farm.id.localeCompare(b.farm.id));
   let bought = 0;
-  for (const farm of farms) {
+  for (const { farm, price } of farms) {
     const left = wantedUnits - bought;
     if (left <= 0) break;
+    if (!(price > 0)) continue;
     const affordable = Math.floor(maximumPayableValueUnits(state, `shop:${store.id}`, content) * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
     const units = Math.min(left, farm.inventory[itemId] || 0, affordable);
     if (units <= 0) break;
@@ -1365,7 +1414,10 @@ export function finishShopsDay(state, content, forceSettlement = false) {
       : shopKind(shop, content) === "trade"
         ? Object.values(shop.inventory || {}).reduce((sum, units) => sum + Math.max(0, units || 0), 0)
         : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
-    const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
+    // 贸易行的本钱是现金和小麦（货当天进出），没生意但还有本钱时不算坏日子，不会因此关门。
+    const noOperatingAssets = shopIsService(shop, content) ? false
+      : shopKind(shop, content) === "trade" ? retailStock <= 0 && maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 && !(shop.cashWheatUnits > 0)
+        : retailStock <= 0;
     if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);

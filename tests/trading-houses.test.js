@@ -12,6 +12,8 @@ import { migrateSave } from "../src/persistence/migrations.js";
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 const RULES = CONTENT.rules;
+const POOL_JIN = 300; // tradeFixture 默认运力池
+const SHARE_JIN = POOL_JIN * RULES.tradeHouseCapacityShare; // 单店独占时的运力份额（斤）
 
 function valid(state, label = "") {
   const check = simulation.validateState(state);
@@ -34,7 +36,7 @@ function addBuilding(state, id, typeId) {
   return id;
 }
 
-// 外贸房（在岗，提供基础运力 300 斤/日，贸易行分到 50%）、批发市场、贸易中心（1 级，2 个铺位）。
+// 外贸房（在岗，提供基础运力 300 斤/日，贸易行分到 rules.tradeHouseCapacityShare）、批发市场、贸易中心（1 级，2 个铺位）。
 // 镇库印制粮券，镇里有钱付批发货款。盐的批发售价压到 10（外镇收购价约 12.25，够 10% 利润）。
 function tradeFixture(seed, { clerks = 10, pool = 300, houses = 1 } = {}) {
   const state = simulation.createInitialState({ seed });
@@ -100,7 +102,7 @@ test("出口：批发存货有余量、利润率够 10% 时卖给外镇，运费
   const row = lastRow(shop);
   const sold = row.exportJin.salt;
   assert.ok(sold > 0, "应当出口盐");
-  assert.equal(sold, 150, "运力份额 = 日运力 300 × 50%，单店独占");
+  assert.ok(Math.abs(sold - SHARE_JIN) < 0.02, `运力份额 = 日运力 300 × tradeHouseCapacityShare，单店独占：${sold}`);
   assert.equal(row.usedJin, sold);
   assert.equal(row.trades, 1);
 
@@ -133,13 +135,13 @@ test("批发存货不到 10 天销量时不出口，超出部分才出口", () =
   assert.equal(Object.keys(lastRow(short.shop).exportJin).length, 0, "存货只够 5 天，不出口");
   assert.equal(lastRow(short.shop).trades, 0);
 
-  // 存货 1500 斤（15 天）：只出超出 10 天（1000 斤）的 500 斤里的运力份额 150 斤。
+  // 存货 1500 斤（15 天）：只出超出 10 天（1000 斤）的 500 斤，且不超过运力份额（300 × tradeHouseCapacityShare）。
   const enough = tradeFixture(9104);
   setMarketSales(enough.state, "salt", 100);
   enough.state.wholesaleMarket.inventory.salt = 1500 * I;
   settleTradingHouses(enough.state, CONTENT);
   const sold = lastRow(enough.shop).exportJin.salt;
-  assert.equal(sold, 150);
+  assert.ok(Math.abs(sold - Math.min(500, SHARE_JIN)) < 0.02, `应出 min(500, 份额) 斤，实际 ${sold}`);
   assert.ok(enough.state.wholesaleMarket.inventory.salt / I >= 1000 - 0.01, "市场至少留下 10 天销量");
   valid(enough.state, "保本地供应");
 });
@@ -201,6 +203,8 @@ test("进口没有小麦就不做", () => {
 
 test("进口量封顶：市场存量不超过 30 天销量", () => {
   const { state, shop } = tradeFixture(9109);
+  // 盐的批发售价抬到 12，不让盐出口抢走运力池（出口排序优先，会先用光运力）。
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 12).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
   shop.cashWheatUnits = 1000 * I;
   setMarketSales(state, "flour", 10); // 日销 10 斤 → 封顶 300 斤，减去现存 0
@@ -218,22 +222,25 @@ test("运力池为 0 时不做买卖", () => {
   valid(state, "运力为零");
 });
 
-test("成交量受店员数限制：每人每天 100 斤，只有商人时最多 100 斤", () => {
-  const { state, shop } = tradeFixture(9111, { clerks: 0 });
+test(`成交量受店员数限制：每人每天 ${RULES.tradeHouseJinPerClerk} 斤，只有商人时最多 ${RULES.tradeHouseJinPerClerk} 斤`, () => {
+  // 加一座物流中心（10 名搬运工 × logisticsJinPerWorker），让日运力足够大，人手而不是运力份额成为限制。
+  const { state, shop } = tradeFixture(9111, { clerks: 0, pool: 1000 });
+  addBuilding(state, "lc1", "logistics_center");
+  simulation.setEmployment(state, "lc1::porters", 10);
   settleTradingHouses(state, CONTENT);
-  assert.equal(lastRow(shop).budgetJin, 100, "一名商人（店主）= 100 斤");
-  assert.ok(lastRow(shop).usedJin <= 100 + 0.01);
-  assert.equal(lastRow(shop).exportJin.salt, 100);
+  assert.equal(lastRow(shop).budgetJin, RULES.tradeHouseJinPerClerk, `一名商人（店主）= ${RULES.tradeHouseJinPerClerk} 斤`);
+  assert.ok(lastRow(shop).usedJin <= RULES.tradeHouseJinPerClerk + 0.01);
+  assert.equal(lastRow(shop).exportJin.salt, RULES.tradeHouseJinPerClerk);
 });
 
-test("两家贸易行按店员数分运力份额，合计不超过当日运力的一半", () => {
+test(`两家贸易行按店员数分运力份额，合计不超过当日运力的 ${RULES.tradeHouseCapacityShare * 100}%`, () => {
   const { state, shopIds } = tradeFixture(9112, { clerks: [10, 0], houses: 2 });
   settleTradingHouses(state, CONTENT);
   const [big, small] = shopIds.map(id => state.shops[id].tradeLog.at(-1));
-  assert.ok(Math.abs(big.shareJin - 300 * 0.5 * 11 / 12) < 0.02, `大店份额 ${big.shareJin}`);
-  assert.ok(Math.abs(small.shareJin - 300 * 0.5 / 12) < 0.02, `小店份额 ${small.shareJin}`);
+  assert.ok(Math.abs(big.shareJin - SHARE_JIN * 11 / 12) < 0.02, `大店份额 ${big.shareJin}`);
+  assert.ok(Math.abs(small.shareJin - SHARE_JIN / 12) < 0.02, `小店份额 ${small.shareJin}`);
   const used = big.usedJin + small.usedJin;
-  assert.ok(used <= 150 + 0.02, `合计不超过一半运力，实际 ${used}`);
+  assert.ok(used <= SHARE_JIN + 0.02, `合计不超过份额，实际 ${used}`);
 });
 
 test("日结流水线：tradeHouses 排在居民服务之后、外镇日结之前", () => {

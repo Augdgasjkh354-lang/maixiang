@@ -499,6 +499,10 @@ export function mountGame(root) {
     } else if (kind === "service-price") {
       result = simulation.configureServicePrice(state, input.dataset.draftTarget, parsed.value);
       successMessage = `服务价格已设为${number(parsed.value, 3)}小麦等值。`;
+    } else if (kind === "trade-tariff-import" || kind === "trade-tariff-export") {
+      const field = kind === "trade-tariff-import" ? "importPercent" : "exportPercent";
+      result = simulation.setTradeTariff(state, { [field]: parsed.value });
+      successMessage = `${kind === "trade-tariff-import" ? "进口" : "出口"}关税已设为${number(parsed.value, 2)}%（只对贸易行征收）。`;
     } else {
       setDraftError(key, "无法识别这项设置，请重新打开面板后再试。", input);
       return false;

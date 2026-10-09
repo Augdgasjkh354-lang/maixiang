@@ -217,6 +217,8 @@ export function createInitialState(options) {
       stallRentFreeUntilSerial: 0,
       stallDiscountTier: 0,
       shopProfitTaxPercent: content.rules.shopProfitTaxDefaultPercent ?? 10,
+      // 进出口关税（%）：只对贸易中心的贸易行征收，交镇库（systems/trading-houses.js）。
+      tradeTariff: { importPercent: 0, exportPercent: 0 },
       autosaveMonths: 1,
       // 再分配（docs/REDISTRIBUTION.md）：富人税按人均家底分档累进，遗产税按去世成年人的份额征收。默认全部为 0。
       wealthTax: { thresholds: [300, 1000, 3000], ratesPercent: [0, 0, 0] },

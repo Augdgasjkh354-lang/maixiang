@@ -1,10 +1,12 @@
 // 养殖基地：养殖场（kind: "farm" 的店铺）每天喂料出肉。
 // 养殖户（商人）和饲养员都干活，每人每日出 outputPerWorkerDay 斤，每斤吃 feedPerUnit 斤饲料（小麦）。
-// 肉先卖给综合商店（见 shops.js 的 buyFromFarms），存货超过 3 天产量的部分卖给批发市场。
+// 肉先卖给综合商店（见 shops.js 的 buyFromFarms，按本场定价），存货超过 3 天产量的部分卖给批发市场。
+// 定价与排产闸门见 farm-pricing.js：存货够卖 farmStockDays 天就停养，积压降价、紧缺涨价。
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
 import { putStock, takeStock } from "../economy/trade.js";
 import { addBookMap, addBookValue, applyProfit, ensureShops, farmDailyOutputUnits, shopDefinition } from "./shops.js";
+import { farmOutputRoomUnits, reviewFarmPricing } from "./farm-pricing.js";
 import { depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleAvgSoldUnits, wholesaleMarketItemIds, wholesalePurchasePrice } from "./wholesale-market.js";
 
 const SURPLUS_DAYS = 3;
@@ -17,14 +19,19 @@ export function produceLivestock(state, content) {
   const rows = [];
   for (const farm of openFarms(state, content)) {
     const def = shopDefinition(content, farm.typeId);
+    reviewFarmPricing(state, farm, content);
     const capacity = farmDailyOutputUnits(state, farm, content);
     const feedStock = farm.inventory?.[def.feedItemId] || 0;
-    const output = Math.min(capacity, Math.floor(feedStock / def.feedPerUnit));
+    const room = farmOutputRoomUnits(farm, capacity, content);
+    const output = Math.min(capacity, room, Math.floor(feedStock / def.feedPerUnit));
     if (output <= 0) {
-      if (capacity > 0) farm.statusReason = "缺饲料";
+      // 产出状态单独记（statusReason 由店铺日结按欠薪/资金等改写）。
+      farm.outputReason = capacity <= 0 ? "无人饲养" : room <= 0 ? "存货充足，暂停出栏" : "缺饲料";
+      if (capacity > 0 && room > 0) farm.statusReason = "缺饲料";
       rows.push({ shopId: farm.id, producedUnits: 0 });
       continue;
     }
+    farm.outputReason = output < capacity ? (output >= room ? "按销量减产" : "饲料不足，减产") : "满产";
     const feed = takeStock(farm, def.feedItemId, Math.ceil(output * def.feedPerUnit));
     putStock(farm, def.productItemId, output, feed.costUnits);
     addBookMap(farm, "producedUnits", def.productItemId, output);
@@ -44,8 +51,8 @@ export function sellFarmSurplusToWholesale(state, content) {
     const itemId = def.productItemId;
     if (!wholesaleMarketItemIds(content).includes(itemId)) continue;
     const keep = Math.max(farmDailyOutputUnits(state, farm, content), content.precision.inventoryUnitsPerJin) * SURPLUS_DAYS;
-    // 批发市场只收到自己 10 天销量（至少 20 斤）为止，不无限囤货。
-    const marketRoom = Math.max(20 * content.precision.inventoryUnitsPerJin, wholesaleAvgSoldUnits(state, itemId, content, 7) * 10) - (state.wholesaleMarket?.inventory?.[itemId] || 0);
+    // 批发市场只收到自己 10 天销量（至少 townOutputMinStockJin 斤，与镇营最低备货同口径）为止，不无限囤货。
+    const marketRoom = Math.max((content.rules.townOutputMinStockJin ?? 200) * content.precision.inventoryUnitsPerJin, wholesaleAvgSoldUnits(state, itemId, content, 7) * 10) - (state.wholesaleMarket?.inventory?.[itemId] || 0);
     const surplus = Math.min(Math.max(0, marketRoom), Math.max(0, (farm.inventory?.[itemId] || 0) - keep));
     if (surplus <= 0) continue;
     const price = wholesalePurchasePrice(state, itemId, content);

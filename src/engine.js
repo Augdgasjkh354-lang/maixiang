@@ -20,7 +20,7 @@ import {
   configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares,
   listBuilding, approveIpoApplication, rejectIpoApplication,
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
-  setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
+  setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
   configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
   startCurrencyReform,
   reclaimFarmland
@@ -177,6 +177,7 @@ export function createSimulation(content) {
     setStallRentFree: function (state, days) { return setStallRentFree(state, days, definitions); },
     setStallDiscountTier: function (state, tier) { return setStallDiscountTier(state, tier, definitions); },
     setShopProfitTax: function (state, value) { return setShopProfitTax(state, value, definitions); },
+    setTradeTariff: function (state, patch) { return setTradeTariff(state, patch, definitions); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
     configureShopMerchants: function (state, shopId, count) { return configureShopMerchants(state, shopId, count, definitions); },
     configureShopClerks: function (state, shopId, count) { return configureShopClerks(state, shopId, count, definitions); },

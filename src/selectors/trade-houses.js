@@ -21,7 +21,7 @@ function summarize(rows, content) {
   const scale = currencyScale(content);
   const exportMap = {};
   const importMap = {};
-  const totals = { revenueVoucherUnits: 0, cogsVoucherUnits: 0, freightVoucherUnits: 0, profitVoucherUnits: 0, trades: 0, usedJin: 0, shareJin: 0, budgetJin: 0 };
+  const totals = { revenueVoucherUnits: 0, cogsVoucherUnits: 0, freightVoucherUnits: 0, tariffVoucherUnits: 0, profitVoucherUnits: 0, trades: 0, usedJin: 0, shareJin: 0, budgetJin: 0 };
   for (const row of rows) {
     addMap(exportMap, row.exportJin);
     addMap(importMap, row.importJin);
@@ -45,6 +45,8 @@ function summarize(rows, content) {
     revenueVoucher: round2(totals.revenueVoucherUnits / scale),
     cogsVoucher: round2(totals.cogsVoucherUnits / scale),
     freightVoucher: round2(totals.freightVoucherUnits / scale),
+    // 进出口关税（交镇库，只对贸易行征收）。
+    tariffVoucher: round2(totals.tariffVoucherUnits / scale),
     profitVoucher: round2(totals.profitVoucherUnits / scale),
     // 实际单斤利润率（利润 ÷ 成本 = 买价 + 运费）；没有成交时为 null。
     marginPercent: costVoucher > 0 ? round1(totals.profitVoucherUnits / costVoucher * 100) : null,
@@ -95,6 +97,9 @@ export function selectTradeHouseView(state, content) {
         merchants, maxMerchants: shopMaxMerchants(shop, content),
         clerks, maxClerks: shopClerkLimit(shop, content),
         staff: clerks + merchants,
+        // 店员由系统按销量自动增减；诊断与近 7 日日均成交（只读，来自 shop.plan）。
+        staffingDiagnosis: shop.plan?.staffingDiagnosis || null,
+        expectedDailyTradeJin: Number.isFinite(shop.plan?.expectedDailyTradeJin) ? round2(shop.plan.expectedDailyTradeJin) : null,
         // 今日（最近一个日结日）的预算与运力份额；没有日志时为 null。
         budgetJin: today ? round2(today.budgetJin) : null,
         shareJin: today ? round2(today.shareJin) : null,
@@ -111,6 +116,7 @@ export function selectTradeHouseView(state, content) {
     importTotalJin: round2(views.reduce((sum, view) => sum + view.importTotalJin, 0)),
     revenueVoucher: round2(views.reduce((sum, view) => sum + view.revenueVoucher, 0)),
     freightVoucher: round2(views.reduce((sum, view) => sum + view.freightVoucher, 0)),
+    tariffVoucher: round2(views.reduce((sum, view) => sum + view.tariffVoucher, 0)),
     profitVoucher: round2(views.reduce((sum, view) => sum + view.profitVoucher, 0)),
     trades: views.reduce((sum, view) => sum + view.trades, 0)
   });
@@ -128,6 +134,14 @@ export function selectTradeHouseView(state, content) {
     markets: marketRows(state, content),
     houses,
     todayTotals: totalsOf(allToday),
-    weekTotals: totalsOf(allWeek)
+    weekTotals: totalsOf(allWeek),
+    // 进出口关税设置与收入（粮券）：只读 state.policy.tradeTariff 与 state.tradeTariffs。
+    tariff: {
+      importPercent: state.policy?.tradeTariff?.importPercent ?? 0,
+      exportPercent: state.policy?.tradeTariff?.exportPercent ?? 0,
+      maximumPercent: content.rules.tradeTariffMaximumPercent ?? 50,
+      thisYearVoucher: round2((state.tradeTariffs?.byYear?.[state.year] || 0) / voucherScale),
+      cumulativeVoucher: round2((state.tradeTariffs?.cumulativeVoucherUnits || 0) / voucherScale)
+    }
   };
 }

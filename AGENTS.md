@@ -55,14 +55,14 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 家庭 | 居民以户为单位，有库存、粮券、岗位、舒心值 |
 | 救济 | 政策页一个开关：口粮不足 7 天的家庭补到 14 天（家庭先用自己的粮券兑粮）。口粮由镇库实物拨付；社保基金开启时由基金按价值结算，付不起记债。没有手动拨粮和邻里互助 |
 | 国债 | 粮券阶段可发，玩家定总额/期限/固定利率；发行当天住户和银行按闲钱认购 |
-| 外镇 | 档案在 `content/outside-towns.js`，算法共用 `systems/outside-town.js`（状态 `state.outsideTowns[id]`）。每天按人口自产/消耗各商品、吃口粮；进口品（盐、木材、酒、布）存货不足 3 年用量都按正常价收，超过 3 年才压价，繁荣度越低越肯出高价；自产外卖品（面粉、面包）按库存比目标定价；买卖价差随关系分收窄，大单逐段计价，没有套利。繁荣度跟随供应满足率；人口只增不减（每年 0.5%—3%，随繁荣度），口粮不足的年份停止增长、每年开垦新耕地，秋收入库。只用口粮储备以上的小麦付款。外贸房在岗才能交易、签长协；没有关税。加新外镇 = 加一份档案 |
-| 运力 / 贸易行 | `systems/logistics.js` 管运力池（外贸房基础 + 物流中心 + 码头），所有对外镇的货都要 `takeFreightCapacity`；镇里自己的货不付运费。贸易中心的贸易行是 kind `trade` 的店铺（`systems/trading-houses.js`），自己做进出口、付运费给镇库。河岸地块只建码头和外贸房。详见 `docs/TRADE.md` |
+| 外镇 | 档案在 `content/outside-towns.js`，算法共用 `systems/outside-town.js`（状态 `state.outsideTowns[id]`）。每天按人口自产/消耗各商品、吃口粮；进口品（盐、木材、酒、布）存货不足 3 年用量都按正常价收，超过 3 年才压价，繁荣度越低越肯出高价；自产外卖品（面粉、面包）按库存比目标定价；买卖价差随关系分收窄，大单逐段计价，没有套利。繁荣度跟随供应满足率；人口只增不减（每年 0.5%—3%，随繁荣度），口粮不足的年份停止增长、每年开垦新耕地，秋收入库。只用口粮储备以上的小麦付款。外贸房在岗才能交易、签长协。关税只对贸易行征收（`trading-houses.js` 的 `tradeTariffRate`，见 `docs/TRADE.md`），镇里自己的外贸与长协不收。加新外镇 = 加一份档案 |
+| 运力 / 贸易行 | `systems/logistics.js` 管运力池（外贸房基础 + 物流中心 + 码头），所有对外镇的货都要 `takeFreightCapacity`；镇里自己的货不付运费。贸易中心的贸易行是 kind `trade` 的店铺（`systems/trading-houses.js`），自己做进出口（偏向出口，进口利润门槛更高）、付运费和关税给镇库，像商业街店铺一样自己增减店员。河岸地块只建码头和外贸房。详见 `docs/TRADE.md` |
 | 再分配 | `systems/redistribution.js`：富人税（人均家底三档超额累进，每 30 天）、遗产税（年终按去世成年人份额）、整户无人家产归镇库；基尼与逐年曲线在 `selectors/inequality.js`。社保由雇主替员工交（`socialSecurity.employerSharePercent`，岗位 → 雇主映射在 `social-security.js`）。服务可设 `minAffluence`（戏园只有宽裕人家去）。详见 `docs/REDISTRIBUTION.md` |
 | 整户无人 | 家产归镇库（`redistribution.js` 的 `escheatHousehold`）；别墅退回空置再卖；开的店不清算，由本店商人 → 店员 → 家底最厚的一户接手（`shops.js` 的 `transferShopOwnership`），旧档里的孤儿店在日结店铺步骤里自动接手 |
 | 社保基金 | 独立钱包（支付账户 `social`），操作入口在社保局建筑。养老金、失业金由基金付，不够时镇库垫付并记为基金欠国库的债；镇库注资也记债，基金可还款；基金可买卖上市公司股票（`company.fundShares`）并分红 |
 
 | 产业 | 有 `industryTier` 的建筑（0 原料：伐木场/盐场/棉田，mod 的茶园/陶土坑/桑园；1 加工：磨坊/酒坊/织坊/陶窑；2 成品：面包房）。镇营加工（有原料投入、或配方标 `demandGated` 的）按市场需求减产：批发市场存够 30 天销量就停（`selectors/production.js` 的 `townOutputGate`），磨坊、酒坊不把镇库小麦用到 180 天口粮以下。所有"哪些建筑能民营/成立公司/设生产税"都由 `content/buildings.js` 的 `industryTypeIds` / `isIndustryType` 推导，经营计划从下游往上游排。加新产业 = 加 item + recipe + 带 industryTier 的建筑 |
-| 养殖基地 / 时代广场 | 都是"店铺"的宿主建筑（建筑定义带 `shopHost.slotsPerLevel`），复用店铺的店主、商人、店员、工资、租金、利润税、清算。养殖场是 `kind: "farm"` 的店铺（`systems/livestock.js` 每天喂麦出肉，直供综合商店 `buyFromFarms`，余量进批发市场）；时代广场是一个集体集市（`kind: "stall"`、`collective: true` 的店铺，不属于某一户；`systems/stalls.js` 按销量增减摆摊人数，只卖 `householdGoods`，每人每日 25 斤，利润每天按人头 ×0.8—1.2 随机分给摆摊家庭） |
+| 养殖基地 / 时代广场 | 都是"店铺"的宿主建筑（建筑定义带 `shopHost.slotsPerLevel`），复用店铺的店主、商人、店员、工资、租金、利润税、清算。养殖场是 `kind: "farm"` 的店铺（`systems/livestock.js` 每天喂麦出肉，直供综合商店 `buyFromFarms`，余量进批发市场；`systems/farm-pricing.js` 按存货自主定价、存货够 7 天停养，售价不低于饲料加人工成本）；时代广场是一个集体集市（`kind: "stall"`、`collective: true` 的店铺，不属于某一户；`systems/stalls.js` 按销量增减摆摊人数，只卖 `householdGoods`，每人每日 25 斤，利润每天按人头 ×0.8—1.2 随机分给摆摊家庭） |
 | 家底 / 宽裕度 | `systems/household-budget.js`：家底 = 粮券 + 留够到下次秋收再加 30 天口粮后多出的小麦；宽裕度 = √(人均家底/参照值)，封顶 3。日用品数量、主食里面粉面包的比例、服务预算都由它决定（`rules.householdBudget`）。当天缓存不进存档，同一天内改了家底要 `invalidateHouseholdBudgets` |
 | 日用品 | 酒、布、鸡鸭鹅猪肉（茶叶、陶器在 mod 里）：`rules.householdGoods` 配置正常人家的年人均量和收入弹性，实际量 = 标准量 × 宽裕度^弹性；主食和盐之后到综合商店买，用了加舒心值（多用边际递减），没有不扣分（`systems/goods-demand.js`）。后加的零售商品标 `optionalRetail`，镇上有货才参与商店试进货与资金储备 |
 

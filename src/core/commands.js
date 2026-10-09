@@ -353,6 +353,20 @@ export function setShopProfitTax(state, percent, content) {
   return { ok: true, value: state.policy.shopProfitTaxPercent };
 }
 
+// 进出口关税：patch = { importPercent?, exportPercent? }，0—tradeTariffMaximumPercent。
+export function setTradeTariff(state, patch, content) {
+  const max = content.rules.tradeTariffMaximumPercent ?? 50;
+  const tariff = { importPercent: 0, exportPercent: 0, ...(state.policy.tradeTariff || {}) };
+  for (const key of ["importPercent", "exportPercent"]) {
+    if (patch?.[key] === undefined) continue;
+    const value = Number(patch[key]);
+    if (!Number.isFinite(value) || value < 0 || value > max) return { ok: false, reason: `关税须为0%—${max}%` };
+    tariff[key] = Math.round(value * 100) / 100;
+  }
+  state.policy.tradeTariff = tariff;
+  return { ok: true, value: { ...tariff } };
+}
+
 export function openResidentShop(state, buildingId, typeId, householdId, content) {
   return openShop(state, buildingId, typeId, content, householdId || null);
 }

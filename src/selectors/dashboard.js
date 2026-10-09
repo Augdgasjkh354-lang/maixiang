@@ -27,6 +27,7 @@ import { WAGE_CONTROL_CIVIL_ROLE_IDS, privateWageRate, townWageRate } from "../s
 import { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } from "../systems/households.js";
 import { bondOutstandingVoucherUnits } from "../systems/bonds.js";
 import { stallSquareSummaries, shopSummaries } from "../systems/shops.js";
+import { farmSalePriceVoucher, farmUnitCostVoucher } from "../systems/farm-pricing.js";
 import { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFeedback, PURCHASE_PRICE_FLOOR_RATIO } from "../systems/wholesale-market.js";
 import { selectOutsideTownView } from "../systems/outside-town.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
@@ -180,6 +181,25 @@ function industryProductivityRows(state, content) {
       maxPercent: PRODUCTIVITY_MAX_PERCENT
     };
   });
+}
+
+// 养殖场自主定价（只读派生，不写 state）：卖给商店的价、每斤成本、价格系数与原因、产出状态（暂停出栏 / 缺饲料）。
+function withFarmPricing(state, row, content) {
+  if (row.kind !== "farm" || !row.farm) return row;
+  const source = state.shops?.[row.id];
+  if (!source) return row;
+  const itemId = row.farm.productItemId;
+  return {
+    ...row,
+    farm: {
+      ...row.farm,
+      salePriceVoucher: farmSalePriceVoucher(state, source, content),
+      unitCostVoucher: farmUnitCostVoucher(state, source, content),
+      priceFactor: Number(source.pricing?.priceFactor?.[itemId]) > 0 ? Number(source.pricing.priceFactor[itemId]) : 1,
+      pricingReason: source.pricing?.reason || "",
+      outputStatus: source.outputReason || source.statusReason || ""
+    }
+  };
 }
 
 export function selectDashboard(state, content, selection) {
@@ -398,7 +418,7 @@ export function selectDashboard(state, content, selection) {
   const satisfactionChange = needResidents && recentSat.length > 1
     ? state.satisfaction - recentSat[Math.max(0, recentSat.length - 8)].value
     : 0;
-  const shops = (full || needPolicy || needSite) ? shopSummaries(state, content) : [];
+  const shops = (full || needPolicy || needSite) ? shopSummaries(state, content).map(function (row) { return withFarmPricing(state, row, content); }) : [];
   const stallSquares = (full || needPolicy || needSite) ? stallSquareSummaries(state, content, shops) : [];
   const companies = needBusiness ? Object.values(state.companies || {}).map(company => {
     const summary = companySummary(state, company, content);

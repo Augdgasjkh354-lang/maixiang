@@ -5,7 +5,10 @@
 //   进口：向外镇买（付店里的小麦）→ 按批发收购价卖给批发市场（市场付粮券）。
 //         进口量封顶：市场存量不超过 30 天销量（至少 20 斤）。
 //   运费：每运一斤付 freightVoucherPerJin 给镇库（同一条运费规则）。
-//   利润率 = (卖价 − 买价 − 运费) / (买价 + 运费) 须达到 tradeHouseTargetMarginPercent 才做。
+//   关税：出口按外镇付的货款收 policy.tradeTariff.exportPercent%，进口按付给外镇的货款收 importPercent%，交镇库。
+//   利润率 = (卖价 − 买价 − 运费 − 关税) / (买价 + 运费 [+ 进口关税]) 须达到门槛才做：
+//   出口 tradeHouseTargetMarginPercent，进口 tradeHouseImportMarginPercent（更高，偏向出口）。
+//   排序时出口的利润率乘 tradeHouseExportPriority，同等条件先做出口。
 //   成交量：min(店员 × tradeHouseJinPerClerk, 当日运力 × tradeHouseCapacityShare 按店员数分的份额)，实际运力从运力池扣。
 //   只在外贸房在岗时做买卖（与镇长手动外贸同一条规则）。
 //
@@ -50,7 +53,7 @@ export function tradeHouseStaff(state, shop) {
 function blankTradeRow(serial, staff, shareJin, budgetJin) {
   return {
     serial, staff, shareJin: round2(shareJin), budgetJin: round2(budgetJin), usedJin: 0, trades: 0,
-    exportJin: {}, importJin: {}, revenueVoucherUnits: 0, cogsVoucherUnits: 0, freightVoucherUnits: 0, profitVoucherUnits: 0
+    exportJin: {}, importJin: {}, revenueVoucherUnits: 0, cogsVoucherUnits: 0, freightVoucherUnits: 0, tariffVoucherUnits: 0, profitVoucherUnits: 0
   };
 }
 
@@ -60,6 +63,24 @@ function serialOf(state, content) {
 
 function owner(shop) {
   return `shop:${shop.id}`;
+}
+
+// 关税交镇库；付不起的部分记为店铺欠税（与利润税同一笔欠款，之后照常追缴），钱不凭空消失。
+function payTariff(state, shop, tariffUnits, label, content) {
+  if (!(tariffUnits > 0)) return 0;
+  const result = settleMonetaryPayment(state, owner(shop), "town", currentPaymentComposition(state, tariffUnits), content,
+    "trade_tariff", `${shop.name}${label}关税`, { requireFull: false });
+  const paid = result.ok ? result.paidValueUnits || 0 : 0;
+  if (paid < tariffUnits) {
+    shop.liabilities ||= {};
+    shop.liabilities.taxVoucherUnits = (shop.liabilities.taxVoucherUnits || 0) + (tariffUnits - paid);
+  }
+  addBookValue(shop, "tariffVoucherUnits", tariffUnits);
+  state.tradeTariffs ||= { cumulativeVoucherUnits: 0, byYear: {} };
+  state.tradeTariffs.byYear ||= {};
+  state.tradeTariffs.cumulativeVoucherUnits = (state.tradeTariffs.cumulativeVoucherUnits || 0) + tariffUnits;
+  state.tradeTariffs.byYear[state.year] = (state.tradeTariffs.byYear[state.year] || 0) + tariffUnits;
+  return tariffUnits;
 }
 
 // 单调谓词的最大解：pred(0+) 为真，返回 [0, hi] 中最大的 x 使 pred(x) 为真（二分，36 次足够精确到百万分之一斤）。
@@ -95,8 +116,23 @@ function freightUnitsOf(qJin, freight, content) {
   return Math.ceil(qJin * freight * currencyScale(content) - 1e-9);
 }
 
-function marginTarget(content) {
-  return 1 + (content.rules.tradeHouseTargetMarginPercent ?? 10) / 100;
+function marginTarget(content, direction = "export") {
+  const percent = direction === "import"
+    ? content.rules.tradeHouseImportMarginPercent ?? content.rules.tradeHouseTargetMarginPercent ?? 10
+    : content.rules.tradeHouseTargetMarginPercent ?? 10;
+  return 1 + percent / 100;
+}
+
+// 关税税率（0—1）。只对贸易行生效；镇长手动外贸与长期协定是镇里自己的货，不对自己收税。
+export function tradeTariffRate(state, direction) {
+  const tariff = state.policy?.tradeTariff || {};
+  const percent = Number(direction === "import" ? tariff.importPercent : tariff.exportPercent);
+  return Number.isFinite(percent) && percent > 0 ? Math.min(100, percent) / 100 : 0;
+}
+
+// 关税（粮券单位）：按货款价值（斤小麦 = 券）向上取整。
+function tariffUnitsOf(valueJin, rate, content) {
+  return rate > 0 ? Math.ceil(valueJin * rate * currencyScale(content) - 1e-9) : 0;
 }
 
 // 外镇候选：每个未封关的外镇、每样它做的商品；出口（我们卖）一律有，进口（我们买）只看它愿意卖的。
@@ -123,11 +159,11 @@ function quickMarginRatio(state, content, cand) {
   if (cand.direction === "export") {
     const price = wholesaleUnitPrice(state, cand.itemId, content);
     if (!(price > 0)) return null;
-    return unitPrice(cand.town, cand.good, "sell") / (price + freight) - 1;
+    return unitPrice(cand.town, cand.good, "sell") * (1 - tradeTariffRate(state, "export")) / (price + freight) - 1;
   }
   const price = wholesalePurchasePrice(state, cand.itemId, content);
   if (!(price > 0)) return null;
-  return price / (unitPrice(cand.town, cand.good, "buy") + freight) - 1;
+  return price / (unitPrice(cand.town, cand.good, "buy") * (1 + tradeTariffRate(state, "import")) + freight) - 1;
 }
 
 // 出口计划：返回 { units, qJin } 或 null。只读，不改 state。
@@ -138,8 +174,9 @@ function planExport(state, content, run, cand) {
   if (!(price > 0)) return null;
   const freight = freightVoucherPerJin(state, content);
   const cost = price + freight;
-  const minSell = cost * marginTarget(content);
-  if (unitPrice(town, good, "sell") < minSell) return null;
+  const keep = 1 - tradeTariffRate(state, "export");
+  const minSell = cost * marginTarget(content, "export");
+  if (unitPrice(town, good, "sell") * keep < minSell) return null;
   const market = ensureWholesaleMarket(state, content);
   const stockJin = nonNegative(market.inventory?.[itemId]) / scale;
   // 至少留 townOutputMinStockJin（200 斤）：还没有销量记录时也不把批发市场卖空。
@@ -147,7 +184,7 @@ function planExport(state, content, run, cand) {
   // 保本地供应：存量不到 reserve 天销量时不出口，只出超出的余量。
   if (stockJin - reserveJin < MIN_JIN) return null;
   const cashJin = maximumPayableValueUnits(state, owner(run.shop), content) / (currencyScale(content) * cost);
-  const avgSell = x => quoteValue(town, good, "sell", x) / x;
+  const avgSell = x => quoteValue(town, good, "sell", x) * keep / x;
   let q = Math.min(stockJin - reserveJin, run.remainingJin, freightPoolJin(state), cashJin);
   q = largestWhere(q, x => avgSell(x) >= minSell);
   q = affordableSellQuantity(town, profile, good, q);
@@ -163,8 +200,9 @@ function planImport(state, content, run, cand) {
   const price = wholesalePurchasePrice(state, itemId, content);
   if (!(price > 0)) return null;
   const freight = freightVoucherPerJin(state, content);
-  const maxCost = price / marginTarget(content);
-  if (unitPrice(town, good, "buy") + freight > maxCost) return null;
+  const maxCost = price / marginTarget(content, "import");
+  const duty = 1 + tradeTariffRate(state, "import");
+  if (unitPrice(town, good, "buy") * duty + freight > maxCost) return null;
   const market = ensureWholesaleMarket(state, content);
   const stockJin = nonNegative(market.inventory?.[itemId]) / scale;
   const avgSoldJin = localAvgSoldJin(state, content, itemId);
@@ -175,15 +213,17 @@ function planImport(state, content, run, cand) {
   const wheatHeld = nonNegative(run.shop.cashWheatUnits);
   const buyAvg = x => quoteValue(town, good, "buy", x) / x;
   const payUnitsOf = x => Math.round(quoteValue(town, good, "buy", x) * scale);
-  // 小麦：货款小麦 + 运费折算的小麦都要在店里（支付的运费可能只用小麦）。
-  const wheatOk = x => payUnitsOf(x) + wheatUnitsForVoucherUnits(freightUnitsOf(x, freight, content), content, "ceil") <= wheatHeld;
+  // 小麦：货款小麦 + 运费、关税折算的小麦都要在店里（运费、关税可能只用小麦付）。
+  const tariffRate = tradeTariffRate(state, "import");
+  const wheatOk = x => payUnitsOf(x) + wheatUnitsForVoucherUnits(freightUnitsOf(x, freight, content) + tariffUnitsOf(quoteValue(town, good, "buy", x), tariffRate, content), content, "ceil") <= wheatHeld;
   let q = Math.min(roomJin, sellableStock(town, good), run.remainingJin, freightPoolJin(state), townCashJin);
-  q = largestWhere(q, x => buyAvg(x) + freight <= maxCost);
+  q = largestWhere(q, x => buyAvg(x) * duty + freight <= maxCost);
   q = largestWhere(q, wheatOk);
   const units = Math.floor(q * scale + 1e-6);
   if (units < 1) return null;
   const qJin = units / scale;
-  return { units, qJin, wheatPayUnits: payUnitsOf(qJin), freightUnits: freightUnitsOf(qJin, freight, content), sellValueUnits: valueOf(units, price, content) };
+  return { units, qJin, wheatPayUnits: payUnitsOf(qJin), freightUnits: freightUnitsOf(qJin, freight, content),
+    tariffUnits: tariffUnitsOf(quoteValue(town, good, "buy", qJin), tariffRate, content), sellValueUnits: valueOf(units, price, content) };
 }
 
 // 出口成交：先买货进店，再付运费，再把货交给外镇、收小麦。运费付不起时货留在店里（不凭空消失）。
@@ -213,18 +253,19 @@ function executeExport(state, content, run, cand, plan) {
   shop.cashWheatUnits = nonNegative(shop.cashWheatUnits) + valueWheatUnits;
   const revenue = voucherUnitsForWheatUnits(valueWheatUnits, content, "floor");
   const paidFreight = freight.paidValueUnits || 0;
+  const tariff = payTariff(state, shop, tariffUnitsOf(valueJin, tradeTariffRate(state, "export"), content), `向${profile.name}出口${label}`, content);
   addBookValue(shop, "revenueVoucherUnits", revenue);
   addBookValue(shop, "cogsVoucherUnits", taken.costUnits);
   addBookValue(shop, "freightVoucherUnits", paidFreight);
   addBookMap(shop, "soldUnits", itemId, taken.units);
-  applyProfit(shop, revenue - taken.costUnits - paidFreight);
+  applyProfit(shop, revenue - taken.costUnits - paidFreight - tariff);
   recordTradeStats(town, "sell", valueJin);
   recordLedger(state, {
     type: "trade_house_export", transactionId: makeTransactionId(state), source: owner(shop), destination: "outside_town",
     itemId, quantityUnits: taken.units, qeqUnits: 0,
     reason: `${shop.name}向${profile.name}出口${label}${round2(qJin)}斤，收小麦${valueJin}斤`
   }, content);
-  return { ok: true, qJin: taken.units / scale, profitVoucherUnits: revenue - taken.costUnits - paidFreight, revenue, cogs: taken.costUnits, freight: paidFreight, direction: "export" };
+  return { ok: true, qJin: taken.units / scale, profitVoucherUnits: revenue - taken.costUnits - paidFreight - tariff, revenue, cogs: taken.costUnits, freight: paidFreight, tariff, direction: "export" };
 }
 
 // 进口成交：付小麦给外镇，再付运费，货入店，再按批发收购价卖给批发市场。
@@ -241,7 +282,8 @@ function executeImport(state, content, run, cand, plan) {
   const sellValue = valueOf(plan.units, price, content);
   // 预检（不动钱）：镇库付得起收购款；店里的小麦付得起货款加运费。
   if (!quoteMonetaryPayment(state, "town", currentPaymentComposition(state, sellValue), content).full) return null;
-  if (payUnits + wheatUnitsForVoucherUnits(freightUnits, content, "ceil") > nonNegative(shop.cashWheatUnits)) return null;
+  const tariffUnits = tariffUnitsOf(valueJin, tradeTariffRate(state, "import"), content);
+  if (payUnits + wheatUnitsForVoucherUnits(freightUnits + tariffUnits, content, "ceil") > nonNegative(shop.cashWheatUnits)) return null;
   // ① 小麦付给外镇（实物，外镇没有账户）。
   shop.cashWheatUnits = nonNegative(shop.cashWheatUnits) - payUnits;
   // ② 运费付镇库；失败则把小麦退回（没有任何东西丢失）。
@@ -251,6 +293,8 @@ function executeImport(state, content, run, cand, plan) {
     shop.cashWheatUnits += payUnits;
     return null;
   }
+  // ②' 进口关税交镇库（付不起的记欠税）。
+  const tariff = payTariff(state, shop, tariffUnits, `自${profile.name}进口${label}`, content);
   // ③ 外镇发货：库存减少、小麦增加；运力从池子扣。
   takeFreightCapacity(state, qJin, content);
   town.stocks[itemId] = round2(town.stocks[itemId] - qJin);
@@ -272,13 +316,13 @@ function executeImport(state, content, run, cand, plan) {
   addBookValue(shop, "cogsVoucherUnits", taken.costUnits);
   addBookValue(shop, "freightVoucherUnits", paidFreight);
   addBookMap(shop, "soldUnits", itemId, taken.units);
-  applyProfit(shop, sellValue - taken.costUnits - paidFreight);
+  applyProfit(shop, sellValue - taken.costUnits - paidFreight - tariff);
   recordLedger(state, {
     type: "trade_house_import", transactionId: makeTransactionId(state), source: "outside_town", destination: owner(shop),
     itemId, quantityUnits: plan.units, qeqUnits: 0,
     reason: `${shop.name}自${profile.name}进口${label}${round2(qJin)}斤，付小麦${valueJin}斤，按批发收购价卖给批发市场`
   }, content);
-  return { ok: true, qJin, profitVoucherUnits: sellValue - taken.costUnits - paidFreight, revenue: sellValue, cogs: taken.costUnits, freight: paidFreight, direction: "import" };
+  return { ok: true, qJin, profitVoucherUnits: sellValue - taken.costUnits - paidFreight - tariff, revenue: sellValue, cogs: taken.costUnits, freight: paidFreight, tariff, direction: "import" };
 }
 
 function pushRow(row, cand, result) {
@@ -291,6 +335,7 @@ function pushRow(row, cand, result) {
   row.revenueVoucherUnits += result.revenue;
   row.cogsVoucherUnits += result.cogs;
   row.freightVoucherUnits += result.freight;
+  row.tariffVoucherUnits = (row.tariffVoucherUnits || 0) + (result.tariff || 0);
   row.profitVoucherUnits += result.profitVoucherUnits;
 }
 
@@ -309,12 +354,13 @@ export function settleTradingHouses(state, content) {
     const budgetJin = operational ? Math.min(staff * (content.rules.tradeHouseJinPerClerk ?? 100), shareJin) : 0;
     return { shop, remainingJin: budgetJin, row: blankTradeRow(serial, staff, shareJin, budgetJin) };
   });
-  const margin = marginTarget(content);
+  const exportPriority = content.rules.tradeHouseExportPriority ?? 1;
   if (runs.some(run => run.remainingJin >= MIN_JIN) && freightPoolJin(state) >= MIN_JIN) {
     const ranked = candidatesFor(state, content)
       .map(cand => ({ cand, ratio: quickMarginRatio(state, content, cand) }))
-      .filter(row => row.ratio !== null && row.ratio + 1 >= margin - 1e-9)
-      .sort((a, b) => b.ratio - a.ratio);
+      .filter(row => row.ratio !== null && row.ratio + 1 >= marginTarget(content, row.cand.direction) - 1e-9)
+      .map(row => ({ ...row, rank: row.cand.direction === "export" ? row.ratio * exportPriority : row.ratio }))
+      .sort((a, b) => b.rank - a.rank);
     for (const { cand } of ranked) {
       for (const run of runs) {
         if (run.remainingJin < MIN_JIN || freightPoolJin(state) < MIN_JIN) continue;
@@ -330,6 +376,6 @@ export function settleTradingHouses(state, content) {
   return runs.map(run => {
     run.shop.tradeLog = [...(Array.isArray(run.shop.tradeLog) ? run.shop.tradeLog : []), run.row].slice(-HISTORY_LIMIT);
     return { shopId: run.shop.id, budgetJin: run.row.budgetJin, usedJin: run.row.usedJin, trades: run.row.trades,
-      profitVoucherUnits: run.row.profitVoucherUnits, freightVoucherUnits: run.row.freightVoucherUnits };
+      profitVoucherUnits: run.row.profitVoucherUnits, freightVoucherUnits: run.row.freightVoucherUnits, tariffVoucherUnits: run.row.tariffVoucherUnits };
   });
 }

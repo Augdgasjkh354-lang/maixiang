@@ -47,8 +47,11 @@ export const RULES = Object.freeze({
   dockFreightVoucherPerJin: 0.03,
   // 贸易中心 / 贸易行（docs/TRADE.md「贸易中心与贸易行」）：贸易行每天按店员数定成交量，另受当日运力的份额限制。
   tradeHouseTargetMarginPercent: 10, // 单斤利润率（卖价 − 买价 − 运费）达到这个百分比（相对买价+运费）才做
-  tradeHouseJinPerClerk: 100, // 每名店员（含商人）每天可成交的斤数
-  tradeHouseCapacityShare: 0.5, // 各贸易行合计最多占当日运力的这个比例，按店员数分配；另一半留给镇里
+  tradeHouseImportMarginPercent: 25, // 进口的利润率门槛（高于出口，贸易行偏向出口）
+  tradeHouseExportPriority: 1.5, // 排序时出口利润率乘这个系数，同等条件先做出口
+  tradeHouseJinPerClerk: 300, // 每名店员（含商人）每天可成交的斤数
+  tradeHouseCapacityShare: 0.8, // 各贸易行合计最多占当日运力的这个比例，按店员数分配；其余留给镇里
+  tradeTariffMaximumPercent: 50, // 进出口关税上限（%）；默认 0，在贸易中心设
   tradeHouseExportMinStockDays: 10, // 批发市场存量不到这么多天销量时，不出口这样货（保本地供应）
   tradeHouseImportShortageDays: 3, // 批发市场存量不到这么多天销量时视为紧缺（界面标记用）
   agricultureTaxDefaultPercent: 40, // 用户 0.1.11 调优（原 50）
@@ -177,6 +180,7 @@ export const RULES = Object.freeze({
   shopWageRaiseProfitShare: 0.5,
   shopWageSlackFactor: 0.85,
   shopWageTightFactor: 1.2,
+  farmStockDays: 7, // 养殖场存货够卖这么多天就停养；超过即算积压降价（systems/farm-pricing.js）
   // 民营工资（systems/private-wage.js）：参照镇营同岗位实际日薪，失业松紧系数与商店共用。
   privateWageAdjustIntervalDays: 15,
   privateWageStepPercent: 10,
