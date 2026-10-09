@@ -24,6 +24,27 @@ function byteLength(text) {
   catch { return value.length * 2; }
 }
 
+// 每条存档记录的字节数缓存，按记录对象引用挂载（WeakMap）。记录只会整体替换、不会原地修改，
+// 记录被替换或删除后缓存随之失效，且不会额外持有字符串。
+const recordByteCounts = new WeakMap();
+function countsOf(record) {
+  let counts = recordByteCounts.get(record);
+  if (!counts) { counts = {}; recordByteCounts.set(record, counts); }
+  return counts;
+}
+function recordFieldBytes(record, field) {
+  const counts = countsOf(record);
+  if (counts[field] === undefined) counts[field] = byteLength(record[field] || "");
+  return counts[field];
+}
+// 新记录的 backup 就是旧记录的 primary（或旧 backup），字节数已知时直接沿用，省一次 UTF-8 编码。
+function seedBackupBytes(record, oldRecord, backup) {
+  if (!oldRecord || typeof backup !== "string") return;
+  const old = countsOf(oldRecord);
+  const known = backup === oldRecord.primary ? old.primary : backup === oldRecord.backup ? old.backup : undefined;
+  if (known !== undefined) countsOf(record).backup = known;
+}
+
 function nameOf(value) {
   const name = String(value ?? "").trim();
   if (!name) throw new SavePersistenceError("validation", "请输入存档名称。");
@@ -169,16 +190,17 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
     let primaryBytes = 0;
     let backupBytes = 0;
     for (const record of slotRecords.values()) {
-      primaryBytes += byteLength(record.primary || "");
-      backupBytes += byteLength(record.backup || "");
+      primaryBytes += recordFieldBytes(record, "primary");
+      backupBytes += recordFieldBytes(record, "backup");
     }
     return { primaryBytes, backupBytes, totalBytes: primaryBytes + backupBytes, slotCount: slotRecords.size };
   }
 
+  // pendingBytes 可以是计算函数：只在出错时才统计字节数，成功路径不做 UTF-8 编码。
   function decorate(error, step, pendingBytes = 0) {
     const classified = safeError(error, "写入 IndexedDB");
     classified.step = classified.step || step;
-    classified.pendingBytes = Number.isFinite(classified.pendingBytes) ? classified.pendingBytes : pendingBytes;
+    if (!Number.isFinite(classified.pendingBytes)) classified.pendingBytes = typeof pendingBytes === "function" ? pendingBytes() : pendingBytes;
     classified.storageUsage = { indexedDB: indexedStats() };
     return classified;
   }
@@ -233,7 +255,8 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
     const savedAt = new Date().toISOString();
     const primary = encode(id, nameOf(name), state, savedAt, content);
     const nextCatalog = activate ? { ...catalog, activeId: id } : catalog;
-    const pendingBytes = byteLength(primary) + (activate ? byteLength(stringify(nextCatalog)) : 0);
+    const catalogBytes = activate ? byteLength(stringify(nextCatalog)) : 0;
+    const pendingBytes = () => byteLength(primary) + catalogBytes;
     let tx;
     try {
       tx = db.transaction([SLOT_STORE, META_STORE], "readwrite");
@@ -269,18 +292,19 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
     const savedAt = new Date().toISOString();
     const primary = encode(id, oldMeta.name, state, savedAt, content);
     const record = { ...oldRecord, id, primary, backup, updatedAt: savedAt };
-    const pendingBytes = byteLength(primary) + byteLength(backup || "");
     try {
       await putOne(db, SLOT_STORE, record);
       const readBack = await readOne(db, SLOT_STORE, id);
-      // 读回内容与刚编码的 primary 逐字相同，即已通过校验，无需再 parse 一遍整份存档。
+      // 回读校验：与刚编码的 primary、backup 逐字比较，不再 parse 整份存档。字符串相等判断是引擎内的
+      // 整块内存比对（同样长度的 2.4MB 文本约 1ms），能发现截断与任意字节改动，比重算校验和更便宜且更严格。
       if (!readBack || readBack.primary !== primary || readBack.backup !== backup) throw new Error("存档写入后读回校验失败");
-      slotRecords.set(id, readBack);
-      // 复用读回的同一份字符串，不额外占一份内存。
-      metaCache.set(id, { primary: readBack.primary, meta: { ...oldMeta, savedAt } });
+      // 校验通过后改用本地对象（与回读副本逐字相同），两份回读副本随即可回收。
+      seedBackupBytes(record, oldRecord, backup);
+      slotRecords.set(id, record);
+      metaCache.set(id, { primary, meta: { ...oldMeta, savedAt } });
       return { id, name: oldMeta.name, savedAt, state, recovered: false };
     } catch (error) {
-      throw decorate(error, "save_current_write_verify", pendingBytes);
+      throw decorate(error, "save_current_write_verify", () => byteLength(primary) + byteLength(backup || ""));
     }
   }
 
@@ -309,6 +333,8 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
       const readBack = await readOne(db, SLOT_STORE, id);
       if (!readBack || readBack.primary !== primary) throw new Error("重命名写入后读回校验失败");
       slotRecords.set(id, readBack);
+      // primary 已换成新文本，旧文本不再需要；删掉缓存以免它被继续持有。
+      metaCache.delete(id);
       return { ...decode(primary, id, content), recovered: false };
     } catch (error) {
       throw decorate(error, "rename_slot_write_verify", byteLength(primary));
