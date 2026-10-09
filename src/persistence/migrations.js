@@ -1,3 +1,4 @@
+import { splitOversizedHouseholds } from "../systems/household-split.js";
 // 读档：新版本读旧存档时自动补默认值、按改名清单搬字段、修复坏数据（见 save-compat.js）。
 // 存档版本号只在"彻底不兼容"时才加一；日常加字段、加系统都不用改版本号，也不用写迁移代码。
 // 只拒读两种存档：来自更新版本的，以及早于 MIN_SAVE_VERSION 的远古存档。
@@ -47,6 +48,10 @@ export function migrateSave(raw, content) {
   rehydrate(state, definitions);
   // 旧存档里按等级拆开的建筑整栋换主人（docs/OWNERSHIP.md 旧存档换算）；必须在校验之前，整栋已是空操作。
   convertSplitOwnership(state, definitions, report);
+  rehydrate(state, definitions);
+  // 旧存档的大户（开局 250 户、每户十几人）读档时一次分到每户不超过 8 人；已分好的存档是空操作。
+  const split = splitOversizedHouseholds(state, definitions, { recordEvents: false });
+  if (split.splits > 0) report.households = [`旧存档大户已分家：新增${split.splits}户`];
   rehydrate(state, definitions);
 
   const validate = candidate => validateState(rehydrate(candidate, definitions), definitions).errors;

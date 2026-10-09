@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { simulation } from "../src/engine.js";
 import { CONTENT } from "../src/content/index.js";
 import { validateState } from "../src/core/validation.js";
-import { householdList, isActiveHousehold } from "../src/systems/households.js";
+import { householdList, householdWorkingAge, isActiveHousehold } from "../src/systems/households.js";
 import { createIndependentCompany } from "../src/systems/companies.js";
 import { isWholeBuilding } from "../src/systems/ownership-migrate.js";
 import { jobKeyForBuilding, privateJobKeyForBuilding } from "../src/selectors/labor.js";
@@ -281,12 +281,13 @@ test("整栋换主人时在岗人数搬到新主人的岗位键", () => {
   mill.privateOwners = [h1.id];
   const privateKey = privateJobKeyForBuilding(mill.id, "millers");
   const townKey = jobKeyForBuilding(mill.id, "millers");
-  // 户内劳力 7 人：农活留 2 人，5 人在民营磨坊岗位上（总数不超过劳力）。
-  h1.jobs = { ...(h1.jobs || {}), farmers: 2, [privateKey]: 5 };
+  // 户内劳力 3 人（660 户开局，每户约 5 人，劳力最多 3）：3 人全部在民营磨坊岗位上（总数不超过劳力）。
+  assert.ok(householdWorkingAge(h1) >= 3, "夹具需要一户至少 3 个劳力");
+  h1.jobs = { ...(h1.jobs || {}), farmers: 0, [privateKey]: 3 };
   const loaded = loadOldSave(clone(state));
   assertValid(loaded);
   const after = loaded.households.byId[h1.id].jobs || {};
-  assert.equal(after[townKey], 5, "镇营岗位接收在岗人数");
+  assert.equal(after[townKey], 3, "镇营岗位接收在岗人数");
   assert.equal(after[privateKey] || 0, 0, "民营岗位清空");
 });
 

@@ -5,6 +5,7 @@ import { issueTownVouchers, transferVouchers, voucherBalance, validateCurrencyIn
 import { grantResidentVouchers } from "./helpers-v16.js";
 import { settleTradingHouses, tradeTariffRate } from "../src/systems/trading-houses.js";
 import { prepareShopsForDay, shopClerkCount } from "../src/systems/shops.js";
+import { householdIdleWorkers, householdList } from "../src/systems/households.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -43,7 +44,10 @@ function tradeFixture(seed, { clerks = 10, pool = POOL_JIN } = {}) {
   assert.equal(simulation.configureWholesalePrice(state, "salt", 10).ok, true);
   state.wholesaleMarket.inventory.salt = 5000 * I;
   state.logistics.poolJin = pool;
-  const opened = simulation.openResidentShop(state, "tc1", "trading_house");
+  // 660 户时自动选店主只会挑到粮券最厚的一户，这里指定一户有空闲劳力的店主并给足粮券（启动资金 + 生活储备）。
+  const owner = householdList(state).find(h => householdIdleWorkers(h) > 0);
+  assert.equal(grantResidentVouchers(state, 5000, CONTENT, owner.id).ok, true);
+  const opened = simulation.openResidentShop(state, "tc1", "trading_house", owner.id);
   assert.equal(opened.ok, true, opened.reason);
   assert.equal(simulation.configureShopClerks(state, opened.shopId, clerks).ok, true);
   transferVouchers(state, "town", `shop:${opened.shopId}`, 20000 * V, CONTENT, "test", "测试：贸易行周转金");

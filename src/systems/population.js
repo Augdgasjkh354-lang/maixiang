@@ -1,3 +1,4 @@
+import { splitOversizedHouseholds } from "./household-split.js";
 import { binomial } from "../core/random.js";
 import { populationStats } from "../selectors/labor.js";
 import { reconcileEmployment } from "./employment.js";
@@ -115,6 +116,8 @@ export function advancePopulation(state, content) {
   syncShopEmployment(state, content);
   // 遗产税（有成年人去世的家庭）与家产归公（整户失效，全部归镇库 / 镇营）。
   const estates = settleYearEstates(state, content, estateSnapshot, householdChange.adultDeathsByHousehold);
+  // 分家：遗产按分家前的户结算完，再把超过 8 人的家庭拆开（systems/household-split.js）。
+  const householdSplits = splitOversizedHouseholds(state, content);
   assertHouseholdBandsMatchCohorts(state);
 
   const workersAtClose = populationStats(state).workers;
@@ -133,5 +136,5 @@ export function advancePopulation(state, content) {
     const cut = change.before - change.after;
     recordEvent(state, change.reason + "：" + jobName + "由" + change.before + "人调为" + change.after + "人" + (cut > 0 ? "，释放" + cut + "个岗位。" : "。"), content);
   }
-  return { births, deaths, marriages, releasedJobs, employmentAdjustments, laborChange, householdAllocation: householdChange, estates };
+  return { births, deaths, marriages, releasedJobs, employmentAdjustments, laborChange, householdAllocation: householdChange, estates, householdSplits };
 }

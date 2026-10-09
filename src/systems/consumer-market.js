@@ -74,7 +74,7 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
   // Snapshot direct household suppliers once, before resident demand is processed.
   // This lets private producers sell without a shop while preventing goods bought
   // earlier in the same demand pass from being re-sold as fresh supply.
-  if (!generalStoreOnly) for (const household of householdList(state).filter(isActiveHousehold)) {
+  if (!generalStoreOnly && options.excludeHouseholdSellers !== true) for (const household of householdList(state).filter(isActiveHousehold)) {
     const stock = household.inventory?.[itemId] || 0;
     if (stock <= 0) continue;
     let available = stock;

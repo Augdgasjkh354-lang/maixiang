@@ -13,9 +13,14 @@ function numericSuffix(id) {
 }
 
 function emptyHousehold(index, content) {
+  return createHousehold(index + 1, content);
+}
+
+// 新建一户空家庭（编号 number → id household-N，名"第N户"）。分家也用它。
+export function createHousehold(number, content) {
   return {
-    id: `household-${index + 1}`,
-    name: `第${index + 1}户`,
+    id: `household-${number}`,
+    name: `第${number}户`,
     ageBands: { children: 0, workers: 0, elders: 0 },
     jobs: {},
     inventory: emptyInventory(content),
@@ -54,8 +59,10 @@ export function isActiveHousehold(household) {
 }
 
 export function createInitialHouseholds(state, content) {
-  // 开局户数（默认 250，人口平均分入）；规模测试可调大，见 scripts/health-check.mjs --households。
-  const householdCount = Math.max(1, Math.floor(content.rules.initialHouseholdCount ?? 250));
+  // 开局户数：默认按人口 ÷ initialHouseholdSize（5 人一户）；initialHouseholdCount 可直接指定（规模测试用）。
+  const population = state.cohorts.reduce((sum, cohort) => sum + cohort.m + cohort.f, 0);
+  const householdCount = Math.max(1, Math.floor(content.rules.initialHouseholdCount
+    ?? Math.round(population / Math.max(1, content.rules.initialHouseholdSize ?? 5))));
   const households = Array.from({ length: householdCount }, (_, index) => emptyHousehold(index, content));
   const totals = { children: 0, workers: 0, elders: 0 };
   for (const cohort of state.cohorts) {

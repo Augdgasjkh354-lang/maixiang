@@ -148,7 +148,8 @@ test("食盐原子交易守恒，单独消费且居民粮储线会限购", () =>
   assert.equal(grantResidentVouchers(state, 20000, CONTENT, owner.id).ok, true);
   const opened = simulation.openResidentShop(state, street.id, "general", owner.id);
   assert.equal(opened.ok, true, opened.reason);
-  assert.equal(setJobCount(state, `shop:${opened.shopId}:clerk`, 5, CONTENT,
+  // 660 户（3300 人）每户需求很小，综合商店客流上限 = 人手 × 20：要卖满 10 斤需约 200 客，故雇 12 名店员。
+  assert.equal(setJobCount(state, `shop:${opened.shopId}:clerk`, 12, CONTENT,
     { type: "shop", id: opened.shopId }).ok, true);
   const shop = state.shops[opened.shopId];
   shop.inventory.salt = 10 * SCALE;

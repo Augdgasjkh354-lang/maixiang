@@ -152,7 +152,8 @@ test("只有富户去戏园：穷户从不成交，富户成交并计入营收�
   for (const h of [...rich, ...poor]) ensureHouseholdLife(h, CONTENT).day = {};
   let served = 0;
   for (let day = 0; day < 20; day += 1) {
-    for (const h of rich) setAffluence(state, h, 2.2);
+    // 660 户每户约 5 人：日家底预算 ≈ 0.35 × 宽裕度² × 人口，一张票 15 粮券，宽裕度 2.2 的小户付不起整张票，取封顶 3。
+    for (const h of rich) setAffluence(state, h, 3);
     for (const h of poor) setAffluence(state, h, 0.4);
     const result = serviceDay(state);
     served += result.servedUses?.theater || 0;

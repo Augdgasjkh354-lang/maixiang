@@ -42,7 +42,8 @@ function fundedHousehold(state, amount = 1000, exclude = new Set()) {
 test("v16初始家庭保持3300人口、1750劳动力和居民总财富汇总一致", () => {
   const state = legacyVoucherState();
   const households = householdList(state);
-  assert.equal(households.length, 250);
+  // 开局户数 = 人口 ÷ initialHouseholdSize（5 人一户）：3300 人 = 660 户。
+  assert.equal(households.length, 3300 / CONTENT.rules.initialHouseholdSize);
   assert.equal(state.households.members, undefined);
   // 开局数值调整（8cf03ae）：人口 1100→3300（未成年1050/劳动力1750/老年500）。
   assert.equal(households.reduce((sum, h) => sum + h.ageBands.children + h.ageBands.workers + h.ageBands.elders, 0), 3300);

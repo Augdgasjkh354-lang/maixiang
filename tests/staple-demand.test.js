@@ -10,8 +10,10 @@ import { householdList, setJobCount } from "../src/systems/households.js";
 import { grantResidentVouchers, setResidentInventoryJin } from "./helpers-v16.js";
 
 const SCALE = CONTENT.precision.inventoryUnitsPerJin;
-// 每日修缮木材：初始 250 户 × 7.3 斤/户年 ÷ 365 = 5 斤/日（正好整除，无结转）。
-const WOOD_DAY_UNITS = 5 * SCALE;
+// 每日修缮木材：户数 × 7.3 斤/户年 ÷ 365（开局户数随人口，660 户时为 13.2 斤/日，整除无结转）。
+function woodDayUnits(state) {
+  return Math.round(householdList(state).length * CONTENT.rules.houseRepairWoodJinPerHouseholdYear * SCALE / CONTENT.rules.daysPerYear);
+}
 
 // 居民购买面粉、面包只允许在综合商店成交，这里搭一间有充足伙计的综合商店。
 function voucherState() {
@@ -118,11 +120,15 @@ function withWoodCompany(state, units = 100000) {
 }
 
 test("修缮木材买入后即记为消耗，不在居民库存里堆积", () => {
-  const state = withWoodCompany(voucherState());
+  // 660 户每日买 13.2 斤，连买 6 日共约 80 斤：木材行库存要够（默认 10 万单位 ≈ 33 斤不够）。
+  const state = withWoodCompany(voucherState(), 1000000);
+  // 660 户每户一行修缮消耗流水，默认 ledgerLimit（500）会截掉尾部，这里放宽以便核对流水合计。
+  const wide = { ...CONTENT, rules: { ...CONTENT.rules, ledgerLimit: 100000 } };
   grantResidentVouchers(state, 1000000, CONTENT);
   assert.equal(state.accounts.residents.wood, 0);
+  const WOOD_DAY_UNITS = woodDayUnits(state);
 
-  const result = buyRepairWoodForResidents(state, CONTENT);
+  const result = buyRepairWoodForResidents(state, wide);
 
   assert.equal(result.targetUnits, WOOD_DAY_UNITS);
   assert.equal(result.purchasedUnits, WOOD_DAY_UNITS);
@@ -138,7 +144,7 @@ test("修缮木材买入后即记为消耗，不在居民库存里堆积", () =>
 
   // 连续多日购买也不会让居民木材库存单调增长。
   for (let day = 0; day < 5; day += 1) {
-    const daily = buyRepairWoodForResidents(state, CONTENT);
+    const daily = buyRepairWoodForResidents(state, wide);
     assert.equal(daily.purchasedUnits, WOOD_DAY_UNITS);
     assert.equal(daily.consumedUnits, WOOD_DAY_UNITS);
     assert.equal(state.accounts.residents.wood, 0);
@@ -152,6 +158,7 @@ test("居民原有木材库存不会被修缮消耗动用", () => {
   const [holder] = householdList(state);
   const existingUnits = 7 * CONTENT.precision.inventoryUnitsPerJin;
   holder.inventory.wood = existingUnits;
+  const WOOD_DAY_UNITS = woodDayUnits(state);
 
   const result = buyRepairWoodForResidents(state, CONTENT);
 

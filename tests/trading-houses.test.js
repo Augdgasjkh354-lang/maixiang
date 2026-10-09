@@ -4,6 +4,7 @@ import { simulation, CONTENT } from "../src/engine.js";
 import { issueTownVouchers, transferVouchers, voucherBalance } from "../src/economy/currency.js";
 import { grantResidentVouchers } from "./helpers-v16.js";
 import { DAILY_STEPS } from "../src/systems/daily.js";
+import { householdIdleWorkers, householdList } from "../src/systems/households.js";
 import { settleTradingHouses, localAvgSoldJin } from "../src/systems/trading-houses.js";
 import { ensureOutsideTowns } from "../src/systems/outside-town.js";
 import { selectTradeHouseView } from "../src/selectors/trade-houses.js";
@@ -52,8 +53,13 @@ function tradeFixture(seed, { clerks = 10, pool = 300, houses = 1 } = {}) {
   state.logistics.poolJin = pool;
   const shopIds = [];
   const clerkList = Array.isArray(clerks) ? clerks : Array.from({ length: houses }, () => clerks);
+  // 660 户时每户只有几百粮券，店主要付启动资金 + 生活储备：为每家贸易行指定一户有空闲劳力的店主并给足粮券。
   for (let i = 0; i < houses; i++) {
-    const opened = simulation.openResidentShop(state, "tc1", "trading_house");
+    // 每次现找：前一家店雇的店员会占用空闲劳力。
+    const owner = householdList(state).find(h => householdIdleWorkers(h) > 0);
+    assert.ok(owner, "需要一户有空闲劳力的店主");
+    assert.equal(grantResidentVouchers(state, 5000, CONTENT, owner.id).ok, true);
+    const opened = simulation.openResidentShop(state, "tc1", "trading_house", owner.id);
     assert.equal(opened.ok, true, opened.reason);
     // 刚雇的店员 30 天内不能解雇，所以店员数在开店时就定好。
     assert.equal(simulation.configureShopClerks(state, opened.shopId, clerkList[i]).ok, true);
@@ -80,9 +86,15 @@ test("贸易中心：只能开在贸易中心，每级 2 个铺位；商业街�
   const wrongHost = simulation.openResidentShop(state, "street", "trading_house");
   assert.equal(wrongHost.ok, false);
   assert.match(wrongHost.reason, /贸易中心/);
-  assert.equal(simulation.openResidentShop(state, "tc1", "trading_house").ok, true);
-  assert.equal(simulation.openResidentShop(state, "tc1", "trading_house").ok, true);
-  const third = simulation.openResidentShop(state, "tc1", "trading_house");
+  // 660 户时店主需指定并给足粮券（自动选店主只会挑到粮券最厚的一户，这里逐户指定）。
+  const openWithOwner = () => {
+    const owner = householdList(state).find(h => householdIdleWorkers(h) > 0);
+    assert.equal(grantResidentVouchers(state, 5000, CONTENT, owner.id).ok, true);
+    return simulation.openResidentShop(state, "tc1", "trading_house", owner.id);
+  };
+  assert.equal(openWithOwner().ok, true);
+  assert.equal(openWithOwner().ok, true);
+  const third = openWithOwner();
   assert.equal(third.ok, false);
   assert.match(third.reason, /贸易中心没有空位/);
   valid(state, "开店后");

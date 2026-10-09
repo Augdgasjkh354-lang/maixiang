@@ -100,18 +100,28 @@ test("真实年度人口结算释放退休农人后，会在下一用工快照�
   const state = simulation.createInitialState({ seed: 161608 });
   simulation.setEmployment(state, "farmers", 200);
   assert.equal(jobCount(state, "farmers"), 200);
-  // 开局数值调整（8cf03ae）后户均 13—14 人、每户 6 名农人且另有待业，人口结算自然减少 1 名劳动力
-  // 已不构成"就业超过劳动力"的超额（原先 4—5 人小户会超额）。这里显式制造超额：
+  // 开局每户约 5 人（660 户），人口结算自然减少的劳动力不足以造成超额。这里显式制造超额：
   // 把某户劳动力降到低于其农人岗位数，人口结算时必然释放该户的农人岗位。
   const farmerHousehold = householdList(state).find(h => (h.jobs?.farmers || 0) > 0);
   assert.ok(farmerHousehold);
   const farmersInHousehold = farmerHousehold.jobs.farmers;
-  // 留 3 人的超额，抵消当年"成年→劳动力"补入后仍必然触发释放。
-  farmerHousehold.ageBands.workers = Math.max(1, farmersInHousehold - 3);
-  // 家庭人口必须与 cohort 一致，故同步减少 3 个劳动年龄人口。
-  const workerCohort = state.cohorts.find(row => row.age >= 18 && row.age < 65 && row.m > 2);
-  assert.ok(workerCohort);
-  workerCohort.m -= 3;
+  // 660 户开局时每户农人最多 2 人、劳力最多 3 人，所以把该户劳力全部清零：超额 = 其农人岗位数，人口结算时必然释放。
+  // 家庭劳力与 cohort 必须同步减少，故 cohort 的劳动年龄人口也减去同样的数。
+  const cut = farmerHousehold.ageBands.workers;
+  assert.ok(cut >= 1 && farmersInHousehold >= 1);
+  farmerHousehold.ageBands.workers = 0;
+  let remaining = cut;
+  for (const row of state.cohorts) {
+    if (remaining <= 0) break;
+    if (row.age < 18 || row.age >= 65) continue;
+    const fromM = Math.min(row.m, remaining);
+    row.m -= fromM;
+    remaining -= fromM;
+    const fromF = Math.min(row.f, remaining);
+    row.f -= fromF;
+    remaining -= fromF;
+  }
+  assert.equal(remaining, 0, "劳动年龄 cohort 足够扣减");
   const result = advancePopulation(state, CONTENT);
   assert.ok(state.lastDemography.householdAllocation.retirees > 0);
   assert.ok(result.householdAllocation.employmentReleases.some(row => row.jobKey === "farmers"), "应实际释放超额农业岗位");

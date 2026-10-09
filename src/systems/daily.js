@@ -1,3 +1,4 @@
+import { withLedgerBatch } from "../economy/ledger.js";
 import { totalQeqUnits } from "../economy/inventory.js";
 import { produceLivestock } from "./livestock.js";
 import { manageStalls } from "./stalls.js";
@@ -289,6 +290,11 @@ function privateIntakeSummary(rows) {
 
 // 按给定步骤表跑一天（测试可传入带自定义 mod 步骤的表）。
 export function runDay(state, content, steps) {
+  // 整个日结在一个账本批次里：账本行按户、对方、类型合并，日终一次写入（economy/ledger.js）。
+  return withLedgerBatch(state, content, () => runDaySteps(state, content, steps));
+}
+
+function runDaySteps(state, content, steps) {
   const beforeTotal = totalQeqUnits(state, content);
   const day = { isNewYearDay: state.day === 0, peopleAtStart: populationStats(state), demography: null };
   for (const step of steps) {

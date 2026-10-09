@@ -180,6 +180,8 @@ export const RULES = Object.freeze({
   shopWageRaiseProfitShare: 0.5,
   shopWageSlackFactor: 0.85,
   shopWageTightFactor: 1.2,
+  initialHouseholdSize: 5, // 开局约几人一户（systems/households.js）
+  householdSplitMaxPeople: 8, // 一户超过这么多人就在年终分家（systems/household-split.js）
   farmStockDays: 7, // 养殖场存货够卖这么多天就停养；超过即算积压降价（systems/farm-pricing.js）
   // 民营工资（systems/private-wage.js）：参照镇营同岗位实际日薪，失业松紧系数与商店共用。
   privateWageAdjustIntervalDays: 15,

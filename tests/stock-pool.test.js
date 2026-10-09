@@ -55,6 +55,8 @@ test("二级市场：镇库未挂出的股份不会卖给住户", () => {
 test("二级市场：买入只从发行池扣减，发行池与镇库持股同减，股款付给镇库", () => {
   const { state, company } = listedState({ offer: 300, price: 2 });
   const buyer = householdList(state)[0];
+  // 660 户时每户约 300 粮券，买家需显式拿到足够粮券付 800 粮券股款。
+  assert.equal(grantResidentVouchers(state, 1000, CONTENT, buyer.id).ok, true);
   for (const household of householdList(state)) household.stockBuyBudgetVoucherUnits = 0;
   buyer.stockBuyBudgetVoucherUnits = 400 * 2 * V;
   const townBefore = voucherBalance(state, "town");

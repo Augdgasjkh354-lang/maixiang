@@ -17,15 +17,19 @@ function yearOfTargets(households, startCarry = 0) {
   return { total, carry: state.housing.repairWoodCarry };
 }
 
-test("规则：每户每年斤数存在，初始 250 户日需求约 5 斤", () => {
+test("规则：每户每年斤数存在，开局户数随人口（每户约 5 人）；250 户日需求约 5 斤", () => {
   assert.equal(typeof RATE, "number");
   assert.equal(CONTENT.rules.houseRepairWoodUnitsPerDay, undefined, "旧的全镇固定常数已删除");
   const state = simulation.createInitialState();
   assert.equal(state.housing.repairWoodCarry, 0);
   const households = activeHouseholds(state).length;
-  assert.equal(households, 250);
+  const population = state.cohorts.reduce((sum, row) => sum + row.m + row.f, 0);
+  assert.equal(households, Math.round(population / CONTENT.rules.initialHouseholdSize), "开局户数 = 人口 ÷ initialHouseholdSize");
+  // 每户年斤数是规则常数：250 户的日需求仍约为 5 斤（参照值），实际开局户数按其线性换算。
+  const referenceDaily = 250 * RATE / DAYS;
+  assert.ok(Math.abs(referenceDaily - 5) < 0.01, `250 户日需求应约为 5 斤，实际 ${referenceDaily}`);
   const daily = households * RATE / DAYS;
-  assert.ok(Math.abs(daily - 5) < 0.01, `250 户日需求应约为 5 斤，实际 ${daily}`);
+  assert.ok(Math.abs(daily - households * referenceDaily / 250) < 1e-9);
 });
 
 test("N 户一年累计需求 ≈ N × 每户年斤数 × 单位精度（允许取整误差）", () => {
@@ -56,10 +60,13 @@ test("小数需求通过结转累积，不会因每日取整而丢失", () => {
 
 test("真实日结：buyRepairWoodForResidents 写入当日目标并推进结转", () => {
   const state = simulation.createInitialState();
+  const households = activeHouseholds(state).length;
+  // 首日目标 = floor(户数 × 每户年斤数 × 单位精度 ÷ 365)，余数进结转（户数随人口，不再固定 250 户）。
+  const numerator = households * RATE * SCALE;
   simulation.advanceDay(state);
   const last = state.housing.lastRepairWoodDay;
-  assert.equal(last.targetUnits, Math.round(5 * SCALE), "250 户首日目标约 5 斤");
-  assert.equal(state.housing.repairWoodCarry, 0, "250 户整除，无余数");
+  assert.equal(last.targetUnits, Math.floor(numerator / DAYS), "首日目标 = 户数 × 每户年斤数 ÷ 365");
+  assert.ok(Math.abs(state.housing.repairWoodCarry - numerator % DAYS) < 1e-6, "余数进结转");
   assert.equal(typeof state.housing.repairWoodCarry, "number");
   assert.ok(Number.isFinite(last.purchasedUnits) && last.purchasedUnits >= 0);
 });

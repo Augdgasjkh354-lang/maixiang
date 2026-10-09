@@ -1,4 +1,4 @@
-import { makeTransactionId, recordLedger } from "./ledger.js";
+import { currencyLedgerBatch, makeTransactionId, recordLedger } from "./ledger.js";
 import { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot, voucherSlot } from "./accounts.js";
 
 // 公司与店铺持有独立的现金小麦，可在银行与粮券互换。
@@ -77,6 +77,26 @@ function setVoucherBalance(state, owner, value, content = null) {
 }
 
 function currencyLedger(state, row, content) {
+  // 日结批次中：同类型、同账户对的粮券流水合并成一行，批次结束时写入（见 ledger.js withLedgerBatch）。
+  const batch = currencyLedgerBatch(state);
+  if (batch) {
+    const key = `${row.type}|${row.owner ?? ""}|${row.from ?? ""}|${row.to ?? ""}`;
+    const merged = batch.get(key);
+    if (merged) {
+      merged.row.voucherUnits = (merged.row.voucherUnits || 0) + (row.voucherUnits || 0);
+      if (row.wheatUnits) merged.row.wheatUnits = (merged.row.wheatUnits || 0) + row.wheatUnits;
+      merged.row.count += 1;
+    } else {
+      const entry = { row: { ...row, count: 1 } };
+      entry.flush = () => writeCurrencyLedgerRow(state, entry.row, content);
+      batch.set(key, entry);
+    }
+    return row;
+  }
+  return writeCurrencyLedgerRow(state, row, content);
+}
+
+function writeCurrencyLedgerRow(state, row, content) {
   const currency = ensureCurrencyState(state);
   const record = { id: currency.ledger.length + 1, year: state.year,
     day: Math.max(1, Math.min(content.rules.daysPerYear, state.day + 1)), ...row };

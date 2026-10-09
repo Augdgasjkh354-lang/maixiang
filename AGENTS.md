@@ -52,7 +52,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 综合商店 | 居民买面粉/面包/盐和日用品的主渠道；目标利润率加价 × 库存系数（见下一行"调价"）；肉直接向养殖场进货 |
 | 调价（物价会动） | 规则在 `economy/price-adjust.js`（`nextPriceFactor`，阈值见 `content/rules.js` 的 `priceAdjust`）。综合商店每 7 天按库存够卖天数、日均销量、断货记录给每个商品定系数（积压降价、紧缺涨价、正常回归 1），售价 = 基准价 × 系数，清库存才可降到进货价 × 0.7，在 `systems/shop-pricing.js`；批发市场自动调价默认关闭，玩家逐品开启后以开启时售价为锚定、±30% 内浮动，在 `systems/wholesale-market.js` 的 `reviewWholesaleAutoPricing`（日结 `pricing` 步） |
 | 镇营 / 民营 / 公司 | 一栋产业建筑整栋只有一个主人（镇里 / 一户 / 一家公司），换主人一律走 `systems/ownership.js` 的 `transferBuildingOwnership`。卖给民营整栋卖；整栋上市一步完成（`systems/ipo.js`，镇营默认一股不挂出、民营申请默认卖 49%，股款归原主人），民营要上市须业主申请、镇长批准；民营和公司自主升级，欠薪超 30 天由镇里收回。镇库持股只在挂出发行池时才卖，且市价不低于镇长定的售价才成交。股价（`systems/stock-exchange.js`）：0.01 粮券一档、单日 ≤20%，常态向业绩锚回拢，偶发泡沫→破裂，参数集中在 `STOCK_MARKET`。旧档拆开的建筑读档时整栋换算（`systems/ownership-migrate.js`）。详见 `docs/OWNERSHIP.md` |
-| 家庭 | 居民以户为单位，有库存、粮券、岗位、舒心值 |
+| 家庭 | 居民以户为单位，有库存、粮券、岗位、舒心值。开局约 5 人一户（`rules.initialHouseholdSize`，3300 人 ≈ 660 户）；每年年终人口超过 8 人的户分家（`systems/household-split.js`，`householdSplitMaxPeople`）：新户拿约一半人口，钱粮按人口比例分，股票/建筑/店铺/经营权/别墅/欠薪债权留原户，岗位放不下的随人走。读旧存档时大户一次分完。户数随人口增长，日结耗时约与户数成正比 |
 | 救济 | 政策页一个开关：口粮不足 7 天的家庭补到 14 天（家庭先用自己的粮券兑粮）。口粮由镇库实物拨付；社保基金开启时由基金按价值结算，付不起记债。没有手动拨粮和邻里互助 |
 | 国债 | 粮券阶段可发，玩家定总额/期限/固定利率；发行当天住户和银行按闲钱认购 |
 | 外镇 | 档案在 `content/outside-towns.js`，算法共用 `systems/outside-town.js`（状态 `state.outsideTowns[id]`）。每天按人口自产/消耗各商品、吃口粮；进口品（盐、木材、酒、布）存货不足 3 年用量都按正常价收，超过 3 年才压价，繁荣度越低越肯出高价；自产外卖品（面粉、面包）按库存比目标定价；买卖价差随关系分收窄，大单逐段计价，没有套利。繁荣度跟随供应满足率；人口只增不减（每年 0.5%—3%，随繁荣度），口粮不足的年份停止增长、每年开垦新耕地，秋收入库。只用口粮储备以上的小麦付款。外贸房在岗才能交易、签长协。关税只对贸易行征收（`trading-houses.js` 的 `tradeTariffRate`，见 `docs/TRADE.md`），镇里自己的外贸与长协不收。加新外镇 = 加一份档案 |
@@ -84,6 +84,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 
 **钱与货**
 - 新增经济主体（要收付钱的）：在 `economy/accounts.js` 登记账户名和存放位置即可，不要在货币、支付、库存里再写 `owner.startsWith(...)` 分支。
+- 日结整天在一个账本批次里（`economy/ledger.js` 的 `withLedgerBatch`）：账本与粮券流水按"类型、付款方、收款方、物品"合并，日终写入。日结中不要回头读当天的 `state.ledger` / `currency.ledger` 找某一笔。
 - 三段记账一律用 `economy/books.js` 的 `bookAdd` / `bookAddMap`，不要手写 day/year/cumulative 循环。
 - 直接买卖（镇库采购、直购、公司卖货）一律走 `economy/trade.js`，不要再各写一套卖家循环和库存成本计算。
 - 发工资一律走 `systems/employer.js`：`accrueWages` 记家庭债权、`payWages` 按户偿付、欠薪 = `wageArrears`。镇库、民营、公司、店铺同一套；行业实物生产税用 `productionTaxUnits`。
