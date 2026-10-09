@@ -165,8 +165,9 @@ test("食盐原子交易守恒，单独消费且居民粮储线会限购", () =>
   assert.equal(shop.inventory.salt, 0, "综合商店库存按成交量原子扣减");
   assert.equal(simulation.totalQeq(state), qeqBefore);
   const meal = consumeDailySalt(state, CONTENT);
-  assert.equal(meal.satisfiedUnits, 10 * SCALE);
-  assert.equal(totalResidentAndTownSalt(state), saltBefore, "买盐只是居民消费的前置，盐总量不变");
+  // 赶集：买到的人家一次买够 5 天，当天只用掉 1 天的量，其余留在家里。
+  assert.ok(meal.satisfiedUnits > 0 && meal.satisfiedUnits <= 10 * SCALE);
+  assert.equal(totalResidentAndTownSalt(state), saltBefore + 10 * SCALE - meal.satisfiedUnits, "居民与镇库的盐 = 原有 + 从商店买入 − 当天用掉");
   assert.equal(simulation.totalQeq(state), qeqBefore);
 
   // 居民只留略高于 30 日口粮保护线的可换券小麦：盐虽有货、也买得起一部分，

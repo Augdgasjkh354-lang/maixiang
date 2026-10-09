@@ -8,6 +8,8 @@ import { householdAffluence } from "./household-budget.js";
 // 每户当天想要的量 = 人口 × 年人均标准量 / 365 × 宽裕度^收入弹性（宽裕度见 household-budget.js：
 // 正常人家 1 倍，穷户接近 0，富户最多数倍）。买在主食和盐之后；用了加舒心值，超过标准量的部分边际递减；
 // 买不到不扣分——这是生活改善，不是新的生存压力。
+// 赶集：家里存货不够今天用时才去买，一次买够 householdGoodsShoppingDays（5）天的量；平时从存货里用。
+// 买得起的人家自然约 5 天采购一次，各户错开，每天上街的户数约为五分之一（日结快很多）。
 
 function goodsConfig(content) {
   return content.rules.householdGoods || {};
@@ -81,12 +83,16 @@ export function buyGoodsForResidents(state, content) {
   ensureGoodsDemand(state);
   const targets = todaysTargets(state, content);
   const households = householdList(state).filter(isActiveHousehold);
+  const shoppingDays = Math.max(1, Math.floor(content.rules.householdGoodsShoppingDays ?? 5));
   const results = {};
   for (const itemId of Object.keys(goodsConfig(content))) {
     const needs = {};
     let desired = 0;
     for (const household of households) {
-      const shortage = Math.max(0, (targets.get(household.id)?.[itemId] || 0) - (household.inventory?.[itemId] || 0));
+      const daily = targets.get(household.id)?.[itemId] || 0;
+      const stock = household.inventory?.[itemId] || 0;
+      // 存货够今天用就不上街；不够时补到 shoppingDays 天的量。
+      const shortage = stock >= daily ? 0 : Math.max(0, daily * shoppingDays - stock);
       if (shortage <= 0) continue;
       needs[household.id] = shortage;
       desired += shortage;

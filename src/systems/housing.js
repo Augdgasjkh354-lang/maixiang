@@ -62,7 +62,17 @@ export function accrueRepairWoodNeed(state, householdCount, content) {
 export function buyRepairWoodForResidents(state, content) {
   const households = householdList(state);
   // 今日修缮需求（库存精度单位）：随活跃家庭数增长。
-  const targetUnits = accrueRepairWoodNeed(state, activeHouseholds(state).length, content);
+  const dailyUnits = accrueRepairWoodNeed(state, activeHouseholds(state).length, content);
+  // 赶集：修缮需求逐日累计，每 householdGoodsShoppingDays 天全镇统一采购一次（买不到的不结转，同原规则）。
+  state.housing ||= {};
+  const shoppingDays = Math.max(1, Math.floor(content.rules.householdGoodsShoppingDays ?? 5));
+  state.housing.repairWoodPendingUnits = (state.housing.repairWoodPendingUnits || 0) + dailyUnits;
+  if ((state.day || 0) % shoppingDays !== 0) {
+    state.housing.lastRepairWoodDay = { targetUnits: 0, pendingUnits: state.housing.repairWoodPendingUnits, purchasedUnits: 0, consumedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: "未到采购日" };
+    return state.housing.lastRepairWoodDay;
+  }
+  const targetUnits = state.housing.repairWoodPendingUnits;
+  state.housing.repairWoodPendingUnits = 0;
   // 购买前快照各家庭木材库存与居民总量。
   const before = new Map(households.map(household => [household.id, household.inventory?.wood || 0]));
   const beforeTotal = households.reduce((sum, household) => sum + (household.inventory?.wood || 0), 0);

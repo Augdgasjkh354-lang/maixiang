@@ -180,6 +180,7 @@ export const RULES = Object.freeze({
   shopWageRaiseProfitShare: 0.5,
   shopWageSlackFactor: 0.85,
   shopWageTightFactor: 1.2,
+  householdGoodsShoppingDays: 5, // 赶集：日用品与盐存货不够当天用才去买、一次买够这么多天；修房木材每这么多天统一采购一次
   initialHouseholdSize: 5, // 开局约几人一户（systems/households.js）
   householdSplitMaxPeople: 8, // 一户超过这么多人就在年终分家（systems/household-split.js）
   farmStockDays: 7, // 养殖场存货够卖这么多天就停养；超过即算积压降价（systems/farm-pricing.js）

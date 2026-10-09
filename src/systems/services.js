@@ -158,7 +158,12 @@ function processServiceDemandNow(state, content) {
   if (!defs.length) return { servedUses: {}, spendingVoucherUnits: 0 };
   const householdsBase = householdList(state).filter(isActiveHousehold);
   if (!householdsBase.length) return { servedUses: {}, spendingVoucherUnits: 0 };
-  const budgets = new Map(householdsBase.map(h => [h.id, householdDailyServiceBudget(state, h, content)]));
+  // 服务预算要试算付款能力（较贵）：只在这户今天第一次真要买服务时才算。
+  const budgets = new Map();
+  const budgetOf = household => {
+    if (!budgets.has(household.id)) budgets.set(household.id, householdDailyServiceBudget(state, household, content));
+    return budgets.get(household.id);
+  };
   const households = rotated(householdsBase, serviceState.rotation.households || 0);
   const services = rotated(defs, serviceState.rotation.services || 0);
   let totalSpent = 0;
@@ -178,7 +183,7 @@ function processServiceDemandNow(state, content) {
       const dailyNeed = Math.min(due, Math.max(1, basisCount(household, def)));
       serviceState.day.attemptedUses[def.id] = (serviceState.day.attemptedUses[def.id] || 0) + dailyNeed;
       const sensitivity = Math.max(0.25, Number(def.incomeSensitivity) || 1);
-      const budget = budgets.get(household.id) || 0;
+      const budget = budgetOf(household) || 0;
       // 高收入敏感服务（茶馆）需要更宽裕的预算，基础服务更容易被购买。
       const effectivePrice = Math.ceil(price * sensitivity);
       const affordableUses = Math.floor(budget / Math.max(price, effectivePrice));

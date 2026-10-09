@@ -33,6 +33,7 @@ export function buySaltForResidents(state, content) {
   const demandUnits = state.salt.todayDemandUnits || 0;
   const households = householdList(state).filter(isActiveHousehold);
   const totalPeople = households.reduce((sum, household) => sum + householdPopulation(household), 0) || 1;
+  const shoppingDays = Math.max(1, Math.floor(content.rules.householdGoodsShoppingDays ?? 5));
   let assignedDemand = 0;
   const householdNeedsUnits = {};
   const shortageUnits = households.reduce((sum, household, index) => {
@@ -40,7 +41,9 @@ export function buySaltForResidents(state, content) {
       ? demandUnits - assignedDemand
       : Math.floor(demandUnits * householdPopulation(household) / totalPeople);
     assignedDemand += familyDemand;
-    const shortage = Math.max(0, familyDemand - (household.inventory?.salt || 0));
+    // 赶集：家里的盐够今天用就不买；不够时一次买够 householdGoodsShoppingDays 天。
+    const stock = household.inventory?.salt || 0;
+    const shortage = stock >= familyDemand ? 0 : Math.max(0, familyDemand * shoppingDays - stock);
     householdNeedsUnits[household.id] = shortage;
     return sum + shortage;
   }, 0);
