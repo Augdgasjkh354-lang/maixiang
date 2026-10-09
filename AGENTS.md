@@ -123,6 +123,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 - 界面改动：打包后用浏览器（或 Playwright）打开 `index.html`，点"新游戏"实际操作一遍。打包冒烟只跑模拟、不渲染界面，界面报错它查不出来。
 - 验收以"账平"为准（`validateState` 通过、钱粮无凭空增减）。模拟最多跑 3 年，不跑 10 年；数值校准类需求另说。
 - 写测试或脚本时，场景里可以直接给镇库加木材来跳过开局（`state.accounts.town.wood += 数量 * content.precision.inventoryUnitsPerJin`）。
+- 满级测试存档 `tests/fixtures/maxed-save.json`（约 10MB，不入库，需要时先生成）：每种建筑升到最高级、岗位填满、银行开到粮券阶段，用来测界面和功能（可在游戏里导入）；只测功能不测数值。用 `node scripts/make-maxed-save.mjs` 重新生成，生成逻辑在 `scripts/maxed-state.mjs`。
 
 ## 协作
 
