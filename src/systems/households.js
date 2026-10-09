@@ -54,7 +54,8 @@ export function isActiveHousehold(household) {
 }
 
 export function createInitialHouseholds(state, content) {
-  const householdCount = 250;
+  // 开局户数（默认 250，人口平均分入）；规模测试可调大，见 scripts/health-check.mjs --households。
+  const householdCount = Math.max(1, Math.floor(content.rules.initialHouseholdCount ?? 250));
   const households = Array.from({ length: householdCount }, (_, index) => emptyHousehold(index, content));
   const totals = { children: 0, workers: 0, elders: 0 };
   for (const cohort of state.cohorts) {

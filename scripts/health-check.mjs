@@ -32,7 +32,7 @@
 //   - 日用品履约 = 年内用上量 / 年内需求量；服务履约 = 年内服务人次 / 年内想用人次。
 
 import { writeFile } from "node:fs/promises";
-import { simulation, CONTENT } from "../src/engine.js";
+import { simulation as defaultSimulation, createSimulation, CONTENT as DEFAULT_CONTENT } from "../src/engine.js";
 import { grantResidentVouchers } from "../tests/helpers-v16.js";
 import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js";
 import { householdList, householdPopulation, isActiveHousehold, residentVoucherUnits } from "../src/systems/households.js";
@@ -40,6 +40,10 @@ import { householdWealthUnits, householdBudgets } from "../src/systems/household
 import { populationStats, selectJobRows } from "../src/selectors/labor.js";
 import { shopSummaries, stallSquareSummaries } from "../src/systems/shops.js";
 
+// --households N：开局户数（默认 250），用于规模与性能测试。
+const householdsArg = (() => { const k = process.argv.indexOf("--households"); return k >= 0 ? Number(process.argv[k + 1]) : null; })();
+const CONTENT = householdsArg ? { ...DEFAULT_CONTENT, rules: { ...DEFAULT_CONTENT.rules, initialHouseholdCount: householdsArg } } : DEFAULT_CONTENT;
+const simulation = householdsArg ? createSimulation(CONTENT) : defaultSimulation;
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 const MID_DAY = 180;
@@ -58,6 +62,8 @@ function parseArgs(argv) {
     else if (a === "--wealth-tax") opts.wealthTax = argv[++i].split(",").map(Number);
     else if (a === "--inheritance") opts.inheritance = Number(argv[++i]);
     else if (a === "--employer-share") opts.employerShare = Number(argv[++i]);
+    else if (a === "--households") i++; // 已在文件顶部读取
+    else if (a === "--snapshot") opts.snapshot = argv[++i]; // 跑完把最终状态写成 JSON（性能基准用）
     else if (/^\d+$/.test(a)) opts.years = Number(a);
     else throw new Error(`未知参数：${a}`);
   }
@@ -524,6 +530,7 @@ async function main() {
     await writeFile(opts.json, JSON.stringify({ meta, rows, yearRows: yearRows.length }, null, 2));
     console.log(`\n已写入 ${opts.json}`);
   }
+  if (opts.snapshot) await writeFile(opts.snapshot, JSON.stringify(state));
 }
 
 main().catch(err => { console.error(err.stack || err.message || err); process.exit(1); });
