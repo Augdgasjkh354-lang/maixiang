@@ -113,7 +113,7 @@ export const RULES = Object.freeze({
     difficultFoodDays: 14,
     comfortableFoodDays: 60
   }),
-  employmentExchangeDefaultJin: 5,
+  employmentExchangeDefaultJin: 20, // 5 时家底多是小麦的人家换不出钱买日用品，第二年消费塌到 2%
   employmentExchangeMinimumJin: 0,
   employmentExchangeMaximumJin: 50,
   publicServiceDemandPopulation: 500,
@@ -194,9 +194,10 @@ export const RULES = Object.freeze({
   serviceComfortDailyMaximum: 3,
   operatingStockCorrectionDays: 5,
   // 家庭购买力（systems/household-budget.js）：人均家底达到参照值时宽裕度为 1（正常消费），宽裕度 = √(人均家底/参照值)，封顶 maxAffluence；
-  // 家底只算粮券 + 留够到下次秋收再加 harvestBufferDays 天口粮后多出的小麦；服务预算 = 家底 / wealthSpendDays × serviceShare；
+  // 家底只算粮券 + 存款 + 留够 wealthFoodReserveDays 天口粮后多出的小麦（不再留到秋收，免得秋收前宽裕度断崖）；
+  // harvestBufferDays 只用于富人税等付款保护（留到下次秋收再加这么多天）；服务预算 = 家底 / wealthSpendDays × serviceShare；
   // 主食里面粉、面包的比例 = 标准比例 × 宽裕度（最多 stapleUpgradeMax 倍）。
-  householdBudget: Object.freeze({ referenceWealthPerCapita: 60, maxAffluence: 3, wealthSpendDays: 60, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5 }),
+  householdBudget: Object.freeze({ referenceWealthPerCapita: 60, maxAffluence: 3, wealthSpendDays: 60, wealthFoodReserveDays: 30, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5 }),
   // 戏园的门槛：宽裕度低于此值的家庭不去戏园（不产生需求，也不计入"需求未满足"）。
   // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天收一次；基尼系数逐年记录最多保留 50 年。
   wealthTaxPeriodDays: 30,

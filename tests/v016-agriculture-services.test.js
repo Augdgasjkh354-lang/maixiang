@@ -1,5 +1,5 @@
 import test from "node:test";
-import { daysUntilHarvest, invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
+import { invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
 import { initializeBuildingJobs, refillAgricultureToTarget, reconcileEmployment } from "../src/systems/employment.js";
@@ -37,7 +37,7 @@ function idleHouseholds(state, count = 2) {
 function setBudget(household, voucherPerDay, state = null) {
   ensureHouseholdLife(household, CONTENT).day = {};
   const rules = CONTENT.rules.householdBudget;
-  const keepDays = (state ? daysUntilHarvest(state, CONTENT) : CONTENT.rules.daysPerYear) + rules.harvestBufferDays;
+  const keepDays = rules.wealthFoodReserveDays; // 家底只扣 30 天口粮（与 householdWealthUnits 一致）
   const keepJin = householdPopulation(household) * CONTENT.rules.foodPerPersonDay * keepDays;
   household.voucherUnits = 0;
   for (const itemId of ["flour", "bread"]) household.inventory[itemId] = 0;

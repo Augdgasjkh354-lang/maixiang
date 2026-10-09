@@ -1,5 +1,5 @@
 import test from "node:test";
-import { householdAffluence, householdWealthUnits, daysUntilHarvest } from "../src/systems/household-budget.js";
+import { householdAffluence, householdWealthUnits, invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
 
 import assert from "node:assert/strict";
 import { CONTENT } from "../src/content/index.js";
@@ -50,17 +50,36 @@ test("日用品需求跟家底走：没家底的不买，越宽裕买得越多�
   assert.ok(richPoints > normalPoints && richPoints <= max * 1.5 + 1e-9, "多用多加，但最多 1.5 倍");
 });
 
-test("家底不算秋收前的口粮：存粮只够吃到秋收的人家不算宽裕", () => {
+test("家底只扣 30 天口粮：存粮只够 30 天口粮的人家没有家底，多出来的小麦才算", () => {
   const state = simulation.createInitialState({ seed: 5503 });
   const h = householdList(state)[0];
   h.voucherUnits = 0;
   const people = householdPopulation(h);
-  const keepDays = daysUntilHarvest(state, CONTENT) + CONTENT.rules.householdBudget.harvestBufferDays;
+  const keepDays = CONTENT.rules.householdBudget.wealthFoodReserveDays;
   h.inventory.wheat = people * CONTENT.rules.foodPerPersonDay * keepDays * I;
   for (const itemId of ["flour", "bread"]) h.inventory[itemId] = 0;
   assert.equal(householdWealthUnits(state, h, CONTENT), 0);
   h.inventory.wheat += 600 * people * I;
   assert.ok(householdWealthUnits(state, h, CONTENT) > 0, "多出来的小麦才算家底");
+});
+
+test("秋收前存粮 300 天口粮的人家有宽裕度，秋收前后宽裕度不跳变", () => {
+  const state = simulation.createInitialState({ seed: 5504 });
+  const h = householdList(state)[0];
+  h.voucherUnits = 0;
+  const people = householdPopulation(h);
+  h.inventory.wheat = people * CONTENT.rules.foodPerPersonDay * 300 * I;
+  for (const itemId of ["flour", "bread"]) h.inventory[itemId] = 0;
+  state.day = 200; // 距秋收还有约 74 天
+  invalidateHouseholdBudgets(state);
+  const before = householdAffluence(state, h, CONTENT);
+  assert.ok(before > 0, `秋收前存粮 300 天口粮应有宽裕度，实际 ${before}`);
+  state.day = 300; // 已过秋收
+  invalidateHouseholdBudgets(state);
+  const after = householdAffluence(state, h, CONTENT);
+  assert.ok(after > 0);
+  const ratio = Math.max(before, after) / Math.min(before, after);
+  assert.ok(ratio < 2, `秋收前后宽裕度不应跳变：秋收前 ${before}，秋收后 ${after}`);
 });
 
 test("镇营酒坊用镇库小麦酿酒，棉田产棉，织坊用棉织布", () => {

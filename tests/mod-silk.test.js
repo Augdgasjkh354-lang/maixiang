@@ -10,7 +10,7 @@ import { householdList, householdPopulation, isActiveHousehold, setJobCount, hou
 import { initializeBuildingJobs } from "../src/systems/employment.js";
 import { openShop } from "../src/systems/shops.js";
 import { buyGoodsForResidents } from "../src/systems/goods-demand.js";
-import { daysUntilHarvest, invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
+import { invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
 import { issueTownVouchers, transferVouchers, voucherBalance } from "../src/economy/currency.js";
 import { assembleDailySteps, modArt, selectModViews, validateMods, defineMod } from "../src/mods/api.js";
 import { tradeWithOutsideTown } from "../src/systems/outside-town.js";
@@ -58,7 +58,7 @@ function useVoucherMoney(state) {
 function setAffluence(state, household, affluence) {
   if (state.monetaryReform.stage !== "voucher") useVoucherMoney(state);
   const people = householdPopulation(household);
-  const keepDays = daysUntilHarvest(state, content) + content.rules.householdBudget.harvestBufferDays;
+  const keepDays = content.rules.householdBudget.wealthFoodReserveDays; // 家底只扣这么多天口粮，正好留足口粮、不产生额外家底
   household.inventory.wheat = Math.round(people * content.rules.foodPerPersonDay * keepDays * I);
   household.inventory.flour = 0;
   household.inventory.bread = 0;

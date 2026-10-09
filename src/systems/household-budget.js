@@ -1,7 +1,7 @@
 // 家庭购买力：所有"想买多少、花多少"的决定都从这里取数。
 //
-// 家底（可动用财富）= 手头粮券 + 银行存款 + 留够"到下次秋收 + 缓冲天数"口粮之后多出来的小麦（按券值）。
-//   存款随时可取回付款（支付层自动取回），算家底；秋收前的存粮是一家人下一年的口粮，不算可花的钱。
+// 家底（可动用财富）= 手头粮券 + 银行存款 + 留够 wealthFoodReserveDays（30）天口粮之后多出来的小麦（按券值）。
+//   存款随时可取回付款（支付层自动取回），算家底。原来留到下次秋收，秋收前余粮被截成 0、宽裕度在 0.3—2.7 间断崖，已改。
 // 宽裕度 m = √(人均家底 / 参照值)，封顶 maxAffluence：
 //   m = 1 是"正常人家"，日用品按标准量买、主食按标准比例换成面粉面包；
 //   穷户 m 接近 0，几乎只吃自家小麦；富户最多买到 maxAffluence 倍。
@@ -35,7 +35,8 @@ export function daysUntilHarvest(state, content) {
 
 export function householdWealthUnits(state, household, content) {
   const rules = budgetRules(content);
-  const keepDays = daysUntilHarvest(state, content) + rules.harvestBufferDays;
+  // 只留 30 天口粮：留到秋收会让秋收前余粮被截成 0，宽裕度在 0.3 和 2.7 之间来回跳。
+  const keepDays = rules.wealthFoodReserveDays ?? 30;
   const surplusWheat = householdConvertibleWheatUnits(state, household, content, keepDays);
   const deposit = Math.max(0, state.bank?.deposits?.[household.id] || 0);
   return Math.max(0, household.voucherUnits || 0) + deposit + voucherUnitsForWheatUnits(surplusWheat, content, "floor");

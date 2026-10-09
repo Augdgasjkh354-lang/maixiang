@@ -6,11 +6,11 @@ import { legacyVoucherState } from "./helpers-monetary.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 
-test("就业换券额度：新局默认 5 斤，规则常量为 默认 5、上限 50", () => {
-  assert.equal(CONTENT.rules.employmentExchangeDefaultJin, 5);
+test("就业换券额度：新局默认 20 斤，规则常量为 默认 20、上限 50", () => {
+  assert.equal(CONTENT.rules.employmentExchangeDefaultJin, 20);
   assert.equal(CONTENT.rules.employmentExchangeMaximumJin, 50);
   const state = legacyVoucherState({ seed: 990001 });
-  assert.equal(state.policy.employmentExchangeJin, 5);
+  assert.equal(state.policy.employmentExchangeJin, 20);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
