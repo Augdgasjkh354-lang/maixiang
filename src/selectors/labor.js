@@ -2,6 +2,7 @@ import { CORE_ROLES } from "../content/roles.js";
 import { householdList, householdEmploymentCount, householdWorkingAge, jobCount } from "../systems/households.js";
 import { reclaimedAcres } from "../systems/agriculture.js";
 import { computePoachable } from "../systems/labor-market.js";
+import { privateWageRate, wageControlFactor } from "../systems/payroll.js";
 
 export function jobKeyForBuilding(buildingId, roleId) { return buildingId + "::" + roleId; }
 export function privateJobKeyForBuilding(buildingId, roleId) { return buildingId + "::" + roleId + "::private"; }
@@ -81,7 +82,7 @@ export function selectJobRows(state, content, runtime = null) {
       if (privateLevels > 0 && !job.managedBy) rows.push({
         key: privateJobKeyForBuilding(building.id, job.id), roleId: job.id, buildingId: building.id, buildingName: definition.name,
         name: job.name + "（民营）", note: "民营经营自动安排", count: readJobCount(state, privateJobKeyForBuilding(building.id, job.id), runtime),
-        capacity: job.slots * privateLevels, wagePerWorkerDay: state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0,
+        capacity: job.slots * privateLevels, wagePerWorkerDay: privateWageRate(state, building, job, content),
         releasePriority: job.releasePriority || 0, scope: "private" });
       const listedLevels = Math.max(0, ownership.listedLevels || 0);
       if (listedLevels > 0 && !job.managedBy) {
@@ -116,7 +117,13 @@ export function selectJobRows(state, content, runtime = null) {
   // 用户 0.1.11：待业为 0 时，镇营建筑岗位可按出价挖人；poachable 计入 maxAssignable。
   const poachableFor = idle <= 0 ? computePoachable(state, content) : null;
   for (const row of rows) {
-    row.poachable = poachableFor && row.scope === "building" ? poachableFor(row.wagePerWorkerDay || 0) : 0;
+    // 实际日薪：镇营行（非 private/listed/shop）= 基础日薪 × 工资调控系数，与 payroll.js 实发一致；民营/公司/店铺行本身就是实际值。
+    row.effectiveWagePerWorkerDay = !["private", "listed", "shop"].includes(row.scope)
+      ? (row.wagePerWorkerDay || 0) * wageControlFactor(state, row.roleId)
+      : (row.wagePerWorkerDay || 0);
+  }
+  for (const row of rows) {
+    row.poachable = poachableFor && row.scope === "building" ? poachableFor(row.effectiveWagePerWorkerDay) : 0;
     let room = Math.max(0, row.capacity - row.count);
     if (row.globalDemandKind === "public_service") room = Math.min(room, Math.max(0, row.globalDemand - row.globalInPost));
     row.maxAssignable = row.roleId === content.agriculture.farmerRoleId && row.key === content.agriculture.farmerRoleId

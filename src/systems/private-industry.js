@@ -15,6 +15,7 @@ import { spendableVoucherUnits } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { valueUnitsOfGoods, daySerialOf } from "./ownership.js";
 
+import { privateWageRate } from "./payroll.js";
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
 
 function targetBatches(state, building) {
@@ -84,7 +85,7 @@ export function privateHireCapByOwnerMoney(state, building, role, content) {
   const owners = `household:${ownerId}`;
   const maxWheat = householdConvertibleWheatUnits(state, owner, content, content.rules.householdFoodReserveDays ?? 30);
   const money = spendableVoucherUnits(state, owners) + voucherUnitsForWheatUnits(maxWheat, content, "floor");
-  const rate = state.employment.wageRates?.[role.id] ?? role.wagePerWorkerDay ?? 5;
+  const rate = privateWageRate(state, building, role, content);
   const perWorkerDayUnits = rate * currencyScale(content);
   if (!(perWorkerDayUnits > 0)) return Number.POSITIVE_INFINITY;
   return Math.max(0, Math.floor(money / 7 / perWorkerDayUnits));
@@ -142,7 +143,7 @@ export function payPrivateIndustryWages(state, content) {
   for (const building of state.buildings.filter(row => isIndustryType(content, row.typeId) && (row.ownership?.privateLevels || 0) > 0)) {
     const definition = content.buildings[building.typeId]; const job = definition?.jobs?.[0]; if (!job) continue;
     const key = privateJobKeyForBuilding(building.id, job.id); const workers = readJobCount(state, key);
-    const rate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5; const due = Math.round(workers * rate * scale);
+    const rate = privateWageRate(state, building, job, content); const due = Math.round(workers * rate * scale);
     const payroll = wageBook(state.privateEconomy.payrollByBuilding[building.id] ||= { arrearsVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, cumulativePaidVoucherUnits: 0 });
     accrueWages(state, payroll, jobAssignments(state, key), due, content);
     payroll.cumulativeAccruedVoucherUnits += due;

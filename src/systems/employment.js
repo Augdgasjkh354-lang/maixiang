@@ -56,7 +56,7 @@ export function assignWorkers(state, jobKey, requested, content) {
   const changed = value !== row.count;
   const shortage = value - row.count - idle;
   if (shortage > 0 && row.scope === "building") {
-    poachWorkers(state, row.wagePerWorkerDay || 0, shortage, content, {
+    poachWorkers(state, row.effectiveWagePerWorkerDay || 0, shortage, content, {
       toKey: jobKey,
       toLabel: `${row.buildingName || ""}${row.name || ""}`,
       allowFarmers: false

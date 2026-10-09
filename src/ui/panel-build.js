@@ -1,7 +1,7 @@
 import { buildingSymbol } from "./art.js";
 import { CONTENT } from "../content/index.js";
 import { industryTypeIds } from "../content/buildings.js";
-import { escapeHtml, number, percent, moneyUnit } from "./format.js";
+import { escapeHtml, number, percent, moneyUnit, effectiveTownWage } from "./format.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 
 // 建筑分类页签（纯展示层状态，刷新页面后回到默认）。
@@ -45,7 +45,8 @@ function materialSummary(option) {
   }).join("<br>");
 }
 
-function buildCard(option, selectedBuild, wageRates, unit) {
+function buildCard(option, selectedBuild, view, unit) {
+  const wageRates = view.wageRates || {};
   const planned = option.project;
   const status = planned
     ? `施工中 ${number(option.pendingCount)}处 · ${percent(planned.workDone / planned.workRequired * 100)}`
@@ -56,7 +57,7 @@ function buildCard(option, selectedBuild, wageRates, unit) {
         : `${number(option.count)}座 · 可建`;
   const isSelected = selectedBuild === option.id;
   const jobs = (option.jobs || []).map(job =>
-    `${escapeHtml(job.name)} ${number(job.slots)}人 · 日薪${number(wageRates[job.id] ?? job.wagePerWorkerDay ?? 5, 1)}${unit}`
+    `${escapeHtml(job.name)} ${number(job.slots)}人 · 日薪${number(effectiveTownWage(view, job.id, wageRates[job.id] ?? job.wagePerWorkerDay ?? 0), 1)}${unit}`
   ).join("<br>");
   const jobsHtml = jobs || "无固定岗位";
   const location = option.requiredPlotFeature
@@ -127,7 +128,7 @@ export function renderBuild(view) {
     ${projectList}
     ${previewCard}
     ${tabs}
-    <div class="build-grid">${categoryOptions.map(option => buildCard(option, selected, view.wageRates, unit)).join("")}</div>
-    ${uncategorized.length ? `<div class="build-grid">${uncategorized.map(option => buildCard(option, selected, view.wageRates, unit)).join("")}</div>` : ""}
+    <div class="build-grid">${categoryOptions.map(option => buildCard(option, selected, view, unit)).join("")}</div>
+    ${uncategorized.length ? `<div class="build-grid">${uncategorized.map(option => buildCard(option, selected, view, unit)).join("")}</div>` : ""}
     <details class="detail-block" data-detail-key="production-recipes"><summary>生产方式</summary><div class="detail-body"><div class="subtle">磨坊：100斤小麦→80斤面粉。面包房：100斤面粉→120斤面包。</div></div></details>`;
 }

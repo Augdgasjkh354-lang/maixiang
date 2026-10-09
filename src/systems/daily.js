@@ -25,6 +25,7 @@ import { settleTradeAgreementsMonth, settleTradeAgreementsYear } from "./trade-a
 import { resetLaborCompetitionYear } from "./labor-market.js";
 import { recordEconomyHistory } from "./wealth-stats.js";
 import { accrueSaltNeed, buySaltForResidents, consumeDailySalt, finishSaltGraceDay, selectSaltCoverage } from "./salt.js";
+import { adjustPrivateWages } from "./private-wage.js";
 import { arrangePrivateWorkers, processPrivateIndustries, resetPrivateDaily, resetPrivateYear, payPrivateIndustryWages } from "./private-industry.js";
 import { emptyFinancialFlowPeriod } from "../economy/financial-flows.js";
 import { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } from "./companies.js";
@@ -135,6 +136,8 @@ export const CORE_DAILY_STEPS = [
   { id: "staffing", run: (state, content, day) => {
     accrueServiceDemand(state, content);
     refreshOperatingPlan(state, content);
+    // 民营业主每 15 天按行情与经营调一次工资，再按新工资招工。
+    day.privateWageAdjustments = adjustPrivateWages(state, content);
     arrangePrivateWorkers(state, content);
     arrangeListedWorkers(state, content);
     syncShopEmployment(state, content);

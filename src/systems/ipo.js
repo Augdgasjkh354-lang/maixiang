@@ -14,6 +14,7 @@ import { householdConvertibleWheatUnits } from "./households.js";
 import { privateJobKeyForBuilding, readJobCount } from "../selectors/labor.js";
 import { buildingOwner, companyOfBuilding, daySerialOf, valueUnitsOfGoods } from "./ownership.js";
 import { createIndependentCompany } from "./companies.js";
+import { privateWageRate, townWageRate } from "./payroll.js";
 import {
   DEFAULT_TOTAL_SHARES, applyCompanyListing, buildingValuationVoucher, ensureStockExchangeState, hasStockExchange,
   listingGate, nearbyDivisibleShareCounts, resolveListingTerms, suggestedSharePriceVoucher
@@ -51,10 +52,10 @@ export function nextOwnerUpgradeQuote(state, building, ownerId, content) {
   const moneyScale = content.precision.currencyUnitsPerVoucher;
   const materialCostUnits = (config.materialRequirements || []).reduce((sum, row) =>
     sum + valueUnitsOfGoods(quantityToUnits(row.quantity, content), currentUnitPrice(state, row.itemId, content), content), 0);
-  const builderWage = state.employment.wageRates?.builders ?? 10;
+  const builderWage = townWageRate(state, "builders", content);
   const labourCostUnits = Math.round(config.workDays * builderWage * moneyScale);
   const workers = readJobCount(state, privateJobKeyForBuilding(building.id, job.id));
-  const wageRate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5;
+  const wageRate = privateWageRate(state, building, job, content);
   const dailyWageUnits = Math.round(workers * wageRate * moneyScale);
   return {
     nextLevel: level + 1,

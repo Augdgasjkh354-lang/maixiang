@@ -89,6 +89,8 @@ export function transferBuildingOwnership(state, building, newOwner, content) {
   building.ownership = ownershipFor(kind, level);
   if (kind === "household") building.privateOwners = [newOwner.id];
   else delete building.privateOwners;
+  // 民营工资是业主自己定的，换主人后新业主从镇营行情起步。
+  delete building.privateWage;
   if (kind === "company") {
     const company = companyOfBuilding(state, building.id);
     company.listedLevels = level;

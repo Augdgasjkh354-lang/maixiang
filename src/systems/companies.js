@@ -19,6 +19,7 @@ import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wag
 import { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, readWholesalePurchasePrice, wholesaleUnitPrice } from "./wholesale-market.js";
 import { buildingOwner, companyOfBuilding, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
 import { offsetWageClaims, transferWageClaimsToTown } from "./employer.js";
+import { privateWageRate, townWageRate } from "./payroll.js";
 
 function blankPeriod() {
   return {
@@ -169,7 +170,11 @@ export function createIndependentCompany(state, buildingId, options, content) {
   const inventory = Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0]));
   const inventoryCostVoucherUnits = Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0]));
   const name = String(options?.name || "").trim().slice(0, 30) || definition.name + "公司";
-  const defaultWage = state.employment.wageRates?.[definition.jobs?.[0]?.id] ?? definition.jobs?.[0]?.wagePerWorkerDay ?? 5;
+  // 公司起薪：民营转来的沿用业主定的工资，镇营转来的取镇营实际日薪（含工资调控系数）。
+  const firstJob = definition.jobs?.[0];
+  const defaultWage = !firstJob ? 5 : (building.ownership?.privateLevels || 0) > 0
+    ? privateWageRate(state, building, firstJob, content)
+    : Math.round(townWageRate(state, firstJob.id, content) * 2) / 2;
   const company = ensureCompanyBooks({
     id, name, buildingId, typeId: building.typeId, listedLevels: levels,
     totalShares: 0, townShares: 0, residentShares: 0, householdShares: {},

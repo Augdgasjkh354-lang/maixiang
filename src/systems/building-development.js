@@ -13,6 +13,7 @@ import { allocateInputToTown } from "./wholesale-market.js";
 import { buildingOwner, companyOfBuilding, daySerialOf, jobKeyForOwner, valueUnitsOfGoods } from "./ownership.js";
 import { householdConvertibleWheatUnits } from "./households.js";
 import { readJobCount } from "../selectors/labor.js";
+import { privateWageRate, townWageRate } from "./payroll.js";
 
 function materialLines(rows, content) {
   return (rows || []).map(row => ({
@@ -59,7 +60,7 @@ export function selectUpgradePreview(state, buildingId, content) {
   });
   const recommended = config.recommendedWorkers || definition.construction.recommendedWorkers;
   const labor = employmentSnapshot(state, content);
-  const wage = state.employment.wageRates?.builders ?? 10;
+  const wage = townWageRate(state, "builders", content);
   // 本工程可招募人数只受“当前待业劳力”约束，不再受其他工程占用的全局上限挤压。
   const builders = Math.max(0, Math.min(recommended, labor.idle));
   const days = builders > 0 ? Math.ceil(config.workDays / builders) : null;
@@ -141,11 +142,12 @@ function openUpgradeProject(state, building, definition, preview, lines, content
 //   现金 ≥ 升级花费 + ownerUpgradeReserveWageDays 天工资。
 // 升级花费 = 材料按批发价折算 + 工日 × 建筑工工资，一次性付给镇库；之后工程照常由镇里施工（材料不再由镇库付钱）。
 
-function ownerWageRate(state, building, owner, job) {
+function ownerWageRate(state, building, owner, job, content) {
   if (owner.kind === "company") {
     const company = companyOfBuilding(state, building.id);
     if (Number.isFinite(company?.settings?.wagePerWorkerDay)) return company.settings.wagePerWorkerDay;
   }
+  if (owner.kind === "household") return privateWageRate(state, building, job, content);
   return state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5;
 }
 
@@ -180,10 +182,10 @@ function tryOwnerUpgrade(state, building, owner, content) {
   }
   const materialCostUnits = lines.reduce((sum, line) =>
     sum + valueUnitsOfGoods(line.quantityUnits, currentUnitPrice(state, line.itemId, content), content), 0);
-  const builderWage = state.employment.wageRates?.builders ?? 10;
+  const builderWage = townWageRate(state, "builders", content);
   const labourCostUnits = Math.round(config.workDays * builderWage * moneyScale);
   const costUnits = materialCostUnits + labourCostUnits;
-  const dailyWageUnits = Math.round(workers * ownerWageRate(state, building, owner, job) * moneyScale);
+  const dailyWageUnits = Math.round(workers * ownerWageRate(state, building, owner, job, content) * moneyScale);
   const reserveUnits = dailyWageUnits * (content.rules.ownerUpgradeReserveWageDays ?? 60);
   const payer = owner.kind === "household" ? `household:${owner.id}` : `company:${owner.id}`;
   const household = owner.kind === "household" ? state.households?.byId?.[owner.id] : null;

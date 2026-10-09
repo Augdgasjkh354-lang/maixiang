@@ -177,6 +177,10 @@ export const RULES = Object.freeze({
   shopWageRaiseProfitShare: 0.5,
   shopWageSlackFactor: 0.85,
   shopWageTightFactor: 1.2,
+  // 民营工资（systems/private-wage.js）：参照镇营同岗位实际日薪，失业松紧系数与商店共用。
+  privateWageAdjustIntervalDays: 15,
+  privateWageStepPercent: 10,
+  privateWageFloorPercent: 50,
   laborUnemploymentHighPercent: 8,
   laborUnemploymentLowPercent: 5,
   laborPoachPremiumPercent: 15,

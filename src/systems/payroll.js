@@ -31,6 +31,21 @@ export function wageControlFactor(state, roleId) {
   return Number.isFinite(value) && value >= 0 ? value : 1;
 }
 
+// 镇营岗位实际日薪：基础日薪 × 工资调控系数（与 payroll.js 实发同一口径）。
+export function townWageRate(state, jobId, content) {
+  const job = content.roles?.[jobId] || Object.values(content.buildings || {})
+    .flatMap(definition => definition.jobs || []).find(row => row.id === jobId);
+  const base = state.employment?.wageRates?.[jobId] ?? job?.wagePerWorkerDay ?? 0;
+  return Math.max(0, base) * wageControlFactor(state, jobId);
+}
+
+// 民营建筑实际日薪：业主定的 building.privateWage；没定过时取镇营同岗位实际日薪（见 private-wage.js）。
+export function privateWageRate(state, building, job, content) {
+  const stored = building?.privateWage?.wagePerWorkerDay;
+  if (typeof stored === "number" && Number.isFinite(stored) && stored >= 0) return stored;
+  return Math.round(townWageRate(state, job.id, content) * 2) / 2;
+}
+
 export function ensureWageControl(state) {
   state.policy ||= {};
   state.policy.wageControl ||= { civil: 1.0, industry: 1.0 };

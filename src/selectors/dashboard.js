@@ -23,7 +23,7 @@ import { computeWealthStats } from "../systems/wealth-stats.js";
 import { selectInequality } from "./inequality.js";
 import { currencyScale, validateCurrencyInvariant, voucherBalance } from "../economy/currency.js";
 import { hasBankAccess } from "../economy/payment.js";
-import { WAGE_CONTROL_CIVIL_ROLE_IDS } from "../systems/payroll.js";
+import { WAGE_CONTROL_CIVIL_ROLE_IDS, privateWageRate, townWageRate } from "../systems/payroll.js";
 import { householdLivingSummary, occupationCounts, householdPopulation, householdIdleWorkers } from "../systems/households.js";
 import { bondOutstandingVoucherUnits } from "../systems/bonds.js";
 import { stallSquareSummaries, shopSummaries } from "../systems/shops.js";
@@ -97,7 +97,7 @@ export function selectConstructionOptions(state, content, context = {}) {
     const previewBuilders = Math.min(builderSlots, Math.max(unassignedBuilders,
       Math.min(definition.construction.recommendedWorkers, unassignedBuilders + labor.idle)));
     const estimatedDays = previewBuilders > 0 ? Math.ceil(definition.construction.workDays / previewBuilders) : null;
-    const builderWage = state.employment.wageRates?.builders ?? content.roles.builders?.wagePerWorkerDay ?? 5;
+    const builderWage = townWageRate(state, "builders", content);
     // 必须地块的建筑只看该类地块；其余看普通空地，外加定义里允许的特殊地块（河岸：外贸房）。
     const allowedPlots = definition.requiredPlotFeature
       ? runtime.plotsByFeature.get(definition.requiredPlotFeature) || []
@@ -195,7 +195,7 @@ export function selectDashboard(state, content, selection) {
   const people = populationStats(state);
   const labor = selectJobRows(state, content, runtime);
   labor.dailyWageExpectedWheatJin = labor.rows.reduce(function (sum, row) {
-    return sum + (row.scope === "private" || row.scope === "listed" || row.roleId === "farmers" ? 0 : row.count * row.wagePerWorkerDay);
+    return sum + (row.scope === "private" || row.scope === "listed" || row.roleId === "farmers" ? 0 : row.count * row.effectiveWagePerWorkerDay);
   }, 0);
   const laborRowByKey = new Map(labor.rows.map(row => [row.key, row]));
   const accounts = selectAccounts(state, content);
@@ -221,6 +221,7 @@ export function selectDashboard(state, content, selection) {
         workers: readJobCount(state, jobKeyForBuilding(building.id, job.id), runtime),
         capacity: job.capacityMode === "building" ? job.slots : job.slots * Math.max(0, ownership.townLevels ?? building.level ?? 1),
         wagePerWorkerDay: state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5,
+        effectiveWagePerWorkerDay: townWageRate(state, job.id, content),
         poachable: laborRow?.poachable || 0,
         globalDemandKind: laborRow?.globalDemandKind || null,
         globalDemand: laborRow?.globalDemand ?? null,
@@ -235,16 +236,20 @@ export function selectDashboard(state, content, selection) {
       return { id: job.id, name: job.name,
         workers: readJobCount(state, privateJobKeyForBuilding(building.id, job.id), runtime),
         capacity: job.slots * (ownership.privateLevels || 0),
-        wagePerWorkerDay: state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0 };
+        wagePerWorkerDay: privateWageRate(state, building, job, content),
+        effectiveWagePerWorkerDay: privateWageRate(state, building, job, content),
+        wageTarget: building.privateWage?.target ?? null,
+        wageDiagnosis: building.privateWage?.diagnosis || null };
     }) : [];
     const listedJobs = includeSiteDetails && definition ? definition.jobs.map(function (job) {
       const company = runtime.companyByBuildingId.get(building.id);
+      const wage = Number.isFinite(company?.settings?.wagePerWorkerDay)
+        ? company.settings.wagePerWorkerDay
+        : (state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0);
       return { id: job.id, name: job.name,
         workers: readJobCount(state, listedJobKeyForBuilding(building.id, job.id), runtime),
         capacity: job.slots * (ownership.listedLevels || 0),
-        wagePerWorkerDay: Number.isFinite(company?.settings?.wagePerWorkerDay)
-          ? company.settings.wagePerWorkerDay
-          : (state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0) };
+        wagePerWorkerDay: wage, effectiveWagePerWorkerDay: wage };
     }) : [];
     const result = {
       id: building.id,
@@ -322,7 +327,7 @@ export function selectDashboard(state, content, selection) {
   });
   const options = (needBuild || needSite) ? selectConstructionOptions(state, content, { runtime, labor }) : [];
   // 在建工程列表：每个工程各自带名称、进度、投入人数与预计工期/工资。
-  const builderWage = state.employment.wageRates?.builders ?? content.roles.builders?.wagePerWorkerDay ?? 5;
+  const builderWage = townWageRate(state, "builders", content);
   const projectViews = (state.projects || []).map(function (project) {
     const definition = content.buildings[project.typeId];
     const workers = Math.max(0, Math.floor(project.workers || 0));

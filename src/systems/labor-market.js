@@ -16,7 +16,7 @@
 
 import { recordEvent } from "../economy/ledger.js";
 import { householdList, householdWorkingAge, householdEmploymentCount, jobCount, setHouseholdJobCount } from "./households.js";
-import { wageControlFactor } from "./payroll.js";
+import { privateWageRate, wageControlFactor } from "./payroll.js";
 
 function clerkJobKey(shop) { return `shop:${shop.id}:clerk`; }
 function merchantJobKey(shop) { return `shop:${shop.id}:merchant`; }
@@ -139,9 +139,12 @@ export function jobWage(state, jobKey, content, cache = null) {
           ? company.settings.wagePerWorkerDay
           : wageRates[job.id] ?? job.wagePerWorkerDay ?? 0;
         if (base > 0) wage = base;
-      } else if (!scope || scope === "private") {
+      } else if (scope === "private") {
+        const rate = privateWageRate(state, building, job, content);
+        if (rate > 0) wage = rate;
+      } else if (!scope) {
         const base = wageRates[job.id] ?? job.wagePerWorkerDay ?? 0;
-        if (base > 0) wage = scope === "private" ? base : base * wageControlFactor(state, job.id);
+        if (base > 0) wage = base * wageControlFactor(state, job.id);
       }
     }
   }

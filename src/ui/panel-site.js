@@ -1,4 +1,4 @@
-import { escapeHtml, number, numberMax, moneyUnit, effectiveTownWage } from "./format.js";
+import { escapeHtml, number, numberMax, moneyUnit } from "./format.js";
 import { MODS } from "../mods/registry.js";
 import { wholesaleItemIds } from "../content/assemble.js";
 import { CONTENT } from "../content/index.js";
@@ -30,7 +30,7 @@ function workerControl(view, job, idle) {
   const unit = moneyUnit(view);
   const poachable = job.poachable || 0;
   const maximum = job.workers + Math.min(Math.max(0, job.capacity - job.workers), idle + poachable);
-  return `<div class="site-worker-control"><span>${escapeHtml(job.name)} · ${number(job.workers)}/${number(job.capacity)}人 · 日薪${number(job.wagePerWorkerDay)}${escapeHtml(unit)}</span><div class="site-worker-actions"><button class="step-btn" data-job="${escapeHtml(job.key)}" data-step="-1" aria-label="减少${escapeHtml(job.name)}" ${job.workers <= 0 ? "disabled" : ""}>−</button>${renderNumericInput(view, { key: `workers:${job.key}`, kind: "employment", target: job.key, value: job.workers, label: `${job.name}人数`, integer: true, minimum: 0, maximum, confirmLabel: "✓", className: "worker-editor site-worker-editor" })}<button class="step-btn" data-job="${escapeHtml(job.key)}" data-step="1" aria-label="增加${escapeHtml(job.name)}" ${job.workers >= maximum || (idle + poachable) <= 0 ? "disabled" : ""}>＋</button></div></div>`;
+  return `<div class="site-worker-control"><span>${escapeHtml(job.name)} · ${number(job.workers)}/${number(job.capacity)}人 · 日薪${number(job.effectiveWagePerWorkerDay, 2)}${escapeHtml(unit)}</span><div class="site-worker-actions"><button class="step-btn" data-job="${escapeHtml(job.key)}" data-step="-1" aria-label="减少${escapeHtml(job.name)}" ${job.workers <= 0 ? "disabled" : ""}>−</button>${renderNumericInput(view, { key: `workers:${job.key}`, kind: "employment", target: job.key, value: job.workers, label: `${job.name}人数`, integer: true, minimum: 0, maximum, confirmLabel: "✓", className: "worker-editor site-worker-editor" })}<button class="step-btn" data-job="${escapeHtml(job.key)}" data-step="1" aria-label="增加${escapeHtml(job.name)}" ${job.workers >= maximum || (idle + poachable) <= 0 ? "disabled" : ""}>＋</button></div></div>`;
 }
 
 
@@ -39,7 +39,7 @@ function buildingStaffingMarkup(view, building) {
   if (!jobs.length) return "";
   const controls = jobs.map(job => workerControl(view, job, view.labor.idle)).join("");
   const wage = jobs[0];
-  return `<h3>人员</h3>${controls}<div class="row"><span class="label">日薪（政策页系数调节）</span><strong class="value">${number(effectiveTownWage(view, wage.id, wage.wagePerWorkerDay), 2)}${escapeHtml(moneyUnit(view))}</strong></div>`;
+  return `<h3>人员</h3>${controls}<div class="row"><span class="label">日薪（政策页系数调节）</span><strong class="value">${number(wage.effectiveWagePerWorkerDay, 2)}${escapeHtml(moneyUnit(view))}</strong></div>`;
 }
 
 // 用户 0.1.11：镇营目标日产量。仅有主产出品且镇营仍占级数的建筑显示；
@@ -386,7 +386,7 @@ export function renderSite(view) {
     const jobs = building.jobs.map(job => ({ ...job, key: `${building.id}::${job.id}` }));
     const privateJobs = building.privateJobs.map(job => ({ ...job, key: `${building.id}::${job.id}::private` }));
     const staff = jobs.reduce((sum, job) => sum + job.workers, 0);
-    const dailyCost = jobs.reduce((sum, job) => sum + job.workers * job.wagePerWorkerDay, 0);
+    const dailyCost = jobs.reduce((sum, job) => sum + job.workers * job.effectiveWagePerWorkerDay, 0);
     const publicService = jobs.find(job => job.globalDemandKind === "public_service");
     const wageUnpaid = payroll?.unpaidCurrentWheatJin || 0;
     const jobMarkup = jobs.map(job => workerControl(view, job, view.labor.idle)).join("");
@@ -423,7 +423,7 @@ export function renderSite(view) {
     const ipoApplication = (view.ipo?.applications || []).find(row => row.buildingId === building.id) || null;
     const privateOwnerMarkup = `${extras ? `<div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(extras.ownerName)}</strong></div>` : ""}${extras?.arrears ? `<div class="shortage-banner visible">欠薪${number(extras.arrearsVoucher, 2)}${escapeHtml(unit)}，已欠${number(extras.arrearsDays)}天；欠薪超过${number(takeoverDays)}天将被镇里收回</div>` : ""}${ipoApplication ? `<div class="subtle">业主已递交上市申请，待镇长在企业面板批准。</div>` : ""}`;
     const privateSection = building.ownership.privateLevels > 0
-      ? `<h3>民营 · ${number(building.ownership.privateLevels)}级${extras?.arrears ? ` <span class="badge red">欠薪</span>` : ""}</h3>${privateOwnerMarkup}<div class="row"><span class="label">状态 / 用工</span><strong class="value">${escapeHtml(building.privateReason || privateStatusLabel(building.privateStatus))} · ${number(privateJobs.reduce((sum, row) => sum + row.workers, 0))}/${number(privateJobs.reduce((sum, row) => sum + row.capacity, 0))}人</strong></div><div class="row"><span class="label">今日产出</span><strong class="value">${privateOutputText}</strong></div><details class="detail-block" data-detail-key="private-stock:${escapeHtml(building.id)}"><summary>原料与预期价格</summary><div class="detail-body"><div class="row"><span class="label">批发市场</span><strong class="value">${privateMarketText}</strong></div><div class="subtle">原料从批发市场按采购价购买；产品预期售价为批发市场当前收购价。</div></div></details>` : "";
+      ? `<h3>民营 · ${number(building.ownership.privateLevels)}级${extras?.arrears ? ` <span class="badge red">欠薪</span>` : ""}</h3>${privateOwnerMarkup}<div class="row"><span class="label">状态 / 用工</span><strong class="value">${escapeHtml(building.privateReason || privateStatusLabel(building.privateStatus))} · ${number(privateJobs.reduce((sum, row) => sum + row.workers, 0))}/${number(privateJobs.reduce((sum, row) => sum + row.capacity, 0))}人</strong></div>${privateJobs.map(job => `<div class="row"><span class="label">${escapeHtml(job.name)}</span><strong class="value">日薪 ${number(job.effectiveWagePerWorkerDay, 2)}${escapeHtml(unit)}${job.wageDiagnosis ? ` · ${escapeHtml(job.wageDiagnosis)}` : ""}</strong></div>`).join("")}<div class="row"><span class="label">今日产出</span><strong class="value">${privateOutputText}</strong></div><details class="detail-block" data-detail-key="private-stock:${escapeHtml(building.id)}"><summary>原料与预期价格</summary><div class="detail-body"><div class="row"><span class="label">批发市场</span><strong class="value">${privateMarketText}</strong></div><div class="subtle">原料从批发市场按采购价购买；产品预期售价为批发市场当前收购价。</div></div></details>` : "";
     const right = building.operatingRight;
     // 民营建筑：镇里按估值收回（整栋回镇营，钱由镇库付给业主）。
     const buybackCard = building.ownership.privateLevels > 0 && right
