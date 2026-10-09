@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { simulation } from "../src/engine.js";
 import { CONTENT } from "../src/content/index.js";
 import { DAILY_STEPS } from "../src/systems/daily.js";
-import { householdList, isActiveHousehold, jobCount } from "../src/systems/households.js";
+import { householdList, isActiveHousehold, jobCount, syncResidentAggregates } from "../src/systems/households.js";
 import { buildingOwner, transferBuildingOwnership } from "../src/systems/ownership.js";
 import { settleIpoApplications } from "../src/systems/ipo.js";
 import { settleHouseholdStockBuying } from "../src/systems/stock-exchange.js";
@@ -75,6 +75,7 @@ function brokeHousehold(state, index = 0) {
   const household = householdList(state).filter(isActiveHousehold)[index];
   household.voucherUnits = 0;
   household.inventory.wheat = 0;
+  syncResidentAggregates(state, CONTENT); // 直接改户余额后按约定同步居民汇总（docs 与 accounts.js 约定）
   return household;
 }
 
@@ -178,6 +179,7 @@ test("民营建筑经镇长批准上市：业主家庭保留 51%，卖方是业�
   const salt = addBuilding(state, "saltworks", "ipo-hh-salt", { level: 1, owner: "household", ownerId: owner.id });
   const itemId = outputItemOf("saltworks");
   owner.inventory[itemId] = 30 * I;
+  syncResidentAggregates(state, CONTENT);
   assert.match(simulation.listBuilding(state, salt.id, { ticker: "204" }).reason, /业主递交上市申请/, "镇长不能直接拿民营建筑上市");
   state.ipoApplications = { [salt.id]: { householdId: owner.id, filedSerial: 1, offerPercent: 49, priceVoucherPerShare: 2 } };
   const result = simulation.approveIpoApplication(state, salt.id, { ticker: "204" });
