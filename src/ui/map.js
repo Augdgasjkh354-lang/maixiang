@@ -96,16 +96,6 @@ function renderRiversideParcel(plot) {
   return `<g class="plot-parcel riverside-parcel" transform="translate(${x} ${y})"><rect x="-48" y="-36" width="96" height="72" rx="12" fill="#dcebe5" fill-opacity=".6" stroke="#7fa79d" stroke-opacity=".85" stroke-width="2" stroke-dasharray="10 7"/><path d="M-30 12q7.5-6 15 0t15 0 15 0 15 0" fill="none" stroke="#8fb6b0" stroke-width="3" stroke-linecap="round"/><text x="0" y="-10" text-anchor="middle" font-size="13" font-weight="700" fill="#4f6f68">${escapeHtml(plot.label)}</text></g>`;
 }
 
-function walkingPeople() {
-  const people = [
-    { x: 456, y: 467, cls: "walker-one", coat: "#5e6c53" },
-    { x: 647, y: 445, cls: "walker-two", coat: "#9a5742" },
-    { x: 811, y: 470, cls: "walker-three", coat: "#4f7480" },
-    { x: 621, y: 484, cls: "walker-four", coat: "#b08945" }
-  ];
-  return `<g class="villagers" aria-hidden="true">${people.map(person => `<g class="villager ${person.cls}" transform="translate(${person.x} ${person.y})"><g class="villager-walk"><circle class="villager-head" r="6" cy="-8"/><path class="villager-coat" d="M-6-3Q0-8 6-3l4 16H-10Z" fill="${person.coat}"/><path class="villager-leg" d="M-3 12-5 20m8-8 3 8"/><path class="villager-bundle" d="M6-1q8 0 7 10H7Z"/></g></g>`).join("")}</g>`;
-}
-
 function workState(building) {
   const status = building.status || {};
   // 闸门减产（市场积压 / 口粮储备）时仍在出货的建筑亮"运作"灯。
@@ -186,7 +176,7 @@ export function renderMap(view, nav) {
       .map(plot => plot.feature === "riverside" ? renderRiversideParcel(plot) : renderParcel(plot)).join("")
     : "";
   return `<canvas id="mapTerrainCanvas" class="map-art-canvas" width="${MAP_WIDTH}" height="${MAP_HEIGHT}" aria-hidden="true"></canvas><svg class="world-map" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="麦乡俯视地图" data-season="${view.season.key}" data-paused="${view.paused}">
-    ${townLandscape([...occupied])}<g class="plot-parcels" pointer-events="none" aria-hidden="true">${parcels}</g><g class="static-sites">${staticSites(view)}${resources}</g><g class="walker-layer">${walkingPeople()}</g>
+    ${townLandscape([...occupied])}<g class="plot-parcels" pointer-events="none" aria-hidden="true">${parcels}</g><g class="static-sites">${staticSites(view)}${resources}</g>
     <g class="buildings-layer">${project}${buildingMarkup}</g><g class="build-sites" style="display:${buildMode ? "" : "none"}">${plots}</g>
     <g class="north-mark" transform="translate(1130 95)"><path d="M0 22V-12m0 0-8 13 8-4 8 4Z"/><text y="39">北</text></g>
   </svg>`;
