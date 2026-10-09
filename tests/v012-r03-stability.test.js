@@ -14,6 +14,7 @@ import { grantResidentVouchers } from "./helpers-v16.js";
 import { renderSite } from "../src/ui/panel-site.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
 import { shopTradePrices } from "../src/economy/operating-plan.js";
+import { pendingWages } from "../src/systems/employer.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -123,7 +124,9 @@ test("r03 负债店铺停业进入待清算，停止新增费用，补资按工�
   }
   prepareShopsForDay(state, CONTENT);
   // 基线清理：店主商人不领固定工资，仅店员（5/天，默认日薪 10→5 斤）计提，共 5*V。
-  assert.equal(shop.liabilities.wageVoucherUnits, 5 * V);
+  // 月薪：这笔工资先进本月待发（店铺默认 25 号发薪），还不是欠薪。
+  assert.equal(shop.liabilities.wageVoucherUnits, 0);
+  assert.equal(pendingWages(shop.liabilities), 5 * V);
   assert.equal(shop.liabilities.rentVoucherUnits, 1 * V);
   shop.settlement.profitVoucherUnits = 100 * V;
   shop.retainedEarningsVoucherUnits = 100 * V;
@@ -131,6 +134,8 @@ test("r03 负债店铺停业进入待清算，停止新增费用，补资按工�
   const firstClose = closeShop(state, shop.id, CONTENT, false);
   assert.equal(firstClose.ok, true);
   assert.equal(shop.status, "liquidating");
+  // 清算不等发薪日（systems/employer.js：清算场合不传 payDay，待发一律到期偿付）：停业时待发工资应转为欠薪。
+  assert.equal(shop.liabilities.wageVoucherUnits, 5 * V, "清算时待发工资应立即到期成为欠薪");
   assert.equal(jobCount(state, merchantKey(shop)), 0);
   assert.equal(jobCount(state, clerkKey(shop)), 0);
   assert.equal(owner.inventory.salt || 0, ownerSaltBefore, "有债务时库存不能返还业主");

@@ -1,3 +1,5 @@
+import { inOpeningPeriod, reviewStaffing } from "./employment-contracts.js";
+import { payDayFor } from "./paydays.js";
 import { populationStats, readJobCount, jobKeyForBuilding, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
 import { isIndustryType } from "../content/buildings.js";
@@ -363,7 +365,7 @@ export function liquidateCompanyForArrears(state, companyId, content) {
     townAdvanceUnits = before - wageArrears(book);
   }
   const job = content.buildings[company.typeId]?.jobs?.[0];
-  const transferredClaimsUnits = job ? transferWageClaimsToTown(state, book, jobKeyForBuilding(company.buildingId, job.id)) : 0;
+  const transferredClaimsUnits = job ? transferWageClaimsToTown(state, book, jobKeyForBuilding(company.buildingId, job.id), content) : 0;
   company.payroll.arrearsVoucherUnits = wageArrears(book);
   // 5. 股份作废、建筑回镇营。
   const cancelledResidentShares = company.residentShares || 0;
@@ -617,8 +619,15 @@ export function arrangeListedWorkers(state, content) {
     const jobKey = listedJobKeyForBuilding(building.id, job.id);
     const current = Math.min(readJobCount(state, jobKey), job.slots * company.listedLevels);
     const plannedWorkers = plannedWorkersForProducer(state, `company:${company.id}`);
-    const desired = Number.isInteger(company.settings?.targetWorkers) ? company.settings.targetWorkers : (plannedWorkers == null ? current : plannedWorkers);
-    idle = hireToward(desired, idle, () => readJobCount(state, jobKey), next => setJobCount(state, jobKey, next, content, { type: "company", id: company.id }));
+    const manual = Number.isInteger(company.settings?.targetWorkers);
+    const desired = manual ? company.settings.targetWorkers : (plannedWorkers == null ? current : plannedWorkers);
+    // 正式员工：计划用工每月 1 号审核、一次一人；玩家手设的目标人数立即招，减人仍须满 30 天并付补偿。
+    const rate = Number.isFinite(company.settings?.wagePerWorkerDay) ? company.settings.wagePerWorkerDay : (state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5);
+    idle = reviewStaffing(state, content, { jobKey, current: readJobCount(state, jobKey), desired, idle, immediateHire: manual,
+      hire: next => setJobCount(state, jobKey, next, content, { type: "company", id: company.id }),
+      payer: `company:${company.id}`, dailyWage: rate, book: wageBook(company.payroll ||= {}), reason: `${company.name}辞退补偿`,
+      opening: inOpeningPeriod(state, content, company.created),
+      losing: (company.history || []).slice(-30).reduce((sum, row) => sum + (row.profitVoucherUnits || 0), 0) < 0 });
   }
 }
 
@@ -631,7 +640,8 @@ export function payListedCompanyWages(state, content) {
     const payroll = wageBook(company.payroll);
     accrueWages(state, payroll, jobAssignments(state, jobKey), due, content);
     payroll.cumulativeAccruedVoucherUnits += due; addPeriodValue(company, "wageExpenseVoucherUnits", due); applyProfit(company, -due);
-    const paid = payWages(state, payroll, "company:" + company.id, content, "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`).paid;
+    const paid = payWages(state, payroll, "company:" + company.id, content, "enterprise_wage_payment", `${company.name}偿付具体债权家庭工资`,
+      { payDay: payDayFor(state, `company:${company.id}`) }).paid;
     payroll.arrearsVoucherUnits = wageArrears(payroll);
     payroll.cumulativePaidVoucherUnits += paid; addPeriodValue(company, "wagesPaidVoucherUnits", paid);
     results.push({ companyId: company.id, workers, dueVoucherUnits: due, paidVoucherUnits: paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });
@@ -814,7 +824,7 @@ export function settleAnnualCompanyProfits(state, endingYear, content) {
 
     // 先尝试偿付已形成的工资债务。债权仍归原家庭，支付媒介由统一支付层决定。
     const debtResult = payWages(state, company.payroll, "company:" + company.id, content,
-      "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`);
+      "enterprise_wage_debt_settlement", `${company.name}年度结算前偿付工资债务`, { overdueOnly: true });
     company.payroll.arrearsVoucherUnits = wageArrears(company.payroll);
 
     const retainedBefore = Math.max(0, company.retainedEarningsVoucherUnits || 0);

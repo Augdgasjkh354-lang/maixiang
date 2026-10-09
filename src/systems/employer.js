@@ -1,9 +1,12 @@
 // 统一雇主：镇库、民营、公司、店铺发工资都用同一套"工资债权簿"。
 //
-//   book.claimsVoucherUnits[householdId]  欠这户的工资（价值单位）
+//   book.pendingByMonth[月序][householdId] 已干活、还没到发薪日的工资（月薪：每天计提，按月结）
+//   book.claimsVoucherUnits[householdId]  已到期的工资（发薪日转入；付不清的就是欠薪）
 //   book.claimsPayment[householdId]       同一笔债的支付构成（小麦/粮券），按原构成偿付
 //
-// 每天：accrueWages 按岗位分配记账 → payWages 由一个或多个付款方按户偿付；欠薪 = wageArrears(book)。
+// 每天：accrueWages 把当天工资记进本月待发 → payWages(..., { payDay }) 到了雇主的发薪日（每月 5/10/15/20/25 号）
+// 把上个月及更早的待发转为到期并偿付，之后每天补付欠薪；欠薪 = wageArrears(book)（只算已到期未付）。
+// 清算、收回等场合不传 payDay：所有待发一律到期并立即偿付。
 
 import { allocateIntegerByWeight } from "../core/allocation.js";
 import { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } from "../economy/payment.js";
@@ -13,7 +16,44 @@ import { jobAssignments, syncResidentAggregates } from "./households.js";
 export function wageBook(holder) {
   holder.claimsVoucherUnits ||= {};
   holder.claimsPayment ||= {};
+  holder.pendingByMonth ||= {};
   return holder;
+}
+
+// 月序（从第 1 年 1 月起数）与本月几号（1 起）。
+export function monthSerial(state, content) {
+  const monthDays = content.rules.monthDays || 30;
+  return Math.floor(((Math.max(1, state.year || 1) - 1) * content.rules.daysPerYear + (state.day || 0)) / monthDays);
+}
+
+export function dayOfMonth(state, content) {
+  return ((state.day || 0) % (content.rules.monthDays || 30)) + 1;
+}
+
+// 还没到期的待发工资合计（本月与上月未到发薪日的部分）。
+export function pendingWages(book) {
+  let total = 0;
+  for (const row of Object.values(book?.pendingByMonth || {})) for (const units of Object.values(row || {})) total += Math.max(0, units || 0);
+  return total;
+}
+
+// 把待发工资转为到期：all=true 时全部转（清算），否则只转本月以前的月份。家庭"应得工资"在到期时入账。
+export function matureWages(state, book, content, { all = false } = {}) {
+  wageBook(book);
+  const current = monthSerial(state, content);
+  let moved = 0;
+  for (const month of Object.keys(book.pendingByMonth)) {
+    if (!all && Number(month) >= current) continue;
+    for (const [householdId, units] of Object.entries(book.pendingByMonth[month] || {})) {
+      if (!(units > 0)) continue;
+      book.claimsVoucherUnits[householdId] = (book.claimsVoucherUnits[householdId] || 0) + units;
+      book.claimsPayment[householdId] = addPaymentObligation(book.claimsPayment[householdId], currentPaymentComposition(state, units));
+      if (state.households?.byId?.[householdId]) recordHouseholdWageDue(state, householdId, units, content);
+      moved += units;
+    }
+    delete book.pendingByMonth[month];
+  }
+  return moved;
 }
 
 export function wageArrears(book) {
@@ -30,20 +70,26 @@ export function accrueWages(state, book, assignments, dueUnits, content) {
   const allocation = allocateIntegerByWeight(dueUnits, households, household => weights[household.id] || 0);
   if (!allocation.ok) return [];
   const rows = [];
+  const month = (book.pendingByMonth[monthSerial(state, content)] ||= {});
   for (const { recipient: household, units } of allocation.rows) {
     if (units <= 0) continue;
-    book.claimsVoucherUnits[household.id] = (book.claimsVoucherUnits[household.id] || 0) + units;
-    book.claimsPayment[household.id] = addPaymentObligation(book.claimsPayment[household.id], currentPaymentComposition(state, units));
-    recordHouseholdWageDue(state, household.id, units, content);
+    month[household.id] = (month[household.id] || 0) + units;
     rows.push({ householdId: household.id, units });
   }
   return rows;
 }
 
 // 按户偿付工资债权。payers：付款方账户名，或 { id, maxWheatUnits }（家庭业主要留口粮），按顺序轮流付。
-// 返回 { paid, rows: [{ householdId, units }] }。
-export function payWages(state, book, payers, content, type, reason) {
+// options.payDay：雇主的发薪日（几号）。没到发薪日什么也不付；到了把上月及以前的待发转为到期再付。
+// 不传 payDay（清算、收回、垫付）：所有待发立即到期并偿付。返回 { paid, rows, matured }。
+export function payWages(state, book, payers, content, type, reason, options = {}) {
   wageBook(book);
+  let matured = 0;
+  if (options.overdueOnly) matured = 0; // 只还已到期的欠薪（如年度结算前），不动待发
+  else if (Number.isFinite(options.payDay)) {
+    if (dayOfMonth(state, content) < options.payDay) return { paid: 0, rows: [], matured: 0 };
+    matured = matureWages(state, book, content);
+  } else matured = matureWages(state, book, content, { all: true });
   const list = (Array.isArray(payers) ? payers : [payers]).map(payer => typeof payer === "string" ? { id: payer } : payer);
   const previousDefer = Boolean(state._deferHouseholdSync);
   state._deferHouseholdSync = true;
@@ -68,12 +114,13 @@ export function payWages(state, book, payers, content, type, reason) {
   }
   state._deferHouseholdSync = previousDefer;
   if (!previousDefer && state._householdSyncDirty) syncResidentAggregates(state, content);
-  return { paid, rows };
+  return { paid, rows, matured };
 }
 
 // 实物抵欠薪（民营收回、公司清算）：按户先到先抵，从债权上扣减 valueUnits，返回实际抵掉的价值。
 export function offsetWageClaims(state, book, valueUnits, content) {
   wageBook(book);
+  matureWages(state, book, content, { all: true });
   const start = Math.max(0, Math.floor(valueUnits || 0));
   let left = start;
   for (const householdId of Object.keys(book.claimsVoucherUnits).sort()) {
@@ -94,8 +141,9 @@ export function offsetWageClaims(state, book, valueUnits, content) {
 }
 
 // 把剩余债权整体转给镇营：记入镇库的历史债权表（按岗位键），之后由镇库经既有工资流程偿付。
-export function transferWageClaimsToTown(state, book, payrollKey) {
+export function transferWageClaimsToTown(state, book, payrollKey, content = null) {
   wageBook(book);
+  if (content) matureWages(state, book, content, { all: true });
   const payroll = state.payroll ||= { arrearsVoucherUnits: {}, totals: {}, year: {} };
   payroll.creditorClaims ||= {};
   payroll.creditorPaymentClaims ||= {};

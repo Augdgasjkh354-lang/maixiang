@@ -5,7 +5,7 @@ import { householdFoodQeqUnits, householdList, householdPopulation } from "./hou
 const PERIOD_FIELDS = [
   "incomeVoucherUnits", "expenseVoucherUnits", "lifeExpenseVoucherUnits", "investmentVoucherUnits",
   "assetExchangeVoucherUnits", "capitalReturnVoucherUnits", "inKindIncomeQeqUnits", "reliefQeqUnits",
-  "foodConsumedQeqUnits", "breadConsumedQeqUnits", "saltConsumedUnits", "wageDueVoucherUnits",
+  "foodConsumedQeqUnits", "breadConsumedQeqUnits", "meatConsumedQeqUnits", "saltConsumedUnits", "wageDueVoucherUnits",
   "wagePaidVoucherUnits", "rentDueVoucherUnits", "rentPaidVoucherUnits", "serviceExpenseVoucherUnits", "serviceComfortPoints"
 ];
 

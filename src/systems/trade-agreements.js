@@ -33,7 +33,7 @@ export function readTradeAgreements(state) {
   return rows.filter(row => row && typeof row === "object").map(row => ({ ...row }));
 }
 
-// 一年切 12 段，每段交付一次（第 361—365 天归入第 12 段）。
+// 一年切 12 段（每月一段），每段交付一次。
 function isMonthlySettlementDue(state, content) {
   const daysPerMonth = Math.max(1, Math.floor((content.rules.daysPerYear || 365) / 12));
   const monthIndex = Math.min(11, Math.floor((Math.max(1, state.day || 1) - 1) / daysPerMonth));

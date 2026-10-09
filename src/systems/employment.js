@@ -1,3 +1,4 @@
+import { dismissibleCount, dismissWorkers, minTenureDays } from "./employment-contracts.js";
 import { populationStats, selectJobRows, jobKeyForBuilding, readJobCount, privateJobKeyForBuilding } from "../selectors/labor.js";
 import { setJobCount, releaseExcessHouseholdEmployment, jobCount } from "./households.js";
 import { reclaimedAcres } from "./agriculture.js";
@@ -62,8 +63,27 @@ export function assignWorkers(state, jobKey, requested, content) {
       allowFarmers: false
     });
   }
+  // 正式员工：镇营减人是辞退——只能辞退入职满 30 天的人，镇库付一个月工资作补偿（systems/employment-contracts.js）。
+  if (value < row.count && row.key !== "builders") {
+    const wanted = row.count - value;
+    const allowed = Math.min(wanted, dismissibleCount(state, jobKey, content));
+    if (allowed <= 0) return { ok: false, changed: false, assigned: row.count, limit, reason: `入职不满${minTenureDays(content)}天的员工不能辞退` };
+    const payroll = ensurePayrollBooks(state);
+    const book = { claimsVoucherUnits: payroll.creditorClaims[jobKey] ||= {}, claimsPayment: payroll.creditorPaymentClaims[jobKey] ||= {}, pendingByMonth: (payroll.creditorPending ||= {})[jobKey] ||= {} };
+    const result = dismissWorkers(state, jobKey, allowed, { payer: "town", dailyWage: row.effectiveWagePerWorkerDay || 0, book, reason: `${row.buildingName || ""}${row.name || ""}辞退补偿` }, content);
+    const assigned = jobCount(state, jobKey);
+    return { ok: true, changed: result.dismissed > 0, assigned, limit, dismissed: result.dismissed, severanceVoucherUnits: result.severanceVoucherUnits,
+      reason: allowed < wanted ? `只辞退了${allowed}人：其余入职不满${minTenureDays(content)}天` : null };
+  }
   const result = setJobCount(state, jobKey, value, content, { type: "town", id: row.buildingId || row.roleId });
   return { ok: result.ok, changed, assigned: result.assigned, limit, reason: result.reason };
+}
+
+function ensurePayrollBooks(state) {
+  state.payroll ||= {};
+  state.payroll.creditorClaims ||= {};
+  state.payroll.creditorPaymentClaims ||= {};
+  return state.payroll;
 }
 
 export function initializeBuildingJobs() {

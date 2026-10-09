@@ -142,5 +142,6 @@ export function describeLoadReport(report) {
   if (report.reset.length) parts.push(`重置子系统：${report.reset.join("、")}`);
   if (report.ownership?.length) parts.push(`整栋归属换算 ${report.ownership.length} 栋：${report.ownership.join("；")}`);
   if (report.households?.length) parts.push(report.households.join("；"));
+  if (report.calendar?.length) parts.push(report.calendar.join("；"));
   return parts.length ? `存档来自旧版本，已自动处理（${parts.join("；")}），其余进度保留。` : null;
 }

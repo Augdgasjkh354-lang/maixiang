@@ -1,3 +1,5 @@
+import { inOpeningPeriod, reviewStaffing } from "./employment-contracts.js";
+import { payDayFor } from "./paydays.js";
 import { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
 import { industryTypeIds, isIndustryType } from "../content/buildings.js";
@@ -106,7 +108,17 @@ export function arrangePrivateWorkers(state, content) {
     const plannedWorkers = plannedWorkersForProducer(state, `private:${building.id}`);
     const ownerCap = privateHireCapByOwnerMoney(state, building, role, content);
     const desired = Math.min(cap, ownerCap, plannedWorkers == null ? readJobCount(state, key) : plannedWorkers);
-    idle = hireToward(desired, idle, () => readJobCount(state, key), next => setPrivateWorkers(state, building.id, role.id, next, content));
+    // 正式员工：每月 1 号审核，不够招一人、多了辞退一人（满 30 天，业主付一个月补偿）。
+    const ownerId = privateOwners(building, state)[0];
+    const owner = ownerId ? state.households?.byId?.[ownerId] : null;
+    const payer = owner ? { id: `household:${ownerId}`, maxWheatUnits: householdConvertibleWheatUnits(state, owner, content, content.rules.householdFoodReserveDays ?? 30) } : null;
+    state.privateEconomy ||= {}; state.privateEconomy.payrollByBuilding ||= {};
+    const book = wageBook(state.privateEconomy.payrollByBuilding[building.id] ||= { arrearsVoucherUnits: 0, cumulativeAccruedVoucherUnits: 0, cumulativePaidVoucherUnits: 0 });
+    idle = reviewStaffing(state, content, { jobKey: key, current: readJobCount(state, key), desired, idle,
+      hire: next => setPrivateWorkers(state, building.id, role.id, next, content),
+      payer, dailyWage: privateWageRate(state, building, role, content), book, reason: `${definition.name}民营辞退补偿`,
+      opening: inOpeningPeriod(state, content, building.privateSince),
+      losing: (building.privateProfitHistory || []).slice(-30).reduce((sum, row) => sum + (row.profitVoucherUnits || 0), 0) < 0 });
   }
 }
 
@@ -153,7 +165,8 @@ export function payPrivateIndustryWages(state, content) {
       id: `household:${ownerId}`,
       maxWheatUnits: householdConvertibleWheatUnits(state, state.households.byId[ownerId], content, content.rules.householdFoodReserveDays ?? 30)
     }));
-    const paid = payWages(state, payroll, payers, content, "private_wage_payment", `${definition.name}民营业主偿付具体债权家庭工资`).paid;
+    const paid = payWages(state, payroll, payers, content, "private_wage_payment", `${definition.name}民营业主偿付具体债权家庭工资`,
+      { payDay: payDayFor(state, `private:${building.id}`) }).paid;
     payroll.arrearsVoucherUnits = wageArrears(payroll); payroll.cumulativePaidVoucherUnits += paid;
     payroll.lastDueVoucherUnits = due;
     results.push({ buildingId: building.id, workers, dueVoucherUnits: due, paidVoucherUnits: paid, arrearsVoucherUnits: payroll.arrearsVoucherUnits });

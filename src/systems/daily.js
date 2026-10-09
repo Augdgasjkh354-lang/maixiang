@@ -1,3 +1,4 @@
+import { assignPayDays } from "./paydays.js";
 import { closeLedgerBatch, openLedgerBatch } from "../economy/ledger.js";
 import { totalQeqUnits } from "../economy/inventory.js";
 import { produceLivestock } from "./livestock.js";
@@ -157,6 +158,8 @@ export const CORE_DAILY_STEPS = [
 
   // ── 发钱：救济优先，再发工资（先还旧欠薪），再失业金、养老金
   { id: "relief", run: (state, content, day) => applyAutomaticRelief(state, day.peopleAtStart.total, content) },
+  // 每月 1 号按盈利能力给雇主排发薪日（5/10/15/20/25 号，systems/paydays.js）。
+  { id: "payDays", run: assignPayDays },
   { id: "wages", run: (state, content, day) => payDailyWages(state, day.laborAtStart, content) },
   { id: "companyWages", run: payListedCompanyWages },
   { id: "privateWages", run: payPrivateIndustryWages },

@@ -35,16 +35,17 @@ export function updateSatisfaction(state, population, comfortQeqUnits, content, 
     const disposablePerCapitaDay = (((recent.incomeVoucherUnits || 0) + (life.day.incomeVoucherUnits || 0)) - ((recent.lifeExpenseVoucherUnits || 0) + (life.day.lifeExpenseVoucherUnits || 0))) / scale / people / days;
     const disposableCoverage = clamp01((disposablePerCapitaDay + (cfg.disposableTargetVoucherPerCapitaDay || 1.5)) / (2 * (cfg.disposableTargetVoucherPerCapitaDay || 1.5)));
     const breadComfort = (cfg.breadComfortMaximum || 5) * clamp01((life.day.breadConsumedQeqUnits || 0) / Math.max(1, dailyFoodNeed * 0.25));
+    const meatComfort = (content.rules.meatStaple?.comfortMaximum ?? 0) * clamp01((life.day.meatConsumedQeqUnits || 0) / Math.max(1, dailyFoodNeed * 0.25));
     const serviceComfort = Math.max(0, Math.min(content.rules.serviceComfortDailyMaximum || 3, life.day.serviceComfortPoints || 0));
     const goodsComfort = goodsComfortPoints(state, household, people, life.day, content) + modComfortPoints(state, household, people, life.day, content, MODS);
     const target = Math.max(0, Math.min(100,
       (cfg.foodWeight || 35) * foodCoverage + (cfg.saltWeight || 12) * saltCoverage +
       (cfg.housingWeight || 15) * housingCoverage + (cfg.wageWeight || 15) * wageCoverage +
-      (cfg.reserveWeight || 13) * reserveCoverage + (cfg.disposableWeight || 5) * disposableCoverage + breadComfort + serviceComfort + goodsComfort));
+      (cfg.reserveWeight || 13) * reserveCoverage + (cfg.disposableWeight || 5) * disposableCoverage + breadComfort + meatComfort + serviceComfort + goodsComfort));
     const prior = Number.isFinite(life.satisfaction) ? life.satisfaction : (state.satisfaction || 75);
     const alpha = foodCoverage < 0.75 ? (content.rules.satisfactionUrgentFoodSmoothing || 0.55) : (content.rules.satisfactionSmoothing || 0.18);
     life.satisfaction = round2(prior * (1 - alpha) + target * alpha);
-    life.lastFactors = { foodCoverage, saltCoverage, housingCoverage, wageCoverage, reserveCoverage, disposableCoverage, breadComfort, serviceComfort, goodsComfort, target, foodDays, disposablePerCapitaDay };
+    life.lastFactors = { foodCoverage, saltCoverage, housingCoverage, wageCoverage, reserveCoverage, disposableCoverage, breadComfort, meatComfort, serviceComfort, goodsComfort, target, foodDays, disposablePerCapitaDay };
     life.satisfactionHistory.push({ year: state.year, day: state.day + 1, value: life.satisfaction });
     const historyLimit = content.rules.householdLifeHistoryDays || 90;
     if (life.satisfactionHistory.length > historyLimit) life.satisfactionHistory.splice(0, life.satisfactionHistory.length - historyLimit);

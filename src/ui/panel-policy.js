@@ -1,4 +1,4 @@
-import { escapeHtml, number } from "./format.js";
+import { escapeHtml, number, payDayText } from "./format.js";
 import { CONTENT } from "../content/index.js";
 import { industryTypeIds } from "../content/buildings.js";
 import { renderNumericInput } from "./numeric-drafts.js";
@@ -95,7 +95,7 @@ export function renderPolicy(view) {
       <div class="row"><span class="label">公务员类系数（政务/警察/银行/交易所/社保）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-civil", kind: "wage-control-civil", target: "wageControl", value: view.policy.wageControl?.civil ?? 1, label: "公务员类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">镇营产业类系数（其余镇营岗位）</span><div class="setting-input">${renderNumericInput(view, { key: "wage-control-industry", kind: "wage-control-industry", target: "wageControl", value: view.policy.wageControl?.industry ?? 1, label: "镇营产业类工资系数", minimum: 0, maximum: 10, className: "setting-editor" })}<b>×</b></div></div>
       <div class="row"><span class="label">今日镇营工资应发</span><strong class="value">${number(view.policy.wageLastDay?.expectedVoucher || 0, 1)}${moneyUnit}</strong></div>
-      <div class="subtle">岗位日薪 = 基础日薪 × 系数；不影响公司自定工资。</div>
+      <div class="subtle">岗位日薪 = 基础日薪 × 系数，月薪 = 日薪 × ${view.monthDays || 30}；不影响公司自定工资。工资按月计提，镇营${payDayText(5)}，店铺、民营、公司的发薪日（5—25号）按盈利排定。</div>
     </div></details>
     <details class="detail-block" data-detail-key="policy-villa"><summary>别墅</summary><div class="detail-body">
       <div class="row"><span class="label">别墅定价</span><div class="setting-input">${renderNumericInput(view, { key: "villa-price", kind: "villa-price", target: "villa", value: view.policy.villa?.priceWheatJin ?? 10000, label: "别墅定价", minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>小麦等值</b></div></div>

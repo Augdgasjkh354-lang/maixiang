@@ -48,6 +48,14 @@ export function migrateSave(raw, content) {
   rehydrate(state, definitions);
   // 旧存档里按等级拆开的建筑整栋换主人（docs/OWNERSHIP.md 旧存档换算）；必须在校验之前，整栋已是空操作。
   convertSplitOwnership(state, definitions, report);
+  // 日历换算：旧存档一年 365 天（没有 calendarDaysPerYear），按比例换到现在的天数（秋收日、季节对应不变）。
+  const savedDaysPerYear = Number(saved?.calendarDaysPerYear) || 365;
+  const daysPerYear = definitions.rules.daysPerYear;
+  if (savedDaysPerYear !== daysPerYear) {
+    state.day = Math.min(daysPerYear - 1, Math.floor((state.day || 0) * daysPerYear / savedDaysPerYear));
+    report.calendar = [`日历改为一年${daysPerYear}天（12个月），日期已按比例换算`];
+  }
+  state.calendarDaysPerYear = daysPerYear;
   rehydrate(state, definitions);
   // 旧存档的大户（开局 250 户、每户十几人）读档时一次分到每户不超过 8 人；已分好的存档是空操作。
   const split = splitOversizedHouseholds(state, definitions, { recordEvents: false });

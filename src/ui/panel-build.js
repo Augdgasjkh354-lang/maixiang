@@ -1,7 +1,7 @@
 import { buildingSymbol } from "./art.js";
 import { CONTENT } from "../content/index.js";
 import { industryTypeIds } from "../content/buildings.js";
-import { escapeHtml, number, percent, moneyUnit, effectiveTownWage } from "./format.js";
+import { escapeHtml, number, percent, moneyUnit, effectiveTownWage, monthlyWageText } from "./format.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 
 // 建筑分类页签（纯展示层状态，刷新页面后回到默认）。
@@ -57,7 +57,7 @@ function buildCard(option, selectedBuild, view, unit) {
         : `${number(option.count)}座 · 可建`;
   const isSelected = selectedBuild === option.id;
   const jobs = (option.jobs || []).map(job =>
-    `${escapeHtml(job.name)} ${number(job.slots)}人 · 日薪${number(effectiveTownWage(view, job.id, wageRates[job.id] ?? job.wagePerWorkerDay ?? 0), 1)}${unit}`
+    `${escapeHtml(job.name)} ${number(job.slots)}人 · ${monthlyWageText(view, effectiveTownWage(view, job.id, wageRates[job.id] ?? job.wagePerWorkerDay ?? 0), 1)}`
   ).join("<br>");
   const jobsHtml = jobs || "无固定岗位";
   const location = option.requiredPlotFeature

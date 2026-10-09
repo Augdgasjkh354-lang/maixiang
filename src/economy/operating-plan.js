@@ -42,7 +42,7 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
   return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: wholesale };
 }
 
-// 集市：进价 = 批发价减特价补贴；售价比镇上最便宜的综合商店低一点（stallUndercutPercent），没有商店时按批发价加成，且不低于进价。
+// 集市：进价 = 批发价减特价补贴；售价跟镇上最便宜的综合商店看齐（stallUndercutPercent 默认 0，同价时居民轮流在两边买），没有商店时按批发价加成，且不低于进价。
 function stallTradePrices(state, def, content, productId, wholesale) {
   const tiers = content.rules.stallWholesaleDiscountTiers || [0];
   const tier = Math.max(0, Math.min(tiers.length - 1, Math.floor(state.policy?.stallDiscountTier || 0)));

@@ -1,5 +1,7 @@
 import { escapeHtml, number } from "./format.js";
 
+// 工资按月显示：日薪 × monthDays。
+
 // 地图经济迷你面板（用户 0.1.11 原 iz/rz/Q4/r5）：摘要显示失业率，
 // 展开显示失业率/公职店员均薪/小麦批发价/镇库小麦/居民口粮 + 近N日走势线。
 function sparkline(history, key, label, decimals) {
@@ -35,14 +37,16 @@ export function renderEconMini(view) {
   const history = economy.history || [];
   if (!market) return "";
   const last = history[history.length - 1] || {};
+  const days = Number(view.monthDays) || 30;
+  const monthlyHistory = history.map(row => ({ ...row, shopWage: row.shopWage == null ? null : row.shopWage * days }));
   const poach = economy.poachYear > 0 && economy.recentPoach?.[0]
     ? `<div class="econ-note">今年跳槽${number(economy.poachYear)}人（最近：${escapeHtml(economy.recentPoach[0].from || "")}→${escapeHtml(economy.recentPoach[0].to || "")}）</div>`
     : "";
   // 失业率、小麦价、镇库小麦已在宏观部分列出，这里只留走势与宏观里没有的项。
   return `<div class="econ-note">${moodNote(market.mood)} · 待业${number(market.idle)}人</div>
     ${sparkline(history, "unemploymentPercent", "失业率%", 1)}
-    <div class="econ-row"><span>公职 / 店员均薪</span><strong>${number(market.referenceWage, 1)} / ${last.shopWage == null ? "—" : number(last.shopWage, 1)}</strong></div>
-    ${sparkline(history, "shopWage", "店员均薪", 1)}
+    <div class="econ-row"><span>公职 / 店员均薪（月）</span><strong>${number(market.referenceWage * days, 1)} / ${last.shopWage == null ? "—" : number(last.shopWage * days, 1)}</strong></div>
+    ${sparkline(monthlyHistory, "shopWage", "店员月薪", 1)}
     ${sparkline(history, "wheatPrice", "小麦价", 2)}
     ${sparkline(history, "townWheatJin", "镇库小麦", 0)}
     <div class="econ-row"><span>居民口粮</span><strong>${last.residentFoodDays == null ? "—" : `${number(last.residentFoodDays, 0)}天`}</strong></div>

@@ -74,7 +74,7 @@ test("养殖场按商店缺口加人：需求大于一人产量时会雇饲养�
   const id = simulation.openResidentShop(state, base, "pig_farm").shopId;
   simulation.advanceDays(state, 40);
   const hands = Object.values(state.households.byId).reduce((sum, h) => sum + (h.jobs?.[`shop:${id}:clerk`] || 0), 0);
-  assert.ok(hands >= 2, `猪肉需求约 ${Math.round(3300 * 8 / 365)} 斤/日，应雇多名饲养员，实际 ${hands}`);
+  assert.ok(hands >= 2, `猪肉需求约 ${Math.round(3300 * 8 / CONTENT.rules.daysPerYear)} 斤/日，应雇多名饲养员，实际 ${hands}`);
 });
 
 function keepersOf(state, shop) {
@@ -185,7 +185,7 @@ test("集市免租：三个月/半年/一年/三年，免租期内不交摊租�
   assert.equal(simulation.setStallRentFree(state, 0).ok, true, "可以取消");
   simulation.advanceDays(state, 5);
   assert.ok((market.accounts.cumulative.rentExpenseVoucherUnits || 0) > 0, "取消后恢复收租");
-  for (const days of [182, 365, 1095]) assert.equal(simulation.setStallRentFree(state, days).ok, true);
+  for (const days of CONTENT.rules.stallRentFreeOptionsDays.slice(1)) assert.equal(simulation.setStallRentFree(state, days).ok, true);
   valid(state);
 });
 

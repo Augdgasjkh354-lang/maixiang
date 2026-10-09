@@ -6,8 +6,9 @@ const THEATER_MIN_AFFLUENCE = 1.5;
 
 export const RULES = Object.freeze({
   saveVersion: SAVE_VERSION,
-  daysPerYear: 365,
-  growingDays: 274,
+  daysPerYear: 360, // 12 个月 × 30 天（monthDays）；旧存档读档时日期按比例换算（persistence/migrations.js）
+  monthDays: 30,
+  growingDays: 270, // 秋收在 10 月 1 日（第 270 天，0 起算）
   foodPerPersonDay: 2,
   housingCapacity: 1000,
   builderSlots: 24,
@@ -24,7 +25,7 @@ export const RULES = Object.freeze({
   // 居民主食需求按固定比例拆分到小麦、面粉、面包。三项之和应为 1，改动后需同步核算口粮当量。
   stapleDemandShares: Object.freeze({ wheat: 0.6, flour: 0.2, bread: 0.2 }),
   // 居民房屋修缮的木材需求：每户每年斤数，按活跃家庭数累计，日需求用 daysPerYear 分摊（小数由 state.housing.repairWoodCarry 结转）。
-  // 250 户 × 7.3 斤 ÷ 365 ≈ 5 斤/日。
+  // 250 户 × 7.3 斤 ÷ 360 ≈ 5 斤/日。
   houseRepairWoodJinPerHouseholdYear: 7.3,
   breadBasicReserveDays: 30,
   breadBasePriceWheatPerJin: 2,
@@ -61,7 +62,7 @@ export const RULES = Object.freeze({
   agricultureTaxSatisfactionHighPercent: 80,
   agricultureTaxSatisfactionSwing: 10,
   operatingRightReserveDays: 90,
-  operatingRightValuationDays: 365,
+  operatingRightValuationDays: 360,
   // 所有制（docs/OWNERSHIP.md）：民营/公司欠薪连续超过该天数，整栋收回镇营。
   ownershipTakeoverArrearsDays: 30, // 欠薪连续超过 30 天 → 镇里收回
   // 民营/公司业主自主升级：每隔这么多天检查一次。
@@ -124,10 +125,10 @@ export const RULES = Object.freeze({
   // 时代广场集市：默认允许摆摊人数。
   stallKeeperDefaultLimit: 50,
   // 集市补贴：免租时长（天，三个月/半年/一年/三年）；批发特价三档，每斤少收 0.1/0.2/0.4 斤小麦（第 0 档不打折）。
-  stallRentFreeOptionsDays: Object.freeze([90, 182, 365, 1095]),
+  stallRentFreeOptionsDays: Object.freeze([90, 180, 360, 1080]),
   stallWholesaleDiscountTiers: Object.freeze([0, 0.1, 0.2, 0.4]),
-  // 集市售价：比综合商店便宜 3%，不低于进价。
-  stallUndercutPercent: 3,
+  // 集市售价比综合商店便宜几个百分点（默认 0：同价，居民轮流在两边买；原来低 3% 会把商店的生意全抢走），不低于进价。
+  stallUndercutPercent: 0,
   shopProfitTaxDefaultPercent: 10,
   shopProfitTaxMaximumPercent: 80,
   shopSettlementDays: 30,
@@ -181,6 +182,12 @@ export const RULES = Object.freeze({
   shopWageSlackFactor: 0.85,
   shopWageTightFactor: 1.2,
   householdGoodsShoppingDays: 5, // 赶集：日用品与盐存货不够当天用才去买、一次买够这么多天；修房木材每这么多天统一采购一次
+  // 正式员工（systems/employment-contracts.js）：入职满这么多天才能辞退；辞退付这么多天日薪作补偿；
+  // 店铺、民营、公司每月 1 号按过去 hiringDemandWindowDays 天的需求审核一次，人手不够才招一人。
+  dismissalMinTenureDays: 30,
+  severanceWageDays: 30,
+  hiringDemandWindowDays: 60,
+  openingPeriodDays: 30, // 开张期：开店、转民营、成立公司后这么多天内每天按需求招人，可一次招够
   initialHouseholdSize: 5, // 开局约几人一户（systems/households.js）
   householdSplitMaxPeople: 8, // 一户超过这么多人就在年终分家（systems/household-split.js）
   farmStockDays: 7, // 养殖场存货够卖这么多天就停养；超过即算积压降价（systems/farm-pricing.js）
@@ -200,6 +207,8 @@ export const RULES = Object.freeze({
   // 家底只算粮券 + 存款 + 留够 wealthFoodReserveDays 天口粮后多出的小麦（不再留到秋收，免得秋收前宽裕度断崖）；
   // harvestBufferDays 只用于富人税等付款保护（留到下次秋收再加这么多天）；服务预算 = 家底 / wealthSpendDays × serviceShare；
   // 主食里面粉、面包的比例 = 标准比例 × 宽裕度（最多 stapleUpgradeMax 倍）。
+  // 批发市场对外卖小麦（养殖场饲料、公司原料）时给镇库留的口粮底线天数。
+  townWheatSaleReserveDays: 60,
   householdBudget: Object.freeze({ referenceWealthPerCapita: 60, maxAffluence: 3, wealthSpendDays: 60, wealthFoodReserveDays: 30, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5 }),
   // 戏园的门槛：宽裕度低于此值的家庭不去戏园（不产生需求，也不计入"需求未满足"）。
   // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天收一次；基尼系数逐年记录最多保留 50 年。
@@ -210,12 +219,12 @@ export const RULES = Object.freeze({
   // comfortMaximum 是用到标准量时的舒心值加成，多用边际递减（最多 1.5 倍）。
   householdGoods: Object.freeze({
     cloth: Object.freeze({ annualPerPerson: 1, incomeElasticity: 0.6, comfortMaximum: 3 }),
-    wine: Object.freeze({ annualPerPerson: 6, incomeElasticity: 1.2, comfortMaximum: 2 }),
-    chicken: Object.freeze({ annualPerPerson: 4, incomeElasticity: 1, comfortMaximum: 0.6 }),
-    duck: Object.freeze({ annualPerPerson: 3, incomeElasticity: 1, comfortMaximum: 0.5 }),
-    goose: Object.freeze({ annualPerPerson: 2, incomeElasticity: 1.3, comfortMaximum: 0.5 }),
-    pork: Object.freeze({ annualPerPerson: 8, incomeElasticity: 0.8, comfortMaximum: 1 })
+    wine: Object.freeze({ annualPerPerson: 6, incomeElasticity: 1.2, comfortMaximum: 2 })
   }),
+  // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/maxAffluence)^exponent，
+  // 宽裕度 1 约 5%、2 约 27%、3 为 75%；肉按 weights 分到鸡鸭鹅猪，没买到的改买面粉。comfortMaximum：肉占口粮 1/4 时的舒心值加成。
+  // 这里的宽裕度是"吃肉习惯"：近 habitDays 天宽裕度的平滑值，秋收前后余粮起落时饮食慢慢变。
+  meatStaple: Object.freeze({ maxShare: 0.75, exponent: 2.5, habitDays: 90, weights: Object.freeze({ chicken: 4, duck: 3, goose: 2, pork: 8 }), comfortMaximum: 4 }),
   serviceTypes: Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", basis: "person", cycleDays: 20, priceVoucher: 4, merchantCapacity: 24, clerkCapacity: 30, consumables: Object.freeze([]), comfort: 0.8, incomeSensitivity: 0.8 }),
     repair: Object.freeze({ id: "repair", name: "修补铺", basis: "household", cycleDays: 30, priceVoucher: 8, merchantCapacity: 14, clerkCapacity: 18, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 0.7 }),
@@ -247,10 +256,10 @@ export const RULES = Object.freeze({
     restaurant: Object.freeze({ id: "restaurant", name: "饭店", kind: "service", serviceId: "restaurant" }),
     // 养殖场：开在养殖基地。商人和饲养员一起养，每人每日出 outputPerWorkerDay 斤肉，每斤肉吃 feedPerUnit 斤小麦。
     // 产品直接卖给综合商店，多余的卖给批发市场。
-    chicken_farm: Object.freeze({ id: "chicken_farm", name: "养鸡场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "chicken", feedItemId: "wheat", feedPerUnit: 2.5, outputPerWorkerDay: 5 }),
-    duck_farm: Object.freeze({ id: "duck_farm", name: "养鸭场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "duck", feedItemId: "wheat", feedPerUnit: 2.5, outputPerWorkerDay: 5 }),
-    goose_farm: Object.freeze({ id: "goose_farm", name: "养鹅场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "goose", feedItemId: "wheat", feedPerUnit: 3, outputPerWorkerDay: 4 }),
-    pig_farm: Object.freeze({ id: "pig_farm", name: "养猪场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "pork", feedItemId: "wheat", feedPerUnit: 3, outputPerWorkerDay: 5 }),
+    chicken_farm: Object.freeze({ id: "chicken_farm", name: "养鸡场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "chicken", feedItemId: "wheat", feedPerUnit: 4, outputPerWorkerDay: 10 }),
+    duck_farm: Object.freeze({ id: "duck_farm", name: "养鸭场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "duck", feedItemId: "wheat", feedPerUnit: 4, outputPerWorkerDay: 10 }),
+    goose_farm: Object.freeze({ id: "goose_farm", name: "养鹅场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "goose", feedItemId: "wheat", feedPerUnit: 4, outputPerWorkerDay: 10 }),
+    pig_farm: Object.freeze({ id: "pig_farm", name: "养猪场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "pork", feedItemId: "wheat", feedPerUnit: 4, outputPerWorkerDay: 10 }),
     // 时代广场集市：一座广场一个集体摊位，待业的人自动来摆，人数按销量增减（不超过允许人数）。
     // 从批发市场进少量日用品（不卖主食），每人每日最多卖 25 斤（一摊 2 人 50 斤），按摊交租；每天的利润按人头 ×0.8—1.2 随机分给摆摊家庭。
     stall: Object.freeze({ id: "stall", name: "集市", kind: "stall", hostBuildingTypeId: "times_square", maxClerks: 0,
@@ -269,7 +278,7 @@ export const RULES = Object.freeze({
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
   wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.2, duck: 4.2, goose: 5, pork: 5 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货

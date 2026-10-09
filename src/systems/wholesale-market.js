@@ -24,7 +24,7 @@ import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/busine
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
 import { setCurrentUnitPrice, currentUnitPrice } from "../economy/prices.js";
 import { nextPriceFactor } from "../economy/price-adjust.js";
-import { householdConvertibleWheatUnits, syncResidentAggregates } from "./households.js";
+import { householdConvertibleWheatUnits, householdList, householdPopulation, syncResidentAggregates } from "./households.js";
 
 
 // 镇营统购统销的商品（不含小麦——小麦继续归镇库直管）。
@@ -491,6 +491,11 @@ function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, conten
 // ---------------------------------------------------------------- 销售（做市商卖出）
 
 // options.discountPerUnit：镇里给的特价补贴（每单位少收多少斤），差价由镇库承担，记在返回的 subsidyVoucherUnits。
+function townWheatSaleReserveUnits(state, content) {
+  const people = householdList(state).reduce((sum, household) => sum + householdPopulation(household), 0);
+  return Math.round(people * content.rules.foodPerPersonDay * (content.rules.townWheatSaleReserveDays ?? 60) * content.precision.inventoryUnitsPerJin);
+}
+
 export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, content, reason = "从批发市场采购", options = {}) {
   const market = ensureWholesaleMarket(state, content);
   if (!hasWholesaleMarket(state)) {
@@ -511,8 +516,9 @@ export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, 
     return { ok: true, boughtUnits: internal.movedUnits, paidVoucherUnits: 0, unitPrice: 0 };
   }
   // 小麦直接从镇库存量出售；其余商品从市场库存出售。
+  // 小麦对外只卖口粮底线（全镇 townWheatSaleReserveDays 天口粮）以上的部分，养殖场喂料、公司原料不能把镇库口粮买空。
   const available = itemId === "wheat"
-    ? Math.max(0, state.accounts?.town?.wheat || 0)
+    ? Math.max(0, (state.accounts?.town?.wheat || 0) - townWheatSaleReserveUnits(state, content))
     : Math.max(0, market.inventory[itemId] || 0);
   // 缺货记账（批发自动调价的紧缺信号）：要的比有的多，差额记为当日未满足量。
   if (itemId !== "wheat" && requestedUnits > available) {

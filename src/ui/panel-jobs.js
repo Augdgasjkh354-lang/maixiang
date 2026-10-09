@@ -1,4 +1,4 @@
-import { escapeHtml, number, moneyUnit, moneyMixHint } from "./format.js";
+import { escapeHtml, number, moneyUnit, moneyMixHint, monthlyWageText, monthlyWageValue, payDayText } from "./format.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 
 // 就业分组（纯展示层，减少长滚动；分组展开状态由 details[data-detail-key] 自动记住）。
@@ -31,7 +31,7 @@ function jobRow(view, row, idle) {
   const wageControl = row.roleId === "farmers"
     ? `<span class="badge">秋收分粮</span>`
     : row.wageKind !== "company-wage"
-      ? `<span class="badge">日薪 ${number(row.effectiveWagePerWorkerDay, 2)}${escapeHtml(unit)}</span>`
+      ? `<span class="badge">${escapeHtml(monthlyWageText(view, row.effectiveWagePerWorkerDay, 2))}${row.payDay != null ? ` · ${payDayText(row.payDay)}` : ""}</span>`
       : `<div class="wage-setting"><span>薪</span>${renderNumericInput(view, {
         key: row.wageKind === "company-wage" ? `company:${row.wageTarget}:wage` : `wage:${row.roleId}`,
         kind: row.wageKind || "wage",
@@ -43,12 +43,14 @@ function jobRow(view, row, idle) {
         disabled: row.wageKind === "company-wage" && !row.wageTarget,
         confirmLabel: "✓",
         className: "wage-editor"
-      })}<span>${escapeHtml(unit)}</span></div>`;
-  const note = row.roleId === "farmers"
+      })}<span>${escapeHtml(unit)}</span><small class="subtle">月薪${monthlyWageValue(view, row.wagePerWorkerDay, 2)}${escapeHtml(unit)}</small></div>`;
+  const baseNote = row.roleId === "farmers"
     ? (row.targetShortage > 0 ? `目标${row.targetCount ?? row.count} · 缺${row.targetShortage}` : `目标${row.targetCount ?? row.count}`)
     : row.globalDemandKind === "public_service"
       ? `全镇需${row.globalDemand} · 缺${row.globalShortage}`
       : row.scope === "listed" ? "公司自动用工" : row.scope === "private" ? "民营自动用工" : "";
+  const dismissNote = row.scope === "building" && row.count > 0 ? `可辞退${number(row.dismissible || 0)}人` : "";
+  const note = [baseNote, dismissNote].filter(Boolean).join(" · ");
   return `<div class="job-row">
     <div class="job-row-head"><div class="job-name">${escapeHtml(row.buildingName ? row.buildingName + " · " + row.name : row.name)}</div><span class="badge">${number(row.count)} / ${number(row.capacity)}</span></div>
     ${note ? `<div class="job-note">${escapeHtml(note)}</div>` : ""}
@@ -59,6 +61,10 @@ function jobRow(view, row, idle) {
 export function renderJobs(view) {
   const last = view.payroll?.lastDay || {};
   const unit = moneyUnit(view);
+  const severanceDays = view.severanceWageDays ?? 30;
+  const minTenure = view.dismissalMinTenureDays ?? 30;
+  const dismissible = view.labor.rows.filter(row => row.scope === "building").reduce((sum, row) => sum + (row.dismissible || 0), 0);
+  const severanceText = severanceDays === (view.monthDays || 30) ? "付一个月工资补偿" : `付${number(severanceDays)}天日薪补偿`;
   const rows = view.labor.rows.filter(row => row.scope !== "shop");
   const sections = JOB_GROUPS
     .map(group => ({ ...group, rows: rows.filter(group.match) }))
@@ -72,7 +78,7 @@ export function renderJobs(view) {
     return `<details class="detail-block" data-detail-key="jobs:${section.id}"${section.id === defaultOpenId ? " open" : ""}><summary>${escapeHtml(section.name)} · ${number(inPost)} / ${number(capacity)}人</summary><div class="detail-body"><div class="job-list">${section.rows.map(row => jobRow(view, row, view.labor.idle)).join("")}</div></div></details>`;
   }).join("");
   return `<h2>就业</h2>
-    <div class="cardlet job-summary"><div class="row"><span class="label">劳动 / 就业 / 待业</span><strong class="value">${number(view.labor.workingAge)} / ${number(view.labor.employed)} / ${number(view.labor.idle)}人</strong></div><div class="row"><span class="label">每日工资</span><strong class="value">约${number(view.labor.dailyWageExpectedWheatJin)}${escapeHtml(unit)}</strong></div>${(last.arrearsBalanceWheatJin || 0) > 0 ? `<div class="shortage-banner visible">欠薪 ${number(last.arrearsBalanceWheatJin)}小麦等值</div>` : ""}</div>
+    <div class="cardlet job-summary"><div class="row"><span class="label">劳动 / 就业 / 待业</span><strong class="value">${number(view.labor.workingAge)} / ${number(view.labor.employed)} / ${number(view.labor.idle)}人</strong></div><div class="row"><span class="label">每月工资（镇营及店铺）</span><strong class="value">约${monthlyWageValue(view, view.labor.dailyWageExpectedWheatJin, 0)}${escapeHtml(unit)}（日均${number(view.labor.dailyWageExpectedWheatJin)}）</strong></div><div class="subtle">工资按月计提、按雇主的发薪日发放；辞退须入职满${number(minTenure)}天，${severanceText}；镇营当前可辞退 ${number(dismissible)} 人。</div>${(last.arrearsBalanceWheatJin || 0) > 0 ? `<div class="shortage-banner visible">欠薪 ${number(last.arrearsBalanceWheatJin)}小麦等值</div>` : ""}</div>
     ${sectionHtml}
     <details class="detail-block" data-detail-key="payroll-detail"><summary>工资账</summary><div class="detail-body">
       <div class="row"><span class="label">今日应付 / 已付</span><strong class="value">${number(last.expectedWheatJin || 0)} / ${number(last.currentPaidWheatJin || 0)}小麦等值</strong></div>

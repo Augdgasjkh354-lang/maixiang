@@ -67,7 +67,7 @@ test("r05 粮券必须先印入镇库；换券只转移镇库已有粮券，镇�
   assert.equal(simulation.validateCurrencyInvariant(state).valid, true);
 });
 
-test("r05 跨年立即归档第365天公司利润，新年Day0估值不会漏掉最后一天", () => {
+test("r05 跨年立即归档全年最后一天（第 daysPerYear 天）公司利润，新年Day0估值不会漏掉最后一天", () => {
   const state = legacyVoucherState({ seed: 110504 });
   state.year = 2;
   state.day = 0;
@@ -80,19 +80,19 @@ test("r05 跨年立即归档第365天公司利润，新年Day0估值不会漏掉
         year: { profitVoucherUnits: 101 * V, revenueVoucherUnits: 202 * V, producedUnits: {}, soldUnits: {}, taxedUnits: {}, purchasedInputUnits: {} },
         cumulative: { profitVoucherUnits: 101 * V, revenueVoucherUnits: 202 * V, producedUnits: {}, soldUnits: {}, taxedUnits: {}, purchasedInputUnits: {} }
       },
-      history: [{ serial: 364, profitVoucherUnits: V, revenueVoucherUnits: 2 * V }],
-      plan: { lastArchivedSerial: 364 }, inventory: {}, inventoryCostVoucherUnits: {}, payroll: {}
+      history: [{ serial: CONTENT.rules.daysPerYear - 1, profitVoucherUnits: V, revenueVoucherUnits: 2 * V }],
+      plan: { lastArchivedSerial: CONTENT.rules.daysPerYear - 1 }, inventory: {}, inventoryCostVoucherUnits: {}, payroll: {}
     }
   };
 
   resetCompanyYear(state, CONTENT, 1);
   const company = state.companies.c1;
-  assert.equal(company.history.at(-1).serial, 365);
+  assert.equal(company.history.at(-1).serial, CONTENT.rules.daysPerYear);
   assert.equal(company.history.at(-1).profitVoucherUnits, 100 * V);
   const value = companyActualProfitValuation(state, company, CONTENT);
-  assert.equal(value.actualProfitVoucherUnits, 101 * V, "Day0估值必须包含旧年第365天利润");
+  assert.equal(value.actualProfitVoucherUnits, 101 * V, "Day0估值必须包含旧年最后一天利润");
 
   const count = company.history.length;
   resetCompanyDaily(state, CONTENT);
-  assert.equal(company.history.length, count, "新年首次日结不得重复归档第365天");
+  assert.equal(company.history.length, count, "新年首次日结不得重复归档最后一天");
 });

@@ -10,10 +10,16 @@ import { migrateSave } from "../src/persistence/migrations.js";
 import { populationStats, selectJobRows } from "../src/selectors/labor.js";
 import { openShop } from "../src/systems/shops.js";
 import { householdIdleWorkers, householdList, setJobCount } from "../src/systems/households.js";
+import { dayOfMonth, pendingWages, wageArrears } from "../src/systems/employer.js";
 import { grantResidentVouchers, setResidentInventoryJin } from "./helpers-v16.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
 
 const SCALE = CONTENT.precision.inventoryUnitsPerJin;
+// 结算到本月第 n 号当天为止（第 n 号的发薪在这一天结算）。
+function settleThroughDayOfMonth(state, n) {
+  while (dayOfMonth(state, CONTENT) !== n) simulation.advanceDay(state);
+  return simulation.advanceDay(state);
+}
 function totalItemUnits(state, itemId) {
   return (state.accounts.residents[itemId] || 0) + (state.accounts.town[itemId] || 0);
 }
@@ -98,29 +104,38 @@ test("expanded map permits separate same-type buildings and job rosters", () => 
 });
 
 test("wage arrears keep their old amount and pay separately from current wages", () => {
+  // 月薪：建造工每天计提进本月待发，镇库每月 5 号结清上月及以前的待发。
+  // 镇库没钱时第一个到期的上月工资形成欠薪；之后工资涨价只影响新计提的工资，旧欠薪金额不变。
   const state = legacyVoucherState();
   addInventory(state, "town", "wood", 600, "test stock", "test", CONTENT);
   const start = simulation.buildAt(state, "mill", "east");
+  const key = "builders::" + start.instanceId;
   changeInventory(state, "town", "wheat", -state.accounts.town.wheat, "empty treasury", "test_adjustment", CONTENT);
-  simulation.advanceDay(state);
-  const first = state.payroll.lastDay;
-  // 默认日薪 10→5 斤（8cf03ae）：12 名建筑工当日应付 120→60 斤。
-  assert.equal(first.expectedWheatJin, 60);
-  assert.equal(first.currentPaidWheatJin, 0);
-  assert.equal(first.unpaidCurrentWheatJin, 60);
-  assert.equal(state.payroll.arrearsWheatUnits["builders::" + start.instanceId], 60 * SCALE);
+  const book = () => ({
+    claimsVoucherUnits: state.payroll.creditorClaims[key] || {},
+    claimsPayment: state.payroll.creditorPaymentClaims[key] || {},
+    pendingByMonth: state.payroll.creditorPending?.[key] || {}
+  });
+  // 第一个 5 号（第 1 个月）上个月还没有待发到期，第二个 5 号（第 2 个月）才把第 1 个月的工资（30 天 × 12 名建筑工 × 5 斤）到期且付不出。
+  settleThroughDayOfMonth(state, 5);
+  assert.equal(wageArrears(book()), 0, "第一个月内的工资还没到期，不是欠薪");
+  settleThroughDayOfMonth(state, 5);
+  const owed = wageArrears(book());
+  assert.equal(owed, 30 * 12 * 5 * SCALE, "第 1 个月的工资到期付不出，形成欠薪");
+  // 工资涨到 20 斤：旧欠薪金额不变。
   simulation.setWageRate(state, "builders", 20);
+  assert.equal(wageArrears(book()), owed);
+  // 镇库补充 360 斤小麦并印券：欠薪按旧金额先付，本日新计提的工资（20 斤 × 12 人 = 240 斤）只进待发，不算欠薪。
   transferItem(state, "residents", "town", "wheat", 360, "补充镇库小麦", CONTENT);
   assert.equal(simulation.issueGrainVouchers(state, "town", 360).ok, true);
+  const pendingBefore = pendingWages(book());
   simulation.advanceDay(state);
-  const second = state.payroll.lastDay;
-  assert.equal(second.expectedWheatJin, 240);
-  assert.equal(second.arrearsPaidWheatJin, 60);
-  assert.equal(second.currentPaidWheatJin, 240);
-  assert.equal(second.arrearsBalanceWheatJin, 0);
-  assert.equal(state.payroll.totals.paidWheatUnits / SCALE, 300);
-  assert.equal(state.business.cumulative.constructionWagesWheatUnits / SCALE, 300);
-  assert.equal(totalQeqUnits(state, CONTENT), 53762400000); // 初始库存 73万→300万/账户
+  const row = state.payroll.lastDay.workers.find(item => item.payrollKey === key);
+  assert.equal(row.arrearsPaidVoucher, 360, "欠薪先付");
+  assert.equal(row.currentPaidVoucher, 0, "未到发薪日的本期工资不付");
+  assert.equal(wageArrears(book()), owed - 360 * SCALE, "欠薪只随实付减少");
+  assert.equal(pendingWages(book()) - pendingBefore, 12 * 20 * SCALE, "新工资按 20 斤计提进待发");
+  assert.equal(simulation.validateState(state).valid, true);
 });
 
 test("unemployment benefit is limited to idle workers, can be disabled, and creates no debt", () => {
@@ -144,9 +159,9 @@ test("unemployment benefit is limited to idle workers, can be disabled, and crea
   const funded = legacyVoucherState();
   simulation.setUnemploymentPolicy(funded, { enabled: true, dailyPerWorkerJin: 1 });
   assert.equal(simulation.issueGrainVouchers(funded, "town", 100000).ok, true);
-  simulation.advanceDays(funded, 365);
-  // 合格人数扩大后年度失业金同步放大（250 人 × 365 天）。
-  assert.equal(funded.annualReports[0].payroll.unemploymentPaidVoucherUnits / CONTENT.precision.currencyUnitsPerVoucher, 91250);
+  simulation.advanceDays(funded, CONTENT.rules.daysPerYear);
+  // 合格人数扩大后年度失业金同步放大（250 人 × 全年天数）。
+  assert.equal(funded.annualReports[0].payroll.unemploymentPaidVoucherUnits / CONTENT.precision.currencyUnitsPerVoucher, 250 * CONTENT.rules.daysPerYear);
 });
 
 test("bread barter is atomic, price sensitive, uses existing stock and protects thirty days", () => {
@@ -259,9 +274,11 @@ test("mill to bakery accounting counts sold stock once and keeps unsold cost in 
   assert.equal(millView.jobs[0].outputToday.flour / SCALE, 64);
   const millPay = view.payroll.lastDay.workers.find(row => row.buildingId === mill.instanceId);
   const bakeryPay = view.payroll.lastDay.workers.find(row => row.buildingId === bakery.instanceId);
-  // 默认日薪 10→5 斤（8cf03ae）：每名工人实发 5 斤。
-  assert.equal(millPay.currentPaidWheatJin, 5);
-  assert.equal(bakeryPay.currentPaidWheatJin, 5);
+  // 默认日薪 10→5 斤（8cf03ae）：每名工人当日应计提 5 斤；月薪要到下个发薪日（5 号）才付，当日不付。
+  assert.equal(millPay.expectedWheatJin, 5);
+  assert.equal(bakeryPay.expectedWheatJin, 5);
+  assert.equal(millPay.currentPaidWheatJin, 0);
+  assert.equal(bakeryPay.currentPaidWheatJin, 0);
 });
 
 test("v2旧存档不再自动迁移", () => {
@@ -272,7 +289,7 @@ test("v2旧存档不再自动迁移", () => {
 });
 test("fifteen-year headless run keeps age, job and inventory ledgers consistent", () => {
   const state = simulation.createInitialState({ seed: 884422 });
-  simulation.advanceDays(state, 365 * 15);
+  simulation.advanceDays(state, CONTENT.rules.daysPerYear * 15);
   assert.equal(state.annualReports.length, 15);
   assert.equal(state.year, 16);
   assert.equal(state.day, 0);

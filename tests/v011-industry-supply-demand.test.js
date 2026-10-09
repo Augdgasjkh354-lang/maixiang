@@ -198,9 +198,11 @@ test("0.1.1综合商店按真实客流增员，且新店员满30日后才允许�
   prepareShopsForDay(state, CONTENT);
   assert.equal(jobCount(state, `shop:${shop.id}:clerk`), 1, "工作未满30天不得自动解雇");
 
+  // 店铺用工每月 1 号审核一次（一次最多增减一人）：推进到满 30 天之后的下一个月初再审核。
   state.day += CONTENT.rules.shopMinimumEmploymentDays;
+  state.day += (CONTENT.rules.monthDays - (state.day % CONTENT.rules.monthDays)) % CONTENT.rules.monthDays;
   prepareShopsForDay(state, CONTENT);
-  assert.equal(jobCount(state, `shop:${shop.id}:clerk`), 0, "满30天且持续无客流后允许缩员");
+  assert.equal(jobCount(state, `shop:${shop.id}:clerk`), 0, "满30天且持续无客流后，月初审核允许缩员");
 });
 
 test("0.1.1本金、未售库存和债务继续分开：本金不成利润，停业不抹掉既有欠薪", () => {
@@ -223,10 +225,15 @@ test("0.1.1本金、未售库存和债务继续分开：本金不成利润，停
   prepareShopsForDay(state, CONTENT);
   assert.equal(shop.accounts.day.revenueVoucherUnits, 0);
   assert.ok(shop.inventory.bread >= 0);
+  // 月薪：工资先计提进待发，店铺默认 25 号发薪；下个月 25 号到期时付不出，才形成欠薪。
+  assert.equal(shop.liabilities.wageVoucherUnits, 0, "未到发薪日，还没有欠薪");
+  state.day = (Math.floor(state.day / CONTENT.rules.monthDays) + 1) * CONTENT.rules.monthDays + 24;
+  prepareShopsForDay(state, CONTENT);
   const debt = shop.liabilities.wageVoucherUnits;
   assert.ok(debt > 0);
   assert.equal(simulation.closeResidentShop(state, shop.id).ok, true);
-  assert.equal(shop.liabilities.wageVoucherUnits, debt, "停业只释放岗位，不清除已形成债务");
+  // 停业时待发工资立即到期并入欠薪，所以欠薪只会多不会少。
+  assert.ok(shop.liabilities.wageVoucherUnits >= debt, "停业只释放岗位，不清除已形成债务");
 });
 
 test("0.1.1保存恢复保持家庭、岗位、库存、股份与经营计划一致，使用v12货币改革结构", () => {

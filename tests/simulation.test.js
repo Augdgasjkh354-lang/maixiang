@@ -37,9 +37,9 @@ test("initial population, jobs and both food accounts match the v1 start", () =>
   assert.equal(simulation.totalQeq(state), 6000000);
 });
 
-test("full crop labor yields 9 million jin at day 274; town tax reaches town", () => {
+test("full crop labor yields 9 million jin at growingDays; town tax reaches town", () => {
   const state = simulation.createInitialState();
-  const result = simulation.advanceDays(state, 274);
+  const result = simulation.advanceDays(state, CONTENT.rules.growingDays);
   const harvest = result.results.find(function (row) { return row.harvest; }).harvest;
   // 初始耕地 4000→15000 亩（8cf03ae），亩产 600 斤 → 总产 15000×600 = 9,000,000 斤。
   assert.equal(harvest.total, 9000000);
@@ -57,7 +57,7 @@ test("full crop labor yields 9 million jin at day 274; town tax reaches town", (
   const taxed = createSimulation(CONTENT);
   const taxState = taxed.createInitialState();
   taxed.setAgricultureTax(taxState, 30);
-  taxed.advanceDays(taxState, 274);
+  taxed.advanceDays(taxState, CONTENT.rules.growingDays);
   const split = recordByType(taxState, "harvest").reduce(function (result, row) {
     result[row.destination] = row.quantityUnits / CONTENT.precision.inventoryUnitsPerJin;
     return result;
@@ -66,29 +66,29 @@ test("full crop labor yields 9 million jin at day 274; town tax reaches town", (
   assert.equal(split.residents, 6300000);
 });
 
-test("365-day consumption is exact; the annual harvest and report are not duplicated", () => {
+test("full-year consumption is exact; the annual harvest and report are not duplicated", () => {
   const state = simulation.createInitialState();
   // 账本上限 4000→500（本分支瘦身改动）后，一整年的日流水会把年度初的 harvest 行挤出滚动窗口，
   // 所以"秋收只记一次"改为在收获当日核对，年末只核对报告口径不重复。
   const harvestState = simulation.createInitialState();
-  simulation.advanceDays(harvestState, 274);
+  simulation.advanceDays(harvestState, CONTENT.rules.growingDays);
   assert.equal(recordByType(harvestState, "harvest").filter(function (row) {
     return row.transactionId === "harvest-y1";
   }).length, 2);
-  simulation.advanceDays(harvestState, 365 - 274);
+  simulation.advanceDays(harvestState, CONTENT.rules.daysPerYear - CONTENT.rules.growingDays);
   assert.equal(harvestState.agriculture.taxHistory.length, 1, "一年只产生一次秋收记录");
 
-  simulation.advanceDays(state, 365);
+  simulation.advanceDays(state, CONTENT.rules.daysPerYear);
   assert.equal(state.year, 2);
   assert.equal(state.day, 0);
-  assert.equal(state.annualReports[0].consumptionQeq / CONTENT.precision.qeqUnitsPerJin, 2409000); // 满额：3300人×2斤×365天（旧2060600是缺粮短缺值）
+  assert.equal(state.annualReports[0].consumptionQeq / CONTENT.precision.qeqUnitsPerJin, 3300 * 2 * CONTENT.rules.daysPerYear); // 满额：3300人×2斤×360天（旧2060600是缺粮短缺值）
   assert.equal(state.annualReports[0].harvestQeq / CONTENT.precision.qeqUnitsPerJin, 9000000);
   assert.equal(state.annualReports.length, 1);
   assert.ok(recordByType(state, "harvest").filter(function (row) {
     return row.transactionId === "harvest-y1";
   }).length <= 2, "harvest-y1 最多是最初的一对分粮行（粮足时流水少，可能尚未滚出500行窗口）");
-  assert.equal(simulation.totalQeq(state), 12591000); // 初始600万 + 秋收900万 − 满额消耗240.9万 − 其他流水
-  simulation.advanceDays(state, 274);
+  assert.equal(simulation.totalQeq(state), 12624000); // 初始600万 + 秋收900万 − 满额消耗237.6万（3300×2×360）− 其他流水
+  simulation.advanceDays(state, CONTENT.rules.growingDays);
   assert.equal(state.year, 2);
   assert.equal(recordByType(state, "harvest").filter(function (row) {
     return row.transactionId === "harvest-y2";
@@ -102,12 +102,13 @@ test("agricultural output reflects labor put in before the harvest", () => {
   assert.equal(selectHarvestForecast(state, CONTENT), 0);
   // 农民目标 400→1500（8cf03ae）：为覆盖 15000 亩上限，按满配 1500 人补足。
   simulation.setEmployment(state, "farmers", 1500);
-  simulation.advanceDays(state, 174);
+  simulation.advanceDays(state, CONTENT.rules.growingDays - 100);
   const harvest = state.ledger.filter(function (row) { return row.type === "harvest"; });
   const output = harvest.reduce(function (sum, row) {
     return sum + row.quantityUnits / CONTENT.precision.inventoryUnitsPerJin;
   }, 0);
-  assert.equal(output, 5715328.467); // 亩产 600（原 500 口径下为 4762773.722666667）
+  // 亩产 600、满额 900 万斤；1500 人农事满配，按农事日占全年秋收日的比例出粮。
+  assert.ok(Math.abs(output - 9000000 * (CONTENT.rules.growingDays - 100) / CONTENT.rules.growingDays) < 1e-3, `实际${output}`);
 });
 
 test("wages, relief and construction start preserve total food until workers are paid day by day", () => {
@@ -189,7 +190,7 @@ test("staffed mill and bakery roles survive construction completion and annual r
     [mill.instanceId + "::millers"]: 3,
     [bakery.instanceId + "::bakers"]: 5
   });
-  simulation.advanceDays(state, 365 - state.day - 1);
+  simulation.advanceDays(state, CONTENT.rules.daysPerYear - state.day - 1);
   assert.deepEqual(rows(), {
     [mill.instanceId + "::millers"]: 3,
     [bakery.instanceId + "::bakers"]: 5
@@ -270,8 +271,9 @@ test("processing is atomic; wages settle separately even when materials are shor
   assert.equal((state.accounts.town.wheat - reserveUnits) / scale, 10);
   assert.equal(market.inventory.wheat / scale, 0);
   assert.equal(state.accounts.residents.flour / scale, 0);
-  // 默认日薪 10→5 斤（8cf03ae）：1 名磨坊工当日工资 5 斤。
-  assert.equal(state.payroll.lastDay.currentPaidWheatJin, 5);
+  // 默认日薪 10→5 斤（8cf03ae）：1 名磨坊工当日计提工资 5 斤；月薪要到下个发薪日（5 号）才付，当日不付。
+  assert.equal(state.payroll.lastDay.expectedWheatJin, 5);
+  assert.equal(state.payroll.lastDay.currentPaidWheatJin, 0);
   assert.equal(recordByType(state, "processing_loss")[0].quantityUnits / scale, 4);
   assert.equal(recordByType(state, "process_input")[0].quantityUnits / scale, 20);
   assert.equal(recordByType(state, "process_output")[0].quantityUnits / scale, 16);

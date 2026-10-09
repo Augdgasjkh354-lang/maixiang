@@ -132,6 +132,17 @@ export function mountGame(root) {
     toast.show(message, duration);
   }
 
+  // 减人/辞退结果文字：辞退人数与补偿（units 换算为粮券），并附上被拒或部分成功的原因。
+  function employmentNotice(result, fallback = "") {
+    const view = buildView();
+    const scale = view.currencyUnitsPerVoucher || 1;
+    const parts = [];
+    if (result?.dismissed) parts.push(`已辞退${number(result.dismissed)}人，补偿${number((result.severanceVoucherUnits || 0) / scale, 2)}${moneyUnit(view)}`);
+    else if (fallback) parts.push(fallback);
+    if (result?.reason) parts.push(result.reason);
+    return parts.join("；");
+  }
+
   const autosave = createAutosaveCoordinator({
     capture: () => {
       // 存档快照必须是完整的一天：排队的存档可能在前一次 await 之后才抓快照，那时帧循环可能已开了新的一天。
@@ -249,7 +260,7 @@ export function mountGame(root) {
 
   function renderHeader(view) {
     const season = view.season;
-    $("#dateLabel").textContent = `第${number(view.year)}年 · ${season.name} · 第${number(season.index)}天`;
+    $("#dateLabel").textContent = `第${number(view.year)}年 · ${season.month}月${season.dayOfMonth}日 · ${season.name}`;
     $("#timeLabel").textContent = `${season.field} · ${view.paused ? "暂停" : `${view.speed}×`}`;
     $("#populationStat").textContent = number(view.people.total);
     $("#idleStat").textContent = number(view.labor.idle);
@@ -441,7 +452,7 @@ export function mountGame(root) {
     let successMessage;
     if (kind === "employment") {
       result = simulation.setEmployment(state, input.dataset.draftTarget, parsed.value);
-      successMessage = `已安排${number(result.assigned)}名${options.label.replace(/人数$/, "")}。`;
+      successMessage = employmentNotice(result, `已安排${number(result.assigned)}名${options.label.replace(/人数$/, "")}。`) || `已安排${number(result.assigned)}名${options.label.replace(/人数$/, "")}。`;
       renderedMapSignature = "";
       latestMapModel = null;
     } else if (kind === "project-workers") {
@@ -1133,6 +1144,7 @@ export function mountGame(root) {
       const base = row.roleId === "farmers" ? (row.targetCount ?? row.count) : row.count;
       const result = simulation.setEmployment(state, row.key, base + Number(adjust.dataset.step));
       if (!result.ok) showToast(result.reason);
+      else if (result.dismissed || result.reason) showToast(employmentNotice(result), 4200);
       changed(true);
       renderedMapSignature = "";
       latestMapModel = null;
@@ -1399,6 +1411,7 @@ export function mountGame(root) {
       if (!shop) return;
       const result = simulation.configureShopClerks(state, shop.id, shop.clerks + Number(shopClerk.dataset.step));
       if (!result.ok) { showToast(result.reason); return; }
+      if (result.severanceVoucherUnits > 0) showToast(`已辞退店员，补偿${number(result.severanceVoucherUnits / (buildView().currencyUnitsPerVoucher || 1), 2)}${moneyUnit(buildView())}`, 4200);
       changed(true); render(true);
       return;
     }

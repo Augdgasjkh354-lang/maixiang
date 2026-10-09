@@ -38,12 +38,17 @@ import { householdRecentTotalsReadonly, householdFoodDays } from "../systems/hou
 import { createDashboardRuntime, employmentExchangeRemainingUnits } from "./dashboard-runtime.js";
 import { selectVillaStats } from "../systems/villas.js";
 import { selectSocialSecurityStats } from "../systems/social-security.js";
+import { decorateTownLaborRows, townBuildingWageTotals, privateBuildingWageTotals, companyWageTotals, shopPayTotals } from "./wages.js";
 
-export function selectSeason(day) {
-  if (day < 91) return { key: "spring", name: "春", field: "麦苗返青", index: day + 1 };
-  if (day < 183) return { key: "summer", name: "夏", field: "麦穗抽长", index: day - 90 };
-  if (day < 274) return { key: "autumn", name: "秋", field: "金穗待收", index: day - 182 };
-  return { key: "winter", name: "冬", field: "田间休整", index: day - 273 };
+// 日历：一年 12 个月 × 30 天。春 1—3 月，夏 4—6 月，秋 7—9 月，冬 10—12 月（10 月 1 日秋收）。
+export function selectSeason(day, monthDays = 30) {
+  const month = Math.floor(day / monthDays) + 1;
+  const dayOfMonth = (day % monthDays) + 1;
+  const base = { month, dayOfMonth, index: (day % (monthDays * 3)) + 1 };
+  if (month <= 3) return { ...base, key: "spring", name: "春", field: "麦苗返青" };
+  if (month <= 6) return { ...base, key: "summer", name: "夏", field: "麦穗抽长" };
+  if (month <= 9) return { ...base, key: "autumn", name: "秋", field: "金穗待收" };
+  return { ...base, key: "winter", name: "冬", field: "田间休整" };
 }
 
 // 面板只读视图：已开荒/上限、可选亩数、工日与镇库预计工资。
@@ -202,6 +207,14 @@ function withFarmPricing(state, row, content) {
   };
 }
 
+// 建筑（整栋一个主人）的发薪日与待发/欠薪：镇营看镇库债权簿，民营看整栋簿，公司看公司簿。
+function buildingWageTotals(state, content, building, definition, ownership, runtime) {
+  if ((ownership.townLevels || 0) > 0) return { owner: "town", ...townBuildingWageTotals(state, content, building, definition) };
+  if ((ownership.privateLevels || 0) > 0) return { owner: "private", ...privateBuildingWageTotals(state, content, building.id) };
+  const company = runtime.companyByBuildingId.get(building.id);
+  return company ? { owner: "company", ...companyWageTotals(state, content, company) } : null;
+}
+
 export function selectDashboard(state, content, selection) {
   const panel = selection?.panel || "all";
   const full = panel === "all";
@@ -214,6 +227,7 @@ export function selectDashboard(state, content, selection) {
   const households = runtime.households;
   const people = populationStats(state);
   const labor = selectJobRows(state, content, runtime);
+  decorateTownLaborRows(state, content, labor.rows);
   labor.dailyWageExpectedWheatJin = labor.rows.reduce(function (sum, row) {
     return sum + (row.scope === "private" || row.scope === "listed" || row.roleId === "farmers" ? 0 : row.count * row.effectiveWagePerWorkerDay);
   }, 0);
@@ -243,6 +257,7 @@ export function selectDashboard(state, content, selection) {
         wagePerWorkerDay: state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 5,
         effectiveWagePerWorkerDay: townWageRate(state, job.id, content),
         poachable: laborRow?.poachable || 0,
+        dismissible: laborRow?.dismissible || 0,
         globalDemandKind: laborRow?.globalDemandKind || null,
         globalDemand: laborRow?.globalDemand ?? null,
         globalInPost: laborRow?.globalInPost ?? null,
@@ -290,6 +305,7 @@ export function selectDashboard(state, content, selection) {
       privateJobs,
       listedJobs,
       companyId: runtime.companyByBuildingId.get(building.id)?.id || null,
+      wages: buildingWageTotals(state, content, building, definition, ownership, runtime),
       privateStatus: includeSiteDetails ? (privateState?.status || ((ownership.privateLevels || 0) > 0 ? "no_demand" : "not_private")) : null,
       privateReason: includeSiteDetails ? (privateState?.reason || null) : null,
       privateInputPurchases: includeSiteDetails ? (privateState?.inputPurchases || []) : [],
@@ -365,7 +381,7 @@ export function selectDashboard(state, content, selection) {
     };
   });
   const dailyNeed = people.total * content.rules.foodPerPersonDay;
-  const season = selectSeason(state.day);
+  const season = selectSeason(state.day, content.rules.monthDays || 30);
   const voucherScale = currencyScale(content);
   const needMarket = full || needBusiness;
   const breadPrice = needMarket ? currentUnitPrice(state, "bread", content) : 0;
@@ -418,7 +434,7 @@ export function selectDashboard(state, content, selection) {
   const satisfactionChange = needResidents && recentSat.length > 1
     ? state.satisfaction - recentSat[Math.max(0, recentSat.length - 8)].value
     : 0;
-  const shops = (full || needPolicy || needSite) ? shopSummaries(state, content).map(function (row) { return withFarmPricing(state, row, content); }) : [];
+  const shops = (full || needPolicy || needSite) ? shopSummaries(state, content).map(function (row) { const shopState = state.shops?.[row.id]; return { ...withFarmPricing(state, row, content), ...(shopState ? shopPayTotals(state, content, shopState) : {}) }; }) : [];
   const stallSquares = (full || needPolicy || needSite) ? stallSquareSummaries(state, content, shops) : [];
   const companies = needBusiness ? Object.values(state.companies || {}).map(company => {
     const summary = companySummary(state, company, content);
@@ -427,6 +443,7 @@ export function selectDashboard(state, content, selection) {
     const reserveUnits = companyWorkingCapitalReserve(company, state, content);
     return {
       ...summary,
+      wages: companyWageTotals(state, content, company),
       subscription,
       stockReference: reference,
       workingCapitalReserveVoucher: reserveUnits / voucherScale,
@@ -745,6 +762,9 @@ export function selectDashboard(state, content, selection) {
     lastDemography: needResidents ? state.lastDemography : null,
     housingCapacity: (needResidents || needSite) ? housing.capacity : 0,
     daysPerYear: content.rules.daysPerYear,
+    monthDays: content.rules.monthDays || 30,
+    dismissalMinTenureDays: content.rules.dismissalMinTenureDays ?? 30,
+    severanceWageDays: content.rules.severanceWageDays ?? 30,
     farmCapacity: reclaimedAcres(state, content) / content.agriculture.acresPerFarmer,
     cropWorkUnits: state.agriculture.workUnits,
     farmWorkDays: (needResidents || needSite) ? state.agriculture.workUnits /

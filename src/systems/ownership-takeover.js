@@ -47,7 +47,7 @@ function takeoverPrivateBuilding(state, building, content, days) {
   if (beforeTown > 0) payWages(state, book, "town", content, "private_takeover_town_advance", `${definition.name}收回后镇库偿付欠薪`);
   const townAdvanceUnits = beforeTown - wageArrears(book);
   const job = definition.jobs?.[0];
-  const transferredClaimsUnits = job ? transferWageClaimsToTown(state, book, jobKeyForBuilding(building.id, job.id)) : 0;
+  const transferredClaimsUnits = job ? transferWageClaimsToTown(state, book, jobKeyForBuilding(building.id, job.id), content) : 0;
   delete state.privateEconomy.payrollByBuilding[building.id];
   // 3. 建筑整栋回镇营（岗位人数搬到镇营岗位键，经营权价格与利润记录作废）。
   const moved = transferBuildingOwnership(state, building, { kind: "town", id: null }, content);

@@ -46,7 +46,14 @@ test("0.1.2工资对照：提高工资增加员工应收与雇主成本，资金
   simulation.setWageRate(low,"millers",5); simulation.setWageRate(high,"millers",20);
   simulation.advanceDay(low); simulation.advanceDay(high);
   assert.ok(high.payroll.lastDay.expectedVoucher > low.payroll.lastDay.expectedVoucher);
-  assert.ok(Object.values(high.payroll.creditorClaims["wage-mill::millers"]||{}).reduce((a,b)=>a+b,0) > Object.values(low.payroll.creditorClaims["wage-mill::millers"]||{}).reduce((a,b)=>a+b,0));
+  // 月薪：工资先计提进本月待发（未到发薪日），雇主应付总额 = 待发 + 已到期债权。
+  const owed = state => {
+    const key = "wage-mill::millers";
+    const claims = Object.values(state.payroll.creditorClaims[key] || {}).reduce((a, b) => a + b, 0);
+    const pending = Object.values(state.payroll.creditorPending?.[key] || {}).flatMap(row => Object.values(row)).reduce((a, b) => a + b, 0);
+    return claims + pending;
+  };
+  assert.ok(owed(high) > owed(low));
 });
 
 test("0.1.2失业金对照：实际失业劳动力获得家庭到账，镇库不足明确显示未覆盖人数", () => {
@@ -96,13 +103,22 @@ test("0.1.2家庭有券无食物时先按1:1正常兑付，避免虚假饥饿且
 });
 
 test("0.1.2欠薪偿付进入原债权家庭，换岗后不把旧债转给后来上岗者", () => {
-  const s=cloneInitial(1208); addBuilding(s,"mill","claim-mill"); simulation.setEmployment(s,"claim-mill::millers",1); simulation.advanceDay(s);
+  const s=cloneInitial(1208); addBuilding(s,"mill","claim-mill"); simulation.setEmployment(s,"claim-mill::millers",1);
+  // 镇库没钱：第一个发薪日（5 号）只计提不到期，第二个 5 号上月的工资到期付不出，形成具体家庭的欠薪。
+  assert.equal(transferVouchers(s,"town","residents",s.currency.balances.town,CONTENT,"test_drain","测试：镇库没钱").ok,true);
+  for (let payday = 0; payday < 2; payday += 1) {
+    while (((s.day % 30) + 1) !== 5) simulation.advanceDay(s);
+    simulation.advanceDay(s);
+  }
   const claims=s.payroll.creditorClaims["claim-mill::millers"]; const originalId=Object.keys(claims).find(id=>claims[id]>0); assert.ok(originalId); const oldDebt=claims[originalId];
   assert.equal(releaseJobFromHousehold(s,originalId,"claim-mill::millers",1),1);
   const replacement=householdList(s).find(h=>h.id!==originalId&&householdIdleWorkers(h)>0); assert.ok(replacement);
   assert.equal(setHouseholdJobCount(s,replacement.id,"claim-mill::millers",1,CONTENT).ok,true);
-  const before=s.households.byId[originalId].voucherUnits; simulation.issueGrainVouchers(s,"town",100); simulation.advanceDay(s);
-  assert.ok(s.households.byId[originalId].voucherUnits-before>=oldDebt); assert.ok((s.payroll.creditorClaims["claim-mill::millers"][originalId]||0)===0);
+  const before=s.households.byId[originalId].voucherUnits; simulation.issueGrainVouchers(s,"town",1000); simulation.advanceDay(s);
+  // 旧欠薪按原债权家庭偿付；换岗者没有这笔债，也不会因此产生欠薪。
+  assert.ok(s.households.byId[originalId].voucherUnits-before>=Math.min(oldDebt,1000*V));
+  assert.equal(s.payroll.creditorClaims["claim-mill::millers"][originalId]||0, Math.max(0, oldDebt-1000*V));
+  assert.equal(s.payroll.creditorClaims["claim-mill::millers"][replacement.id]||0, 0);
 });
 
 test("0.1.2家庭生活账区分收入、生活支出、消费、投资与资产兑换，不重复记账", () => {
