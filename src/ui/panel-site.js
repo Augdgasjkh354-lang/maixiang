@@ -127,7 +127,9 @@ function bankManagementMarkup(view, physical = true) {
     : `<div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: reform.employmentExchangeMinimumJin, maximum: reform.employmentExchangeMaximumJin, className: "setting-editor" })}<b>斤</b></div></div>
       <h3>粮券印制与注销</h3>
       <div class="row"><span class="label">镇库 / 居民粮券</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentVoucher, 2)}粮券</strong></div>
-      <div class="row"><span class="label">流通粮券</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
+      <div class="row"><span class="label">粮券总量（含镇库）</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
+      <div class="row"><span class="label">镇库外流通</span><strong class="value">${number(c.outsideTownVoucher, 2)}粮券</strong></div>
+      <div class="subtle">总量只在印制、注销时变；居民以粮换券、用券兑粮只是在镇库与民间之间流动。</div>
       <div class="business-form-row"><label>数量${stagedBankInput(view, "currency-amount", "发行或兑付数量", 1000)}</label><div class="settings-actions"><button class="secondary" data-currency-preview="issue">印制粮券</button><button class="secondary" data-currency-preview="redeem">注销粮券</button></div></div>
       ${previewMarkup}`;
   return `<div class="status-strip"><span class="status-light working"></span><strong>${physical ? "银行" : "兼容银行入口"}</strong><span>${reform.stageName}</span></div>

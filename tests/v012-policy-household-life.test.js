@@ -155,8 +155,8 @@ function assertReliefConservation(before, after, result) {
   const redeemedQeq = result.redeemedWheatUnits * CONTENT.precision.qeqUnitsPerJin / I;
   assert.equal(before.reserveWheatUnits, 0, "r04不再维护独立兑付储备");
   assert.equal(after.reserveWheatUnits, 0, "兑回后仍不产生独立兑付储备");
-  assert.equal(before.issuedUnits - after.issuedUnits, result.redeemedWheatUnits, "已发行粮券按实际兑付注销");
-  assert.equal(before.voucherUnits - after.voucherUnits, result.redeemedWheatUnits, "家庭粮券按实际兑付注销");
+  assert.equal(after.issuedUnits, before.issuedUnits, "家庭兑付的粮券交回镇库，不注销，发行总量不变");
+  assert.equal(before.voucherUnits - after.voucherUnits, result.redeemedWheatUnits, "家庭粮券按实际兑付交出");
   assert.equal(after.householdFoodQeqUnits - before.householdFoodQeqUnits, redeemedQeq + result.movedQeqUnits, "家庭新增口粮=自费兑付+免费救济");
   assert.equal(before.townFoodQeqUnits - after.townFoodQeqUnits, redeemedQeq + result.movedQeqUnits, "兑回与免费救济都从镇库可用粮实际拨出");
   assert.equal(after.totalFoodQeqUnits, before.totalFoodQeqUnits, "兑付与救济不改变全镇总口粮");

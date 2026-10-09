@@ -668,6 +668,8 @@ export function selectDashboard(state, content, selection) {
       residentVoucher: voucherBalance(state, "residents") / voucherScale,
       issuedVoucher: (state.currency?.issuedUnits || 0) / voucherScale,
       circulationVoucher: currencyInvariant.balances / voucherScale,
+      // 镇库以外流通：全体粮券减镇库余额（居民、店铺、公司、银行、社保基金手里的券）。
+      outsideTownVoucher: Math.max(0, currencyInvariant.balances - voucherBalance(state, "town")) / voucherScale,
       availableTownWheatJin: (state.accounts.town.wheat || 0) / content.precision.inventoryUnitsPerJin,
       availableResidentWheatJin: (state.accounts.residents.wheat || 0) / content.precision.inventoryUnitsPerJin,
       invariantValid: currencyInvariant.valid,

@@ -220,7 +220,9 @@ export function issueVouchersFromWheat(state, owner, wheatUnits, content, reason
   return { ok: true, transactionId, wheatUnits, voucherUnits, householdRows };
 }
 
-export function redeemVouchersForWheat(state, owner, voucherUnits, content, reason = "注销粮券兑回小麦") {
+// 粮券兑小麦：居民、店铺等用券向镇库换小麦，券交回镇库券池（镇库卖粮收券），全体粮券总量不变；
+// 只有镇库自己兑（owner === "town"）才是注销，发行量减少。
+export function redeemVouchersForWheat(state, owner, voucherUnits, content, reason = "粮券兑回小麦") {
   if (!Number.isSafeInteger(voucherUnits) || voucherUnits <= 0) return { ok: false, reason: "兑换数量必须大于0" };
   const supportedOwner = ["town", "residents", "household"].includes(parseOwner(owner).kind) || holdsCashWheat(owner);
   if (!supportedOwner) return { ok: false, reason: "该账户不能直接兑回小麦" };
@@ -228,7 +230,7 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
   const wheatUnits = wheatUnitsForVoucherUnits(voucherUnits, content, "floor");
   if (wheatUnits <= 0 || voucherUnitsForWheatUnits(wheatUnits, content, "floor") !== voucherUnits) return { ok: false, reason: "该数量无法按当前整数精度兑回" };
   if (voucherBalance(state, owner) < voucherUnits) return { ok: false, reason: "粮券余额不足" };
-  if (currency.issuedUnits < voucherUnits) return { ok: false, reason: "未注销发行量不足" };
+  if (owner === "town" && currency.issuedUnits < voucherUnits) return { ok: false, reason: "未注销发行量不足" };
   if (owner !== "town" && (state.accounts?.town?.wheat || 0) < wheatUnits) return { ok: false, reason: "镇库可用小麦不足" };
 
   let householdRows = null;
@@ -258,12 +260,15 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
     const quote = quoteTownCostRemoval(state, "wheat", wheatUnits, content);
     applyTownCostRemoval(state, quote);
     state.accounts.town.wheat -= wheatUnits;
+    setVoucherBalance(state, "town", voucherBalance(state, "town") + voucherUnits, content);
   }
   currency.reserveWheatUnits = 0;
   currency.reserveWheatCostVoucherUnits = 0;
   currency.reserveModel = "town-inventory-v1";
-  currency.issuedUnits -= voucherUnits;
-  currency.redeemedCumulativeUnits += voucherUnits;
+  if (owner === "town") {
+    currency.issuedUnits -= voucherUnits;
+    currency.redeemedCumulativeUnits += voucherUnits;
+  }
   const transactionId = makeTransactionId(state);
   currencyLedger(state, { type: "redeem", transactionId, owner, wheatUnits, voucherUnits, householdRows, reason }, content);
   recordHouseholdAssetExchange(state, householdRows, voucherUnits, content);
