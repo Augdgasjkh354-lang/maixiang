@@ -6,16 +6,28 @@ import { recordFinancialFlow } from "./financial-flows.js";
 // 变成每户每个收款方每类一行，写账开销降一个量级。批次不进存档（WeakMap 以 state 为键）。
 const ledgerBatches = new WeakMap();
 
+// 显式开/关批次（分段日结用，见 systems/daily.js 的 createDayRunner）。open 返回 true 表示由本次调用开启，
+// 已有批次时返回 false（调用方不应关闭别人的批次）。close 没有批次时什么也不做。
+export function openLedgerBatch(state) {
+  if (ledgerBatches.has(state)) return false;
+  ledgerBatches.set(state, { rows: new Map(), currency: new Map() });
+  return true;
+}
+
+export function closeLedgerBatch(state, content) {
+  const batch = ledgerBatches.get(state);
+  if (!batch) return;
+  ledgerBatches.delete(state);
+  for (const row of batch.rows.values()) writeLedgerRow(state, row, content);
+  for (const entry of batch.currency.values()) entry.flush();
+}
+
 export function withLedgerBatch(state, content, fn) {
-  if (ledgerBatches.has(state)) return fn();
-  const batch = { rows: new Map(), currency: new Map() };
-  ledgerBatches.set(state, batch);
+  if (!openLedgerBatch(state)) return fn();
   try {
     return fn();
   } finally {
-    ledgerBatches.delete(state);
-    for (const row of batch.rows.values()) writeLedgerRow(state, row, content);
-    for (const entry of batch.currency.values()) entry.flush();
+    closeLedgerBatch(state, content);
   }
 }
 

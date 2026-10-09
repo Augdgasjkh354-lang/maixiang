@@ -3,7 +3,7 @@ import { MODS } from "./mods/registry.js";
 import { bindModCommands } from "./mods/api.js";
 import { validateContent } from "./content/validate.js";
 import { createInitialState } from "./core/state.js";
-import { settleOneDay } from "./systems/daily.js";
+import { settleOneDay, createDayRunner } from "./systems/daily.js";
 import {
   advanceGameDays as advanceDaysWithClock
 } from "./core/clock.js";
@@ -49,6 +49,10 @@ export function createSimulation(content) {
     },
     advanceDay: function (state) {
       return settleOneDay(state, definitions);
+    },
+    // 分段日结（界面快进用）：step(budgetMs, now) / finish()，见 systems/daily.js。
+    createDayRunner: function (state) {
+      return createDayRunner(state, definitions);
     },
     advanceDays: function (state, days) {
       return advanceDaysWithClock(state, days, function (current) {

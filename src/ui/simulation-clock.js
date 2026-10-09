@@ -23,6 +23,25 @@ export class SimulationClock {
     this.paused = false;
   }
 
+  // 分段推进（app.js 把一天拆到多帧跑）：先累计时间，再由调用方每开一天前问 canStartDay、开始时 startDay。
+  accrue(seconds) {
+    if (this.paused || !(seconds > 0)) return;
+    this.fractionalDays += seconds * this.daysPerSecond * this.speed;
+  }
+
+  canStartDay() {
+    return !this.paused && this.fractionalDays >= 1;
+  }
+
+  startDay() {
+    this.fractionalDays -= 1;
+  }
+
+  // 积压最多 1 天（与 advanceFrame 超预算时的处理一致）。
+  capBacklog() {
+    if (this.fractionalDays > 1) this.fractionalDays = 1;
+  }
+
   // budgetMs：本帧单次调用内最多连跑的耗时（至少跑一天）。超时后停止追加，
   // 未跑的进度最多保留 1 天积压，多出的丢弃（等价于自动降速），日结果不受影响。
   advanceFrame(seconds, stepDay, { budgetMs = Infinity, now = defaultNow } = {}) {

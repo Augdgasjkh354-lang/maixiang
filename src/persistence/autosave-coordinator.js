@@ -36,8 +36,9 @@ export function createAutosaveCoordinator({ capture, save, onSuccess = () => {},
         requestedForce = false;
         ok = await saveSnapshot(force);
         if (!ok) break;
-        const next = capture();
-        if (next?.dirty) requested = true;
+        // 不因"存完后又变脏"自动再存：快进时日结一直在推进，状态永远是脏的，
+        // 原来会一存完就接着存（每秒一两次整局存档，快进卡顿的主因）。存档期间有新的
+        // request 时 requested 已被置位，会照常补存；其余交给自动存档周期与玩家操作。
       }
       return ok;
     } finally {

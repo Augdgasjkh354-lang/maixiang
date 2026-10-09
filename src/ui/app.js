@@ -1,4 +1,4 @@
-import { simulation } from "../engine.js";
+import { simulation as rawSimulation } from "../engine.js";
 import { loadReportMessage } from "../persistence/migrations.js";
 import { exportState } from "../persistence/storage.js";
 import { classifyPersistenceError } from "../persistence/save-container.js";
@@ -33,12 +33,35 @@ import { freightLimitNote } from "./freight-note.js";
 // 时光流动时的帧预算与重绘节流（见 frame()）。
 const ADVANCE_FRAME_BUDGET_MS = 40;
 const ADVANCE_RENDER_INTERVAL_MS = 250;
+// 单日结算累计耗时超过这个值就自动暂停（与原来"单帧超 800ms"同阈值，改为按一天的结算耗时计）。
+const DAY_SLOW_PAUSE_MS = 800;
+const nowMs = () => performance.now();
 
 function closest(element, selector) {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
 }
 
+// 包一层 simulation：除 createDayRunner 外，每个调用前先 beforeCall()（即把进行中的半天跑完），
+// 保证界面的任何读写都不会碰到半天状态。mods 里的命令同样包一层。
+function guardSimulation(engine, beforeCall) {
+  const wrap = fn => (...args) => { beforeCall(); return fn(...args); };
+  const guarded = {};
+  for (const [key, value] of Object.entries(engine)) {
+    if (key === "mods") {
+      guarded.mods = Object.fromEntries(Object.entries(value).map(([modId, commands]) => [modId, Object.fromEntries(
+        Object.entries(commands).map(([name, fn]) => [name, typeof fn === "function" ? wrap(fn) : fn])
+      )]));
+    } else if (key === "createDayRunner" || typeof value !== "function") {
+      guarded[key] = value;
+    } else {
+      guarded[key] = wrap(value);
+    }
+  }
+  return guarded;
+}
+
 export function mountGame(root) {
+  const simulation = guardSimulation(rawSimulation, () => flushDay());
   document.title = `麦乡 ${APP_VERSION} · ${BUILD_ID}`;
   root.dataset.appVersion = APP_VERSION;
   root.dataset.buildId = BUILD_ID;
@@ -66,6 +89,8 @@ export function mountGame(root) {
   let selectedOutsideTownId = DEFAULT_OUTSIDE_TOWN_ID;
   let startupError = null;
   let dirty = false;
+  // 进行中的半天 { runner, workMs }：快进时一天拆到多帧跑，期间 state 处于半天状态（见 flushDay）。
+  let activeDay = null;
   let stateRevision = 0;
   let saveSession = 0;
   let saveWarningShown = false;
@@ -108,9 +133,13 @@ export function mountGame(root) {
   }
 
   const autosave = createAutosaveCoordinator({
-    capture: () => state && saves && activeId && !transientMode
-      ? { state, slotId: activeId, revision: stateRevision, session: saveSession, dirty }
-      : null,
+    capture: () => {
+      // 存档快照必须是完整的一天：排队的存档可能在前一次 await 之后才抓快照，那时帧循环可能已开了新的一天。
+      flushDay();
+      return state && saves && activeId && !transientMode
+        ? { state, slotId: activeId, revision: stateRevision, session: saveSession, dirty }
+        : null;
+    },
     save: snapshot => saves.saveCurrent(snapshot.state, snapshot.slotId),
     onSuccess: (snapshot, saved) => {
       if (snapshot.session !== saveSession || snapshot.slotId !== activeId) return;
@@ -147,6 +176,7 @@ export function mountGame(root) {
   }
 
   async function saveIfDirty(force = false) {
+    flushDay();
     if (!state || (!dirty && !force)) return true;
     if (transientMode) {
       dirty = true;
@@ -595,6 +625,7 @@ export function mountGame(root) {
   }
 
   function render(forcePanel = false) {
+    flushDay();
     root.classList.toggle("no-active-save", !state);
     if (!state) {
       latestView = null;
@@ -625,6 +656,7 @@ export function mountGame(root) {
   }
 
   function adoptSave(entry) {
+    flushDay();
     state = entry.state;
     const loadMessage = loadReportMessage(state);
     if (loadMessage) setTimeout(() => showToast(loadMessage, 6000), 0);
@@ -676,6 +708,7 @@ export function mountGame(root) {
   }
 
   function startTemporaryGame() {
+    flushDay();
     state = createInitialState({ content: simulation.content });
     resetAutosaveClock();
     dashboardViews.clear();
@@ -723,6 +756,7 @@ export function mountGame(root) {
   }
 
   function exportCurrentState() {
+    flushDay();
     if (!state) return false;
     const blob = new Blob([exportState(state)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -735,6 +769,7 @@ export function mountGame(root) {
   }
 
   async function clickHandler(event) {
+    flushDay();
     const target = event.target;
     const clickedButton = closest(target, "button");
     if (clickedButton && clickedButton.id !== "soundToggle" && !clickedButton.disabled && !clickedButton.matches("[data-start-building]")) {
@@ -846,6 +881,7 @@ export function mountGame(root) {
     if (closest(target, "[data-persist-temporary]") && state && transientMode) {
       if (!await retryPersistentStorage()) { render(true); showToast(persistenceIssue?.message || "本机存储仍不可用。", 5000); return; }
       try {
+        flushDay();
         const entry = await saves.saveAs(state, `临时进度 ${saves.list().slots.length + 1}`);
         adoptSave(entry);
         showToast("临时进度已保存为本机存档。", 3600);
@@ -908,6 +944,8 @@ export function mountGame(root) {
           const result = await saves.remove(action.id);
           pendingAction = null;
           if (result.current) {
+            // await 期间时光可能仍在走：先把进行中的半天跑完再丢弃当前局。
+            flushDay();
             state = null;
             dashboardViews.clear();
             latestView = null;
@@ -963,6 +1001,7 @@ export function mountGame(root) {
           showToast("当前进度保存失败，未创建新存档。", 5000);
           return;
         }
+        flushDay();
         adoptSave(await saves.saveAs(state, name));
         showToast("已另存为独立存档。");
       } catch (error) {
@@ -1832,6 +1871,7 @@ export function mountGame(root) {
   }
 
   function changeHandler(event) {
+    flushDay();
     const target = event.target;
     if (target.matches("[data-draft-key]") && shouldCommitNumericDraftOnChange(target.dataset.draftKind)) {
       commitNumericDraft(target.dataset.draftKey, target);
@@ -1871,6 +1911,8 @@ export function mountGame(root) {
   }
 
   function keyHandler(event) {
+    // 提交/取消数字草稿要读写 state：先跑完半天（普通输入按键不打断快进）。
+    if (event.key === "Enter" || event.key === "Escape") flushDay();
     const draftInput = closest(event.target, "[data-draft-key]");
     if (draftInput && event.key === "Enter") {
       event.preventDefault();
@@ -1906,15 +1948,94 @@ export function mountGame(root) {
     }
   };
   window.addEventListener("pagehide", pageHideHandler);
-  const saveTimer = setInterval(() => {
+  // 自动存档：日结完成时检查（见 frame）；定时器只在没有半天进行中时补查，不为它打断快进。
+  function maybeAutosave() {
     if (!state || transientMode || !saves) return;
     const months = state.policy?.autosaveMonths ?? 1;
     if (absoluteGameDay() - lastAutosaveAbsDay >= months * 30) {
       lastAutosaveAbsDay = absoluteGameDay();
       void saveIfDirty();
     }
+  }
+  const saveTimer = setInterval(() => {
+    if (activeDay) return;
+    maybeAutosave();
   }, 2000);
   document.addEventListener("visibilitychange", visibilityHandler);
+
+  // ── 分段日结（快进）。一天的步骤拆到多帧里跑：每帧在 ADVANCE_FRAME_BUDGET_MS 内逐步推进，
+  // 一天跑完才算推进一天。半天期间 state 不完整，所以所有读写 state 的入口（simulation 包装、render、
+  // 存档、点击/改值）都先调 flushDay() 把半天同步跑完。
+
+  // 把进行中的半天同步跑完。没有半天时什么也不做，返回 false。
+  function flushDay() {
+    const day = activeDay;
+    if (!day) return false;
+    activeDay = null;
+    const t0 = nowMs();
+    try {
+      day.runner.finish();
+    } catch (err) {
+      clock.pause();
+      throw err;
+    }
+    day.workMs += nowMs() - t0;
+    completeDay(day);
+    return true;
+  }
+
+  // 一天结完（state 已完整）：标脏、失效视图、短缺与单日过慢检查。
+  function completeDay(day) {
+    dirty = true;
+    stateRevision += 1;
+    invalidateStateView();
+    advanceRenderPending = true;
+    if (state.shortageQeq > 0) {
+      clock.pause();
+      showToast("口粮出现短缺，时光已暂停。请检查居民粮账并拨粮救济。", 4200);
+    }
+    // 单日结算超时保护：一天的结算累计超过 DAY_SLOW_PAUSE_MS 自动暂停，可手动继续。
+    if (day.workMs > DAY_SLOW_PAUSE_MS && !clock.paused) {
+      clock.pause();
+      showToast("单日结算较慢，已自动暂停，可手动继续。", 3000);
+    }
+  }
+
+  // 本帧推进：在预算内逐步跑日结，一天跑完才计为推进一天；积压最多 1 天。返回本帧跑完的天数。
+  function advanceFrame(elapsed, now) {
+    clock.accrue(elapsed);
+    const frameStart = nowMs();
+    let completed = 0;
+    while (state && !clock.paused) {
+      if (nowMs() - frameStart >= ADVANCE_FRAME_BUDGET_MS) break;
+      if (!activeDay) {
+        if (!clock.canStartDay()) break;
+        clock.startDay();
+        activeDay = { runner: rawSimulation.createDayRunner(state), workMs: 0 };
+      }
+      const day = activeDay;
+      const t0 = nowMs();
+      const done = day.runner.step(ADVANCE_FRAME_BUDGET_MS - (t0 - frameStart), nowMs);
+      day.workMs += nowMs() - t0;
+      if (!done) break;
+      activeDay = null;
+      completed += 1;
+      completeDay(day);
+      maybeAutosave();
+      renderDueAfterDay(now);
+    }
+    clock.capBacklog();
+    return completed;
+  }
+
+  // 面板重绘只在两天之间做（半天时 render 会把它跑完）：快进时最多每 ADVANCE_RENDER_INTERVAL_MS 一次；暂停后立即补一次。
+  function renderDueAfterDay(now) {
+    if (activeDay || !advanceRenderPending) return;
+    if (!clock.paused && now - lastAdvanceRenderAt < ADVANCE_RENDER_INTERVAL_MS) return;
+    advanceRenderPending = false;
+    lastAdvanceRenderAt = now;
+    render();
+  }
 
   function frame(now) {
     animationFrame = 0;
@@ -1926,37 +2047,17 @@ export function mountGame(root) {
       if (state) {
         if (!clock.paused) animationTime += elapsed;
         // 防御：单日结算异常时暂停并提示，避免静默卡死（之前异常会直接掐断 rAF 循环）
-        let advanced = 0;
-        const frameStart = performance.now();
         try {
-          // 单帧最多连跑约 40ms 的日结，超出部分留到下帧（积压最多 1 天），避免一帧卡住很久。
-          advanced = clock.advanceFrame(elapsed, () => {
-            simulation.advanceDay(state);
-            dirty = true;
-            stateRevision += 1;
-            invalidateStateView();
-            if (state.shortageQeq > 0) {
-              clock.pause();
-              showToast("口粮出现短缺，时光已暂停。请检查居民粮账并拨粮救济。", 4200);
-            }
-            // 单帧内多日结算超时保护：超过 800ms 自动暂停，下帧继续
-            if (performance.now() - frameStart > 800 && !clock.paused) {
-              clock.pause();
-              showToast("单日结算较慢，已自动暂停，可手动继续。", 3000);
-            }
-          }, { budgetMs: ADVANCE_FRAME_BUDGET_MS, now: () => performance.now() });
+          // 暂停时先把进行中的半天同步跑完，再画。
+          if (clock.paused && activeDay) flushDay();
+          advanceFrame(elapsed, now);
         } catch (err) {
+          activeDay = null;
           clock.pause();
           console.error("[麦乡] 日结算异常已暂停", err);
           showToast("结算出现异常已暂停：" + (err && err.message || "未知错误"), 5000);
         }
-        // 快进时面板重绘最多每 ADVANCE_RENDER_INTERVAL_MS 一次；暂停后立即补一次，界面不停在旧数据上。
-        if (advanced > 0) advanceRenderPending = true;
-        if (advanceRenderPending && (clock.paused || now - lastAdvanceRenderAt >= ADVANCE_RENDER_INTERVAL_MS)) {
-          advanceRenderPending = false;
-          lastAdvanceRenderAt = now;
-          render();
-        }
+        renderDueAfterDay(now);
         const view = latestView;
         if (view && !clock.paused && now - lastCanvasFrame >= 90) {
           drawVillageMapCanvas($("#mapTerrainCanvas"), view, navigation.state, animationTime, latestMapModel);

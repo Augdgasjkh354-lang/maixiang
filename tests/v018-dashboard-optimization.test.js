@@ -218,6 +218,8 @@ test("0.1.8 动画帧不再直接构造Dashboard，数字草稿不进入经济�
   assert.match(cacheSource, /selection\.speed/);
   assert.match(appSource, /numericDrafts:\s*Object\.fromEntries\(numericDrafts\)/);
   assert.match(appSource, /function changed\([^)]*\)\s*\{[\s\S]*?invalidateStateView\(\)/);
-  assert.match(frameBody, /simulation\.advanceDay\(state\)[\s\S]*?invalidateStateView\(\)/);
+  // 日结改为分段执行（app.js advanceFrame / completeDay）：一天结完时仍要失效视图缓存。
+  assert.match(frameBody, /advanceFrame\(elapsed, now\)/);
+  assert.match(appSource, /function completeDay\([^)]*\)\s*\{[\s\S]*?invalidateStateView\(\)/);
   assert.match(appSource, /function adoptSave\([^)]*\)\s*\{[\s\S]*?dashboardViews\.clear\(\)/);
 });

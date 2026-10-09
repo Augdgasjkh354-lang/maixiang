@@ -1222,6 +1222,7 @@ const THEATER_MIN_AFFLUENCE = 1.5;
   shopWageRaiseProfitShare: 0.5,
   shopWageSlackFactor: 0.85,
   shopWageTightFactor: 1.2,
+  householdGoodsShoppingDays: 5, // 赶集：日用品与盐存货不够当天用才去买、一次买够这么多天；修房木材每这么多天统一采购一次
   initialHouseholdSize: 5, // 开局约几人一户（systems/households.js）
   householdSplitMaxPeople: 8, // 一户超过这么多人就在年终分家（systems/household-split.js）
   farmStockDays: 7, // 养殖场存货够卖这么多天就停养；超过即算积压降价（systems/farm-pricing.js）
@@ -2050,16 +2051,28 @@ const { RULES } = __mxmod2;
 const { recordFinancialFlow } = __mxmod14;
 const ledgerBatches = new WeakMap();
 
+// 显式开/关批次（分段日结用，见 systems/daily.js 的 createDayRunner）。open 返回 true 表示由本次调用开启，
+// 已有批次时返回 false（调用方不应关闭别人的批次）。close 没有批次时什么也不做。
+       function openLedgerBatch(state) {
+  if (ledgerBatches.has(state)) return false;
+  ledgerBatches.set(state, { rows: new Map(), currency: new Map() });
+  return true;
+}
+
+       function closeLedgerBatch(state, content) {
+  const batch = ledgerBatches.get(state);
+  if (!batch) return;
+  ledgerBatches.delete(state);
+  for (const row of batch.rows.values()) writeLedgerRow(state, row, content);
+  for (const entry of batch.currency.values()) entry.flush();
+}
+
        function withLedgerBatch(state, content, fn) {
-  if (ledgerBatches.has(state)) return fn();
-  const batch = { rows: new Map(), currency: new Map() };
-  ledgerBatches.set(state, batch);
+  if (!openLedgerBatch(state)) return fn();
   try {
     return fn();
   } finally {
-    ledgerBatches.delete(state);
-    for (const row of batch.rows.values()) writeLedgerRow(state, row, content);
-    for (const entry of batch.currency.values()) entry.flush();
+    closeLedgerBatch(state, content);
   }
 }
 
@@ -2161,7 +2174,7 @@ function writeLedgerRow(state, row, content) {
     wageArrearsQeq: 0
   };
 }
-return { withLedgerBatch, currencyLedgerBatch, recordLedger, recordEvent, makeTransactionId, emptyYearTotals };
+return { openLedgerBatch, closeLedgerBatch, withLedgerBatch, currencyLedgerBatch, recordLedger, recordEvent, makeTransactionId, emptyYearTotals };
 })();
 
 // ===== core/allocation.js =====
@@ -2810,7 +2823,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod19 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-885b0c2";
+       const BUILD_ID = "0203-e47616a";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -15444,7 +15457,12 @@ function processServiceDemandNow(state, content) {
   if (!defs.length) return { servedUses: {}, spendingVoucherUnits: 0 };
   const householdsBase = householdList(state).filter(isActiveHousehold);
   if (!householdsBase.length) return { servedUses: {}, spendingVoucherUnits: 0 };
-  const budgets = new Map(householdsBase.map(h => [h.id, householdDailyServiceBudget(state, h, content)]));
+  // 服务预算要试算付款能力（较贵）：只在这户今天第一次真要买服务时才算。
+  const budgets = new Map();
+  const budgetOf = household => {
+    if (!budgets.has(household.id)) budgets.set(household.id, householdDailyServiceBudget(state, household, content));
+    return budgets.get(household.id);
+  };
   const households = rotated(householdsBase, serviceState.rotation.households || 0);
   const services = rotated(defs, serviceState.rotation.services || 0);
   let totalSpent = 0;
@@ -15464,7 +15482,7 @@ function processServiceDemandNow(state, content) {
       const dailyNeed = Math.min(due, Math.max(1, basisCount(household, def)));
       serviceState.day.attemptedUses[def.id] = (serviceState.day.attemptedUses[def.id] || 0) + dailyNeed;
       const sensitivity = Math.max(0.25, Number(def.incomeSensitivity) || 1);
-      const budget = budgets.get(household.id) || 0;
+      const budget = budgetOf(household) || 0;
       // 高收入敏感服务（茶馆）需要更宽裕的预算，基础服务更容易被购买。
       const effectivePrice = Math.ceil(price * sensitivity);
       const affordableUses = Math.floor(budget / Math.max(price, effectivePrice));
@@ -19306,12 +19324,16 @@ function todaysTargets(state, content) {
   ensureGoodsDemand(state);
   const targets = todaysTargets(state, content);
   const households = householdList(state).filter(isActiveHousehold);
+  const shoppingDays = Math.max(1, Math.floor(content.rules.householdGoodsShoppingDays ?? 5));
   const results = {};
   for (const itemId of Object.keys(goodsConfig(content))) {
     const needs = {};
     let desired = 0;
     for (const household of households) {
-      const shortage = Math.max(0, (targets.get(household.id)?.[itemId] || 0) - (household.inventory?.[itemId] || 0));
+      const daily = targets.get(household.id)?.[itemId] || 0;
+      const stock = household.inventory?.[itemId] || 0;
+      // 存货够今天用就不上街；不够时补到 shoppingDays 天的量。
+      const shortage = stock >= daily ? 0 : Math.max(0, daily * shoppingDays - stock);
       if (shortage <= 0) continue;
       needs[household.id] = shortage;
       desired += shortage;
@@ -19765,7 +19787,17 @@ function settleHousingRent(state, housingAtStart, content) {
        function buyRepairWoodForResidents(state, content) {
   const households = householdList(state);
   // 今日修缮需求（库存精度单位）：随活跃家庭数增长。
-  const targetUnits = accrueRepairWoodNeed(state, activeHouseholds(state).length, content);
+  const dailyUnits = accrueRepairWoodNeed(state, activeHouseholds(state).length, content);
+  // 赶集：修缮需求逐日累计，每 householdGoodsShoppingDays 天全镇统一采购一次（买不到的不结转，同原规则）。
+  state.housing ||= {};
+  const shoppingDays = Math.max(1, Math.floor(content.rules.householdGoodsShoppingDays ?? 5));
+  state.housing.repairWoodPendingUnits = (state.housing.repairWoodPendingUnits || 0) + dailyUnits;
+  if ((state.day || 0) % shoppingDays !== 0) {
+    state.housing.lastRepairWoodDay = { targetUnits: 0, pendingUnits: state.housing.repairWoodPendingUnits, purchasedUnits: 0, consumedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: "未到采购日" };
+    return state.housing.lastRepairWoodDay;
+  }
+  const targetUnits = state.housing.repairWoodPendingUnits;
+  state.housing.repairWoodPendingUnits = 0;
   // 购买前快照各家庭木材库存与居民总量。
   const before = new Map(households.map(household => [household.id, household.inventory?.wood || 0]));
   const beforeTotal = households.reduce((sum, household) => sum + (household.inventory?.wood || 0), 0);
@@ -19858,6 +19890,7 @@ function maxPassing(limit, predicate) {
   const demandUnits = state.salt.todayDemandUnits || 0;
   const households = householdList(state).filter(isActiveHousehold);
   const totalPeople = households.reduce((sum, household) => sum + householdPopulation(household), 0) || 1;
+  const shoppingDays = Math.max(1, Math.floor(content.rules.householdGoodsShoppingDays ?? 5));
   let assignedDemand = 0;
   const householdNeedsUnits = {};
   const shortageUnits = households.reduce((sum, household, index) => {
@@ -19865,7 +19898,9 @@ function maxPassing(limit, predicate) {
       ? demandUnits - assignedDemand
       : Math.floor(demandUnits * householdPopulation(household) / totalPeople);
     assignedDemand += familyDemand;
-    const shortage = Math.max(0, familyDemand - (household.inventory?.salt || 0));
+    // 赶集：家里的盐够今天用就不买；不够时一次买够 householdGoodsShoppingDays 天。
+    const stock = household.inventory?.salt || 0;
+    const shortage = stock >= familyDemand ? 0 : Math.max(0, familyDemand * shoppingDays - stock);
     householdNeedsUnits[household.id] = shortage;
     return sum + shortage;
   }, 0);
@@ -21026,7 +21061,7 @@ return { settleOwnershipTakeovers };
 
 // ===== systems/daily.js =====
 const __mxmod98 = (() => {
-const { withLedgerBatch } = __mxmod15;
+const { closeLedgerBatch, openLedgerBatch } = __mxmod15;
 const { totalQeqUnits } = __mxmod17;
 const { produceLivestock } = __mxmod80;
 const { manageStalls } = __mxmod81;
@@ -21315,25 +21350,67 @@ function privateIntakeSummary(rows) {
 
 // 按给定步骤表跑一天（测试可传入带自定义 mod 步骤的表）。
        function runDay(state, content, steps) {
-  // 整个日结在一个账本批次里：账本行按户、对方、类型合并，日终一次写入（economy/ledger.js）。
-  return withLedgerBatch(state, content, () => runDaySteps(state, content, steps));
+  return createDayRunner(state, content, steps).finish();
 }
 
-function runDaySteps(state, content, steps) {
-  const beforeTotal = totalQeqUnits(state, content);
-  const day = { isNewYearDay: state.day === 0, peopleAtStart: populationStats(state), demography: null };
-  for (const step of steps) {
-    day[step.id] = !step.when || step.when(state, content, day) ? (step.run(state, content, day) ?? null) : null;
-  }
-  return {
-    ...day,
-    wholesaleIntake: { allocation: day.wholesaleTownAllocation, town: day.wholesaleTownOutput, private: privateIntakeSummary(day.privateProduction), company: day.wholesaleCompanyIntake },
-    shortageQeq: day.meal.missingQeqUnits,
-    totalChangeQeqUnits: totalQeqUnits(state, content) - beforeTotal,
-    population: populationStats(state)
+const defaultNow = () => (globalThis.performance ? globalThis.performance.now() : Date.now());
+
+// 分段跑一天（界面快进用）。step(budgetMs, now)：每次至少跑 1 步，之后若已超 budgetMs 就停在步与步之间
+// 并返回 false；全部步骤跑完返回 true，结果在 runner.result。finish() 同步跑完剩余步骤并返回结果。
+// 账本批次在第一步前开、跑完后关（整天合并写账，与 runDay 一致）。跑到一半时 state 处于半天状态，
+// 调用方在读写 state 之前必须先 finish()。
+       function createDayRunner(state, content, steps = DAILY_STEPS) {
+  let index = 0;
+  let started = false;
+  let ownsBatch = false;
+  let beforeTotal = 0;
+  let day = null;
+  const runner = {
+    done: false,
+    result: null,
+    step(budgetMs = Infinity, now = defaultNow) {
+      if (runner.done) return true;
+      const startedAt = now();
+      let ran = 0;
+      try {
+        if (!started) {
+          started = true;
+          ownsBatch = openLedgerBatch(state);
+          beforeTotal = totalQeqUnits(state, content);
+          day = { isNewYearDay: state.day === 0, peopleAtStart: populationStats(state), demography: null };
+        }
+        while (index < steps.length) {
+          if (ran > 0 && now() - startedAt >= budgetMs) return false;
+          const step = steps[index];
+          day[step.id] = !step.when || step.when(state, content, day) ? (step.run(state, content, day) ?? null) : null;
+          index += 1;
+          ran += 1;
+        }
+      } catch (error) {
+        // 出错也要关批次（写掉已发生的账），与原 withLedgerBatch 的 finally 一致。
+        if (ownsBatch) closeLedgerBatch(state, content);
+        runner.done = true;
+        throw error;
+      }
+      runner.result = {
+        ...day,
+        wholesaleIntake: { allocation: day.wholesaleTownAllocation, town: day.wholesaleTownOutput, private: privateIntakeSummary(day.privateProduction), company: day.wholesaleCompanyIntake },
+        shortageQeq: day.meal.missingQeqUnits,
+        totalChangeQeqUnits: totalQeqUnits(state, content) - beforeTotal,
+        population: populationStats(state)
+      };
+      if (ownsBatch) closeLedgerBatch(state, content);
+      runner.done = true;
+      return true;
+    },
+    finish() {
+      if (!runner.done) runner.step();
+      return runner.result;
+    }
   };
+  return runner;
 }
-return { CORE_DAILY_STEPS, DAILY_STEPS, settleOneDay, runDay };
+return { CORE_DAILY_STEPS, DAILY_STEPS, settleOneDay, runDay, createDayRunner };
 })();
 
 // ===== selectors/economy.js =====
@@ -22584,7 +22661,7 @@ const { MODS } = __mxmod78;
 const { bindModCommands } = __mxmod74;
 const { validateContent } = __mxmod18;
 const { createInitialState } = __mxmod37;
-const { settleOneDay } = __mxmod98;
+const { settleOneDay, createDayRunner } = __mxmod98;
 const { advanceGameDays: advanceDaysWithClock } = __mxmod20;
 const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setWealthTax, setInheritanceTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, listBuilding, approveIpoApplication, rejectIpoApplication, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod73;
 const { selectDemolitionPreview, selectUpgradePreview } = __mxmod56;
@@ -22610,6 +22687,10 @@ function createSimulation(content) {
     },
     advanceDay: function (state) {
       return settleOneDay(state, definitions);
+    },
+    // 分段日结（界面快进用）：step(budgetMs, now) / finish()，见 systems/daily.js。
+    createDayRunner: function (state) {
+      return createDayRunner(state, definitions);
     },
     advanceDays: function (state, days) {
       return advanceDaysWithClock(state, days, function (current) {
@@ -23942,8 +24023,9 @@ function createAutosaveCoordinator({ capture, save, onSuccess = () => {}, onFail
         requestedForce = false;
         ok = await saveSnapshot(force);
         if (!ok) break;
-        const next = capture();
-        if (next?.dirty) requested = true;
+        // 不因"存完后又变脏"自动再存：快进时日结一直在推进，状态永远是脏的，
+        // 原来会一存完就接着存（每秒一两次整局存档，快进卡顿的主因）。存档期间有新的
+        // request 时 requested 已被置位，会照常补存；其余交给自动存档周期与玩家操作。
       }
       return ok;
     } finally {
@@ -24029,6 +24111,25 @@ class SimulationClock {
 
   resume() {
     this.paused = false;
+  }
+
+  // 分段推进（app.js 把一天拆到多帧跑）：先累计时间，再由调用方每开一天前问 canStartDay、开始时 startDay。
+  accrue(seconds) {
+    if (this.paused || !(seconds > 0)) return;
+    this.fractionalDays += seconds * this.daysPerSecond * this.speed;
+  }
+
+  canStartDay() {
+    return !this.paused && this.fractionalDays >= 1;
+  }
+
+  startDay() {
+    this.fractionalDays -= 1;
+  }
+
+  // 积压最多 1 天（与 advanceFrame 超预算时的处理一致）。
+  capBacklog() {
+    if (this.fractionalDays > 1) this.fractionalDays = 1;
   }
 
   // budgetMs：本帧单次调用内最多连跑的耗时（至少跑一天）。超时后停止追加，
@@ -27879,7 +27980,7 @@ return { freightLimitNote };
 
 // ===== ui/app.js =====
 const __mxmod148 = (() => {
-const { simulation } = __mxmod106;
+const { simulation: rawSimulation } = __mxmod106;
 const { loadReportMessage } = __mxmod109;
 const { exportState } = __mxmod110;
 const { classifyPersistenceError } = __mxmod111;
@@ -27912,12 +28013,35 @@ const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod7;
 const { freightLimitNote } = __mxmod147;
 const ADVANCE_FRAME_BUDGET_MS = 40;
 const ADVANCE_RENDER_INTERVAL_MS = 250;
+// 单日结算累计耗时超过这个值就自动暂停（与原来"单帧超 800ms"同阈值，改为按一天的结算耗时计）。
+const DAY_SLOW_PAUSE_MS = 800;
+const nowMs = () => performance.now();
 
 function closest(element, selector) {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
 }
 
+// 包一层 simulation：除 createDayRunner 外，每个调用前先 beforeCall()（即把进行中的半天跑完），
+// 保证界面的任何读写都不会碰到半天状态。mods 里的命令同样包一层。
+function guardSimulation(engine, beforeCall) {
+  const wrap = fn => (...args) => { beforeCall(); return fn(...args); };
+  const guarded = {};
+  for (const [key, value] of Object.entries(engine)) {
+    if (key === "mods") {
+      guarded.mods = Object.fromEntries(Object.entries(value).map(([modId, commands]) => [modId, Object.fromEntries(
+        Object.entries(commands).map(([name, fn]) => [name, typeof fn === "function" ? wrap(fn) : fn])
+      )]));
+    } else if (key === "createDayRunner" || typeof value !== "function") {
+      guarded[key] = value;
+    } else {
+      guarded[key] = wrap(value);
+    }
+  }
+  return guarded;
+}
+
        function mountGame(root) {
+  const simulation = guardSimulation(rawSimulation, () => flushDay());
   document.title = `麦乡 ${APP_VERSION} · ${BUILD_ID}`;
   root.dataset.appVersion = APP_VERSION;
   root.dataset.buildId = BUILD_ID;
@@ -27945,6 +28069,8 @@ function closest(element, selector) {
   let selectedOutsideTownId = DEFAULT_OUTSIDE_TOWN_ID;
   let startupError = null;
   let dirty = false;
+  // 进行中的半天 { runner, workMs }：快进时一天拆到多帧跑，期间 state 处于半天状态（见 flushDay）。
+  let activeDay = null;
   let stateRevision = 0;
   let saveSession = 0;
   let saveWarningShown = false;
@@ -27987,9 +28113,13 @@ function closest(element, selector) {
   }
 
   const autosave = createAutosaveCoordinator({
-    capture: () => state && saves && activeId && !transientMode
-      ? { state, slotId: activeId, revision: stateRevision, session: saveSession, dirty }
-      : null,
+    capture: () => {
+      // 存档快照必须是完整的一天：排队的存档可能在前一次 await 之后才抓快照，那时帧循环可能已开了新的一天。
+      flushDay();
+      return state && saves && activeId && !transientMode
+        ? { state, slotId: activeId, revision: stateRevision, session: saveSession, dirty }
+        : null;
+    },
     save: snapshot => saves.saveCurrent(snapshot.state, snapshot.slotId),
     onSuccess: (snapshot, saved) => {
       if (snapshot.session !== saveSession || snapshot.slotId !== activeId) return;
@@ -28026,6 +28156,7 @@ function closest(element, selector) {
   }
 
   async function saveIfDirty(force = false) {
+    flushDay();
     if (!state || (!dirty && !force)) return true;
     if (transientMode) {
       dirty = true;
@@ -28474,6 +28605,7 @@ function closest(element, selector) {
   }
 
   function render(forcePanel = false) {
+    flushDay();
     root.classList.toggle("no-active-save", !state);
     if (!state) {
       latestView = null;
@@ -28504,6 +28636,7 @@ function closest(element, selector) {
   }
 
   function adoptSave(entry) {
+    flushDay();
     state = entry.state;
     const loadMessage = loadReportMessage(state);
     if (loadMessage) setTimeout(() => showToast(loadMessage, 6000), 0);
@@ -28555,6 +28688,7 @@ function closest(element, selector) {
   }
 
   function startTemporaryGame() {
+    flushDay();
     state = createInitialState({ content: simulation.content });
     resetAutosaveClock();
     dashboardViews.clear();
@@ -28602,6 +28736,7 @@ function closest(element, selector) {
   }
 
   function exportCurrentState() {
+    flushDay();
     if (!state) return false;
     const blob = new Blob([exportState(state)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -28614,6 +28749,7 @@ function closest(element, selector) {
   }
 
   async function clickHandler(event) {
+    flushDay();
     const target = event.target;
     const clickedButton = closest(target, "button");
     if (clickedButton && clickedButton.id !== "soundToggle" && !clickedButton.disabled && !clickedButton.matches("[data-start-building]")) {
@@ -28725,6 +28861,7 @@ function closest(element, selector) {
     if (closest(target, "[data-persist-temporary]") && state && transientMode) {
       if (!await retryPersistentStorage()) { render(true); showToast(persistenceIssue?.message || "本机存储仍不可用。", 5000); return; }
       try {
+        flushDay();
         const entry = await saves.saveAs(state, `临时进度 ${saves.list().slots.length + 1}`);
         adoptSave(entry);
         showToast("临时进度已保存为本机存档。", 3600);
@@ -28787,6 +28924,8 @@ function closest(element, selector) {
           const result = await saves.remove(action.id);
           pendingAction = null;
           if (result.current) {
+            // await 期间时光可能仍在走：先把进行中的半天跑完再丢弃当前局。
+            flushDay();
             state = null;
             dashboardViews.clear();
             latestView = null;
@@ -28842,6 +28981,7 @@ function closest(element, selector) {
           showToast("当前进度保存失败，未创建新存档。", 5000);
           return;
         }
+        flushDay();
         adoptSave(await saves.saveAs(state, name));
         showToast("已另存为独立存档。");
       } catch (error) {
@@ -29711,6 +29851,7 @@ function closest(element, selector) {
   }
 
   function changeHandler(event) {
+    flushDay();
     const target = event.target;
     if (target.matches("[data-draft-key]") && shouldCommitNumericDraftOnChange(target.dataset.draftKind)) {
       commitNumericDraft(target.dataset.draftKey, target);
@@ -29750,6 +29891,8 @@ function closest(element, selector) {
   }
 
   function keyHandler(event) {
+    // 提交/取消数字草稿要读写 state：先跑完半天（普通输入按键不打断快进）。
+    if (event.key === "Enter" || event.key === "Escape") flushDay();
     const draftInput = closest(event.target, "[data-draft-key]");
     if (draftInput && event.key === "Enter") {
       event.preventDefault();
@@ -29785,15 +29928,94 @@ function closest(element, selector) {
     }
   };
   window.addEventListener("pagehide", pageHideHandler);
-  const saveTimer = setInterval(() => {
+  // 自动存档：日结完成时检查（见 frame）；定时器只在没有半天进行中时补查，不为它打断快进。
+  function maybeAutosave() {
     if (!state || transientMode || !saves) return;
     const months = state.policy?.autosaveMonths ?? 1;
     if (absoluteGameDay() - lastAutosaveAbsDay >= months * 30) {
       lastAutosaveAbsDay = absoluteGameDay();
       void saveIfDirty();
     }
+  }
+  const saveTimer = setInterval(() => {
+    if (activeDay) return;
+    maybeAutosave();
   }, 2000);
   document.addEventListener("visibilitychange", visibilityHandler);
+
+  // ── 分段日结（快进）。一天的步骤拆到多帧里跑：每帧在 ADVANCE_FRAME_BUDGET_MS 内逐步推进，
+  // 一天跑完才算推进一天。半天期间 state 不完整，所以所有读写 state 的入口（simulation 包装、render、
+  // 存档、点击/改值）都先调 flushDay() 把半天同步跑完。
+
+  // 把进行中的半天同步跑完。没有半天时什么也不做，返回 false。
+  function flushDay() {
+    const day = activeDay;
+    if (!day) return false;
+    activeDay = null;
+    const t0 = nowMs();
+    try {
+      day.runner.finish();
+    } catch (err) {
+      clock.pause();
+      throw err;
+    }
+    day.workMs += nowMs() - t0;
+    completeDay(day);
+    return true;
+  }
+
+  // 一天结完（state 已完整）：标脏、失效视图、短缺与单日过慢检查。
+  function completeDay(day) {
+    dirty = true;
+    stateRevision += 1;
+    invalidateStateView();
+    advanceRenderPending = true;
+    if (state.shortageQeq > 0) {
+      clock.pause();
+      showToast("口粮出现短缺，时光已暂停。请检查居民粮账并拨粮救济。", 4200);
+    }
+    // 单日结算超时保护：一天的结算累计超过 DAY_SLOW_PAUSE_MS 自动暂停，可手动继续。
+    if (day.workMs > DAY_SLOW_PAUSE_MS && !clock.paused) {
+      clock.pause();
+      showToast("单日结算较慢，已自动暂停，可手动继续。", 3000);
+    }
+  }
+
+  // 本帧推进：在预算内逐步跑日结，一天跑完才计为推进一天；积压最多 1 天。返回本帧跑完的天数。
+  function advanceFrame(elapsed, now) {
+    clock.accrue(elapsed);
+    const frameStart = nowMs();
+    let completed = 0;
+    while (state && !clock.paused) {
+      if (nowMs() - frameStart >= ADVANCE_FRAME_BUDGET_MS) break;
+      if (!activeDay) {
+        if (!clock.canStartDay()) break;
+        clock.startDay();
+        activeDay = { runner: rawSimulation.createDayRunner(state), workMs: 0 };
+      }
+      const day = activeDay;
+      const t0 = nowMs();
+      const done = day.runner.step(ADVANCE_FRAME_BUDGET_MS - (t0 - frameStart), nowMs);
+      day.workMs += nowMs() - t0;
+      if (!done) break;
+      activeDay = null;
+      completed += 1;
+      completeDay(day);
+      maybeAutosave();
+      renderDueAfterDay(now);
+    }
+    clock.capBacklog();
+    return completed;
+  }
+
+  // 面板重绘只在两天之间做（半天时 render 会把它跑完）：快进时最多每 ADVANCE_RENDER_INTERVAL_MS 一次；暂停后立即补一次。
+  function renderDueAfterDay(now) {
+    if (activeDay || !advanceRenderPending) return;
+    if (!clock.paused && now - lastAdvanceRenderAt < ADVANCE_RENDER_INTERVAL_MS) return;
+    advanceRenderPending = false;
+    lastAdvanceRenderAt = now;
+    render();
+  }
 
   function frame(now) {
     animationFrame = 0;
@@ -29805,37 +30027,17 @@ function closest(element, selector) {
       if (state) {
         if (!clock.paused) animationTime += elapsed;
         // 防御：单日结算异常时暂停并提示，避免静默卡死（之前异常会直接掐断 rAF 循环）
-        let advanced = 0;
-        const frameStart = performance.now();
         try {
-          // 单帧最多连跑约 40ms 的日结，超出部分留到下帧（积压最多 1 天），避免一帧卡住很久。
-          advanced = clock.advanceFrame(elapsed, () => {
-            simulation.advanceDay(state);
-            dirty = true;
-            stateRevision += 1;
-            invalidateStateView();
-            if (state.shortageQeq > 0) {
-              clock.pause();
-              showToast("口粮出现短缺，时光已暂停。请检查居民粮账并拨粮救济。", 4200);
-            }
-            // 单帧内多日结算超时保护：超过 800ms 自动暂停，下帧继续
-            if (performance.now() - frameStart > 800 && !clock.paused) {
-              clock.pause();
-              showToast("单日结算较慢，已自动暂停，可手动继续。", 3000);
-            }
-          }, { budgetMs: ADVANCE_FRAME_BUDGET_MS, now: () => performance.now() });
+          // 暂停时先把进行中的半天同步跑完，再画。
+          if (clock.paused && activeDay) flushDay();
+          advanceFrame(elapsed, now);
         } catch (err) {
+          activeDay = null;
           clock.pause();
           console.error("[麦乡] 日结算异常已暂停", err);
           showToast("结算出现异常已暂停：" + (err && err.message || "未知错误"), 5000);
         }
-        // 快进时面板重绘最多每 ADVANCE_RENDER_INTERVAL_MS 一次；暂停后立即补一次，界面不停在旧数据上。
-        if (advanced > 0) advanceRenderPending = true;
-        if (advanceRenderPending && (clock.paused || now - lastAdvanceRenderAt >= ADVANCE_RENDER_INTERVAL_MS)) {
-          advanceRenderPending = false;
-          lastAdvanceRenderAt = now;
-          render();
-        }
+        renderDueAfterDay(now);
         const view = latestView;
         if (view && !clock.paused && now - lastCanvasFrame >= 90) {
           drawVillageMapCanvas($("#mapTerrainCanvas"), view, navigation.state, animationTime, latestMapModel);

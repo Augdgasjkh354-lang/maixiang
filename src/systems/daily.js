@@ -1,4 +1,4 @@
-import { withLedgerBatch } from "../economy/ledger.js";
+import { closeLedgerBatch, openLedgerBatch } from "../economy/ledger.js";
 import { totalQeqUnits } from "../economy/inventory.js";
 import { produceLivestock } from "./livestock.js";
 import { manageStalls } from "./stalls.js";
@@ -290,21 +290,63 @@ function privateIntakeSummary(rows) {
 
 // 按给定步骤表跑一天（测试可传入带自定义 mod 步骤的表）。
 export function runDay(state, content, steps) {
-  // 整个日结在一个账本批次里：账本行按户、对方、类型合并，日终一次写入（economy/ledger.js）。
-  return withLedgerBatch(state, content, () => runDaySteps(state, content, steps));
+  return createDayRunner(state, content, steps).finish();
 }
 
-function runDaySteps(state, content, steps) {
-  const beforeTotal = totalQeqUnits(state, content);
-  const day = { isNewYearDay: state.day === 0, peopleAtStart: populationStats(state), demography: null };
-  for (const step of steps) {
-    day[step.id] = !step.when || step.when(state, content, day) ? (step.run(state, content, day) ?? null) : null;
-  }
-  return {
-    ...day,
-    wholesaleIntake: { allocation: day.wholesaleTownAllocation, town: day.wholesaleTownOutput, private: privateIntakeSummary(day.privateProduction), company: day.wholesaleCompanyIntake },
-    shortageQeq: day.meal.missingQeqUnits,
-    totalChangeQeqUnits: totalQeqUnits(state, content) - beforeTotal,
-    population: populationStats(state)
+const defaultNow = () => (globalThis.performance ? globalThis.performance.now() : Date.now());
+
+// 分段跑一天（界面快进用）。step(budgetMs, now)：每次至少跑 1 步，之后若已超 budgetMs 就停在步与步之间
+// 并返回 false；全部步骤跑完返回 true，结果在 runner.result。finish() 同步跑完剩余步骤并返回结果。
+// 账本批次在第一步前开、跑完后关（整天合并写账，与 runDay 一致）。跑到一半时 state 处于半天状态，
+// 调用方在读写 state 之前必须先 finish()。
+export function createDayRunner(state, content, steps = DAILY_STEPS) {
+  let index = 0;
+  let started = false;
+  let ownsBatch = false;
+  let beforeTotal = 0;
+  let day = null;
+  const runner = {
+    done: false,
+    result: null,
+    step(budgetMs = Infinity, now = defaultNow) {
+      if (runner.done) return true;
+      const startedAt = now();
+      let ran = 0;
+      try {
+        if (!started) {
+          started = true;
+          ownsBatch = openLedgerBatch(state);
+          beforeTotal = totalQeqUnits(state, content);
+          day = { isNewYearDay: state.day === 0, peopleAtStart: populationStats(state), demography: null };
+        }
+        while (index < steps.length) {
+          if (ran > 0 && now() - startedAt >= budgetMs) return false;
+          const step = steps[index];
+          day[step.id] = !step.when || step.when(state, content, day) ? (step.run(state, content, day) ?? null) : null;
+          index += 1;
+          ran += 1;
+        }
+      } catch (error) {
+        // 出错也要关批次（写掉已发生的账），与原 withLedgerBatch 的 finally 一致。
+        if (ownsBatch) closeLedgerBatch(state, content);
+        runner.done = true;
+        throw error;
+      }
+      runner.result = {
+        ...day,
+        wholesaleIntake: { allocation: day.wholesaleTownAllocation, town: day.wholesaleTownOutput, private: privateIntakeSummary(day.privateProduction), company: day.wholesaleCompanyIntake },
+        shortageQeq: day.meal.missingQeqUnits,
+        totalChangeQeqUnits: totalQeqUnits(state, content) - beforeTotal,
+        population: populationStats(state)
+      };
+      if (ownsBatch) closeLedgerBatch(state, content);
+      runner.done = true;
+      return true;
+    },
+    finish() {
+      if (!runner.done) runner.step();
+      return runner.result;
+    }
   };
+  return runner;
 }
