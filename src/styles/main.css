@@ -193,21 +193,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 .production-site .status-dot { fill: #9b7040; stroke: #f7e8bc; stroke-width: 3; }
 .production-site.working .status-dot { fill: #6d984e; }
 .production-site .worker-count { fill: #fff5d9; font: 750 14px sans-serif; text-anchor: middle; paint-order: stroke; stroke: #4f5537; stroke-width: 4px; }
-.villager-head { fill: #d6a678; stroke: #71523b; stroke-width: 2; }
-.villager-coat { stroke: #5a4838; stroke-width: 1.8; }
-.villager-leg { fill: none; stroke: #614c35; stroke-width: 3; stroke-linecap: round; }
-.villager-bundle { fill: #dbc58e; stroke: #77623e; stroke-width: 2; }
-.villager-walk { transform-box: fill-box; transform-origin: center; animation: villager-step 1s ease-in-out infinite alternate; }
-.walker-one { animation: road-walk-one 24s ease-in-out infinite; }
-.walker-two { animation: road-walk-two 21s ease-in-out -4s infinite; }
-.walker-three { animation: road-walk-three 26s ease-in-out -8s infinite; }
-.walker-four { animation: road-walk-four 23s ease-in-out -12s infinite; }
-.world-map[data-paused="true"] .villager, .world-map[data-paused="true"] .villager-walk { animation-play-state: paused !important; }
-@keyframes villager-step { from { transform: translateY(0) rotate(-2deg); } to { transform: translateY(-2px) rotate(2deg); } }
-@keyframes road-walk-one { 0%,100% { transform: translate(0,0); } 50% { transform: translate(110px,-9px); } }
-@keyframes road-walk-two { 0%,100% { transform: translate(0,0); } 50% { transform: translate(108px,23px); } }
-@keyframes road-walk-three { 0%,100% { transform: translate(0,0); } 50% { transform: translate(84px,29px); } }
-@keyframes road-walk-four { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-85px,-15px); } }
 .project-site .worksite-ground { fill: #ba9958; stroke: #8c693c; stroke-width: 4; stroke-dasharray: 8 7; }
 .scaffold { fill: none; stroke: #8a5933; stroke-width: 5; stroke-linejoin: round; }
 .project-ring { fill: none; stroke: #f6d577; stroke-width: 7; transform: rotate(-90deg); transform-origin: 0 0; }
@@ -502,7 +487,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #d39f43; outline-
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
-  .villager, .villager-walk, .mill-sails, .smoke { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+  .mill-sails, .smoke { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 
 /* v15 · 粮券、企业与股份 */
