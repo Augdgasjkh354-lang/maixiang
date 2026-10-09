@@ -59,7 +59,10 @@ export function ensureCurrencyState(state) {
 export function voucherBalance(state, owner) {
   ensureCurrencyState(state);
   if (owner === "residents" && hasHouseholds(state)) return residentVoucherUnits(state);
-  if (!parseOwner(owner).kind) throw new Error("未知粮券账户：" + owner);
+  const { kind, id } = parseOwner(owner);
+  if (!kind) throw new Error("未知粮券账户：" + owner);
+  // 家庭直接读（最常见，省去建 slot 对象）；与 readSlot(voucherSlot(...)) 同口径。
+  if (kind === "household") return state.households?.byId?.[id]?.voucherUnits || 0;
   return readSlot(voucherSlot(state, owner));
 }
 
@@ -78,9 +81,9 @@ function currencyLedger(state, row, content) {
   const record = { id: currency.ledger.length + 1, year: state.year,
     day: Math.max(1, Math.min(content.rules.daysPerYear, state.day + 1)), ...row };
   currency.ledger.push(record);
-  if (currency.ledger.length > (content.rules.currencyLedgerLimit || 1500)) {
-    currency.ledger.splice(0, currency.ledger.length - (content.rules.currencyLedgerLimit || 1500));
-  }
+  const limit = content.rules.currencyLedgerLimit || 1500;
+  // 平时每次只多出 1 条：shift 比 splice(0, n) 快得多，结果相同。
+  while (currency.ledger.length > limit) currency.ledger.shift();
   return record;
 }
 

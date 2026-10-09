@@ -16,12 +16,25 @@
 
 const PREFIXES = [["household:", "household"], ["company:", "company"], ["shop:", "shop"]];
 
+// 结果按账户名缓存（付款链路每天调用数百万次）；返回冻结对象，调用方只读。
+const parsedOwners = new Map();
+const PARSED_OWNER_CACHE_LIMIT = 20000;
 export function parseOwner(owner) {
-  if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") return { kind: owner, id: null };
-  for (const [prefix, kind] of PREFIXES) {
-    if (typeof owner === "string" && owner.startsWith(prefix)) return { kind, id: owner.slice(prefix.length) };
+  const cached = typeof owner === "string" ? parsedOwners.get(owner) : undefined;
+  if (cached) return cached;
+  let parsed = { kind: null, id: null };
+  if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") parsed = { kind: owner, id: null };
+  else {
+    for (const [prefix, kind] of PREFIXES) {
+      if (typeof owner === "string" && owner.startsWith(prefix)) { parsed = { kind, id: owner.slice(prefix.length) }; break; }
+    }
   }
-  return { kind: null, id: null };
+  Object.freeze(parsed);
+  if (typeof owner === "string") {
+    if (parsedOwners.size >= PARSED_OWNER_CACHE_LIMIT) parsedOwners.clear();
+    parsedOwners.set(owner, parsed);
+  }
+  return parsed;
 }
 
 function entityOf(state, kind, id) {

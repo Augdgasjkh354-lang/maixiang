@@ -155,6 +155,15 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
   }
   let catalog = defaultCatalog();
   let slotRecords = new Map();
+  // 已校验过的 primary 元信息缓存（按 id，primary 文本不同则失效），避免每次存档都重新 parse 旧主档。
+  const metaCache = new Map();
+  function cachedMeta(id, primary) {
+    const cached = metaCache.get(id);
+    if (cached && cached.primary === primary) return cached.meta;
+    const meta = inspect(primary, id);
+    metaCache.set(id, { primary, meta });
+    return meta;
+  }
 
   function indexedStats() {
     let primaryBytes = 0;
@@ -251,7 +260,7 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
     let oldMeta = null;
     let backup = oldRecord?.backup || null;
     if (oldRecord?.primary) {
-      try { oldMeta = inspect(oldRecord.primary, id); backup = oldRecord.primary; } catch {}
+      try { oldMeta = cachedMeta(id, oldRecord.primary); backup = oldRecord.primary; } catch {}
     }
     if (!oldMeta && oldRecord?.backup) {
       try { oldMeta = inspect(oldRecord.backup, id); } catch {}
@@ -264,9 +273,11 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
     try {
       await putOne(db, SLOT_STORE, record);
       const readBack = await readOne(db, SLOT_STORE, id);
+      // 读回内容与刚编码的 primary 逐字相同，即已通过校验，无需再 parse 一遍整份存档。
       if (!readBack || readBack.primary !== primary || readBack.backup !== backup) throw new Error("存档写入后读回校验失败");
-      inspect(readBack.primary, id);
       slotRecords.set(id, readBack);
+      // 复用读回的同一份字符串，不额外占一份内存。
+      metaCache.set(id, { primary: readBack.primary, meta: { ...oldMeta, savedAt } });
       return { id, name: oldMeta.name, savedAt, state, recovered: false };
     } catch (error) {
       throw decorate(error, "save_current_write_verify", pendingBytes);
@@ -317,6 +328,7 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
       const readBack = await readOne(db, SLOT_STORE, id);
       if (readBack !== undefined) throw new Error("删除存档后读回仍存在");
       slotRecords.delete(id);
+      metaCache.delete(id);
       catalog = nextCatalog;
       return { current };
     } catch (error) {

@@ -7,8 +7,10 @@ export function recordLedger(state, entry, content, options = {}) {
     day: Math.max(1, Math.min(content.rules.daysPerYear, options.day ?? (state.day + 1)))
   };
   state.ledgerSequence += 1;
-  state.ledger.unshift({ id: state.ledgerSequence, ...date, ...entry });
-  recordFinancialFlow(state, { id: state.ledgerSequence, ...date, ...entry });
+  // 同一行对象给账本和资金流统计（recordFinancialFlow 只读），省一次对象展开。
+  const row = { id: state.ledgerSequence, ...date, ...entry };
+  state.ledger.unshift(row);
+  recordFinancialFlow(state, row);
   if (state.ledger.length > content.rules.ledgerLimit) {
     state.ledger.length = content.rules.ledgerLimit;
   }

@@ -2,7 +2,7 @@ import { addWageExpense } from "../economy/business.js";
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
-import { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } from "./households.js";
+import { withDeferredHouseholdSync, jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } from "./households.js";
 import { accrueWages, payWages, wageArrears } from "./employer.js";
 import { ensureSocialSecurity, payFromFund } from "./social-security.js";
 
@@ -85,7 +85,12 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
   addWageExpense(state, kind, voucherUnits, sector);
 }
 
+// 每条工资行付完都会全量同步居民汇总（250 户 × 全部物品）；整天合并成结束时同步一次。
 export function payDailyWages(state, laborAtStart, content) {
+  return withDeferredHouseholdSync(state, content, () => payDailyWagesNow(state, laborAtStart, content));
+}
+
+function payDailyWagesNow(state, laborAtStart, content) {
   const payroll = ensurePayroll(state);
   payroll.creditorClaims ||= {};
   payroll.creditorPaymentClaims ||= {};

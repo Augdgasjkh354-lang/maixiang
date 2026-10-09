@@ -4,17 +4,31 @@ export function escapeHtml(value) {
   });
 }
 
+// Intl.NumberFormat 实例按精度缓存：toLocaleString 每次都会重新解析 locale 与选项，界面每帧调用成百上千次。
+// 输出与 Number#toLocaleString 逐字一致（toLocaleString 本身就是 new Intl.NumberFormat(...).format）。
+const fixedFormats = new Map();
+const maxFormats = new Map();
+
+function cachedFormat(cache, key, options) {
+  let formatter = cache.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat("zh-CN", options);
+    cache.set(key, formatter);
+  }
+  return formatter;
+}
+
 export function number(value, digits) {
   const precision = digits ?? 0;
-  return Number(value || 0).toLocaleString("zh-CN", {
+  return cachedFormat(fixedFormats, precision, {
     maximumFractionDigits: precision,
     minimumFractionDigits: precision
-  });
+  }).format(Number(value || 0));
 }
 
 
 export function numberMax(value, digits = 1) {
-  return Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: digits });
+  return cachedFormat(maxFormats, digits, { maximumFractionDigits: digits }).format(Number(value || 0));
 }
 
 export function shortageJin(qeqUnits, qeqUnitsPerJin) {

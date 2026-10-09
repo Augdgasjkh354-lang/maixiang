@@ -429,9 +429,22 @@ export function residentVoucherUnits(state) {
   return state.currency?.balances?.residents || 0;
 }
 
+// 按 content.items 缓存物品列表（每天被调用上百万次，不再每次 Object.entries 分配）。
+// content 冻结后不变；mod 注册在开局前完成，新的 content.items 对象会得到新缓存。
+const itemEntriesCache = new WeakMap();
+function itemEntries(content) {
+  let cached = itemEntriesCache.get(content.items);
+  if (!cached) {
+    const all = Object.entries(content.items);
+    cached = { all, otherFood: all.filter(([itemId, item]) => itemId !== "wheat" && item.edible && item.qeq) };
+    itemEntriesCache.set(content.items, cached);
+  }
+  return cached;
+}
+
 export function householdFoodQeqUnits(state, household, content) {
   let total = 0;
-  for (const [itemId, item] of Object.entries(content.items)) total += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
+  for (const [itemId, item] of itemEntries(content).all) total += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
   return total;
 }
 
@@ -445,8 +458,7 @@ export function householdConvertibleWheatUnits(state, household, content, reserv
   if (wheat <= 0) return 0;
   const reserve = householdReserveQeqUnits(state, household, content, reserveDays);
   let otherFoodQeq = 0;
-  for (const [itemId, item] of Object.entries(content.items)) {
-    if (itemId === "wheat" || !item.edible || !item.qeq) continue;
+  for (const [itemId, item] of itemEntries(content).otherFood) {
     otherFoodQeq += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
   }
   const wheatQeqPerUnit = qeqUnitsForInventoryUnits(content.items.wheat, 1, content);

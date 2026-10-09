@@ -30,6 +30,10 @@ import { APP_VERSION, BUILD_ID } from "../content/version.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { freightLimitNote } from "./freight-note.js";
 
+// 时光流动时的帧预算与重绘节流（见 frame()）。
+const ADVANCE_FRAME_BUDGET_MS = 40;
+const ADVANCE_RENDER_INTERVAL_MS = 250;
+
 function closest(element, selector) {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
 }
@@ -70,6 +74,8 @@ export function mountGame(root) {
   let animationFrame = 0;
   let animationTime = 0;
   let lastCanvasFrame = 0;
+  let lastAdvanceRenderAt = -Infinity;
+  let advanceRenderPending = false;
   let renderedMapSignature = "";
   let renderedEventsSignature = "";
   let latestEventKey = null;
@@ -81,6 +87,10 @@ export function mountGame(root) {
   let sharePreviewCompanyId = null;
   let buybackPreview = null;
   let lastBuildPreviewPlotId = null;
+  let renderedPanelMarkup = null;
+  const setText = (element, text) => {
+    if (element && element.textContent !== text) element.textContent = text;
+  };
   let latestView = null;
   let latestMapModel = null;
 
@@ -545,29 +555,36 @@ export function mountGame(root) {
       build: "建设", residents: "镇民与就业", business: "经营与粮账",
       policy: "政策", settings: "设置", site: "地方详情"
     };
-    $("#panelKicker").textContent = titles[panelName] || "镇务";
+    const kicker = $("#panelKicker");
+    setText(kicker, titles[panelName] || "镇务");
     const panel = $("#panel");
     if (!force && shouldDeferNumericPanelRender(panel, document.activeElement)) return;
     const previousPanelName = panel.dataset.renderedPanel || "";
     const preserveUiState = previousPanelName === panelName;
-    const openDetails = preserveUiState
-      ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key][open]")).map(detail => detail.dataset.detailKey))
-      : new Set();
-    const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
-    panel.innerHTML = panelMarkup(view);
-    panel.dataset.renderedPanel = panelName || "";
+    const markup = panelMarkup(view);
+    // 内容与上次相同就不碰 DOM：不重新解析，焦点、草稿、展开状态、滚动位置都原样保留。
+    const unchanged = preserveUiState && markup === renderedPanelMarkup;
+    if (!unchanged) {
+      const openDetails = preserveUiState
+        ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key][open]")).map(detail => detail.dataset.detailKey))
+        : new Set();
+      const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
+      panel.innerHTML = markup;
+      renderedPanelMarkup = markup;
+      panel.dataset.renderedPanel = panelName || "";
+      if (openDetails.size) {
+        for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
+          if (openDetails.has(detail.dataset.detailKey)) detail.open = true;
+        }
+      }
+      if (preserveUiState && panelName !== "build") panel.scrollTop = previousScrollTop;
+    }
     // 地方详情：用地名做面板标题，正文里不再重复一行大标题。
     const siteTitle = panelName === "site" ? panel.querySelector(":scope > h2") : null;
     if (siteTitle) {
-      $("#panelKicker").textContent = siteTitle.textContent;
+      setText(kicker, siteTitle.textContent);
       siteTitle.hidden = true;
     }
-    if (openDetails.size) {
-      for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
-        if (openDetails.has(detail.dataset.detailKey)) detail.open = true;
-      }
-    }
-    if (preserveUiState && panelName !== "build") panel.scrollTop = previousScrollTop;
     if (panelName === "build") {
       const previewPlotId = navigation.state.previewPlotId;
       if (previewPlotId && previewPlotId !== lastBuildPreviewPlotId) panel.scrollTop = 0;
@@ -1912,6 +1929,7 @@ export function mountGame(root) {
         let advanced = 0;
         const frameStart = performance.now();
         try {
+          // 单帧最多连跑约 40ms 的日结，超出部分留到下帧（积压最多 1 天），避免一帧卡住很久。
           advanced = clock.advanceFrame(elapsed, () => {
             simulation.advanceDay(state);
             dirty = true;
@@ -1926,13 +1944,19 @@ export function mountGame(root) {
               clock.pause();
               showToast("单日结算较慢，已自动暂停，可手动继续。", 3000);
             }
-          });
+          }, { budgetMs: ADVANCE_FRAME_BUDGET_MS, now: () => performance.now() });
         } catch (err) {
           clock.pause();
           console.error("[麦乡] 日结算异常已暂停", err);
           showToast("结算出现异常已暂停：" + (err && err.message || "未知错误"), 5000);
         }
-        if (advanced > 0) render();
+        // 快进时面板重绘最多每 ADVANCE_RENDER_INTERVAL_MS 一次；暂停后立即补一次，界面不停在旧数据上。
+        if (advanced > 0) advanceRenderPending = true;
+        if (advanceRenderPending && (clock.paused || now - lastAdvanceRenderAt >= ADVANCE_RENDER_INTERVAL_MS)) {
+          advanceRenderPending = false;
+          lastAdvanceRenderAt = now;
+          render();
+        }
         const view = latestView;
         if (view && !clock.paused && now - lastCanvasFrame >= 90) {
           drawVillageMapCanvas($("#mapTerrainCanvas"), view, navigation.state, animationTime, latestMapModel);

@@ -1896,12 +1896,25 @@ const __mxmod13 = (() => {
 
 const PREFIXES = [["household:", "household"], ["company:", "company"], ["shop:", "shop"]];
 
+// 结果按账户名缓存（付款链路每天调用数百万次）；返回冻结对象，调用方只读。
+const parsedOwners = new Map();
+const PARSED_OWNER_CACHE_LIMIT = 20000;
        function parseOwner(owner) {
-  if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") return { kind: owner, id: null };
-  for (const [prefix, kind] of PREFIXES) {
-    if (typeof owner === "string" && owner.startsWith(prefix)) return { kind, id: owner.slice(prefix.length) };
+  const cached = typeof owner === "string" ? parsedOwners.get(owner) : undefined;
+  if (cached) return cached;
+  let parsed = { kind: null, id: null };
+  if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") parsed = { kind: owner, id: null };
+  else {
+    for (const [prefix, kind] of PREFIXES) {
+      if (typeof owner === "string" && owner.startsWith(prefix)) { parsed = { kind, id: owner.slice(prefix.length) }; break; }
+    }
   }
-  return { kind: null, id: null };
+  Object.freeze(parsed);
+  if (typeof owner === "string") {
+    if (parsedOwners.size >= PARSED_OWNER_CACHE_LIMIT) parsedOwners.clear();
+    parsedOwners.set(owner, parsed);
+  }
+  return parsed;
 }
 
 function entityOf(state, kind, id) {
@@ -2039,8 +2052,10 @@ function recordLedger(state, entry, content, options = {}) {
     day: Math.max(1, Math.min(content.rules.daysPerYear, options.day ?? (state.day + 1)))
   };
   state.ledgerSequence += 1;
-  state.ledger.unshift({ id: state.ledgerSequence, ...date, ...entry });
-  recordFinancialFlow(state, { id: state.ledgerSequence, ...date, ...entry });
+  // 同一行对象给账本和资金流统计（recordFinancialFlow 只读），省一次对象展开。
+  const row = { id: state.ledgerSequence, ...date, ...entry };
+  state.ledger.unshift(row);
+  recordFinancialFlow(state, row);
   if (state.ledger.length > content.rules.ledgerLimit) {
     state.ledger.length = content.rules.ledgerLimit;
   }
@@ -2215,9 +2230,15 @@ function syncResidentInventoryMirror(state, content) {
   if (!hasHouseholdAccounts(state)) return;
   state.accounts ||= {};
   state.accounts.residents ||= {};
-  for (const itemId of Object.keys(content.items)) {
-    state.accounts.residents[itemId] = householdRows(state).reduce((sum, household) => sum + (household.inventory?.[itemId] || 0), 0);
+  // 一次遍历全部家庭（原来每种物品各遍历一遍，选择器里最热的一处）；结果与逐品求和相同。
+  const itemIds = Object.keys(content.items);
+  const totals = Object.fromEntries(itemIds.map(itemId => [itemId, 0]));
+  for (const household of householdRows(state)) {
+    const inventory = household.inventory;
+    if (!inventory) continue;
+    for (const itemId of itemIds) totals[itemId] += inventory[itemId] || 0;
   }
+  for (const itemId of itemIds) state.accounts.residents[itemId] = totals[itemId];
 }
 
 const accountObject = accountInventory;
@@ -2746,7 +2767,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod19 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-39d00bd";
+       const BUILD_ID = "0203-a2b1c39";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -3195,9 +3216,22 @@ function addBirths(state, count) {
   return state.currency?.balances?.residents || 0;
 }
 
+// 按 content.items 缓存物品列表（每天被调用上百万次，不再每次 Object.entries 分配）。
+// content 冻结后不变；mod 注册在开局前完成，新的 content.items 对象会得到新缓存。
+const itemEntriesCache = new WeakMap();
+function itemEntries(content) {
+  let cached = itemEntriesCache.get(content.items);
+  if (!cached) {
+    const all = Object.entries(content.items);
+    cached = { all, otherFood: all.filter(([itemId, item]) => itemId !== "wheat" && item.edible && item.qeq) };
+    itemEntriesCache.set(content.items, cached);
+  }
+  return cached;
+}
+
        function householdFoodQeqUnits(state, household, content) {
   let total = 0;
-  for (const [itemId, item] of Object.entries(content.items)) total += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
+  for (const [itemId, item] of itemEntries(content).all) total += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
   return total;
 }
 
@@ -3211,8 +3245,7 @@ function addBirths(state, count) {
   if (wheat <= 0) return 0;
   const reserve = householdReserveQeqUnits(state, household, content, reserveDays);
   let otherFoodQeq = 0;
-  for (const [itemId, item] of Object.entries(content.items)) {
-    if (itemId === "wheat" || !item.edible || !item.qeq) continue;
+  for (const [itemId, item] of itemEntries(content).otherFood) {
     otherFoodQeq += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
   }
   const wheatQeqPerUnit = qeqUnitsForInventoryUnits(content.items.wheat, 1, content);
@@ -3939,7 +3972,10 @@ function holdsCashWheat(owner) {
        function voucherBalance(state, owner) {
   ensureCurrencyState(state);
   if (owner === "residents" && hasHouseholds(state)) return residentVoucherUnits(state);
-  if (!parseOwner(owner).kind) throw new Error("未知粮券账户：" + owner);
+  const { kind, id } = parseOwner(owner);
+  if (!kind) throw new Error("未知粮券账户：" + owner);
+  // 家庭直接读（最常见，省去建 slot 对象）；与 readSlot(voucherSlot(...)) 同口径。
+  if (kind === "household") return state.households?.byId?.[id]?.voucherUnits || 0;
   return readSlot(voucherSlot(state, owner));
 }
 
@@ -3958,9 +3994,9 @@ function currencyLedger(state, row, content) {
   const record = { id: currency.ledger.length + 1, year: state.year,
     day: Math.max(1, Math.min(content.rules.daysPerYear, state.day + 1)), ...row };
   currency.ledger.push(record);
-  if (currency.ledger.length > (content.rules.currencyLedgerLimit || 1500)) {
-    currency.ledger.splice(0, currency.ledger.length - (content.rules.currencyLedgerLimit || 1500));
-  }
+  const limit = content.rules.currencyLedgerLimit || 1500;
+  // 平时每次只多出 1 条：shift 比 splice(0, n) 快得多，结果相同。
+  while (currency.ledger.length > limit) currency.ledger.shift();
   return record;
 }
 
@@ -7840,7 +7876,7 @@ const { addWageExpense } = __mxmod23;
 const { currencyScale } = __mxmod27;
 const { currentPaymentComposition, settleMonetaryPayment } = __mxmod29;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod15;
-const { jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } = __mxmod21;
+const { withDeferredHouseholdSync, jobAssignments, householdList, householdIdleWorkers, householdPopulation, householdFoodQeqUnits } = __mxmod21;
 const { accrueWages, payWages, wageArrears } = __mxmod39;
 const { ensureSocialSecurity, payFromFund } = __mxmod40;
 function ensurePayroll(state) {
@@ -7922,7 +7958,12 @@ function recordWageExpense(state, row, voucherUnits, kind, content) {
   addWageExpense(state, kind, voucherUnits, sector);
 }
 
+// 每条工资行付完都会全量同步居民汇总（250 户 × 全部物品）；整天合并成结束时同步一次。
        function payDailyWages(state, laborAtStart, content) {
+  return withDeferredHouseholdSync(state, content, () => payDailyWagesNow(state, laborAtStart, content));
+}
+
+function payDailyWagesNow(state, laborAtStart, content) {
   const payroll = ensurePayroll(state);
   payroll.creditorClaims ||= {};
   payroll.creditorPaymentClaims ||= {};
@@ -18617,11 +18658,13 @@ function maximumAffordableUnits(state, household, price, content, reserveDays, c
   const voucherAvailable = spendableVoucherUnits(state, owner);
   const wheatUnitsAvailable = householdConvertibleWheatUnits(state, household, content, reserveDays);
   const wheatValueAvailable = voucherUnitsForWheatUnits(wheatUnitsAvailable, content, "floor");
+  // 仅作为二分上界；真正可支付性统一交给支付层判断，避免全粮券阶段误回退小麦。
+  let high = Math.min(cap, Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale))));
+  // 上界为 0 时不必建支付上下文（买不起的户占大多数）。
+  if (high <= 0) return 0;
   const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits: wheatUnitsAvailable });
   const canPay = valueUnits => quotePaymentValueUnitsWithContext(paymentContext, valueUnits).full;
   let low = 0;
-  // 仅作为二分上界；真正可支付性统一交给支付层判断，避免全粮券阶段误回退小麦。
-  let high = Math.min(cap, Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale))));
   // 常见情况：想买的量本来就付得起，一次报价就够，不用二分。
   if (high > 0 && canPay(Math.round(high / inventoryScale * price * scale))) return high;
   while (low < high) {
@@ -23412,6 +23455,15 @@ function safeError(error, action) {
   }
   let catalog = defaultCatalog();
   let slotRecords = new Map();
+  // 已校验过的 primary 元信息缓存（按 id，primary 文本不同则失效），避免每次存档都重新 parse 旧主档。
+  const metaCache = new Map();
+  function cachedMeta(id, primary) {
+    const cached = metaCache.get(id);
+    if (cached && cached.primary === primary) return cached.meta;
+    const meta = inspect(primary, id);
+    metaCache.set(id, { primary, meta });
+    return meta;
+  }
 
   function indexedStats() {
     let primaryBytes = 0;
@@ -23508,7 +23560,7 @@ function safeError(error, action) {
     let oldMeta = null;
     let backup = oldRecord?.backup || null;
     if (oldRecord?.primary) {
-      try { oldMeta = inspect(oldRecord.primary, id); backup = oldRecord.primary; } catch {}
+      try { oldMeta = cachedMeta(id, oldRecord.primary); backup = oldRecord.primary; } catch {}
     }
     if (!oldMeta && oldRecord?.backup) {
       try { oldMeta = inspect(oldRecord.backup, id); } catch {}
@@ -23521,9 +23573,11 @@ function safeError(error, action) {
     try {
       await putOne(db, SLOT_STORE, record);
       const readBack = await readOne(db, SLOT_STORE, id);
+      // 读回内容与刚编码的 primary 逐字相同，即已通过校验，无需再 parse 一遍整份存档。
       if (!readBack || readBack.primary !== primary || readBack.backup !== backup) throw new Error("存档写入后读回校验失败");
-      inspect(readBack.primary, id);
       slotRecords.set(id, readBack);
+      // 复用读回的同一份字符串，不额外占一份内存。
+      metaCache.set(id, { primary: readBack.primary, meta: { ...oldMeta, savedAt } });
       return { id, name: oldMeta.name, savedAt, state, recovered: false };
     } catch (error) {
       throw decorate(error, "save_current_write_verify", pendingBytes);
@@ -23574,6 +23628,7 @@ function safeError(error, action) {
       const readBack = await readOne(db, SLOT_STORE, id);
       if (readBack !== undefined) throw new Error("删除存档后读回仍存在");
       slotRecords.delete(id);
+      metaCache.delete(id);
       catalog = nextCatalog;
       return { current };
     } catch (error) {
@@ -23766,17 +23821,28 @@ class SimulationClock {
     this.paused = false;
   }
 
-  advanceFrame(seconds, stepDay) {
+  // budgetMs：本帧单次调用内最多连跑的耗时（至少跑一天）。超时后停止追加，
+  // 未跑的进度最多保留 1 天积压，多出的丢弃（等价于自动降速），日结果不受影响。
+  advanceFrame(seconds, stepDay, { budgetMs = Infinity, now = defaultNow } = {}) {
     if (this.paused || seconds <= 0) return 0;
     this.fractionalDays += seconds * this.daysPerSecond * this.speed;
+    const startedAt = now();
     let advanced = 0;
     while (!this.paused && this.fractionalDays >= 1) {
+      if (advanced > 0 && now() - startedAt > budgetMs) {
+        this.fractionalDays = Math.min(this.fractionalDays, 1);
+        break;
+      }
       this.fractionalDays -= 1;
       stepDay();
       advanced += 1;
     }
     return advanced;
   }
+}
+
+function defaultNow() {
+  return globalThis.performance ? globalThis.performance.now() : Date.now();
 }
 return { SimulationClock };
 })();
@@ -24065,17 +24131,31 @@ function escapeHtml(value) {
   });
 }
 
+// Intl.NumberFormat 实例按精度缓存：toLocaleString 每次都会重新解析 locale 与选项，界面每帧调用成百上千次。
+// 输出与 Number#toLocaleString 逐字一致（toLocaleString 本身就是 new Intl.NumberFormat(...).format）。
+const fixedFormats = new Map();
+const maxFormats = new Map();
+
+function cachedFormat(cache, key, options) {
+  let formatter = cache.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat("zh-CN", options);
+    cache.set(key, formatter);
+  }
+  return formatter;
+}
+
        function number(value, digits) {
   const precision = digits ?? 0;
-  return Number(value || 0).toLocaleString("zh-CN", {
+  return cachedFormat(fixedFormats, precision, {
     maximumFractionDigits: precision,
     minimumFractionDigits: precision
-  });
+  }).format(Number(value || 0));
 }
 
 
        function numberMax(value, digits = 1) {
-  return Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: digits });
+  return cachedFormat(maxFormats, digits, { maximumFractionDigits: digits }).format(Number(value || 0));
 }
 
        function shortageJin(qeqUnits, qeqUnitsPerJin) {
@@ -27620,6 +27700,9 @@ const { createDashboardViewCache } = __mxmod145;
 const { APP_VERSION, BUILD_ID } = __mxmod19;
 const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod7;
 const { freightLimitNote } = __mxmod146;
+const ADVANCE_FRAME_BUDGET_MS = 40;
+const ADVANCE_RENDER_INTERVAL_MS = 250;
+
 function closest(element, selector) {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
 }
@@ -27660,6 +27743,8 @@ function closest(element, selector) {
   let animationFrame = 0;
   let animationTime = 0;
   let lastCanvasFrame = 0;
+  let lastAdvanceRenderAt = -Infinity;
+  let advanceRenderPending = false;
   let renderedMapSignature = "";
   let renderedEventsSignature = "";
   let latestEventKey = null;
@@ -27671,6 +27756,10 @@ function closest(element, selector) {
   let sharePreviewCompanyId = null;
   let buybackPreview = null;
   let lastBuildPreviewPlotId = null;
+  let renderedPanelMarkup = null;
+  const setText = (element, text) => {
+    if (element && element.textContent !== text) element.textContent = text;
+  };
   let latestView = null;
   let latestMapModel = null;
 
@@ -28135,29 +28224,36 @@ function closest(element, selector) {
       build: "建设", residents: "镇民与就业", business: "经营与粮账",
       policy: "政策", settings: "设置", site: "地方详情"
     };
-    $("#panelKicker").textContent = titles[panelName] || "镇务";
+    const kicker = $("#panelKicker");
+    setText(kicker, titles[panelName] || "镇务");
     const panel = $("#panel");
     if (!force && shouldDeferNumericPanelRender(panel, document.activeElement)) return;
     const previousPanelName = panel.dataset.renderedPanel || "";
     const preserveUiState = previousPanelName === panelName;
-    const openDetails = preserveUiState
-      ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key][open]")).map(detail => detail.dataset.detailKey))
-      : new Set();
-    const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
-    panel.innerHTML = panelMarkup(view);
-    panel.dataset.renderedPanel = panelName || "";
+    const markup = panelMarkup(view);
+    // 内容与上次相同就不碰 DOM：不重新解析，焦点、草稿、展开状态、滚动位置都原样保留。
+    const unchanged = preserveUiState && markup === renderedPanelMarkup;
+    if (!unchanged) {
+      const openDetails = preserveUiState
+        ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key][open]")).map(detail => detail.dataset.detailKey))
+        : new Set();
+      const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
+      panel.innerHTML = markup;
+      renderedPanelMarkup = markup;
+      panel.dataset.renderedPanel = panelName || "";
+      if (openDetails.size) {
+        for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
+          if (openDetails.has(detail.dataset.detailKey)) detail.open = true;
+        }
+      }
+      if (preserveUiState && panelName !== "build") panel.scrollTop = previousScrollTop;
+    }
     // 地方详情：用地名做面板标题，正文里不再重复一行大标题。
     const siteTitle = panelName === "site" ? panel.querySelector(":scope > h2") : null;
     if (siteTitle) {
-      $("#panelKicker").textContent = siteTitle.textContent;
+      setText(kicker, siteTitle.textContent);
       siteTitle.hidden = true;
     }
-    if (openDetails.size) {
-      for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
-        if (openDetails.has(detail.dataset.detailKey)) detail.open = true;
-      }
-    }
-    if (preserveUiState && panelName !== "build") panel.scrollTop = previousScrollTop;
     if (panelName === "build") {
       const previewPlotId = navigation.state.previewPlotId;
       if (previewPlotId && previewPlotId !== lastBuildPreviewPlotId) panel.scrollTop = 0;
@@ -29502,6 +29598,7 @@ function closest(element, selector) {
         let advanced = 0;
         const frameStart = performance.now();
         try {
+          // 单帧最多连跑约 40ms 的日结，超出部分留到下帧（积压最多 1 天），避免一帧卡住很久。
           advanced = clock.advanceFrame(elapsed, () => {
             simulation.advanceDay(state);
             dirty = true;
@@ -29516,13 +29613,19 @@ function closest(element, selector) {
               clock.pause();
               showToast("单日结算较慢，已自动暂停，可手动继续。", 3000);
             }
-          });
+          }, { budgetMs: ADVANCE_FRAME_BUDGET_MS, now: () => performance.now() });
         } catch (err) {
           clock.pause();
           console.error("[麦乡] 日结算异常已暂停", err);
           showToast("结算出现异常已暂停：" + (err && err.message || "未知错误"), 5000);
         }
-        if (advanced > 0) render();
+        // 快进时面板重绘最多每 ADVANCE_RENDER_INTERVAL_MS 一次；暂停后立即补一次，界面不停在旧数据上。
+        if (advanced > 0) advanceRenderPending = true;
+        if (advanceRenderPending && (clock.paused || now - lastAdvanceRenderAt >= ADVANCE_RENDER_INTERVAL_MS)) {
+          advanceRenderPending = false;
+          lastAdvanceRenderAt = now;
+          render();
+        }
         const view = latestView;
         if (view && !clock.paused && now - lastCanvasFrame >= 90) {
           drawVillageMapCanvas($("#mapTerrainCanvas"), view, navigation.state, animationTime, latestMapModel);

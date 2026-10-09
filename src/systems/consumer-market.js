@@ -113,11 +113,13 @@ function maximumAffordableUnits(state, household, price, content, reserveDays, c
   const voucherAvailable = spendableVoucherUnits(state, owner);
   const wheatUnitsAvailable = householdConvertibleWheatUnits(state, household, content, reserveDays);
   const wheatValueAvailable = voucherUnitsForWheatUnits(wheatUnitsAvailable, content, "floor");
+  // 仅作为二分上界；真正可支付性统一交给支付层判断，避免全粮券阶段误回退小麦。
+  let high = Math.min(cap, Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale))));
+  // 上界为 0 时不必建支付上下文（买不起的户占大多数）。
+  if (high <= 0) return 0;
   const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits: wheatUnitsAvailable });
   const canPay = valueUnits => quotePaymentValueUnitsWithContext(paymentContext, valueUnits).full;
   let low = 0;
-  // 仅作为二分上界；真正可支付性统一交给支付层判断，避免全粮券阶段误回退小麦。
-  let high = Math.min(cap, Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale))));
   // 常见情况：想买的量本来就付得起，一次报价就够，不用二分。
   if (high > 0 && canPay(Math.round(high / inventoryScale * price * scale))) return high;
   while (low < high) {
