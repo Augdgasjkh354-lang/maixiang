@@ -208,7 +208,8 @@ export function setHouseholdJobCount(state, householdId, jobKey, requested, cont
   const target = Math.max(0, Math.floor(Number(requested) || 0));
   const current = Math.max(0, household.jobs?.[jobKey] || 0);
   const other = householdEmploymentCount(household) - current;
-  if (other + target > householdWorkingAge(household)) return { ok: false, reason: "该家庭没有足够待业劳动力" };
+  // 只拦增岗：减岗（含劳动力减少后释放超额岗位、整户去世释放全部岗位）永远允许。
+  if (target > current && other + target > householdWorkingAge(household)) return { ok: false, reason: "该家庭没有足够待业劳动力" };
   household.jobs ||= {};
   if (target > 0) household.jobs[jobKey] = target;
   else delete household.jobs[jobKey];
@@ -264,7 +265,7 @@ export function releaseJobFromHousehold(state, householdId, jobKey, count = Numb
   return cut;
 }
 
-function jobReleaseRank(jobKey) {
+export function jobReleaseRank(jobKey) {
   if (jobKey.endsWith(":clerk")) return 1000;
   if (jobKey.includes("::private")) return 800;
   if (jobKey.includes("::listed")) return 700;

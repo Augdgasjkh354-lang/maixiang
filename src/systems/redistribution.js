@@ -24,6 +24,8 @@ import { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfG
 import { transferWageClaimsToTown, wageBook } from "./employer.js";
 import { jobKeyForBuilding } from "../selectors/labor.js";
 import { selectOperatingRightPreview } from "../selectors/operating-rights.js";
+import { ensureVillaState } from "./villas.js";
+import { shopsAwaitingSuccession, succeedShopsOfHousehold } from "./shops.js";
 
 // 政策默认值（政策页可调；写在这里，内容规则里可用 content.rules 覆盖）。
 const DEFAULT_WEALTH_TAX_THRESHOLDS = [300, 1000, 3000];
@@ -59,7 +61,7 @@ export function blankRedistributionRow() {
   return {
     wealthTaxDueUnits: 0, wealthTaxUnits: 0, wealthTaxWaivedUnits: 0, wealthTaxPayers: 0,
     inheritanceTaxUnits: 0, inheritancePayers: 0,
-    escheatUnits: 0, escheatHouseholds: 0, escheatShares: 0, escheatBuildings: 0
+    escheatUnits: 0, escheatHouseholds: 0, escheatShares: 0, escheatBuildings: 0, escheatVillas: 0
   };
 }
 
@@ -255,6 +257,9 @@ function householdHasEscheatableAssets(state, household) {
   if ((state.bank?.deposits?.[household.id] || 0) > 0) return true;
   if (Object.values(household.inventory || {}).some(units => units > 0)) return true;
   if (Object.values(household.shares || {}).some(count => count > 0)) return true;
+  if ((state.villas?.sold || []).some(row => row.householdId === household.id)) return true;
+  // 店铺在等业主更替（无人接手时也算，直到有人接手或店铺关闭）。
+  if (shopsAwaitingSuccession(state, household.id).length > 0) return true;
   return ownedPrivateBuildings(state, household.id).length > 0;
 }
 
@@ -264,7 +269,7 @@ function escheatHousehold(state, household, content) {
   const owner = `household:${id}`;
   const scale = currencyScale(content);
   const reason = `${household.name}整户失效，家产归镇库`;
-  const totals = { voucherUnits: 0, inventoryValueUnits: 0, shareCount: 0, buildingCount: 0 };
+  const totals = { voucherUnits: 0, inventoryValueUnits: 0, shareCount: 0, buildingCount: 0, villaCount: 0 };
 
   // 1. 存款：银行现金够才能取回，取不回的留在存款台账，之后每日再试。
   const deposit = Math.max(0, state.bank?.deposits?.[id] || 0);
@@ -273,7 +278,9 @@ function escheatHousehold(state, household, content) {
   const movable = takeable > 0 || (household.voucherUnits || 0) > 0 || ownedPrivateBuildings(state, id).length > 0
     || Object.values(household.inventory || {}).some(units => units > 0)
     || Object.values(household.shares || {}).some(count => count > 0);
-  if (!movable) return null;
+  // 别墅与店铺不取决于现金：即使其余家产动不了，也要交接（店铺）或空置（别墅）。
+  const villaRows = (state.villas?.sold || []).filter(row => row.householdId === id);
+  if (!movable && !villaRows.length && !shopsAwaitingSuccession(state, id).length) return null;
   if (takeable > 0) {
     const result = withdrawFromBank(state, id, takeable, content);
     if (!result.ok) throw new Error("家产归公取款预检后失败：" + result.reason);
@@ -341,14 +348,33 @@ function escheatHousehold(state, household, content) {
     totals.buildingCount += 1;
   }
 
+  // 6. 别墅 → 空置：删掉售出记录（别墅重新进入空置名单，日结的别墅销售会再卖），欠税一并免除。
+  if (villaRows.length) {
+    const villas = ensureVillaState(state);
+    villas.sold = villas.sold.filter(row => row.householdId !== id);
+    delete villas.taxArrearsValueUnits[id];
+    household.villaAssets = [];
+    totals.villaCount = villaRows.length;
+  }
+
   syncResidentAggregates(state, content);
   const valueUnits = totals.voucherUnits + totals.inventoryValueUnits;
+  const villaText = totals.villaCount ? `，别墅${totals.villaCount}栋空置待售` : "";
+  if (movable) {
+    recordEvent(state, `${household.name}整户失效，家产归镇库：粮券与存款${Math.round(totals.voucherUnits / scale)}券、库存折${Math.round(totals.inventoryValueUnits / scale)}券、股票${totals.shareCount}股、民营建筑${totals.buildingCount}栋收归镇营${villaText}。`, content, { day: state.day + 1 });
+  } else if (totals.villaCount) {
+    recordEvent(state, `${household.name}整户失效，别墅${totals.villaCount}栋空置待售。`, content, { day: state.day + 1 });
+  }
+
+  // 7. 店铺 → 新业主（不关门、不清算）。无人可接手的店铺保持暂停，留待之后每日再试。
+  succeedShopsOfHousehold(state, id, content);
+
   const book = ensureRedistribution(state);
   bookAdd(book, "escheatUnits", valueUnits);
+  bookAdd(book, "escheatVillas", totals.villaCount);
   if (!householdHasEscheatableAssets(state, household)) bookAdd(book, "escheatHouseholds", 1);
   bookAdd(book, "escheatShares", totals.shareCount);
   bookAdd(book, "escheatBuildings", totals.buildingCount);
-  recordEvent(state, `${household.name}整户失效，家产归镇库：粮券与存款${Math.round(totals.voucherUnits / scale)}券、库存折${Math.round(totals.inventoryValueUnits / scale)}券、股票${totals.shareCount}股、民营建筑${totals.buildingCount}栋收归镇营。`, content, { day: state.day + 1 });
   return { householdId: id, ...totals, valueUnits };
 }
 

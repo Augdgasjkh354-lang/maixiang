@@ -7,6 +7,7 @@ import { recordEvent } from "../economy/ledger.js";
 import { nextRandom } from "../core/random.js";
 import {
   householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold,
+  householdWorkingAge, jobReleaseRank, releaseJobFromHousehold,
   syncResidentAggregates,
   setHouseholdJobCount, setJobCount, jobCount, jobAssignments
 } from "./households.js";
@@ -272,6 +273,127 @@ export function syncShopEmployment(state, content) {
     }
   }
   return state.shops;
+}
+
+// ---------------------------------------------------------------- 业主更替（docs/REDISTRIBUTION.md 第 2 条）
+// 业主家庭失效（人口归零）时店铺不关门、不清算：按 商人 → 店员 → 家底最厚的一户 的顺序由新业主接手，
+// 现金、库存、负债、员工与经营设置原样保留；利润自然改付给新业主（settleShopTaxAndDistribution 按 ownerHouseholdId 分配）。
+
+function livingWorkerHousehold(state, householdId) {
+  const household = state.households?.byId?.[householdId];
+  return household && isActiveHousehold(household) && householdWorkingAge(household) > 0 ? household : null;
+}
+
+// 店铺在等待业主更替：非集体、未关闭、未清算，且业主家庭不存在或已失效。
+export function shopsAwaitingSuccession(state, householdId) {
+  return Object.values(state.shops || {}).filter(shop => !shop.collective && shop.ownerHouseholdId === householdId
+    && shop.status !== "closed" && shop.status !== "liquidating");
+}
+
+// 候选人：商人（岗位多者优先）→ 店员（岗位多者优先）→ 家底最厚（粮券 + 存款 + 超出口粮储备的小麦）且不已在同类宿主建筑开店的一户。
+// 平局统一取可动用粮券多者。返回 { household, source } 或 null。
+export function chooseShopSuccessor(state, shop, content) {
+  const merchantKey = merchantJobKey(shop);
+  const clerkKey = clerkJobKey(shop);
+  const byMoneyThenId = (a, b) => b.money - a.money || a.household.id.localeCompare(b.household.id);
+  const staffRows = key => householdList(state)
+    .filter(household => household.id !== shop.ownerHouseholdId && (household.jobs?.[key] || 0) > 0 && livingWorkerHousehold(state, household.id))
+    .map(household => ({ household, slots: household.jobs[key], money: spendableVoucherUnits(state, `household:${household.id}`) }));
+  const merchants = staffRows(merchantKey).sort((a, b) => b.slots - a.slots || byMoneyThenId(a, b));
+  if (merchants.length) return { household: merchants[0].household, source: "merchant" };
+  const clerks = staffRows(clerkKey).sort((a, b) => b.slots - a.slots || byMoneyThenId(a, b));
+  if (clerks.length) return { household: clerks[0].household, source: "clerk" };
+  const hostTypeId = shopHostTypeId(shopDefinition(content, shop.typeId));
+  const ownsSameHost = new Set(Object.values(state.shops || {})
+    .filter(other => other.id !== shop.id && !other.collective && other.status !== "closed" && other.ownerHouseholdId
+      && shopHostTypeId(shopDefinition(content, other.typeId)) === hostTypeId)
+    .map(other => other.ownerHouseholdId));
+  const wealthy = householdList(state)
+    .filter(household => household.id !== shop.ownerHouseholdId && !ownsSameHost.has(household.id) && livingWorkerHousehold(state, household.id))
+    .map(household => {
+      const wheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
+      const money = spendableVoucherUnits(state, `household:${household.id}`) + voucherUnitsForWheatUnits(wheatUnits, content, "floor");
+      return { household, money };
+    })
+    .sort(byMoneyThenId);
+  if (wealthy.length) return { household: wealthy[0].household, source: "wealth" };
+  return null;
+}
+
+// 把店铺交给新业主。新业主必须是有劳动力的在世家庭；若他不是本店商人，先离开本店店员岗位（或释放一个其他岗位），再任商人。
+// 商人岗位已满（且新业主不在岗）时不替换他人，直接失败。旧业主的商人岗位一并清掉。
+export function transferShopOwnership(state, shopId, newHouseholdId, content) {
+  const shop = ensureShops(state, content)[shopId];
+  if (!shop) return { ok: false, reason: "店铺不存在" };
+  if (shop.collective) return { ok: false, reason: "集体摊位没有业主" };
+  const next = livingWorkerHousehold(state, newHouseholdId);
+  if (!next) return { ok: false, reason: "新业主必须是有劳动力的在世家庭" };
+  const merchantKey = merchantJobKey(shop);
+  const clerkKey = clerkJobKey(shop);
+  const previousId = shop.ownerHouseholdId;
+  const previous = previousId && previousId !== next.id ? state.households?.byId?.[previousId] : null;
+  const previousMerchants = previous ? (previous.jobs?.[merchantKey] || 0) : 0;
+  const nextIsMerchant = (next.jobs?.[merchantKey] || 0) >= 1;
+  if (!nextIsMerchant && shopMerchantCount(state, shop) - previousMerchants >= shopMaxMerchants(shop, content)) {
+    return { ok: false, reason: "商人岗位已满，新业主无法上岗" };
+  }
+  if (previous && previousMerchants > 0) setHouseholdJobCount(state, previous.id, merchantKey, 0, null);
+  if (!nextIsMerchant) {
+    if ((next.jobs?.[clerkKey] || 0) > 0) setHouseholdJobCount(state, next.id, clerkKey, next.jobs[clerkKey] - 1, null);
+    if (householdIdleWorkers(next) <= 0) {
+      const key = Object.keys(next.jobs || {}).filter(jobKey => next.jobs[jobKey] > 0)
+        .sort((a, b) => jobReleaseRank(b) - jobReleaseRank(a) || b.localeCompare(a))[0];
+      if (key) releaseJobFromHousehold(state, next.id, key, 1);
+    }
+    const assigned = setHouseholdJobCount(state, next.id, merchantKey, 1, content);
+    if (!assigned.ok) return { ok: false, reason: assigned.reason };
+  }
+  syncClerkTenure(state, shop, content);
+  shop.ownerHouseholdId = next.id;
+  if (previous) previous.shopIds = (previous.shopIds || []).filter(id => id !== shopId);
+  next.shopIds ||= [];
+  if (!next.shopIds.includes(shopId)) next.shopIds.push(shopId);
+  delete shop.successionNoticed;
+  syncShopEmployment(state, content);
+  return { ok: true, shopId, householdId: next.id, previousHouseholdId: previousId };
+}
+
+// 单店的业主更替：找到新业主并交接，记事件；找不到则店铺保持暂停（只记一次事件）。
+function succeedOrphanShop(state, shop, content) {
+  const previous = state.households?.byId?.[shop.ownerHouseholdId];
+  const previousName = previous?.name || shop.ownerHouseholdId;
+  const typeName = shopDefinition(content, shop.typeId)?.name || "店铺";
+  const choice = chooseShopSuccessor(state, shop, content);
+  if (!choice) {
+    if (!shop.successionNoticed) {
+      shop.successionNoticed = true;
+      recordEvent(state, `${previousName}无人继承，其开的${typeName}无人接手，店铺暂停。`, content, { day: state.day + 1 });
+    }
+    syncShopEmployment(state, content);
+    return { ok: false, reason: "无人可接手" };
+  }
+  const result = transferShopOwnership(state, shop.id, choice.household.id, content);
+  if (!result.ok) return { ok: false, reason: result.reason };
+  const label = { merchant: "原商人", clerk: "原店员", wealth: "家底最厚的一户" }[choice.source];
+  recordEvent(state, `${previousName}无人继承，其开的${typeName}由${choice.household.name}（${label}）接手。`, content, { day: state.day + 1 });
+  return { ok: true, householdId: choice.household.id, source: choice.source };
+}
+
+// 家产归公时调用：这一户名下待交接的店铺逐个交接。
+export function succeedShopsOfHousehold(state, householdId, content) {
+  return shopsAwaitingSuccession(state, householdId).map(shop => ({ shopId: shop.id, ...succeedOrphanShop(state, shop, content) }));
+}
+
+// 日结店铺准备：业主已失效的店铺（含旧档里已被暂停的孤儿店）每日尝试交接。
+export function succeedOrphanShops(state, content) {
+  const rows = [];
+  for (const shop of Object.values(ensureShops(state, content))) {
+    if (shop.collective || shop.status === "closed" || shop.status === "liquidating") continue;
+    const owner = state.households?.byId?.[shop.ownerHouseholdId];
+    if (owner && isActiveHousehold(owner)) continue;
+    rows.push({ shopId: shop.id, ...succeedOrphanShop(state, shop, content) });
+  }
+  return rows;
 }
 
 function householdStartupReserveUnits(household, content) {
@@ -1185,6 +1307,8 @@ function buyFromFarms(state, store, itemId, wantedUnits, content) {
 
 export function prepareShopsForDay(state, content) {
   ensureShops(state, content);
+  // 业主已失效的店铺先交接（旧档里已被暂停的孤儿店也在这里恢复），再做日常同步。
+  succeedOrphanShops(state, content);
   syncShopEmployment(state, content);
   const operating = Object.values(state.shops).filter(shop => shop.status === "open");
   const paused = Object.values(state.shops).filter(shop => shop.status === "paused");
