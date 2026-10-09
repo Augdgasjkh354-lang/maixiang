@@ -9,6 +9,8 @@ import { settleTradingHouses, localAvgSoldJin } from "../src/systems/trading-hou
 import { ensureOutsideTowns } from "../src/systems/outside-town.js";
 import { selectTradeHouseView } from "../src/selectors/trade-houses.js";
 import { migrateSave } from "../src/persistence/migrations.js";
+import { prepareShopsForDay } from "../src/systems/shops.js";
+import { pendingWages } from "../src/systems/employer.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -304,4 +306,28 @@ test("存档往返：贸易行日志、账与库存读回后不变，状态合�
   assert.deepEqual(loaded.shops[id].tradeLog, state.shops[id].tradeLog);
   assert.equal(loaded.shops[id].cashWheatUnits, state.shops[id].cashWheatUnits);
   valid(loaded, "读档后");
+});
+
+test("贸易行清算：日结推进，未满 30 天仍清算中，满 30 天仍欠账则核销关门，店内货物返还业主", () => {
+  const { state, shop } = tradeFixture(9310, { clerks: 3 });
+  const owner = state.households.byId[shop.ownerHouseholdId];
+  prepareShopsForDay(state, CONTENT);
+  // 现金抽干、货留店里：停业时工资和租金付不出，清算必然留有负债。
+  if (shop.cashVoucherUnits > 0) {
+    assert.equal(transferVouchers(state, `shop:${shop.id}`, `household:${owner.id}`, shop.cashVoucherUnits, CONTENT,
+      "test_drain", "测试抽干贸易行现金").ok, true);
+  }
+  shop.inventory.salt = 20 * I;
+  assert.equal(simulation.closeResidentShop(state, shop.id).ok, true);
+  assert.equal(shop.status, "liquidating");
+  const debt = () => (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0)
+    + pendingWages(shop.liabilities);
+  assert.ok(debt() > 0, "清算时应有付不出的负债");
+  for (let day = 0; day < 30; day += 1) simulation.advanceDay(state);
+  assert.equal(shop.status, "liquidating", "未满 30 天应仍在清算中");
+  simulation.advanceDay(state);
+  assert.equal(shop.status, "closed", "满 30 天仍欠账应核销关门");
+  assert.equal(debt(), 0);
+  assert.equal(shop.inventory.salt || 0, 0, "店内货物已返还业主");
+  valid(state, "贸易行核销关门后");
 });
