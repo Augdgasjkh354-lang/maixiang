@@ -59,10 +59,31 @@ function syncResidentInventoryMirror(state, content) {
   for (const itemId of itemIds) state.accounts.residents[itemId] = totals[itemId];
 }
 
+// 居民库存镜像平时由转移增量维护（每次改动量已知，加减即可），不再每次读写都整表重算。
+// 延迟同步期间（state._deferHouseholdSync）户库存可能被外部直接改动，仍整表重算；镜像缺物品键时也整表补齐。
+function residentMirrorTrusted(state, content) {
+  if (state._deferHouseholdSync) return false;
+  const mirror = state.accounts?.residents;
+  if (!mirror) return false;
+  for (const itemId in content.items) if (!Number.isInteger(mirror[itemId])) return false;
+  return true;
+}
+
+function freshenResidentMirror(state, content) {
+  if (hasHouseholdAccounts(state) && !residentMirrorTrusted(state, content)) syncResidentInventoryMirror(state, content);
+}
+
+// 某户库存已按 delta 改过（改动总量正好等于 delta）：镜像加上 delta 即可。
+function applyResidentMirrorDelta(state, itemId, delta, content) {
+  if (!hasHouseholdAccounts(state)) return;
+  if (!residentMirrorTrusted(state, content)) { syncResidentInventoryMirror(state, content); return; }
+  state.accounts.residents[itemId] += delta;
+}
+
 const accountObject = accountInventory;
 
 export function accountQeqUnits(state, owner, content) {
-  if (owner === "residents" && hasHouseholdAccounts(state)) syncResidentInventoryMirror(state, content);
+  if (owner === "residents") freshenResidentMirror(state, content);
   const account = accountObject(state, owner);
   if (!account) return 0;
   let total = 0;
@@ -85,7 +106,7 @@ export function totalQeqUnits(state, content) {
 
 function ownerBalance(state, owner, itemId, content) {
   if (!content.items[itemId]) throw new Error("未注册物品：" + itemId);
-  if (owner === "residents" && hasHouseholdAccounts(state)) syncResidentInventoryMirror(state, content);
+  if (owner === "residents") freshenResidentMirror(state, content);
   const account = accountObject(state, owner);
   if (!account) throw new Error("未知粮食账户：" + owner);
   if (!Number.isInteger(account[itemId])) account[itemId] = 0;
@@ -120,7 +141,7 @@ function distributeResidentDelta(state, itemId, delta, content) {
     }
     if (left > 0) throw new RangeError("居民家庭库存不足");
   }
-  syncResidentInventoryMirror(state, content);
+  applyResidentMirrorDelta(state, itemId, delta, content);
 }
 
 function setBalance(state, owner, itemId, next, content) {
@@ -132,7 +153,7 @@ function setBalance(state, owner, itemId, next, content) {
   }
   const account = accountObject(state, owner);
   account[itemId] = next;
-  if (isHouseholdOwner(owner)) syncResidentInventoryMirror(state, content);
+  if (isHouseholdOwner(owner)) applyResidentMirrorDelta(state, itemId, next - before, content);
 }
 
 // 有库存的账户才能做实物转移（社保基金只有钱、没有库存）。
@@ -231,7 +252,7 @@ export function planFoodTransfer(account, qeqUnits, content, allowPartial) {
 
 export function transferFoodQeq(state, from, to, qeqUnits, reason, category, content, options) {
   const settings = options || {};
-  if (from === "residents" && hasHouseholdAccounts(state)) syncResidentInventoryMirror(state, content);
+  if (from === "residents") freshenResidentMirror(state, content);
   const fromAccount = accountObject(state, from);
   const plan = planFoodTransfer(fromAccount, qeqUnits, content, settings.allowPartial === true);
   if (!plan || plan.movedQeqUnits === 0) {
