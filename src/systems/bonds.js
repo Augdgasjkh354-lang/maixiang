@@ -4,6 +4,7 @@ import { householdList, householdPopulation, isActiveHousehold, syncResidentAggr
 import { wholesalePrice } from "./wealth-stats.js";
 import { bankLoanableVoucherUnits, bankPolicy, ensureBankState } from "./bank.js";
 import { liquidityInvestRatio } from "./liquidity.js";
+import { recordHouseholdBudgetIncome } from "./household-life.js";
 
 // 国债：镇库按玩家定的固定票面利率发行，发行当天由住户（存款后剩余闲钱）与银行（闲置可贷额度）
 // 直接认购，卖出多少算多少；票面须高于存款利率住户才会买。每年付息、到期还本，
@@ -43,6 +44,8 @@ function payToHolder(state, holderKey, units, content = null, incomeUnits = 0) {
     const household = state.households?.byId?.[id];
     if (household) {
       household.voucherUnits = (household.voucherUnits || 0) + units;
+      // 利息部分计入家庭近期收入（本金回收不计）。
+      if (content && incomeUnits > 0) recordHouseholdBudgetIncome(state, id, incomeUnits, content);
       // 居民汇总粮券是缓存值：改动家庭券后必须同步，否则粮券总账守恒校验失败。
       if (content) syncResidentAggregates(state, content);
     }

@@ -7,6 +7,7 @@ import { initializeBuildingJobs } from "../src/systems/employment.js";
 import { accrueServiceDemand, processServiceDemand } from "../src/systems/services.js";
 import { prepareShopsForDay, finishShopsDay, resetShopDaily } from "../src/systems/shops.js";
 import { householdAffluence, invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
+import { voucherWealthForAffluence } from "./budget-fixture.js";
 import { ensureHouseholdLife } from "../src/systems/household-life.js";
 import { issueTownVouchers, transferVouchers, voucherBalance } from "../src/economy/currency.js";
 
@@ -33,7 +34,7 @@ function idleHouseholds(state, count) {
 }
 
 // 把一户的宽裕度设成 affluence：小麦只留够口粮（无余粮），粮券按 宽裕度² × 参照人均家底 × 人口 给出。
-// 宽裕度 = √(人均家底 / 参照值)，所以家底 = affluence² × referenceWealthPerCapita × 人口。
+// 宽裕度 m 由可动用预算比值决定（household-budget 新口径），家底由 voucherWealthForAffluence 反算。
 // 粮券必须走发行与转账，否则总账不守恒（validateState 会报错）。
 function useVoucherMoney(state) {
   if (state.monetaryReform?.stage === "voucher") return;
@@ -50,7 +51,7 @@ function setAffluence(state, household, affluence) {
   household.inventory.wheat = Math.round(people * CONTENT.rules.foodPerPersonDay * keepDays * I);
   household.inventory.flour = 0;
   household.inventory.bread = 0;
-  const target = Math.round(affluence * affluence * CONTENT.rules.householdBudget.referenceWealthPerCapita * people * V);
+  const target = voucherWealthForAffluence(state, household, affluence, CONTENT);
   const owner = `household:${household.id}`;
   const current = voucherBalance(state, owner);
   if (target > current) {

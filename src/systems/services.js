@@ -119,7 +119,7 @@ export function accrueServiceDemand(state, content) {
   return serviceState.day.demandedUses;
 }
 
-// 服务预算看家底（household-budget：可动用财富摊到 wealthSpendDays 天 × 服务占比），
+// 服务预算看可动用预算（household-budget：收入预期 + 家底 × usableWealthShare，摊到一年 360 天，× 服务占比），
 // 不再看最近 7 天收入——农民的收入是一年一次的秋收，按周收入算会让他们永远"没钱"。
 function householdDailyServiceBudget(state, household, content) {
   const budget = householdBudgets(state, content).get(household.id)?.serviceBudgetUnits || 0;

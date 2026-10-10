@@ -50,6 +50,22 @@ const INCOME_TYPES = new Set([
 const LIFE_EXPENSE_TYPES = new Set(["rent_payment", "wheat_trade", "bread_trade", "salt_trade", "shop_retail_sale", "shop_service_sale", "wheat_direct_trade", "bread_direct_trade", "salt_direct_trade"]);
 const INVESTMENT_TYPES = new Set(["share_subscription", "operating_right_sale", "shop_capital", "shop_startup_capital", "shop_capital_injection"]);
 const CAPITAL_RETURN_TYPES = new Set(["shop_capital_refund", "shop_close_distribution"]);
+// 家庭"近期日收入"（household-budget 的可动用预算）的收入白名单：钱真正到达家庭账户的收入类付款才计入。
+// 不计入：以粮换券、存款取回、镇库与银行之间的内部转移、买卖资产（股票、国债本金、别墅、经营权、店铺资本）、
+// 清算返还、开店垫付、一次性辞退补偿（severance_payment）、镇库还欠款（town_debt_repayment）、救济（实物口粮 relief）、
+// 家庭之间的商品买卖（消费与店铺零售）。利息（存款、国债）与务农分粮（实物）由专门入口计入，见 recordHouseholdBudgetIncome / recordHouseholdBudgetInKind。
+export const BUDGET_INCOME_TYPES = new Set([
+  // 工资：月薪发薪、欠薪补付、建筑与开荒工资、民营/公司/店铺雇员工资
+  "wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment",
+  "land_reclamation_wage", "enterprise_wage_payment", "private_wage_payment", "shop_wage_payment",
+  // 店铺、民营、公司的利润分配：店主家庭分利润、摆摊家庭分利润、民营业主收购收入（与 BUDGET_COST_TYPES 相抵）、公司股东分红
+  "shop_profit_distribution", "collective_profit_share", "wholesale_private_purchase", "enterprise_dividend", "enterprise_annual_distribution",
+  // 社保：养老金、失业金、农民补贴（社保基金付出）
+  "pension_payment", "unemployment_benefit", "farmer_subsidy"
+]);
+// 家庭作为经营者付出的成本（从家庭账户付出，与 BUDGET_INCOME_TYPES 相抵，得到经营净收入）：民营业主的投入采购、民营工资。
+export const BUDGET_COST_TYPES = new Set(["wholesale_sale", "private_wage_payment"]);
+
 const WAGE_TYPES = new Set(["wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment", "enterprise_wage_payment", "private_wage_payment", "shop_wage_payment"]);
 
 export function recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits = [], householdCredits = [] }, content) {
@@ -58,6 +74,7 @@ export function recordHouseholdVoucherTransfer(state, { from, to, type, voucherU
   for (const row of debitRows) {
     const household = state.households?.byId?.[row.householdId];
     if (!household) continue;
+    if (BUDGET_COST_TYPES.has(type)) add(household, "budgetCostVoucherUnits", row.units, content);
     if (INVESTMENT_TYPES.has(type)) add(household, "investmentVoucherUnits", row.units, content);
     else if (LIFE_EXPENSE_TYPES.has(type)) { add(household, "expenseVoucherUnits", row.units, content); add(household, "lifeExpenseVoucherUnits", row.units, content); if (type === "shop_service_sale") add(household, "serviceExpenseVoucherUnits", row.units, content); }
     else add(household, "expenseVoucherUnits", row.units, content);
@@ -68,6 +85,7 @@ export function recordHouseholdVoucherTransfer(state, { from, to, type, voucherU
     if (CAPITAL_RETURN_TYPES.has(type)) add(household, "capitalReturnVoucherUnits", row.units, content);
     else if (INCOME_TYPES.has(type)) add(household, "incomeVoucherUnits", row.units, content);
     if (WAGE_TYPES.has(type)) add(household, "wagePaidVoucherUnits", row.units, content);
+    if (BUDGET_INCOME_TYPES.has(type)) add(household, "budgetIncomeVoucherUnits", row.units, content);
   }
 }
 
@@ -81,6 +99,37 @@ export function recordHouseholdAssetExchange(state, householdRows, voucherUnits,
 export function recordHouseholdInKind(state, householdId, key, units, content) {
   const household = state.households?.byId?.[householdId];
   if (household) add(household, key, units, content);
+}
+
+// 利息（存款利息、国债利息）与务农分粮（实物，按券值 = 斤 × 1 券）计入家庭近期收入。
+export function recordHouseholdBudgetIncome(state, householdId, units, content) {
+  const household = state.households?.byId?.[householdId];
+  if (household && Number.isFinite(units) && units > 0) add(household, "budgetIncomeVoucherUnits", units, content);
+}
+export function recordHouseholdBudgetInKind(state, householdId, wheatInventoryUnits, content) {
+  const scale = content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin;
+  const units = Math.floor((Number(wheatInventoryUnits) || 0) / content.precision.inventoryUnitsPerJin * scale);
+  recordHouseholdBudgetIncome(state, householdId, units, content);
+}
+
+// 近期日收入（券/日，指数滑动平均）。没有记录（开局、旧档）时用收入预期 ÷ daysPerYear 作初值。
+export function householdRecentIncomeUnitsPerDay(household, content) {
+  const stored = household.recentIncomeUnits;
+  if (Number.isFinite(stored)) return Math.max(0, stored);
+  const scale = content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin;
+  return Math.max(0, Number(household.incomeExpectationJin) || 0) * scale / (content.rules.daysPerYear || 360);
+}
+
+// 每日结束时把当天的净收入（收入 − 经营成本）并入指数滑动平均，半衰期 incomeHalfLifeDays（默认 30 天）。
+export function finalizeHouseholdIncomeDay(state, content) {
+  const halfLife = Math.max(1, content.rules.householdBudget?.incomeHalfLifeDays ?? 30);
+  const alpha = 1 - Math.pow(0.5, 1 / halfLife);
+  for (const household of householdList(state)) {
+    const life = ensureHouseholdLife(household, content);
+    const today = (life.day.budgetIncomeVoucherUnits || 0) - (life.day.budgetCostVoucherUnits || 0);
+    const prior = householdRecentIncomeUnitsPerDay(household, content);
+    household.recentIncomeUnits = Math.round((prior + alpha * (today - prior)) * 10000) / 10000;
+  }
 }
 
 export function recordHouseholdWageDue(state, householdId, units, content) { recordHouseholdInKind(state, householdId, "wageDueVoucherUnits", units, content); }

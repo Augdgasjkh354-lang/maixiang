@@ -11,6 +11,7 @@ import { initializeBuildingJobs } from "../src/systems/employment.js";
 import { openShop } from "../src/systems/shops.js";
 import { buyGoodsForResidents } from "../src/systems/goods-demand.js";
 import { invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
+import { voucherWealthForAffluence } from "./budget-fixture.js";
 import { issueTownVouchers, transferVouchers, voucherBalance } from "../src/economy/currency.js";
 import { assembleDailySteps, modArt, selectModViews, validateMods, defineMod } from "../src/mods/api.js";
 import { tradeWithOutsideTown } from "../src/systems/outside-town.js";
@@ -54,7 +55,7 @@ function useVoucherMoney(state) {
   state.monetaryReform.legacyBankAccess = true;
 }
 
-// 宽裕度 = √(人均家底 / 参照值)：把家底设成 affluence² × 参照值 × 人口，小麦只留够口粮。
+// 宽裕度 m（household-budget 新口径）：把粮券家底设成让可动用预算对应 m 的值，小麦只留够口粮。
 function setAffluence(state, household, affluence) {
   if (state.monetaryReform.stage !== "voucher") useVoucherMoney(state);
   const people = householdPopulation(household);
@@ -62,7 +63,7 @@ function setAffluence(state, household, affluence) {
   household.inventory.wheat = Math.round(people * content.rules.foodPerPersonDay * keepDays * I);
   household.inventory.flour = 0;
   household.inventory.bread = 0;
-  const target = Math.round(affluence * affluence * content.rules.householdBudget.referenceWealthPerCapita * people * V);
+  const target = voucherWealthForAffluence(state, household, affluence, content);
   const owner = `household:${household.id}`;
   const current = voucherBalance(state, owner);
   if (target > current) {

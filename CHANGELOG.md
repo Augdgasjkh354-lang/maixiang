@@ -1,3 +1,14 @@
+## 未发布 · 宽裕度重做
+
+- 宽裕度改按"可动用预算"算（`systems/household-budget.js`）：可动用预算 B（斤/人/年）= 人均年收入 + `usableWealthShare`（10%）× 人均家底；参照预算 R = `referenceBudgetPerCapitaJin`（2000）× 物价指数；宽裕度 m = Mmax × tanh(a × √(B/R))，a = atanh(1/Mmax)，Mmax = `maxAffluence`（4，渐近上限）。B = R 时 m = 1，不再硬封顶 3。
+- 年收入 = 近期日收入 × 360。近期日收入（`household.recentIncomeUnits`，存档字段，旧档不迁移）是收入类付款的指数滑动平均，半衰期 `incomeHalfLifeDays`（30），每日最后一步（`householdIncome`）并入。开局、无记录时用收入预期 `incomeExpectationJin ÷ 360` 作初值。
+- 计入收入的付款（`systems/household-life.js` 的 `BUDGET_INCOME_TYPES`）：各类工资（含月薪发薪、欠薪补付、建筑/开荒/民营/店铺/公司工资）、店主家庭的店铺利润分配、摆摊家庭的利润分成、民营业主收购收入（扣除投入采购与民营工资，`BUDGET_COST_TYPES`）、公司股东分红、养老金、失业金、农民补贴；另有存款利息、国债利息（利息部分）与务农分粮（实物，按 1 券/斤折算）。不计入：救济（实物口粮）、以粮换券、存款取回、买卖资产（股票、国债本金、别墅、经营权、店铺资本）、清算返还、开店垫付、一次性辞退补偿（`severance_payment`）、镇库还欠款（`town_debt_repayment`）、家庭之间的商品买卖、场景注入（`scenario_income` 等）。
+- 物价指数：篮子面粉 0.5、面包 0.3、盐 0.2，当前价相对开局售价（`rules.wholesaleDefaultSalePrices`）的加权平均，缺价按 1，每日缓存。小麦钉价，不进篮子。
+- 每日可花 = 可动用预算 ÷ 360（`rules.daysPerYear`），服务预算 = 每日可花 × `serviceShare`；去掉旧的 `wealthSpendDays`。
+- 标定（有店主、有富人税的探针镇，3 年，`usableWealthShare` = 0.10）：第 2 年末人口加权宽裕度中位数 ≈ 1 → `referenceBudgetPerCapitaJin` = 2000。`usableWealthShare` = 0.20 时需 2130；两者结论几乎相同，推荐 0.10。v023 场景（旧收入口径）标定为 1940，与新口径不同，已改用探针镇。
+- 肉当主食的曲线改用 `meatStaple.fullAffluence` = 3（肉占比达 maxShare 的宽裕度），不再跟 maxAffluence 挂钩，肉占比曲线保持原数值（宽裕度 1 约 5%、2 约 27%、3 为 75%）。
+- 测试：`tests/household-budget.test.js`（宽裕度函数、物价、收入为 0 只靠家底、当天缓存与 invalidate 等）、`tests/household-income.test.js`（开局初值、指数滑动平均与半衰期、收入白名单、利息与实物分粮、民营净收入）；`tests/budget-fixture.js` 把宽裕度设成指定值；其余依赖旧口径的测试改按新口径设定。
+
 ## 未发布 · 社保农民补贴
 
 - 社保基金新增支出"农民补贴"：政策页"每农民每日补贴"（`socialSecurity.farmerSubsidyPerFarmerJin`，默认 0，即不改变旧行为），按各户在岗务农人数每日发到家庭；与养老金同一套付款规则，基金不足时镇库垫付并计为基金负债。累计支出见"累计收支"（`totalSubsidyUnits`）。代码在 `systems/social-security.js` 的 `payFarmerSubsidies`，日结步骤 `farmerSubsidy` 紧随养老金。

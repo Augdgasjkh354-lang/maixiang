@@ -1,5 +1,6 @@
 import test from "node:test";
 import { householdAffluence, householdWealthUnits, invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
+import { voucherWealthForAffluence } from "./budget-fixture.js";
 
 import assert from "node:assert/strict";
 import { CONTENT } from "../src/content/index.js";
@@ -24,14 +25,14 @@ test("日用品需求跟家底走：没家底的不买，越宽裕买得越多�
   const state = simulation.createInitialState({ seed: 5501 });
   const [poor, normal, rich] = householdList(state);
   for (const h of householdList(state)) h.voucherUnits = 0;
-  const ref = CONTENT.rules.householdBudget.referenceWealthPerCapita;
-  normal.voucherUnits = Math.round(ref * householdPopulation(normal) * V);
-  rich.voucherUnits = Math.round(ref * 9 * householdPopulation(rich) * V);
+  normal.voucherUnits = voucherWealthForAffluence(state, normal, 1, CONTENT);
+  rich.voucherUnits = voucherWealthForAffluence(state, rich, 3, CONTENT);
   for (const h of [poor, normal, rich]) h.inventory.wheat = 0;
   syncResidentAggregates(state, CONTENT);
+  invalidateHouseholdBudgets(state);
   assert.equal(householdAffluence(state, poor, CONTENT), 0);
-  assert.ok(Math.abs(householdAffluence(state, normal, CONTENT) - 1) < 1e-6, "人均家底等于参照值时宽裕度为 1");
-  assert.ok(Math.abs(householdAffluence(state, rich, CONTENT) - 3) < 1e-6, "9 倍参照值 → √9 = 3");
+  assert.ok(Math.abs(householdAffluence(state, normal, CONTENT) - 1) < 1e-3, "可动用预算等于参照预算时宽裕度为 1");
+  assert.ok(Math.abs(householdAffluence(state, rich, CONTENT) - 3) < 1e-3, "宽裕度 3 的家底（只靠家底）");
 
   accrueGoodsDemand(state, 0, CONTENT);
   for (const h of [poor, normal, rich]) for (const itemId of Object.keys(CONTENT.rules.householdGoods)) h.inventory[itemId] = 1000 * I;
@@ -40,7 +41,7 @@ test("日用品需求跟家底走：没家底的不买，越宽裕买得越多�
   const standard = h => standardDailyUnits(householdPopulation(h), cfg, CONTENT);
   assert.equal(poor.life?.day?.wineConsumedUnits || 0, 0, "没家底不喝酒");
   assert.equal(normal.life.day.wineConsumedUnits, Math.floor(standard(normal)));
-  assert.equal(rich.life.day.wineConsumedUnits, Math.floor(standard(rich) * Math.pow(3, cfg.incomeElasticity)), "富户按 3^弹性 倍消费");
+  assert.ok(Math.abs(rich.life.day.wineConsumedUnits - Math.floor(standard(rich) * Math.pow(3, cfg.incomeElasticity))) <= 1, "富户按 3^弹性 倍消费");
 
   const max = Object.values(CONTENT.rules.householdGoods).reduce((sum, row) => sum + row.comfortMaximum, 0);
   assert.equal(goodsComfortPoints(state, poor, householdPopulation(poor), poor.life?.day || {}, CONTENT), 0, "没有日用品不加分也不扣分");

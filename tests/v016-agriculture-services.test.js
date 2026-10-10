@@ -32,16 +32,19 @@ function idleHouseholds(state, count = 2) {
   return rows.slice(0, count);
 }
 
-// 服务预算 = 家底 / wealthSpendDays × serviceShare（household-budget）。这里把"每日可花"设成 voucherPerDay：
-// 家底 = voucherPerDay × wealthSpendDays，全放在粮券里，小麦清零以免多出来的存粮也算进家底。
+// 服务预算 = 每日可花 × serviceShare，每日可花 = 可动用预算 ÷ daysPerYear，可动用预算 = 收入预期 + usableWealthShare × 家底（household-budget）。
+// 这里把"每日可花"设成 voucherPerDay：收入预期清零，家底 = voucherPerDay × daysPerYear ÷ usableWealthShare，全用小麦（1 券/斤）放进存粮，
+// 留足 30 天口粮之外的部分才算家底。
 function setBudget(household, voucherPerDay, state = null) {
   ensureHouseholdLife(household, CONTENT).day = {};
   const rules = CONTENT.rules.householdBudget;
   const keepDays = rules.wealthFoodReserveDays; // 家底只扣 30 天口粮（与 householdWealthUnits 一致）
   const keepJin = householdPopulation(household) * CONTENT.rules.foodPerPersonDay * keepDays;
+  household.incomeExpectationJin = 0;
   household.voucherUnits = 0;
   for (const itemId of ["flour", "bread"]) household.inventory[itemId] = 0;
-  household.inventory.wheat = Math.round((keepJin + voucherPerDay * rules.wealthSpendDays) * CONTENT.precision.inventoryUnitsPerJin);
+  const wealthJin = voucherPerDay * CONTENT.rules.daysPerYear / rules.usableWealthShare;
+  household.inventory.wheat = Math.round((keepJin + wealthJin) * CONTENT.precision.inventoryUnitsPerJin);
   budgetDirty = true;
 }
 let budgetDirty = false;

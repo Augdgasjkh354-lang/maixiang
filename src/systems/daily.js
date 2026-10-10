@@ -34,7 +34,7 @@ import { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, re
 import { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } from "./shops.js";
 import { settleTradingHouses } from "./trading-houses.js";
 import { refreshOperatingPlan, recordConsumerDay } from "../economy/operating-plan.js";
-import { archiveHouseholdLifeYear, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } from "./household-life.js";
+import { archiveHouseholdLifeYear, finalizeHouseholdIncomeDay, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } from "./household-life.js";
 import { settleBankDay } from "./bank.js";
 import { settleBondsDay } from "./bonds.js";
 import { settleStockMarketDay, settleHouseholdStockBuying } from "./stock-exchange.js";
@@ -273,6 +273,8 @@ export const CORE_DAILY_STEPS = [
   { id: "tradeAgreementMonth", run: settleTradeAgreementsMonth },
   { id: "tradeAgreementYear", when: newYearDay, run: settleTradeAgreementsYear },
   { id: "outsideTownDay", run: advanceOutsideTownDay },
+  // 家庭近期收入：放在最后，把当天所有收入（含店铺利润分配、收获分粮）并入滑动平均。
+  { id: "householdIncome", run: finalizeHouseholdIncomeDay },
   { id: "history", run: (state, content) => { recordEconomyHistory(state, content); snapshotWholesaleHistory(state, content); } }
 ];
 

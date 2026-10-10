@@ -9,6 +9,7 @@
 // - 新户生活账从零开始，满意度继承原户。
 import { createHousehold, householdList, householdPopulation, householdWorkingAge, jobReleaseRank, releaseExcessHouseholdEmployment, syncResidentAggregates } from "./households.js";
 import { invalidateHouseholdBudgets } from "./household-budget.js";
+import { householdRecentIncomeUnitsPerDay } from "./household-life.js";
 import { recordEvent } from "../economy/ledger.js";
 
 function numericSuffix(id) {
@@ -91,6 +92,10 @@ function splitOne(state, original, number, content) {
   }
   splitJobs(original, household);
   if (Number.isFinite(original.meatHabit)) household.meatHabit = original.meatHabit;
+  // 近期收入按人口比例分：两户人均收入不变（无记录时先把收入预期折成近期日收入再分）。
+  const perDayIncome = householdRecentIncomeUnitsPerDay(original, content);
+  original.recentIncomeUnits = perDayIncome * (1 - share);
+  household.recentIncomeUnits = perDayIncome * share;
   const satisfaction = original.life?.satisfaction;
   if (Number.isFinite(satisfaction)) household.life = { satisfaction };
   return household;

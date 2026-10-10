@@ -24,12 +24,12 @@ export function stapleDemandShares(content) {
   };
 }
 
-// 肉当主食：口粮当量里肉的占比，随宽裕度上升，最多 maxShare（rules.meatStaple）。
+// 肉当主食：口粮当量里肉的占比，随宽裕度上升，宽裕度 fullAffluence 时达到 maxShare（rules.meatStaple）。
 export function meatStapleShare(affluence, content) {
   const rule = content.rules.meatStaple;
   if (!rule || !(affluence > 0)) return 0;
-  const maxAffluence = content.rules.householdBudget?.maxAffluence ?? 3;
-  const ratio = Math.min(1, affluence / Math.max(1e-9, maxAffluence));
+  const fullAffluence = rule.fullAffluence ?? 3;
+  const ratio = Math.min(1, affluence / Math.max(1e-9, fullAffluence));
   return Math.max(0, Math.min(rule.maxShare ?? 0.75, (rule.maxShare ?? 0.75) * Math.pow(ratio, rule.exponent ?? 2.5)));
 }
 

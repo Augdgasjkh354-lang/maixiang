@@ -203,13 +203,22 @@ export const RULES = Object.freeze({
   serviceDemandMaximumCycles: 2,
   serviceComfortDailyMaximum: 3,
   operatingStockCorrectionDays: 5,
-  // 家庭购买力（systems/household-budget.js）：人均家底达到参照值时宽裕度为 1（正常消费），宽裕度 = √(人均家底/参照值)，封顶 maxAffluence；
-  // 家底只算粮券 + 存款 + 留够 wealthFoodReserveDays 天口粮后多出的小麦（不再留到秋收，免得秋收前宽裕度断崖）；
-  // harvestBufferDays 只用于富人税等付款保护（留到下次秋收再加这么多天）；服务预算 = 家底 / wealthSpendDays × serviceShare；
+  // 家庭购买力（systems/household-budget.js）：宽裕度 m = maxAffluence × tanh(a × √(B/R))，a = atanh(1/maxAffluence)。
+  //   maxAffluence 是渐近上限（不是硬封顶）；B = 可动用预算（斤/人/年）= 人均年收入 + usableWealthShare × 人均家底；
+  //   年收入 = 近期日收入 × 360（household.recentIncomeUnits，收入类付款的指数滑动平均，半衰期 incomeHalfLifeDays；白名单见 systems/household-life.js 的 BUDGET_INCOME_TYPES）；
+  //   无记录时用收入预期 incomeExpectationJin ÷ 360 作初值。
+  //   R = referenceBudgetPerCapitaJin × 物价指数（篮子 basket：面粉、面包、盐，相对开局售价 wholesaleDefaultSalePrices 的加权平均；小麦钉价，不进篮子）。
+  //   B = R 时 m = 1（正常人家）。referenceBudgetPerCapitaJin 按"有店主、有贫富差距"的探针镇第 2 年末人口加权宽裕度中位数 ≈ 1 标定（见 CHANGELOG）。
+  // 家底只算粮券 + 存款 + 留够 wealthFoodReserveDays 天口粮后多出的小麦（不留到秋收，免得秋收前宽裕度断崖）；
+  // harvestBufferDays 只用于富人税等付款保护（留到下次秋收再加这么多天）；每日可花 = B ÷ 360，服务预算 = 每日可花 × serviceShare；
   // 主食里面粉、面包的比例 = 标准比例 × 宽裕度（最多 stapleUpgradeMax 倍）。
   // 批发市场对外卖小麦（养殖场饲料、公司原料）时给镇库留的口粮底线天数。
   townWheatSaleReserveDays: 60,
-  householdBudget: Object.freeze({ referenceWealthPerCapita: 60, maxAffluence: 3, wealthSpendDays: 60, wealthFoodReserveDays: 30, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5 }),
+  householdBudget: Object.freeze({
+    referenceBudgetPerCapitaJin: 2000, maxAffluence: 4, usableWealthShare: 0.1, incomeHalfLifeDays: 30,
+    basket: Object.freeze({ flour: 0.5, bread: 0.3, salt: 0.2 }),
+    wealthFoodReserveDays: 30, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5
+  }),
   // 戏园的门槛：宽裕度低于此值的家庭不去戏园（不产生需求，也不计入"需求未满足"）。
   // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天收一次；基尼系数逐年记录最多保留 50 年。
   wealthTaxPeriodDays: 30,
@@ -221,10 +230,11 @@ export const RULES = Object.freeze({
     cloth: Object.freeze({ annualPerPerson: 1, incomeElasticity: 0.6, comfortMaximum: 3 }),
     wine: Object.freeze({ annualPerPerson: 6, incomeElasticity: 1.2, comfortMaximum: 2 })
   }),
-  // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/maxAffluence)^exponent，
+  // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/fullAffluence)^exponent（封顶 maxShare），
+  // fullAffluence 是肉占比达到 maxShare 的宽裕度（不再跟 householdBudget.maxAffluence 挂钩：那已是渐近上限 4，会让肉的曲线整体漂移）；
   // 宽裕度 1 约 5%、2 约 27%、3 为 75%；肉按 weights 分到鸡鸭鹅猪，没买到的改买面粉。comfortMaximum：肉占口粮 1/4 时的舒心值加成。
   // 这里的宽裕度是"吃肉习惯"：近 habitDays 天宽裕度的平滑值，秋收前后余粮起落时饮食慢慢变。
-  meatStaple: Object.freeze({ maxShare: 0.75, exponent: 2.5, habitDays: 90, weights: Object.freeze({ chicken: 4, duck: 3, goose: 2, pork: 8 }), comfortMaximum: 4 }),
+  meatStaple: Object.freeze({ maxShare: 0.75, fullAffluence: 3, exponent: 2.5, habitDays: 90, weights: Object.freeze({ chicken: 4, duck: 3, goose: 2, pork: 8 }), comfortMaximum: 4 }),
   serviceTypes: Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", basis: "person", cycleDays: 20, priceVoucher: 4, merchantCapacity: 24, clerkCapacity: 30, consumables: Object.freeze([]), comfort: 0.8, incomeSensitivity: 0.8 }),
     repair: Object.freeze({ id: "repair", name: "修补铺", basis: "household", cycleDays: 30, priceVoucher: 8, merchantCapacity: 14, clerkCapacity: 18, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 0.7 }),
