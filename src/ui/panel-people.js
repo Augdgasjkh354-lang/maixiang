@@ -37,6 +37,7 @@ function inequalityCardlet(ineq) {
   return `<div class="cardlet" style="margin-top:10px"><div class="setting-title">贫富与再分配</div>
     <div class="row"><span class="label">基尼系数</span><strong class="value">${gini}</strong></div>
     <div class="row"><span class="label">最富1% / 10% 占全镇家底</span><strong class="value">${number(ineq.top1SharePercent, 1)}% / ${number(ineq.top10SharePercent, 1)}%</strong></div>
+    <p class="subtle">基尼与占比口径：含存款、股票、房产、国债（全口径家底，与富人税同口径）。</p>
     ${assessed}
     ${bracketRows(ineq)}
     <div class="row"><span class="label">本年富人税 / 免征</span><strong class="value">${number(year.wealthTaxVoucher, 2)} / ${number(year.wealthTaxWaivedVoucher, 2)}券</strong></div>
@@ -54,7 +55,7 @@ function laborMoodText(mood) {
 
 function wealthRows(w, label) {
   if (!w) return "";
-  return `<div class="row"><span class="label">${label}人均家底 穷10% / 中位 / 富10%</span><strong class="value">${number(w.poorWealthPerCapita, 0)} / ${number(w.medianWealthPerCapita, 0)} / ${number(w.richWealthPerCapita, 0)}</strong></div><div class="row"><span class="label">最富10%占全镇家底</span><strong class="value">${number(w.richWealthSharePercent, 1)}%</strong></div><div class="row"><span class="label">${label}人均年收入 穷10% / 中位 / 富10%</span><strong class="value">${number(w.poorIncomePerCapita, 0)} / ${number(w.medianIncomePerCapita, 0)} / ${number(w.richIncomePerCapita, 0)}</strong></div>`;
+  return `<div class="row"><span class="label">${label}人均家底 穷10% / 中位 / 富10%</span><strong class="value">${number(w.poorWealthPerCapita, 0)} / ${number(w.medianWealthPerCapita, 0)} / ${number(w.richWealthPerCapita, 0)}</strong></div><div class="row"><span class="label">${label}人均年收入 穷10% / 中位 / 富10%</span><strong class="value">${number(w.poorIncomePerCapita, 0)} / ${number(w.medianIncomePerCapita, 0)} / ${number(w.richIncomePerCapita, 0)}</strong></div>`;
 }
 
 function wealthCardlet(view) {
@@ -62,7 +63,7 @@ function wealthCardlet(view) {
   const history = (view.annualReports || []).filter(r => r.wealth).slice(-5);
   if (!now && !history.length) return "";
   const past = history.map(r => `<div class="row"><span class="label">第${number(r.year)}年 穷10% / 中位 / 富10% 人均家底</span><strong class="value">${number(r.wealth.poorWealthPerCapita, 0)} / ${number(r.wealth.medianWealthPerCapita, 0)} / ${number(r.wealth.richWealthPerCapita, 0)}</strong></div>`).join("");
-  return `<div class="cardlet" style="margin-top:10px"><div class="setting-title">贫富分布</div>${wealthRows(now, "今年")}${past ? `<details class="detail-block" data-detail-key="wealth-history"><summary>历年对比</summary><div class="detail-body">${past}</div></details>` : ""}</div>`;
+  return `<div class="cardlet" style="margin-top:10px"><div class="setting-title">贫富分布</div><p class="subtle">人均家底仅计粮券与存粮，不含存款、股票、房产、国债；全口径见上方贫富与再分配。</p>${wealthRows(now, "今年")}${past ? `<details class="detail-block" data-detail-key="wealth-history"><summary>历年对比</summary><div class="detail-body">${past}</div></details>` : ""}</div>`;
 }
 
 export function renderPeople(view) {

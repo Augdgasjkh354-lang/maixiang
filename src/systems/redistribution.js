@@ -1,7 +1,8 @@
 // 再分配工具箱（docs/REDISTRIBUTION.md 第 1、2 条）：富人税、遗产税、家产归公，以及贫富基尼统计。
 //
-// 征税口径（家底）= 粮券 + 银行存款 + 超出口粮储备的小麦（householdWealthUnits）
-//                 + 股票市值（household.shares × 公司实时股价）+ 名下民营建筑估值（operating-rights 整栋估值）。
+// 征税口径（家底，全口径）= 粮券 + 银行存款 + 超出口粮储备的小麦（householdWealthUnits）
+//                 + 股票市值（household.shares × 公司实时股价）+ 名下民营建筑估值（operating-rights 整栋估值）
+//                 + 名下存续国债本金（bonds.js 的 holdings，按户汇总）。贫富统计（基尼、最富占比）同口径。
 // - 富人税：每 30 天（日序号 % 30 === 0）按人均家底超额累进；年税率 ÷ 12 作为当月应纳。
 //   付款顺序由支付层决定：粮券 → 存款 → 小麦；小麦不动口粮储备；付不起的当月免征，不卖股、不卖楼。
 // - 遗产税：年终人口结算时，有成年人去世的家庭按去世份额征收，超过第一档门槛 × 去世人数的部分按税率计。
@@ -19,7 +20,8 @@ import { bookAdd, ensureBook } from "../economy/books.js";
 import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, syncResidentAggregates, withDeferredHouseholdSync } from "./households.js";
 import { daysUntilHarvest, householdWealthUnits } from "./household-budget.js";
-import { wholesalePrice, householdWealth } from "./wealth-stats.js";
+import { wholesalePrice } from "./wealth-stats.js";
+import { householdBondPrincipalMap } from "./bonds.js";
 import { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
 import { transferWageClaimsToTown, wageBook } from "./employer.js";
 import { jobKeyForBuilding } from "../selectors/labor.js";
@@ -90,9 +92,9 @@ export function isWealthTaxDay(state, content) {
   return daySerialOf(state, content) % wealthTaxPeriodDays(content) === 0;
 }
 
-// 单户征税口径（券，内部单位）：粮券 + 存款 + 超额小麦 + 股票市值 + 民营建筑估值。给面板与测试用；富人税与遗产税内部共用同一口径。
+// 单户征税口径（内部单位）：粮券 + 存款 + 超额小麦 + 股票市值 + 民营建筑估值 + 国债本金。给面板与测试用；富人税、遗产税与贫富统计共用同一口径。
 export function householdTaxableWealthUnits(state, household, content) {
-  return taxBaseUnits(state, household, content, privateBuildingValuations(state, content));
+  return taxBaseUnits(state, household, content, wealthContext(state, content));
 }
 
 // 年度累进：一户人均家底 w（券）下的年应纳税（券／人）。
@@ -134,11 +136,17 @@ function shareValueUnits(state, household) {
   return total;
 }
 
+// 全口径家底所需的全镇一次性汇总（只读）：民营建筑估值（按户）与国债本金（按户）。每次调用只算一遍。
+function wealthContext(state, content) {
+  return { valuations: privateBuildingValuations(state, content), bonds: householdBondPrincipalMap(state) };
+}
+
 // 征税口径（单位：内部货币单位）。
-function taxBaseUnits(state, household, content, valuations) {
+function taxBaseUnits(state, household, content, ctx) {
   return householdWealthUnits(state, household, content)
     + shareValueUnits(state, household)
-    + (valuations.get(household.id) || 0);
+    + (ctx.valuations.get(household.id) || 0)
+    + (ctx.bonds.get(household.id) || 0);
 }
 
 function ownedPrivateBuildings(state, householdId) {
@@ -172,7 +180,7 @@ function collectFromHouseholds(state, content, rows, type, label) {
 export function settleWealthTax(state, content) {
   const scale = currencyScale(content);
   const { thresholds, ratesPercent } = wealthTaxPolicy(state);
-  const valuations = privateBuildingValuations(state, content);
+  const ctx = wealthContext(state, content);
   // brackets[0] 为免征档（人均家底低于第一档门槛），brackets[k] 为第 k 档（税率 ratesPercent[k-1]）。
   const brackets = Array.from({ length: thresholds.length + 1 }, (_, index) => ({ index, households: 0, people: 0 }));
   const rows = [];
@@ -182,7 +190,7 @@ export function settleWealthTax(state, content) {
     if (!isActiveHousehold(household)) continue;
     activeHouseholds += 1;
     const people = householdPopulation(household);
-    const perCapita = taxBaseUnits(state, household, content, valuations) / scale / people;
+    const perCapita = taxBaseUnits(state, household, content, ctx) / scale / people;
     const bracket = thresholds.filter(threshold => perCapita >= threshold).length;
     brackets[bracket].households += 1;
     brackets[bracket].people += people;
@@ -210,12 +218,12 @@ export function settleWealthTax(state, content) {
 // 遗产税第一步：年终人口变动之前，记下每户的家底与成年人数（只有税率 > 0 时才需要）。
 export function snapshotEstates(state, content) {
   if (!(inheritanceTaxPercent(state) > 0)) return null;
-  const valuations = privateBuildingValuations(state, content);
+  const ctx = wealthContext(state, content);
   const snapshot = new Map();
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
     snapshot.set(household.id, {
-      wealthUnits: taxBaseUnits(state, household, content, valuations),
+      wealthUnits: taxBaseUnits(state, household, content, ctx),
       adultsBefore: Math.max(0, household.ageBands?.workers || 0) + Math.max(0, household.ageBands?.elders || 0)
     });
   }
@@ -434,13 +442,13 @@ export function setInheritanceTaxPolicy(state, percent) {
 
 // ---------------------------------------------------------------- 贫富统计
 
-// 每户的家底（与 computeWealthStats 同口径：粮券 + 存粮存货按批发价折算），按人口加权用。
+// 每户的家底（全口径，与富人税征税口径一致，内部单位），按人口加权用。基尼、最富占比与逐年曲线都用它。
 export function wealthDistributionRows(state, content) {
-  const prices = Object.fromEntries(Object.keys(content.items || {}).map(itemId => [itemId, wholesalePrice(state, itemId, content)]));
+  const ctx = wealthContext(state, content);
   return householdList(state).filter(isActiveHousehold).map(household => ({
     householdId: household.id,
     people: householdPopulation(household),
-    wealth: householdWealth(state, household, content, prices)
+    wealth: taxBaseUnits(state, household, content, ctx)
   }));
 }
 
