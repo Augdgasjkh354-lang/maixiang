@@ -72,10 +72,10 @@ test("镇营磨坊：需求高时目标库存随之抬高，市场余量只够�
   staff(state, mill, 4);
   const market = ensureWholesaleMarket(state, CONTENT);
 
-  // 过去 7 天每天售出 100 斤面粉 → 目标库存 = 100 × 30 = 3000 斤
+  // 过去 7 天每天售出 100 斤面粉 → 目标库存 = 100 × 360 = 36000 斤
   seedHistory(state, 7, { itemId: "flour", soldJin: 100 });
   assert.equal(wholesaleAvgDemandUnits(state, "flour", CONTENT, 7), 100 * I);
-  market.inventory.flour = 2990 * I; // 余量 10 斤 → 一批面粉 16 斤，只够 1 批
+  market.inventory.flour = 35990 * I; // 余量 10 斤 → 一批面粉 16 斤，只够 1 批
   const result = processBuilding(state, mill, CONTENT);
   assert.equal(result.batches, 1);
   assert.equal(result.status, "market_capped");
