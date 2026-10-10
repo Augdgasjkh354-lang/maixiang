@@ -209,29 +209,6 @@ test("服务需求在店铺间共享且家庭共用一份服务预算，成交�
   assert.notEqual(secondSeller, firstSeller);
 });
 
-async function servicePaymentCase(stage, targetBps) {
-  const state = simulation.createInitialState({ seed: 161604 + targetBps });
-  const street = addStreet(state);
-  const [owner, buyer] = idleHouseholds(state, 2);
-  const shop = openService(state, street, "haircut", owner);
-  if (stage !== "wheat") {
-    state.monetaryReform.stage = stage;
-    state.monetaryReform.targetVoucherBps = targetBps;
-    state.monetaryReform.residentExchangeEnabled = false;
-    state.monetaryReform.legacyBankAccess = true;
-    const issued = issueTownVouchers(state, 100 * V, CONTENT, "测试印制");
-    assert.equal(issued.ok, true, issued.reason);
-    const transfer = transferVouchers(state, "town", `household:${buyer.id}`, 20 * V, CONTENT, "test_income", "测试服务消费资金");
-    assert.equal(transfer.ok, true, transfer.reason);
-  }
-  setBudget(buyer, 20, state);
-  state.services.demandByHousehold[buyer.id] = { haircut: 1000, repair: 0, tea: 0 };
-  const before = { voucher: shop.cashVoucherUnits, wheat: shop.cashWheatUnits };
-  const result = processServiceDemand(state, CONTENT);
-  assert.equal(result.servedUses.haircut, 1);
-  return { voucherDelta: shop.cashVoucherUnits - before.voucher, wheatDelta: shop.cashWheatUnits - before.wheat, state };
-}
-
 test("服务成交、店员工资、店租与利润税均形成真实资金流", () => {
   const state = simulation.createInitialState({ seed: 161605 });
   const street = addStreet(state);

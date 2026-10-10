@@ -258,15 +258,12 @@ test("没有待批申请时不能批准或驳回", () => {
   assert.equal(simulation.rejectIpoApplication(state, salt.id).ok, false);
 });
 
-test("上市前置条件：无交易所、未完成货币改革、代码与整除规则、同一建筑只能一家公司", () => {
+test("上市前置条件：无交易所、代码与整除规则、同一建筑只能一家公司", () => {
   const plain = legacyVoucherState({ seed: 7207 });
   plain.stockExchange = { legacyAccess: false, rotation: 0 };
   const salt = addBuilding(plain, "mill", "ipo-gate-salt", { level: 3 });
   assert.match(simulation.listBuilding(plain, salt.id, {}).reason, /交易所/);
   plain.stockExchange = { legacyAccess: true, rotation: 0 };
-  plain.monetaryReform.stage = "transition";
-  assert.match(simulation.listBuilding(plain, salt.id, {}).reason, /货币改革/);
-  plain.monetaryReform.stage = "voucher";
   const bad = simulation.listBuilding(plain, salt.id, { ticker: "12" });
   assert.equal(bad.ok, false);
   assert.match(bad.reason, /三位数字/);

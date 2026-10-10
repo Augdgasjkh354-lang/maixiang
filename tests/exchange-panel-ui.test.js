@@ -26,7 +26,6 @@ function listedCompanyOn(state, buildingId, { ticker = "088", offer = 0 } = {}) 
   assert.equal(simulation.issueGrainVouchers(state, "town", 20000).ok, true);
   const formed = formCompany(state, buildingId, { name: `${buildingId}公司`, levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
   assert.equal(formed.ok, true, formed.reason);
-  state.monetaryReform.stage = "voucher";
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker, totalShares: 1000, priceVoucherPerShare: 1, offeredShares: offer });
   assert.equal(listed.ok, true, listed.reason);
   return formed.companyId;

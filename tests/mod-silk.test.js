@@ -49,7 +49,6 @@ function assertValid(state, label = "") {
 
 // 粮券走发行与转账，保证总账守恒。
 function useVoucherMoney(state) {
-  state.monetaryReform.stage = "voucher";
   state.monetaryReform.targetVoucherBps = 10000;
   state.monetaryReform.residentExchangeEnabled = false;
   state.monetaryReform.legacyBankAccess = true;
