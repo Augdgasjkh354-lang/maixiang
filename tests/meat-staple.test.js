@@ -39,7 +39,6 @@ function town(seed, { square = true, store: withStore = true } = {}) {
   const base = add("livestock_base");
   const plaza = square ? add("times_square") : null;
   simulation.setEmployment(state, `${market}::${CONTENT.buildings.wholesale_market.jobs[0].id}`, 3);
-  assert.equal(state.monetaryReform.stage, "voucher"); // 开局即粮券阶段
   // 居民每日可花 = 可动用预算 ÷ 360（宽裕度重做后比旧口径少很多），粮券要给够，集市才有现金从养殖场进肉。
   grantResidentVouchers(state, 600000);
   if (!withStore) return { state, street, base, plaza, storeId: null };
@@ -54,10 +53,7 @@ function town(seed, { square = true, store: withStore = true } = {}) {
 // 主食单元测试夹具：粮券阶段、一间综合商店（可选带肉）、居民库存清空。
 function voucherState() {
   const state = simulation.createInitialState();
-  state.monetaryReform = {
-    stage: "voucher", targetVoucherBps: 10000, residentExchangeEnabled: true, legacyBankAccess: true,
-    started: null, completed: { legacy: true }, paymentHistory: [], voucherShortfallByKey: {}
-  };
+  state.monetaryReform = { legacyBankAccess: true };
   return state;
 }
 
@@ -67,7 +63,7 @@ function withGeneralStore(state, stock = {}) {
     "shop-test": {
       id: "shop-test", name: "测试综合商店", buildingId: "street-test", typeId: "general",
       primaryItemId: "wheat", itemId: "wheat", itemIds: ["wheat", "flour", "bread", "salt", ...MEATS],
-      ownerHouseholdId: owner.id, cashVoucherUnits: 0, cashWheatUnits: 0,
+      ownerHouseholdId: owner.id, cashVoucherUnits: 0,
       inventory: { wheat: 0, flour: 0, bread: 0, salt: 0, wood: 0, chicken: 0, duck: 0, goose: 0, pork: 0, ...stock },
       inventoryCostVoucherUnits: {}, status: "open", statusReason: "准备营业",
       accounts: { day: { soldUnits: {} }, year: { soldUnits: {} }, cumulative: { soldUnits: {} } },

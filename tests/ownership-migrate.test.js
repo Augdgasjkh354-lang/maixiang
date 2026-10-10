@@ -11,14 +11,19 @@ import { jobKeyForBuilding, privateJobKeyForBuilding } from "../src/selectors/la
 import { checksumSaveText, decodeSaveContainer, SAVE_CONTAINER_VERSION } from "../src/persistence/save-container.js";
 import { parseSaveFile } from "../src/persistence/storage.js";
 import { loadReportMessage } from "../src/persistence/migrations.js";
-import { wheatEraState } from "./helpers-monetary.js";
+import { setHouseholdVoucherUnits } from "./helpers-monetary.js";
 
-const I = CONTENT.precision.inventoryUnitsPerJin;
-const VOUCHER = CONTENT.precision.currencyUnitsPerVoucher;
 const clone = value => JSON.parse(JSON.stringify(value));
 
 function activeHouseholds(state) {
   return householdList(state).filter(isActiveHousehold);
+}
+
+// 镇库的粮券全部挪给第一户（总量不变），造出"镇库一分钱都付不起"的旧存档。
+function drainTownVouchers(state) {
+  const [h] = activeHouseholds(state);
+  const household = state.households.byId[h.id];
+  setHouseholdVoucherUnits(state, household, (household.voucherUnits || 0) + state.currency.balances.town);
 }
 
 function freePlot(state) {
@@ -84,7 +89,7 @@ function millLines(state) {
 }
 
 test("整栋的存档读档是空操作：归属不变、报告没有换算行", () => {
-  const state = wheatEraState({ seed: 8100 });
+  const state = simulation.createInitialState({ seed: 8100 });
   const [h1] = activeHouseholds(state);
   addMill(state, "mill-whole-town", 2);
   const priv = addMill(state, "mill-whole-private", 2);
@@ -100,14 +105,14 @@ test("整栋的存档读档是空操作：归属不变、报告没有换算行",
 });
 
 test("镇里多：民营少数户按每级估值得到补偿，整栋归镇里", () => {
-  const state = wheatEraState({ seed: 8101 });
+  const state = simulation.createInitialState({ seed:8101 });
   const [h1] = activeHouseholds(state);
   const mill = addMill(state, "mill-town", 3);
   mill.ownership = { townLevels: 2, privateLevels: 1, listedLevels: 0 };
   mill.privateOwners = [h1.id];
   const old = clone(state);
-  const townWheat = old.accounts.town.wheat;
-  const h1Wheat = old.households.byId[h1.id].inventory.wheat;
+  const townWheat = old.currency.balances.town;
+  const h1Wheat = old.households.byId[h1.id].voucherUnits;
   const loaded = loadOldSave(old);
   assertValid(loaded);
   const building = loaded.buildings.find(row => row.id === "mill-town");
@@ -116,13 +121,13 @@ test("镇里多：民营少数户按每级估值得到补偿，整栋归镇里",
   assert.equal(millLines(loaded).length, 1);
   assert.match(millLines(loaded)[0], /^磨坊整栋归属：镇里（补偿民营 1 户 [\d.]+ 粮券）$/);
   // 补偿是真实转账：镇库减少的小麦等于业主增加的小麦。
-  const paid = loaded.households.byId[h1.id].inventory.wheat - h1Wheat;
+  const paid = loaded.households.byId[h1.id].voucherUnits - h1Wheat;
   assert.ok(paid > 0, "民营业主应收到补偿");
-  assert.equal(townWheat - loaded.accounts.town.wheat, paid);
+  assert.equal(townWheat - loaded.currency.balances.town, paid);
 });
 
 test("民营多：户内等级最多者得整栋，其他户补偿；镇营等级并入不另付钱", () => {
-  const state = wheatEraState({ seed: 8102 });
+  const state = simulation.createInitialState({ seed:8102 });
   const [h1, h2] = activeHouseholds(state);
   const mill = addMill(state, "mill-private", 3);
   mill.ownership = { townLevels: 0, privateLevels: 3, listedLevels: 0 };
@@ -138,7 +143,7 @@ test("民营多：户内等级最多者得整栋，其他户补偿；镇营等�
 });
 
 test("平手归镇里：镇里与民营各占一半时整栋归镇里，民营补偿", () => {
-  const state = wheatEraState({ seed: 8103 });
+  const state = simulation.createInitialState({ seed:8103 });
   const [h1] = activeHouseholds(state);
   const mill = addMill(state, "mill-tie", 2);
   mill.ownership = { townLevels: 1, privateLevels: 1, listedLevels: 0 };
@@ -150,7 +155,7 @@ test("平手归镇里：镇里与民营各占一半时整栋归镇里，民营�
 });
 
 test("公司胜出：镇营等级并入公司，镇里按股本折算拿到新增股份，总股本取新等级的整数倍", () => {
-  const state = wheatEraState({ seed: 8104 });
+  const state = simulation.createInitialState({ seed:8104 });
   const [h1] = activeHouseholds(state);
   const { company } = addSplitListedMill(state, "mill-co", {
     level: 3, split: { townLevels: 1, privateLevels: 0, listedLevels: 2 }, residents: 300
@@ -169,7 +174,7 @@ test("公司胜出：镇营等级并入公司，镇里按股本折算拿到新�
 });
 
 test("公司胜出（未上市）：只合并等级，不增发股份；民营等级先补偿", () => {
-  const state = wheatEraState({ seed: 8105 });
+  const state = simulation.createInitialState({ seed:8105 });
   const [h1] = activeHouseholds(state);
   const { company } = addSplitListedMill(state, "mill-co-unlisted", {
     level: 4, split: { townLevels: 1, privateLevels: 1, listedLevels: 2 }, privateOwners: [h1.id], listed: false
@@ -183,14 +188,14 @@ test("公司胜出（未上市）：只合并等级，不增发股份；民营�
 });
 
 test("镇里胜过上市公司：公司清算，居民股份按股价由镇库回购，公司与股份记录消失", () => {
-  const state = wheatEraState({ seed: 8106 });
+  const state = simulation.createInitialState({ seed:8106 });
   const [h1] = activeHouseholds(state);
   const { company } = addSplitListedMill(state, "mill-town-wins", {
     level: 3, split: { townLevels: 2, privateLevels: 0, listedLevels: 1 }, residents: 300, price: 1000
   });
   const old = clone(state);
-  const townWheat = old.accounts.town.wheat;
-  const h1Wheat = old.households.byId[h1.id].inventory.wheat;
+  const townWheat = old.currency.balances.town;
+  const h1Wheat = old.households.byId[h1.id].voucherUnits;
   const loaded = loadOldSave(old);
   assertValid(loaded);
   assert.equal(loaded.companies[company.id], undefined);
@@ -198,13 +203,13 @@ test("镇里胜过上市公司：公司清算，居民股份按股价由镇库�
   assert.equal(loaded.households.byId[h1.id].shares?.[company.id], undefined);
   // 300 股 × 1000 单位 = 300000 单位 = 100 粮券。
   assert.match(millLines(loaded)[0], /^磨坊整栋归属：镇里（公司.+清算：股东回购 100 粮券）$/);
-  const paid = loaded.households.byId[h1.id].inventory.wheat - h1Wheat;
-  assert.equal(paid, 300 * 1000 / VOUCHER * I);
-  assert.equal(townWheat - loaded.accounts.town.wheat, paid);
+  const paid = loaded.households.byId[h1.id].voucherUnits - h1Wheat;
+  assert.equal(paid, 300 * 1000);
+  assert.equal(townWheat - loaded.currency.balances.town, paid);
 });
 
 test("民营胜过上市公司：公司清算，民营业主得整栋，镇营等级并入不另付钱", () => {
-  const state = wheatEraState({ seed: 8107 });
+  const state = simulation.createInitialState({ seed:8107 });
   const [h1] = activeHouseholds(state);
   const { company } = addSplitListedMill(state, "mill-private-wins", {
     level: 4, split: { townLevels: 1, privateLevels: 2, listedLevels: 1 }, privateOwners: [h1.id, h1.id], residents: 300, price: 1000
@@ -219,13 +224,13 @@ test("民营胜过上市公司：公司清算，民营业主得整栋，镇营�
 });
 
 test("镇库付不起补偿：按能付的付，报告和事件写明未付金额", () => {
-  const state = wheatEraState({ seed: 8108 });
+  const state = simulation.createInitialState({ seed:8108 });
   const [h1] = activeHouseholds(state);
   const mill = addMill(state, "mill-broke", 3);
   mill.ownership = { townLevels: 2, privateLevels: 1, listedLevels: 0 };
   mill.privateOwners = [h1.id];
   const old = clone(state);
-  old.accounts.town.wheat = 0;
+  drainTownVouchers(old);
   const loaded = loadOldSave(old);
   assertValid(loaded);
   assert.match(millLines(loaded)[0], /补偿民营 1 户 0 粮券，镇库付不起 [\d.]+ 粮券/);
@@ -234,7 +239,7 @@ test("镇库付不起补偿：按能付的付，报告和事件写明未付金�
 });
 
 test("找不到的业主：其民营等级归镇里，不付补偿", () => {
-  const state = wheatEraState({ seed: 8109 });
+  const state = simulation.createInitialState({ seed:8109 });
   const mill = addMill(state, "mill-ghost", 2);
   mill.ownership = { townLevels: 0, privateLevels: 2, listedLevels: 0 };
   mill.privateOwners = ["household-missing"];
@@ -245,7 +250,7 @@ test("找不到的业主：其民营等级归镇里，不付补偿", () => {
 });
 
 test("孤儿公司：建筑归镇里但仍挂着公司对象（公司等级为0），读档时公司清算、建筑留在镇里", () => {
-  const state = wheatEraState({ seed: 8117 });
+  const state = simulation.createInitialState({ seed:8117 });
   const { company } = addSplitListedMill(state, "mill-orphan", {
     level: 2, split: { townLevels: 2, privateLevels: 0, listedLevels: 0 }, listed: false
   });
@@ -256,7 +261,7 @@ test("孤儿公司：建筑归镇里但仍挂着公司对象（公司等级为0�
 });
 
 test("换算失败时整栋划归镇里、不付补偿，并写进报告", () => {
-  const state = wheatEraState({ seed: 8110 });
+  const state = simulation.createInitialState({ seed:8110 });
   const [h1] = activeHouseholds(state);
   // 镇里多（2 比 1）：走清算路径，库存转移时抛错。
   const { company } = addSplitListedMill(state, "mill-fallback", {
@@ -265,17 +270,17 @@ test("换算失败时整栋划归镇里、不付补偿，并写进报告", () =>
   const old = clone(state);
   // 公司库存里混入非整数（坏数据）：清算时库存转移会抛错，触发兜底。
   old.companies[company.id].inventory.wheat = 1.5;
-  const h1Wheat = old.households.byId[h1.id].inventory.wheat;
+  const h1Wheat = old.households.byId[h1.id].voucherUnits;
   const loaded = loadOldSave(old);
   assertValid(loaded);
   assert.equal(loaded.companies[company.id], undefined);
   assert.deepEqual(loaded.buildings.find(row => row.id === "mill-fallback").ownership, { townLevels: 3, privateLevels: 0, listedLevels: 0 });
-  assert.equal(loaded.households.byId[h1.id].inventory.wheat, h1Wheat, "兜底不付补偿");
+  assert.equal(loaded.households.byId[h1.id].voucherUnits, h1Wheat, "兜底不付补偿");
   assert.match(millLines(loaded)[0], /^磨坊整栋归属：无法换算（.+），整栋划归镇里，未付补偿$/);
 });
 
 test("整栋换主人时在岗人数搬到新主人的岗位键", () => {
-  const state = wheatEraState({ seed: 8115 });
+  const state = simulation.createInitialState({ seed:8115 });
   const [h1] = activeHouseholds(state);
   const mill = addMill(state, "mill-workers", 3);
   mill.ownership = { townLevels: 2, privateLevels: 1, listedLevels: 0 };
@@ -293,13 +298,13 @@ test("整栋换主人时在岗人数搬到新主人的岗位键", () => {
 });
 
 test("公司清算时镇库付不起股份：付得起的回购，其余注销并写进报告", () => {
-  const state = wheatEraState({ seed: 8116 });
+  const state = simulation.createInitialState({ seed:8116 });
   const [h1] = activeHouseholds(state);
   const { company } = addSplitListedMill(state, "mill-share-unpaid", {
     level: 3, split: { townLevels: 2, privateLevels: 0, listedLevels: 1 }, residents: 300, price: 1000
   });
   const old = clone(state);
-  old.accounts.town.wheat = 0;
+  drainTownVouchers(old);
   const loaded = loadOldSave(old);
   assertValid(loaded);
   assert.equal(loaded.companies[company.id], undefined);
@@ -309,7 +314,7 @@ test("公司清算时镇库付不起股份：付得起的回购，其余注销�
 });
 
 test("换算后再读一次是空操作（幂等）", () => {
-  const state = wheatEraState({ seed: 8111 });
+  const state = simulation.createInitialState({ seed:8111 });
   const [h1, h2] = activeHouseholds(state);
   const priv = addMill(state, "mill-idem", 3);
   priv.ownership = { townLevels: 0, privateLevels: 3, listedLevels: 0 };
@@ -325,7 +330,7 @@ test("换算后再读一次是空操作（幂等）", () => {
 });
 
 test("导入存档文件（parseSaveFile）与 IndexedDB 容器读档得到同样的换算结果", () => {
-  const state = wheatEraState({ seed: 8112 });
+  const state = simulation.createInitialState({ seed:8112 });
   const [h1] = activeHouseholds(state);
   const mill = addMill(state, "mill-import", 3);
   mill.ownership = { townLevels: 2, privateLevels: 1, listedLevels: 0 };
@@ -339,7 +344,7 @@ test("导入存档文件（parseSaveFile）与 IndexedDB 容器读档得到同�
 });
 
 test("isWholeBuilding 只认整栋：拆分、业主缺失、公司缺失都不算整栋", () => {
-  const state = wheatEraState({ seed: 8113 });
+  const state = simulation.createInitialState({ seed:8113 });
   const [h1] = activeHouseholds(state);
   const split = addMill(state, "mill-split", 2);
   split.ownership = { townLevels: 1, privateLevels: 1, listedLevels: 0 };

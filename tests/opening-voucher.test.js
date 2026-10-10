@@ -1,12 +1,11 @@
-// 开局即粮券（docs/…、AGENTS.md "货币阶段"）：新开局直接处于粮券阶段，开局发行不经银行闸门；
-// 旧档读档仍以存档自带的阶段为准（小麦阶段的旧档读回后还是小麦阶段）。
+// 开局即粮券（AGENTS.md "货币阶段"）：粮券是唯一货币，开局发行不经银行闸门；
+// 印券仍需银行（或 legacyBankAccess 兼容入口）。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { issueTownVouchers, validateCurrencyInvariant, voucherBalance } from "../src/economy/currency.js";
 import { householdList, householdPopulation } from "../src/systems/households.js";
-import { wheatEraState } from "./helpers-monetary.js";
 import { listingGate } from "../src/systems/stock-exchange.js";
 
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -18,12 +17,9 @@ function assertValid(state, label = "") {
   assert.equal(check.valid, true, `${label} ${check.errors.join("；")}`);
 }
 
-test("新开局即粮券阶段，时点为开局第 1 天，没有兼容银行入口", () => {
+test("新开局粮券是唯一货币，monetaryReform 只剩 legacyBankAccess，没有兼容银行入口", () => {
   const state = simulation.createInitialState({ seed: 4101 });
-  assert.equal(state.monetaryReform.stage, "voucher");
-  assert.equal(state.monetaryReform.legacyBankAccess, false);
-  assert.deepEqual(state.monetaryReform.started, { year: 1, day: 1 });
-  assert.deepEqual(state.monetaryReform.completed, { year: 1, day: 1 });
+  assert.deepEqual(state.monetaryReform, { legacyBankAccess: false });
   assertValid(state, "开局");
 });
 
@@ -53,7 +49,6 @@ test("开局发行不经银行闸门，但之后的印券仍需银行", () => {
   const issued = issueTownVouchers(state, 1000 * V, CONTENT, "测试印券");
   assert.equal(issued.ok, false);
   assert.match(issued.reason, /银行/);
-  assert.equal(simulation.startCurrencyReform(state).ok, false, "粮券阶段不能再次切换");
   assertValid(state, "无银行印券失败后");
 });
 
@@ -78,40 +73,16 @@ test("开局推进 30 天：每日状态合法、粮券守恒", () => {
 test("新开局存档往返：读回仍是粮券阶段，发行量与余额不变", () => {
   const state = simulation.createInitialState({ seed: 4107 });
   const loaded = migrateSave(clone(state), CONTENT);
-  assert.equal(loaded.monetaryReform.stage, "voucher");
   assert.equal(loaded.currency.issuedUnits, state.currency.issuedUnits);
   assert.equal(voucherBalance(loaded, "town"), voucherBalance(state, "town"));
   assertValid(loaded, "新档读回");
 });
 
-test("旧小麦阶段存档读回后仍是小麦阶段，不被开局的粮券阶段覆盖，且校验通过", () => {
-  const old = wheatEraState({ seed: 4108 });
-  for (let day = 0; day < 20; day += 1) simulation.advanceDay(old);
-  const raw = clone(old);
-  assert.equal(raw.monetaryReform.stage, "wheat");
-  const loaded = migrateSave(raw, CONTENT);
-  assert.equal(loaded.monetaryReform.stage, "wheat");
-  assert.equal(loaded.monetaryReform.started, null);
-  assert.equal(loaded.currency.issuedUnits, 0);
-  assert.deepEqual(loaded._loadReport.repaired, [], "读回不应有修复项");
-  assertValid(loaded, "小麦旧档读回");
-});
-
-test("更老的存档没有货币改革字段：按小麦阶段读回", () => {
-  const old = wheatEraState({ seed: 4109 });
-  const raw = clone(old);
-  delete raw.monetaryReform;
-  const loaded = migrateSave(raw, CONTENT);
-  assert.equal(loaded.monetaryReform.stage, "wheat");
-  assertValid(loaded, "无货币字段旧档读回");
-});
-
-test("已进入粮券阶段的旧档读回后仍是粮券阶段", () => {
+test("旧档的 legacyBankAccess 读回后保留；过时的货币阶段字段被丢弃", () => {
   const state = simulation.createInitialState({ seed: 4110 });
   const raw = clone(state);
-  raw.monetaryReform = { stage: "voucher", legacyBankAccess: true, started: { year: 1, day: 5 }, completed: { year: 1, day: 5 } };
+  raw.monetaryReform = { stage: "voucher", legacyBankAccess: true, started: { year: 1, day: 5 }, completed: { year: 1, day: 5 } }; // 过时字段，读档时丢弃
   const loaded = migrateSave(raw, CONTENT);
-  assert.equal(loaded.monetaryReform.stage, "voucher");
-  assert.deepEqual(loaded.monetaryReform.started, { year: 1, day: 5 });
-  assert.equal(loaded.monetaryReform.legacyBankAccess, true);
+  assert.deepEqual(loaded.monetaryReform, { legacyBankAccess: true });
+  assertValid(loaded, "旧档读回");
 });

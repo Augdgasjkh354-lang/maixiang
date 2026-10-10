@@ -26,7 +26,6 @@ function town(seed, { square = true } = {}) {
   const base = add("livestock_base");
   const plaza = square ? add("times_square") : null;
   simulation.setEmployment(state, `${market}::${CONTENT.buildings.wholesale_market.jobs[0].id}`, 3);
-  assert.equal(state.monetaryReform.stage, "voucher"); // 开局即粮券阶段
   grantResidentVouchers(state, 300000);
   const store = simulation.openResidentShop(state, street, "general");
   assert.equal(store.ok, true, store.reason);
@@ -145,7 +144,7 @@ test("旧档里按户开的摊位读档后收摊清算，换成集体集市", ()
   const household = Object.values(state.households.byId).find(h => (h.voucherUnits || 0) > 500 * V);
   const legacyId = "shop-legacy";
   state.shops[legacyId] = { ...structuredClone(state.shops[Object.keys(state.shops)[0]]), id: legacyId, name: "旧摊", typeId: "stall", buildingId: plaza,
-    collective: undefined, ownerHouseholdId: household.id, cashVoucherUnits: 0, cashWheatUnits: 0, inventory: {}, inventoryCostVoucherUnits: {}, history: [] };
+    collective: undefined, ownerHouseholdId: household.id, cashVoucherUnits: 0, inventory: {}, inventoryCostVoucherUnits: {}, history: [] };
   simulation.advanceDays(state, 3);
   assert.ok(!state.shops[legacyId], "旧摊清算完删档");
   assert.ok(collective(state), "建了集体集市");
