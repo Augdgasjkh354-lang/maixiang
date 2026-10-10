@@ -1,5 +1,5 @@
 // 存档结构版本：只在彻底不兼容时才加一。日常加字段不用改（读档会自动补默认值，见 persistence/save-compat.js）。
-export const SAVE_VERSION = 17;
+export const SAVE_VERSION = 18;
 
 // 戏园只招待富户：家庭宽裕度（household-budget.js 的 affluence）达到此值才去。服务定义里的 minAffluence 读它。
 const THEATER_MIN_AFFLUENCE = 1.5;

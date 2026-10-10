@@ -143,6 +143,5 @@ export function describeLoadReport(report) {
   if (report.ownership?.length) parts.push(`整栋归属换算 ${report.ownership.length} 栋：${report.ownership.join("；")}`);
   if (report.households?.length) parts.push(report.households.join("；"));
   if (report.calendar?.length) parts.push(report.calendar.join("；"));
-  if (report.wheatCash?.length) parts.push(report.wheatCash.join("；"));
   return parts.length ? `存档来自旧版本，已自动处理（${parts.join("；")}），其余进度保留。` : null;
 }

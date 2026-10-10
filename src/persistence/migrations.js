@@ -9,12 +9,11 @@ import { createInitialState, ensureProjectAccessor } from "../core/state.js";
 import { syncShopEmployment } from "../systems/shops.js";
 import { syncResidentAggregates } from "../systems/households.js";
 import { convertSplitOwnership } from "../systems/ownership-migrate.js";
-import { convertResidualWheatCash } from "./wheat-cash-migrate.js";
 import {
   ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers
 } from "./save-compat.js";
 
-export const MIN_SAVE_VERSION = 17;
+export const MIN_SAVE_VERSION = 18;
 
 function cloneJson(value) {
   if (typeof globalThis.structuredClone === "function") return globalThis.structuredClone(value);
@@ -37,11 +36,6 @@ export function migrateSave(raw, content) {
   if (stored > current) throw new Error("该存档来自更新版本，当前版本无法读取。");
   if (stored < MIN_SAVE_VERSION) throw new Error("旧版存档不兼容，请开始新游戏。");
 
-  // 小麦阶段（实物当货币）的旧档不再支持：粮券阶段的存档才读得进来。新版存档的 monetaryReform 只有 legacyBankAccess。
-  if (!raw.monetaryReform || typeof raw.monetaryReform !== "object" || raw.monetaryReform.stage === "wheat") {
-    throw new Error("该存档仍是小麦结算的旧版本，已不再支持，请开始新游戏。");
-  }
-
   const report = emptyLoadReport();
   // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
   const saved = applyRenames(cloneJson(raw), report, definitions.modSave?.renames || []);
@@ -50,9 +44,8 @@ export function migrateSave(raw, content) {
   const state = mergeOntoBase(cloneJson(base), saved, "", report, entityMaps);
   state.version = current;
   state.schemaVersion = current;
-  // 货币阶段已删除：旧的粮券阶段存档里的 stage/started/completed 丢掉，只留银行入口标记。
+  // 货币阶段已删除，只留银行入口标记。
   state.monetaryReform = { legacyBankAccess: Boolean(saved.monetaryReform?.legacyBankAccess) };
-  convertResidualWheatCash(state, definitions, report);
   sanitizeNumbers(state, report);
   rehydrate(state, definitions);
   // 旧存档里按等级拆开的建筑整栋换主人（docs/OWNERSHIP.md 旧存档换算）；必须在校验之前，整栋已是空操作。
