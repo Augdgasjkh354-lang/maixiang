@@ -1461,7 +1461,7 @@ export function mountGame(root) {
       const result = simulation.openResidentShop(state, shopOpen.dataset.shopBuilding, shopOpen.dataset.shopOpen);
       if (!result.ok) { showToast(result.reason); return; }
       changed(true); renderedMapSignature = ""; render(true);
-      showToast(`店铺已开业，家庭投入${number(result.startupVoucher, 2)}小麦等值。`);
+      showToast(result.town ? "镇营店已开张，店员由镇里设定。" : `店铺已开业，家庭投入${number(result.startupVoucher, 2)}小麦等值。`);
       return;
     }
     const shopMerchant = closest(target, "[data-shop-merchant][data-step]");

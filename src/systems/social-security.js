@@ -233,6 +233,8 @@ function resolveSocialEmployerUncached(state, jobKey, ctx) {
   const shop = SHOP_JOB_KEY.exec(jobKey);
   if (shop) {
     const record = state.shops?.[shop[1]];
+    // 镇营综合商店：雇主是镇库（工资与社保都由镇库承担）。
+    if (record?.town && record.status !== "closed" && record.status !== "liquidating") return employerInfo(state, SOCIAL_EMPLOYER_TOWN);
     return shopCanEmploy(record)
       ? { employer: `shop:${shop[1]}`, kind: "shop", ownerHouseholdId: record.ownerHouseholdId || null }
       : SELF_EMPLOYED;

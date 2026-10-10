@@ -5,7 +5,9 @@ import { householdIdOf } from "../economy/accounts.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
-import { recordEvent } from "../economy/ledger.js";
+import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
+import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/business.js";
+import { putStock, takeStock } from "../economy/trade.js";
 import { nextRandom } from "../core/random.js";
 import {
   householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold,
@@ -17,7 +19,7 @@ import { shopTradePrices, recentAverage } from "../economy/operating-plan.js";
 import { shopEffectiveMarginPercent } from "../economy/margin-policy.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { accrueWages, payWages, pendingWages, wageArrears, wageBook } from "./employer.js";
-import { buyWholesaleForOwner, hasWholesaleMarket, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
+import { allocateInputToTown, buyWholesaleForOwner, hasWholesaleMarket, recordTownInputConsumption, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
 import { farmSalePriceVoucher } from "./farm-pricing.js";
 import {
@@ -179,7 +181,14 @@ function clerkJobKey(shop) { return `shop:${shop.id}:clerk`; }
 
 export function shopMerchantCount(state, shop) { return jobCount(state, merchantJobKey(shop)); }
 
+// 店铺的付款账户名：镇营综合商店没有自己的钱包，收付款一律走镇库（"town"）；其余店铺走 shop:<id>。
+export function shopAccountName(shop) {
+  return shop?.town ? "town" : `shop:${shop.id}`;
+}
+
 function shopMerchantOnDuty(state, shop) {
+  // 镇营综合商店：没有商人，有店员即营业（店员由镇里设定）。
+  if (shop.town) return shopClerkCount(state, shop) > 0;
   // 集体经营（时代广场）：有人在摊上就算营业，不认某一户店主。
   if (shop.collective) return shopMerchantCount(state, shop) > 0;
   const owner = state.households?.byId?.[shop.ownerHouseholdId];
@@ -267,6 +276,11 @@ export function syncShopEmployment(state, content) {
       continue;
     }
     if (shop.collective) {
+      if (shop.status === "paused") { shop.status = "open"; shop.statusReason = "准备营业"; }
+      continue;
+    }
+    // 镇营综合商店：没有业主与商人，店员由镇里设定，不因"商人缺位"暂停。
+    if (shop.town) {
       if (shop.status === "paused") { shop.status = "open"; shop.statusReason = "准备营业"; }
       continue;
     }
@@ -383,6 +397,7 @@ export function transferShopOwnership(state, shopId, newHouseholdId, content) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
   if (shop.collective) return { ok: false, reason: "集体摊位没有业主" };
+  if (shop.town) return { ok: false, reason: "镇营店没有业主" };
   const next = livingWorkerHousehold(state, newHouseholdId);
   if (!next) return { ok: false, reason: "新业主必须是有劳动力的在世家庭" };
   const merchantKey = merchantJobKey(shop);
@@ -446,7 +461,7 @@ export function succeedShopsOfHousehold(state, householdId, content) {
 export function succeedOrphanShops(state, content) {
   const rows = [];
   for (const shop of Object.values(ensureShops(state, content))) {
-    if (shop.collective || shop.status === "closed" || shop.status === "liquidating") continue;
+    if (shop.collective || shop.town || shop.status === "closed" || shop.status === "liquidating") continue;
     const owner = state.households?.byId?.[shop.ownerHouseholdId];
     if (owner && isActiveHousehold(owner)) continue;
     rows.push({ shopId: shop.id, ...succeedOrphanShop(state, shop, content) });
@@ -487,6 +502,7 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
   if (!definition) return { ok: false, reason: "不支持这种店铺" };
   const active = shopsForStreet(state, buildingId);
   if (active.length >= shopHostSlots(building, content)) return { ok: false, reason: `${hostName}没有空位` };
+  if (requestedDefinition?.town) return openTownShopRecord(state, building, normalizedTypeId, definition, content);
   const startupUnits = shopStartupUnits(definition, content);
   const household = chooseMerchantHousehold(state, content, preferredHouseholdId, startupUnits);
   if (!household) return { ok: false, reason: "没有同时满足生活储备、启动资金和空闲劳动力的家庭" };
@@ -562,9 +578,58 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
   return { ok: true, shopId, householdId: household.id, startupVoucher: startupUnits / currencyScale(content) };
 }
 
+// 镇营综合商店（content 里的 town_general 别名 → 综合商店，带 town 标记）：镇里持有，不要业主与商人，
+// 没有自己的钱（收入直接进镇库、工资与进货由镇库付），店员由镇里设定（configureShopClerks）。占用商业街店位。
+function openTownShopRecord(state, building, typeId, definition, content) {
+  if (!hasWholesaleMarket(state)) return { ok: false, reason: "请先建成批发市场（镇营综合商店从批发市场进货）" };
+  // 每条商业街的镇营店数量上限（rules.townShop.maxPerStreet，默认 1）；停业中的不占名额。
+  const maxPerStreet = Math.max(1, Math.floor(Number(content.rules.townShop?.maxPerStreet ?? 1)));
+  const open = Object.values(state.shops || {}).filter(row => row.town && row.buildingId === building.id
+    && row.status !== "closed" && row.status !== "liquidating").length;
+  if (open >= maxPerStreet) return { ok: false, reason: `每条商业街最多${maxPerStreet}家镇营综合商店` };
+  const shopId = `shop-${state.nextShopNumber++}`;
+  const shop = {
+    id: shopId,
+    name: `镇营${definition.name}`,
+    buildingId: building.id,
+    typeId,
+    town: true,
+    primaryItemId: definition.itemIds?.[0] || null,
+    itemId: definition.itemIds?.[0] || null,
+    itemIds: definition.kind === "retail" ? [...(definition.itemIds || [])] : [],
+    serviceId: null,
+    ownerHouseholdId: null,
+    cashVoucherUnits: 0,
+    cashWheatUnits: 0,
+    inventory: emptyShopInventory(content),
+    inventoryCostVoucherUnits: {},
+    status: "open",
+    statusReason: "准备营业",
+    openedYear: state.year,
+    openedDay: state.day + 1,
+    badDays: 0,
+    accounts: { day: blankShopPeriod(), year: blankShopPeriod(), cumulative: blankShopPeriod() },
+    liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 },
+    settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
+    retainedEarningsVoucherUnits: 0,
+    initialCapital: { valueUnits: 0, voucherValueUnits: 0, wheatValueUnits: 0 }
+  };
+  state.shops[shopId] = shop;
+  ensureShopBooks(shop, content);
+  syncShopEmployment(state, content);
+  recordEvent(state, `镇里在商业街开出${shop.name}，店员由镇里设定。`, content, { day: state.day + 1 });
+  return { ok: true, shopId, householdId: null, town: true, startupVoucher: 0 };
+}
+
+// 镇里开一家镇营综合商店（命令 openTownShop 调用）。
+export function openTownShop(state, buildingId, content) {
+  return openShop(state, buildingId, "town_general", content);
+}
+
 export function setShopMerchants(state, shopId, requested, content) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
+  if (shop.town) return { ok: false, reason: "镇营店没有商人，店员由镇里设定" };
   syncShopEmployment(state, content);
   if (shop.status !== "open") return { ok: false, reason: "店铺未营业" };
   const max = shopMaxMerchants(shop, content);
@@ -631,7 +696,7 @@ export function setShopClerks(state, shopId, requested, content) {
     for (const row of result.releasedRows || []) {
       const due = perWorker * row.count;
       if (due <= 0) continue;
-      const paid = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${row.householdId}`, currentPaymentComposition(state, due), content,
+      const paid = settleMonetaryPayment(state, shopAccountName(shop), `household:${row.householdId}`, currentPaymentComposition(state, due), content,
         "severance_payment", `${shop.name}辞退店员补偿`, { requireFull: false }).paidValueUnits || 0;
       if (due > paid) {
         shop.liabilities.claimsVoucherUnits[row.householdId] = (shop.liabilities.claimsVoucherUnits[row.householdId] || 0) + (due - paid);
@@ -712,6 +777,25 @@ function shopWorkingCapitalReserve(state, shop, content) {
   return Math.round(shopSalesCapacityUnits(state, shop, content) / content.precision.inventoryUnitsPerJin * averageWholesale * days * currencyScale(content));
 }
 
+// 镇营店的定价成本基础：与库存成本账并行，按私营店进货的同一价（市场段为进货时的批发售价，养殖场段为养殖场售价）逐笔入账、
+// 按比例转出，只供动态定价复核算利润率；镇库的库存成本账不受影响。私营店不用，这些函数对非镇营店直接返回。
+function addPricingBasis(shop, itemId, valueUnits) {
+  if (!shop.town || !(valueUnits > 0)) return;
+  shop.pricingBasisVoucherUnits ||= {};
+  shop.pricingBasisVoucherUnits[itemId] = (shop.pricingBasisVoucherUnits[itemId] || 0) + Math.floor(valueUnits);
+}
+function takePricingBasis(shop, itemId, available, units) {
+  if (!shop.town) return 0;
+  shop.pricingBasisVoucherUnits ||= {};
+  const basis = shop.pricingBasisVoucherUnits[itemId] || 0;
+  const cost = units >= available ? basis : (available > 0 ? Math.floor(basis * units / available) : 0);
+  shop.pricingBasisVoucherUnits[itemId] = Math.max(0, basis - cost);
+  return cost;
+}
+function wholesaleValueUnits(state, itemId, units, content) {
+  return Math.round(units / content.precision.inventoryUnitsPerJin * wholesaleUnitPrice(state, itemId, content) * currencyScale(content));
+}
+
 function removeShopInventoryCost(shop, itemId, units) {
   const available = shop.inventory[itemId] || 0;
   const basis = shop.inventoryCostVoucherUnits[itemId] || 0;
@@ -748,10 +832,12 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
   if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * prices.retailVoucherPerUnit * currencyScale(content));
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
   const maxWheatUnits = buyerHousehold ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30) : undefined;
-  const payment = settleMonetaryPayment(state, buyerOwner, `shop:${shopId}`, currentPaymentComposition(state, paymentUnits), content,
+  // 镇营店的零售收入直接进镇库（付给 "town"），店里没有自己的钱。
+  const payment = settleMonetaryPayment(state, buyerOwner, shopAccountName(shop), currentPaymentComposition(state, paymentUnits), content,
     "shop_retail_sale", reason, { requireFull: true, ...(maxWheatUnits === undefined ? {} : { maxWheatUnits }) });
   if (!payment.ok) return payment;
   const cogs = removeShopInventoryCost(shop, itemId, actual);
+  const pricingCogs = shop.town ? takePricingBasis(shop, itemId, shop.inventory[itemId] || 0, actual) : cogs;
   shop.inventory[itemId] -= actual;
   addBookValue(shop, "revenueVoucherUnits", paymentUnits);
   addBookValue(shop, "cogsVoucherUnits", cogs);
@@ -774,7 +860,8 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
   }
   applyProfit(shop, paymentUnits - cogs);
   // 0.2.3 动态加价：把这一笔成交记入按商品的利润率窗口（收入/进货成本/销量）。
-  recordShopItemSale(shop, itemId, actual, paymentUnits, cogs, content);
+  // 动态定价的成本口径用定价成本基础（镇营店按私营店同口径的进货价入账，见 addPricingBasis）；账上 COGS 仍是内部成本基础。
+  recordShopItemSale(shop, itemId, actual, paymentUnits, pricingCogs, content);
   return { ok: true, itemId, quantityUnits: actual, paidVoucherUnits: paymentUnits, paidValueUnits: paymentUnits, cogsVoucherUnits: cogs, transactionId: payment.transactionId };
 }
 
@@ -855,8 +942,31 @@ export function recordShopServiceSale(state, shopId, householdId, serviceId, con
   return { ok: true, paidValueUnits: priceUnits, cogsVoucherUnits: cogs, transactionId: payment.transactionId };
 }
 
+// 镇营综合商店从批发市场进货：市场 → 镇库 → 店，全部是镇里内部调拨（只搬货、不付钱），成本基础随货转移。
+// 返回的 paidVoucherUnits 是这批货的内部成本（不是现金）；库存与成本由调用方用 putStock 入账。
+// 同时记入批发市场的镇营需求（townConsumed），让做市商看见镇营店的进货量。
+function procureTownStoreFromMarket(state, shop, itemId, wantedUnits, content) {
+  const none = { boughtUnits: 0, paidVoucherUnits: 0, subsidyVoucherUnits: 0 };
+  if (!hasWholesaleMarket(state) || !wholesaleMonopolyItemIds(content).includes(itemId) || !(wantedUnits > 0)) return none;
+  // 供货份额上限：镇营店当日每种商品最多拿批发市场可售量（进货前的库存，镇营店先进货，即私营店尚未进货时的库存）的 supplyShareMax，余下留给私营店。
+  const stock = Math.max(0, state.wholesaleMarket.inventory?.[itemId] || 0);
+  const share = Math.min(1, Math.max(0, Number(content.rules.townShop?.supplyShareMax ?? 0.5)));
+  const capUnits = Math.floor(stock * share);
+  const askUnits = Math.min(Math.floor(wantedUnits), capUnits);
+  if (askUnits <= 0) return none;
+  const moved = allocateInputToTown(state, itemId, askUnits, content, `${shop.name}从批发市场进货（镇库内部调拨，不付钱）`);
+  if (!moved.ok || !(moved.movedUnits > 0)) return none;
+  const units = moved.movedUnits;
+  const out = removeTownInventoryWithCost(state, itemId, units, content);
+  recordLedger(state, { type: "town_store_restock", transactionId: makeTransactionId(state), source: "town", destination: `shop:${shop.id}`,
+    itemId, quantityUnits: units, qeqUnits: 0, reason: `${shop.name}从镇库领货（内部调拨，不付钱）` }, content);
+  recordTownInputConsumption(state, itemId, units, content);
+  return { boughtUnits: units, paidVoucherUnits: out.costWheatUnits, subsidyVoucherUnits: 0 };
+}
+
 export function procureShopInventory(state, shop, content) {
   if (shop.status !== "open") return { purchasedUnits: 0, purchasedByItem: {}, reason: shop.status === "paused" ? "暂停经营" : "已停业" };
+  if (shop.town && !shopMerchantOnDuty(state, shop)) return { purchasedUnits: 0, purchasedByItem: {}, reason: "无店员，暂不进货" };
   const invScale = content.precision.inventoryUnitsPerJin;
   const def = shopDefinition(content, shop.typeId);
   let itemTargets = [];
@@ -905,16 +1015,19 @@ export function procureShopInventory(state, shop, content) {
     // 综合商店和集市先从养殖场进肉，不够再找批发市场。
     const fromFarms = (def?.id === "general" || def?.kind === "stall") && content.items[row.itemId]?.livestock ? buyFromFarms(state, shop, row.itemId, need, content, row.dailyUnits) : 0;
     const purchase = need - fromFarms > 0
-      ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`,
-        { discountPerUnit: shop.collective ? stallDiscountPerUnit(state, content) : 0 })
+      ? (shop.town
+        ? procureTownStoreFromMarket(state, shop, row.itemId, need - fromFarms, content)
+        : buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`,
+          { discountPerUnit: shop.collective ? stallDiscountPerUnit(state, content) : 0 }))
       : { boughtUnits: 0, paidVoucherUnits: 0 };
     if (purchase.subsidyVoucherUnits > 0) addBookValue(shop, "subsidyVoucherUnits", purchase.subsidyVoucherUnits);
     const bought = (purchase.boughtUnits || 0) + fromFarms;
     const wholesaleBought = purchase.boughtUnits || 0;
     if (wholesaleBought > 0) {
-      shop.inventory[row.itemId] = (shop.inventory[row.itemId] || 0) + wholesaleBought;
-      shop.inventoryCostVoucherUnits[row.itemId] = (shop.inventoryCostVoucherUnits[row.itemId] || 0) + (purchase.paidVoucherUnits || 0);
-      addBookValue(shop, "purchaseVoucherUnits", purchase.paidVoucherUnits || 0);
+      putStock(shop, row.itemId, wholesaleBought, purchase.paidVoucherUnits || 0);
+      addPricingBasis(shop, row.itemId, wholesaleValueUnits(state, row.itemId, wholesaleBought, content));
+      // 镇营店的进货成本是镇库内部价，不是现金支出，不记入采购账。
+      if (!shop.town) addBookValue(shop, "purchaseVoucherUnits", purchase.paidVoucherUnits || 0);
       addBookMap(shop, "purchasedUnits", row.itemId, wholesaleBought);
     }
     purchasedByItem[row.itemId] = bought;
@@ -922,7 +1035,8 @@ export function procureShopInventory(state, shop, content) {
   }
   if (hadNeed && purchasedTotal <= 0) {
     // 基线清理：无批发市场时走镇库直购，缺货提示要准确。
-    shop.statusReason = maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 ? "缺资金" : (hasWholesaleMarket(state) ? "批发市场缺货" : "镇库缺货");
+    if (shop.town) shop.statusReason = hasWholesaleMarket(state) ? "批发市场缺货" : "尚未建成批发市场";
+    else shop.statusReason = maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 ? "缺资金" : (hasWholesaleMarket(state) ? "批发市场缺货" : "镇库缺货");
   }
   return { purchasedUnits: purchasedTotal, purchasedByItem, reason: !hadNeed ? "库存充足" : (purchasedTotal > 0 ? "已补货" : shop.statusReason) };
 }
@@ -950,7 +1064,8 @@ function accrueDailyLiabilities(state, shop, content) {
     : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
   // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
   const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
-  const rent = Math.max(0, Math.round(rentVoucher * rentUnits * scale));
+  // 镇营综合商店不交店租（镇库自己的店）。
+  const rent = shop.town ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
   if (rentFree) addBookValue(shop, "rentWaivedVoucherUnits", Math.round((state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2) * rentUnits * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
   if (!shop.collective) accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
@@ -981,14 +1096,34 @@ function payLiability(state, shop, key, destination, content, type, reason) {
 
 function payDailyLiabilities(state, shop, content) {
   // 营业中按发薪日结；暂停、清算、收摊（非营业）时所有待发工资立即到期，进入欠薪清偿顺序。
-  const options = shop.status === "open" ? { payDay: payDayFor(state, `shop:${shop.id}`) } : {};
-  payWages(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`, options);
+  // 镇营店的工资由镇库付（发薪日按镇库的 5 号）。
+  const payer = shopAccountName(shop);
+  const options = shop.status === "open" ? { payDay: payDayFor(state, payer) } : {};
+  payWages(state, shop.liabilities, payer, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`, options);
   shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
+  // 镇营店不交店租与利润税（镇库自己的店，钱本来就在镇库）。
+  if (shop.town) return;
   payLiability(state, shop, "rentVoucherUnits", "town", content, "shop_rent_payment", `${shop.name}支付店租`);
   payLiability(state, shop, "taxVoucherUnits", "town", content, "shop_profit_tax_payment", `${shop.name}缴纳商业利润税`);
 }
 
+// 镇营综合商店的"结账"：收入已直接进镇库，店里没有留存现金，不交利润税、不分红。
+// 留存利润（收入减进货成本与工资）按账记为已上缴镇库，留存额清零。
+function settleTownShop(state, shop) {
+  const remitted = shop.retainedEarningsVoucherUnits || 0;
+  if (remitted) addBookValue(shop, "remittedVoucherUnits", remitted);
+  shop.retainedEarningsVoucherUnits = 0;
+  shop.settlement.days = 0;
+  shop.settlement.profitVoucherUnits = 0;
+  shop.settlement.lossCarryVoucherUnits = 0;
+  shop.settlement.lastSettlementYear = state.year;
+  shop.settlement.lastSettlementDay = state.day + 1;
+  return { settled: true, periodProfitVoucherUnits: 0, taxVoucherUnits: 0, lossCarryVoucherUnits: 0, distributedVoucherUnits: 0,
+    retainedEarningsVoucherUnits: 0, remittedVoucherUnits: remitted, reserveVoucherUnits: 0 };
+}
+
 export function settleShopTaxAndDistribution(state, shop, content, force = false, options = {}) {
+  if (shop.town) return settleTownShop(state, shop);
   const interval = shopDefinition(content, shop.typeId)?.settlementDays || content.rules.shopSettlementDays || 30;
   if (!force && shop.settlement.days < interval) return { settled: false };
   const periodProfit = shop.settlement.profitVoucherUnits || 0;
@@ -1096,6 +1231,8 @@ function averageWholesalePriceJin(state, shop, content, history) {
 }
 
 function autoAdjustShopClerks(state, shop, content) {
+  // 镇营综合商店的店员由镇里设定（configureShopClerks），自动审核不覆盖。
+  if (shop.town) return;
   const serial = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
   // 正式员工：每月 1 号审核一次（新店第一次立即审核），一次最多增减一人。
   shop.plan ||= { lastAdjustedSerial: -1 };
@@ -1432,11 +1569,11 @@ function buyFromFarms(state, store, itemId, wantedUnits, content, dailyUnits = w
     const left = wantedUnits - bought;
     if (left <= 0) break;
     if (!(price > 0)) continue;
-    const affordable = Math.floor(maximumPayableValueUnits(state, `shop:${store.id}`, content) * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
+    const affordable = Math.floor(maximumPayableValueUnits(state, shopAccountName(store), content) * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
     const units = Math.min(left, farm.inventory[itemId] || 0, affordable);
     if (units <= 0) break;
     const value = Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content));
-    const payment = settleMonetaryPayment(state, `shop:${store.id}`, `shop:${farm.id}`, currentPaymentComposition(state, value), content,
+    const payment = settleMonetaryPayment(state, shopAccountName(store), `shop:${farm.id}`, currentPaymentComposition(state, value), content,
       "farm_sale", `${store.name}向${farm.name}进${content.items[itemId]?.name || itemId}`, { requireFull: true });
     if (!payment.ok) break;
     const cogs = removeShopInventoryCost(farm, itemId, units);
@@ -1446,8 +1583,8 @@ function buyFromFarms(state, store, itemId, wantedUnits, content, dailyUnits = w
     addBookMap(farm, "soldUnits", itemId, units);
     addBookMap(farm, "storeSoldUnits", itemId, units);
     applyProfit(farm, value - cogs);
-    store.inventory[itemId] = (store.inventory[itemId] || 0) + units;
-    store.inventoryCostVoucherUnits[itemId] = (store.inventoryCostVoucherUnits[itemId] || 0) + value;
+    putStock(store, itemId, units, value);
+    addPricingBasis(store, itemId, value);
     addBookValue(store, "purchaseVoucherUnits", value);
     addBookMap(store, "purchasedUnits", itemId, units);
     bought += units;
@@ -1471,7 +1608,9 @@ export function prepareShopsForDay(state, content) {
   syncShopEmployment(state, content);
   const rows = [];
   // 集市先进货：它卖得少（摊位人手封顶），先拿一点养殖场的肉；综合商店需求大，排在后面会把肉全包走、集市进不到货。
-  const procureOrder = [...operating].sort((a, b) => (shopKind(a, content) === "stall" ? 0 : 1) - (shopKind(b, content) === "stall" ? 0 : 1));
+  // 镇营综合商店最先进货（镇里的店，进货优先于私营店）；其次集市。
+  const procureRank = shop => (shop.town ? 0 : shopKind(shop, content) === "stall" ? 1 : 2);
+  const procureOrder = [...operating].sort((a, b) => procureRank(a) - procureRank(b));
   for (const shop of procureOrder) {
     ensureShopBooks(shop, content);
     shop.settlement.days += 1;
@@ -1526,17 +1665,18 @@ export function finishShopsDay(state, content, forceSettlement = false) {
       : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
     const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
     // 贸易行不因无生意而累计坏日子：连续 tradeHousePauseDays 天无买卖且亏损由 trading-houses.js 暂停营业，暂停中不进清算。
-    if (tradeHouse) shop.badDays = 0;
+    // 镇营综合商店不因连续无生意累计坏日子（不自动关店，由玩家关）。
+    if (tradeHouse || shop.town) shop.badDays = 0;
     else if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
-    else if (maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
+    else if (maximumPayableValueUnits(state, shopAccountName(shop), content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
     else if (shopKind(shop, content) === "trade") shop.statusReason = activity > 0 ? "营业中" : "暂无可做的买卖";
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";
     else shop.statusReason = "营业中";
-    if (!shop.collective && shop.badDays >= (content.rules.shopClosureBadDays || 30) && activity <= 0) {
+    if (!shop.collective && !shop.town && shop.badDays >= (content.rules.shopClosureBadDays || 30) && activity <= 0) {
       const closing = closeShop(state, shop.id, content, true);
       rows.push({ shopId: shop.id, closed: true, liquidationPending: closing.liquidationPending, settlement });
     } else rows.push({ shopId: shop.id, closed: false, settlement });
@@ -1589,10 +1729,42 @@ function finalizeShopLiquidation(state, shop, content) {
   return true;
 }
 
+// 镇营综合商店停业（玩家关店）：店员释放（不付辞退补偿，同其他店铺停业）；欠薪立即由镇库偿付，
+// 付不起的记为镇库欠家庭（household.townOwesVoucherUnits，之后镇库有钱就还）；库存归镇库，成本随货转移。
+// 镇营店没有自己的钱，所以不进清算。
+function windUpTownShop(state, shop, content) {
+  setJobCount(state, merchantJobKey(shop), 0, null);
+  setJobCount(state, clerkJobKey(shop), 0, null);
+  shop.status = "closed";
+  shop.statusReason = "已停业，库存归镇库";
+  payDailyLiabilities(state, shop, content);
+  for (const [householdId, due] of Object.entries(shop.liabilities.claimsVoucherUnits || {})) {
+    const household = state.households?.byId?.[householdId];
+    if (!(due > 0) || !household) continue;
+    household.townOwesVoucherUnits = (household.townOwesVoucherUnits || 0) + due;
+    delete shop.liabilities.claimsVoucherUnits[householdId];
+    if (shop.liabilities.claimsPayment) delete shop.liabilities.claimsPayment[householdId];
+  }
+  shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
+  for (const [itemId, units] of Object.entries(shop.inventory || {})) {
+    if (!(units > 0)) continue;
+    const taken = takeStock(shop, itemId, units, { strict: true });
+    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + taken.units;
+    addTownCostBasis(state, itemId, Math.max(0, Math.floor(taken.costUnits)));
+    recordLedger(state, { type: "town_store_stock_return", transactionId: makeTransactionId(state), source: `shop:${shop.id}`, destination: "town",
+      itemId, quantityUnits: taken.units, qeqUnits: 0, reason: `${shop.name}停业，库存归镇库` }, content);
+  }
+  shop.pricingBasisVoucherUnits = {};
+  syncShopEmployment(state, content);
+  recordEvent(state, `${shop.name}停业，库存归镇库。`, content, { day: state.day + 1 });
+  return { ok: true, shopId: shop.id, liquidationPending: false, status: shop.status, liabilitiesVoucherUnits: shopLiabilityTotal(shop) };
+}
+
 export function closeShop(state, shopId, content, automatic = false) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
   if (shop.status === "closed") return { ok: true, shopId, alreadyClosed: true, liquidationPending: false };
+  if (shop.town) return windUpTownShop(state, shop, content);
   if (shop.status !== "liquidating") {
     settleShopTaxAndDistribution(state, shop, content, true, { allowDistribution: false });
     setJobCount(state, merchantJobKey(shop), 0, null);
@@ -1733,14 +1905,15 @@ export function shopSummaries(state, content) {
     else if (kind === "retail" && avgSalesUnits <= 0) operatingStatus = "暂无销量";
     else if (Number.isFinite(shop.plan?.targetClerks) && shop.plan.targetClerks < shopClerkCount(state, shop)) operatingStatus = "用工偏多";
     return {
-      id: shop.id, name: shop.name, buildingId: shop.buildingId, typeId: shop.typeId, typeName: def?.name || shop.typeId, kind, collective: Boolean(shop.collective),
+      id: shop.id, name: shop.name, buildingId: shop.buildingId, typeId: shop.typeId, typeName: def?.name || shop.typeId, kind, collective: Boolean(shop.collective), town: Boolean(shop.town),
       itemId: primary, itemName: primary ? (content.items[primary]?.name || primary) : "", itemIds, inventoryRows, serviceId,
       serviceName: serviceId ? (content.rules.serviceTypes?.[serviceId]?.name || serviceId) : null,
-      ownerHouseholdId: shop.ownerHouseholdId, ownerName: state.households?.byId?.[shop.ownerHouseholdId]?.name || shop.ownerHouseholdId, merchantHouseholdId: shop.ownerHouseholdId, merchantOnDuty: shopMerchantOnDuty(state, shop),
+      ownerHouseholdId: shop.ownerHouseholdId, ownerName: shop.town ? "镇库" : (state.households?.byId?.[shop.ownerHouseholdId]?.name || shop.ownerHouseholdId), merchantHouseholdId: shop.ownerHouseholdId, merchantOnDuty: shopMerchantOnDuty(state, shop),
       merchants: shopMerchantCount(state, shop), maxMerchants: shopMaxMerchants(shop, content),
       clerks: shopClerkCount(state, shop), maxClerks: shopClerkLimit(shop, content), occupiesStreet: shopOccupiesStreet(shop),
       cashVoucher: shop.cashVoucherUnits / scale, cashWheatJin: (shop.cashWheatUnits || 0) / invScale,
-      cashValue: maximumPayableValueUnits(state, `shop:${shop.id}`, content) / scale, inventory: stockUnits / invScale,
+      // 镇营店没有自己的钱（收入在镇库），可支付资金记 0。
+      cashValue: shop.town ? 0 : maximumPayableValueUnits(state, `shop:${shop.id}`, content) / scale, inventory: stockUnits / invScale,
       capacityJin: shopSalesCapacityUnits(state, shop, content) / invScale,
       customerCapacity: shopDailyCustomerCapacity(state, shop, content),
       serviceCapacity: serviceId ? serviceShopCapacityUses(state, shop, content) : 0,
