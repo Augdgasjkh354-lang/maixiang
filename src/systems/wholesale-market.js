@@ -538,10 +538,9 @@ export function buyWholesaleForOwner(state, buyerOwner, itemId, requestedUnits, 
   const value = price < listPrice ? Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content)) : fullValue;
   const householdId = householdIdOf(buyerOwner);
   const household = householdId ? state.households?.byId?.[householdId] : null;
-  const maxWheatUnits = household ? householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) : undefined;
   // 货款进入镇库。
   const payment = settleMonetaryPayment(state, buyerOwner, "town", currentPaymentComposition(state, value), content,
-    "wholesale_sale", reason, { requireFull: true, ...(maxWheatUnits === undefined ? {} : { maxWheatUnits }) });
+    "wholesale_sale", reason, { requireFull: true });
   if (!payment.ok) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: payment.reason || "支付失败" };
   let removed;
   if (itemId === "wheat") {

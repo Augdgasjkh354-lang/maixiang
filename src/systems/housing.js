@@ -20,9 +20,8 @@ export function settleHousingRent(state, housingAtStart, content) {
     const household = state.households?.byId?.[row.householdId];
     if (!household) continue;
     recordHouseholdRentDue(state, household.id, row.units, content);
-    const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
     const moved = settleMonetaryPayment(state, `household:${household.id}`, "town", currentPaymentComposition(state, row.units), content,
-      "rent_payment", "家庭支付公租房日租金", { requireFull: false, maxWheatUnits });
+      "rent_payment", "家庭支付公租房日租金", { requireFull: false });
     const paid = moved.paidValueUnits || 0;
     if (paid > 0) { collectedUnits += paid; recordHouseholdRentPaid(state, household.id, paid, content); }
   }

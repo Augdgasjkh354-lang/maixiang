@@ -107,6 +107,17 @@ function exchangeVoucherPoolUnits(state, owner, withdrawableUnits) {
   return Math.max(0, townAdvanceCapacityUnits(state) - advance);
 }
 
+// 同 spendableVoucherUnits(state, `household:${id}`)，直接用家庭对象，省掉拼账户名和解析（热路径：遍历全体家庭估购买力）。
+export function householdSpendableVoucherUnits(state, household) {
+  const hand = Math.max(0, household.voucherUnits || 0);
+  const bank = state.bank;
+  if (!bank) return hand;
+  const deposit = bank.deposits?.[household.id] || 0;
+  if (!(deposit > 0)) return hand;
+  const liquidity = Math.max(0, bank.cashVoucherUnits || 0) + townAdvanceCapacityUnits(state);
+  return liquidity > 0 ? hand + Math.min(liquidity, deposit) : hand;
+}
+
 // 付款可动用的粮券 = 手头粮券 + 可取回的存款。所有"能不能付、最多付多少"的判断都用它。
 export function spendableVoucherUnits(state, owner) {
   return Math.max(0, voucherBalance(state, owner)) + depositWithdrawableUnits(state, owner);
