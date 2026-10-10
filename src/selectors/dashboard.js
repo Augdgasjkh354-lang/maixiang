@@ -632,7 +632,8 @@ export function selectDashboard(state, content, selection) {
           reserveRequirementPercent: reservePct,
           totalDepositsVoucher: totalDeposits / voucherScale,
           outstandingLoansVoucher: outstanding / voucherScale,
-          loanableVoucher: Math.max(0, (bank.cashVoucherUnits || 0) - Math.floor(totalDeposits * reservePct / 100)) / voucherScale,
+          // 可贷额 = 现金 − 准备金 − 欠镇库（与 systems/bank.js 的 bankLoanableVoucherUnits 同口径；此处不能调用它，因其会写入默认政策）。
+          loanableVoucher: Math.max(0, (bank.cashVoucherUnits || 0) - Math.floor(totalDeposits * reservePct / 100) - (bank.debtToTownUnits || 0)) / voucherScale,
           badDebtVoucher: (bank.stats?.badDebtVoucherUnits || 0) / voucherScale,
           interestEarnedVoucher: (bank.stats?.interestEarnedVoucherUnits || 0) / voucherScale,
           interestPaidVoucher: (bank.stats?.interestPaidVoucherUnits || 0) / voucherScale,

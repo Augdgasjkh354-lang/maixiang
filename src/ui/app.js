@@ -1674,6 +1674,20 @@ export function mountGame(root) {
         : socialTrade.dataset.socialBuy ? `社保基金买入${number(result.shares)}股。` : `社保基金卖出${number(result.shares)}股。`);
       return;
     }
+    if (closest(target, "[data-bank-repay]") && state) {
+      const amount = readStagedNumber("bank-repay", { label: "偿还镇库金额", positive: true });
+      if (amount === null) return;
+      const result = simulation.repayBankDebtToTown(state, amount);
+      if (!result?.ok) {
+        showToast(result?.reason || "偿还未能完成。");
+        return;
+      }
+      numericDrafts.delete("bank-repay");
+      changed(true);
+      render(true);
+      showToast(`已偿还镇库${number(result.repaidJin, 1)}券，尚欠${number(result.debtJin, 1)}券。`);
+      return;
+    }
     if (closest(target, "[data-wealth-tax-save]") && state) {
       const thresholds = WEALTH_TAX_THRESHOLD_KEYS.map(key => readStagedNumber(key, { label: "富人税门槛", minimum: 0, maximum: 1000000000 }));
       const ratesPercent = WEALTH_TAX_RATE_KEYS.map(key => readStagedNumber(key, { label: "富人税税率", minimum: 0, maximum: 20 }));

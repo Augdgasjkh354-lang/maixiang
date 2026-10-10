@@ -7,7 +7,8 @@ import { householdList, syncResidentAggregates } from "../src/systems/households
 import { issueTownVouchers, transferVouchers, validateCurrencyInvariant, voucherBalance } from "../src/economy/currency.js";
 import { currentPaymentComposition, depositWithdrawableUnits, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } from "../src/economy/payment.js";
 import { withdrawFromBank } from "../src/economy/deposits.js";
-import { bankDebtRepayableUnits, bankLedgerInvariant, depositToBank, ensureBankState, settleBankDay, settleBankDebtRepay } from "../src/systems/bank.js";
+import { bankDebtRepayableUnits, bankLedgerInvariant, bankLoanableVoucherUnits, depositToBank, ensureBankState, issueBankLoan, settleBankDay, settleBankDebtRepay } from "../src/systems/bank.js";
+import { formCompany } from "./helpers-ipo.js";
 import { settleWealthTax } from "../src/systems/redistribution.js";
 import { selectDashboard } from "../src/selectors/dashboard.js";
 import { legacyVoucherState, setHouseholdVoucherUnits } from "./helpers-monetary.js";
@@ -328,4 +329,79 @@ test("改准备金率之后托底仍然守恒", () => {
   assert.equal(setBankPolicyCommand(state, { reserveRequirementPercent: 20 }).ok, true);
   withdrawFromBank(state, household.id, 500 * SCALE, CONTENT);
   assertBooksBalance(state);
+});
+
+// 新建一座磨坊（不经施工），供公司测试用。
+function addMill(state) {
+  const required = CONTENT.buildings.mill.requiredPlotFeature || null;
+  const plot = state.plots.find(row => (required ? row.feature === required : !row.feature) && !state.buildings.some(b => b.plotId === row.id));
+  assert.ok(plot, "缺少磨坊地块");
+  const building = { id: "bank-test-mill", typeId: "mill", level: 1,
+    ownership: { townLevels: 1, privateLevels: 0, listedLevels: 0 }, plotId: plot.id, x: plot.x, y: plot.y,
+    materialInvestments: [], completed: { year: state.year, day: 1 } };
+  state.buildings.push(building);
+  return building;
+}
+
+// 放贷可贷额 = 现金 − 准备金 − 欠镇库：欠镇库的钱不能再借给公司，选择器与放贷共用同一口径。
+// 夹具：存款 800、现金 100，取 300 → 垫付 200 欠镇库、现金 0、存款 500；另一户存 500 → 现金 500、存款 1000、准备金 100。
+function stateWithDebtAndCash() {
+  const state = fixtureState();
+  const household = weakBank(state, richestHousehold(state), { deposit: 800 * SCALE, cash: 100 * SCALE });
+  const withdrawn = withdrawFromBank(state, household.id, 300 * SCALE, CONTENT);
+  assert.equal(withdrawn.ok, true, withdrawn.reason);
+  assert.equal(state.bank.debtToTownUnits, 200 * SCALE, "夹具：欠镇库 200");
+  otherDeposits(state, household.id, 500 * SCALE);
+  assert.equal(state.bank.cashVoucherUnits, 500 * SCALE, "夹具：现金 500");
+  assertBooksBalance(state);
+  return { state, household };
+}
+
+test("可贷额扣掉欠镇库：可贷 = 现金 500 − 准备金 100 − 欠镇库 200 = 200，选择器 loanableVoucher 同口径", () => {
+  const { state } = stateWithDebtAndCash();
+  assert.equal(bankLoanableVoucherUnits(state), 200 * SCALE);
+  const bankStats = selectDashboard(state, CONTENT).policy.bankStats;
+  assert.equal(bankStats.loanableVoucher, 200);
+});
+
+test("放贷上限：超过扣除欠镇库后的可贷额整笔拒绝；不超过则放贷成功，可贷额随之归零", () => {
+  const { state } = stateWithDebtAndCash();
+  const mill = addMill(state);
+  const formed = formCompany(state, mill.id, { name: "测试磨坊" });
+  assert.equal(formed.ok, true, formed.reason);
+  const tooMuch = issueBankLoan(state, "company", formed.companyId, 201 * SCALE, CONTENT);
+  assert.equal(tooMuch.ok, false);
+  assert.match(tooMuch.reason, /可贷额度不足/);
+  assert.equal(state.bank.debtToTownUnits, 200 * SCALE, "拒绝时欠镇库不动");
+  const ok = issueBankLoan(state, "company", formed.companyId, 200 * SCALE, CONTENT);
+  assert.equal(ok.ok, true, ok.reason);
+  assert.equal(bankLoanableVoucherUnits(state), 0, "放出后可贷额归零（现金 300 − 准备金 100 − 欠镇库 200）");
+  assertBooksBalance(state);
+});
+
+test("还债与放贷：先还清欠镇库再放贷时可贷额恢复；手动还款受准备金与安全垫约束", () => {
+  const { state } = stateWithDebtAndCash();
+  assert.equal(bankDebtRepayableUnits(state, CONTENT), 200 * SCALE, "可还 = min(欠款 200, 现金 500 − 准备金 100 − 安全垫 50)");
+  const partial = simulation.repayBankDebtToTown(state, 150);
+  assert.equal(partial.ok, true, partial.reason);
+  assert.equal(partial.repaidJin, 150);
+  assert.equal(partial.debtJin, 50);
+  assert.equal(bankLoanableVoucherUnits(state), 200 * SCALE, "现金 350 − 准备金 100 − 欠镇库 50");
+  // 超过欠款的请求按欠款封顶，不报错。
+  const rest = simulation.repayBankDebtToTown(state, 100);
+  assert.equal(rest.ok, true, rest.reason);
+  assert.equal(rest.repaidJin, 50);
+  assert.equal(state.bank.debtToTownUnits, 0);
+  assert.equal(bankLoanableVoucherUnits(state), 200 * SCALE, "欠款清零：现金 300 − 准备金 100");
+  assertBooksBalance(state);
+  const none = simulation.repayBankDebtToTown(state, 10);
+  assert.equal(none.ok, false);
+});
+
+test("安全垫读规则：rules.bankDebtRepayBufferShare 缺省 0.05；覆盖后可还额随之变化", () => {
+  const { state } = stateWithDebtAndCash();
+  assert.equal(CONTENT.rules.bankDebtRepayBufferShare, 0.05);
+  // 安全垫放大到存款的 50%（500 券）：现金 500 − 准备金 100 − 安全垫 500 < 0，可还额为 0。
+  const strict = { ...CONTENT, rules: { ...CONTENT.rules, bankDebtRepayBufferShare: 0.5 } };
+  assert.equal(bankDebtRepayableUnits(state, strict), 0);
 });

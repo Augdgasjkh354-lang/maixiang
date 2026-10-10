@@ -260,6 +260,8 @@ export const RULES = Object.freeze({
   // 镇营综合商店（systems/shops.js）：supplyShareMax = 每日每种商品最多进批发市场可售量的比例（余下留给私营店）；
   // maxPerStreet = 每条商业街最多几家镇营综合商店。
   townShop: Object.freeze({ supplyShareMax: 0.5, maxPerStreet: 1 }),
+  // 银行镇库托底（systems/bank.js）：还债时银行须保留的安全垫（占存款比例）；缺省与 DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE 一致。
+  bankDebtRepayBufferShare: 0.05,
   shopTypes: Object.freeze({
     general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),

@@ -204,12 +204,13 @@ export function bankTotals(state) {
   };
 }
 
-// 可贷额度 = 银行现金 - 法定准备金（存款×准备金率）
+// 可贷额度 = 银行现金 - 法定准备金（存款×准备金率）- 欠镇库（镇库托底垫付的债要先还，不能把镇库的钱再借出去）。
+// 放贷（issueBankLoan / settleBankAutoLoans）与国债认购（bonds.js）共用这一口径。
 export function bankLoanableVoucherUnits(state) {
   const policy = bankPolicy(state);
   const totals = bankTotals(state);
   const required = Math.floor(totals.totalDepositsVoucherUnits * (policy.reserveRequirementPercent / 100));
-  return Math.max(0, totals.cashVoucherUnits - required);
+  return Math.max(0, totals.cashVoucherUnits - required - bankDebtToTownVoucherUnits(state));
 }
 
 export function depositToBank(state, householdId, voucherUnits, content = null) {

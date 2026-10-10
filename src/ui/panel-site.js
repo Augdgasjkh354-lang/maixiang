@@ -149,6 +149,8 @@ function bankManagementMarkup(view, physical = true) {
       <div class="row"><span class="label">发行量</span><strong class="value">${number(c.issuedVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">存款总额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)}券</strong></div>
       <div class="row"><span class="label">贷款总额</span><strong class="value">${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">欠镇库</span><strong class="value">${number(bank.debtToTownJin || 0, 1)}券（累计垫付 ${number(bank.totalAdvancedJin || 0, 1)} · 累计还款 ${number(bank.totalRepaidJin || 0, 1)} · 可还 ${number(bank.debtRepayableJin || 0, 1)}）</strong></div>
+      <div class="row"><span class="label">偿还镇库</span><div class="setting-input">${stagedBankInput(view, "bank-repay", "偿还镇库金额", Math.round((bank.debtRepayableJin || 0) * 100) / 100)}<b>券</b><button class="secondary" data-bank-repay ${(bank.debtRepayableJin || 0) > 0 ? "" : "disabled"}>偿还</button></div></div>
     </div>`;
   // 三个折叠分组：印券与换券（默认展开，保持第一屏）、利率与存款、国债。
   const issueGroup = `<details class="detail-block bank-group" data-detail-key="bank-issue" open><summary><span>印券与换券</span><span class="subtle">流通 ${number(c.circulationVoucher, 0)}券</span></summary><div class="detail-body">${issueControls}</div></details>`;

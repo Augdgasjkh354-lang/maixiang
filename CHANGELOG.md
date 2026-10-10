@@ -4,7 +4,7 @@
 - 取款时银行现金不够，缺口由镇库垫付（`bank_town_advance`，计为银行欠镇库的债 `bank.debtToTownUnits`）；镇库粮券也不够则整笔拒绝。报价的可取回额 = min(银行现金 + 镇库粮券, 存款)，换券池扣掉垫付额，报价与结算一致。
 - 还债：现金超出准备金 + 安全垫（`rules` 参数 `bankDebtRepayBufferShare`，默认 0.05，代码内缺省）的部分每日先还镇库（`bank_town_repay`），先于新贷款；玩家命令 `repayBankDebtToTown(amountJin)` 同样受此上限。留存利润口径不变。
 - 台账守恒式改为：存款 + 欠镇库 = 现金 + 在贷 + 国债 − 留存利润；`validateState` 校验三个账目为非负安全整数。新字段读旧档补零，不迁移。
-- 选择器 `dashboard.policy.bankStats` 新增 `debtToTownJin`、`totalAdvancedJin`、`totalRepaidJin`、`debtRepayableJin`（只读）。界面与引擎门面 `engine.js` 的命令导出待接。
+- 选择器 `dashboard.policy.bankStats` 新增 `debtToTownJin`、`totalAdvancedJin`、`totalRepaidJin`、`debtRepayableJin`（只读）。银行面板摘要卡已接「欠镇库」行与「偿还镇库」输入（`data-bank-repay`），引擎门面 `engine.js` 导出 `repayBankDebtToTown`。放贷与国债认购的可贷额扣除欠镇库（`bankLoanableVoucherUnits`）。
 - 测试：`tests/bank-town-advance.test.js`。
 
 ## 未发布 · 镇营综合商店
