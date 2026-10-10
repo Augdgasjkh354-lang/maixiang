@@ -2898,7 +2898,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod20 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-21bda59";
+       const BUILD_ID = "0203-a570bc3";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -3572,14 +3572,17 @@ function addBirths(state, count) {
   state._householdSyncDirty = false;
   state.accounts ||= {};
   const itemIds = Object.keys(content.items);
-  const totals = Object.fromEntries(itemIds.map(itemId => [itemId, 0]));
+  const count = itemIds.length;
+  const totals = new Array(count).fill(0);
   let voucherUnits = 0;
   for (const household of householdList(state)) {
     voucherUnits += household.voucherUnits || 0;
-    for (const itemId of itemIds) totals[itemId] += household.inventory?.[itemId] || 0;
+    const inventory = household.inventory;
+    if (!inventory) continue;
+    for (let i = 0; i < count; i += 1) totals[i] += inventory[itemIds[i]] || 0;
   }
   state.accounts.residents ||= emptyInventory(content);
-  for (const itemId of itemIds) state.accounts.residents[itemId] = totals[itemId];
+  for (let i = 0; i < count; i += 1) state.accounts.residents[itemIds[i]] = totals[i];
   state.currency ||= {};
   state.currency.balances ||= { town: 0, residents: 0 };
   state.currency.balances.residents = voucherUnits;
@@ -3658,6 +3661,14 @@ function itemEntries(content) {
   const wheatQeqPerUnit = qeqUnitsForInventoryUnits(content.items.wheat, 1, content);
   const requiredWheatUnits = Math.max(0, Math.ceil((reserve - otherFoodQeq) / Math.max(1, wheatQeqPerUnit)));
   return Math.max(0, wheat - requiredWheatUnits);
+}
+
+// 付款选项里的"小麦换券上限"：支付层本来就按 householdFoodReserveDays 自算同一个上限（取两者较小值），
+// 所以口粮天数与默认相同时不必预先算（每笔付款省一次遍历）；不同时才显式传入。
+       function reserveWheatPaymentOptions(state, household, content, reserveDays) {
+  const base = content.rules.householdFoodReserveDays ?? 30;
+  if (!household || reserveDays === base) return {};
+  return { maxWheatUnits: householdConvertibleWheatUnits(state, household, content, reserveDays) };
 }
 
        function householdExchangeAllowanceUnits(state, householdId, content) {
@@ -3892,7 +3903,7 @@ function itemEntries(content) {
   for (const row of rows) counts[row.tier] = (counts[row.tier] || 0) + 1;
   return { rows, counts, thresholds };
 }
-return { createHousehold, householdPopulation, householdWorkingAge, householdEmploymentCount, householdIdleWorkers, isActiveHousehold, createInitialHouseholds, hasHouseholds, householdList, activeHouseholds, totalHouseholdAgeBands, jobAssignments, jobCount, ensureEmploymentExchangeDay, touchHouseholdEmploymentEligibility, jobTenureDays, setHouseholdJobCount, setJobCount, releaseJobFromHousehold, jobReleaseRank, releaseExcessHouseholdEmployment, applyHouseholdDemography, withDeferredHouseholdSync, syncResidentAggregates, setForceFullResidentSync, applyResidentAggregateDelta, residentInventoryUnits, residentVoucherUnits, householdFoodQeqUnits, householdReserveQeqUnits, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, consumeHouseholdExchangeAllowance, maximumResidentExchangeWheatUnits, debitHouseholdInventory, creditHouseholdInventory, takeResidentInventory, distributeResidentInventory, creditHouseholdVouchers, debitHouseholdVouchers, takeResidentVouchers, distributeResidentVouchers, clearDailyHouseholdIncome, resetYearHouseholdIncome, occupationCounts, householdLivingSummary };
+return { createHousehold, householdPopulation, householdWorkingAge, householdEmploymentCount, householdIdleWorkers, isActiveHousehold, createInitialHouseholds, hasHouseholds, householdList, activeHouseholds, totalHouseholdAgeBands, jobAssignments, jobCount, ensureEmploymentExchangeDay, touchHouseholdEmploymentEligibility, jobTenureDays, setHouseholdJobCount, setJobCount, releaseJobFromHousehold, jobReleaseRank, releaseExcessHouseholdEmployment, applyHouseholdDemography, withDeferredHouseholdSync, syncResidentAggregates, setForceFullResidentSync, applyResidentAggregateDelta, residentInventoryUnits, residentVoucherUnits, householdFoodQeqUnits, householdReserveQeqUnits, householdConvertibleWheatUnits, reserveWheatPaymentOptions, householdExchangeAllowanceUnits, consumeHouseholdExchangeAllowance, maximumResidentExchangeWheatUnits, debitHouseholdInventory, creditHouseholdInventory, takeResidentInventory, distributeResidentInventory, creditHouseholdVouchers, debitHouseholdVouchers, takeResidentVouchers, distributeResidentVouchers, clearDailyHouseholdIncome, resetYearHouseholdIncome, occupationCounts, householdLivingSummary };
 })();
 
 // ===== systems/household-life.js =====
@@ -4686,6 +4697,17 @@ function exchangeVoucherPoolUnits(state, owner, withdrawableUnits) {
   return Math.max(0, townAdvanceCapacityUnits(state) - advance);
 }
 
+// 同 spendableVoucherUnits(state, `household:${id}`)，直接用家庭对象，省掉拼账户名和解析（热路径：遍历全体家庭估购买力）。
+       function householdSpendableVoucherUnits(state, household) {
+  const hand = Math.max(0, household.voucherUnits || 0);
+  const bank = state.bank;
+  if (!bank) return hand;
+  const deposit = bank.deposits?.[household.id] || 0;
+  if (!(deposit > 0)) return hand;
+  const liquidity = Math.max(0, bank.cashVoucherUnits || 0) + townAdvanceCapacityUnits(state);
+  return liquidity > 0 ? hand + Math.min(liquidity, deposit) : hand;
+}
+
 // 付款可动用的粮券 = 手头粮券 + 可取回的存款。所有"能不能付、最多付多少"的判断都用它。
        function spendableVoucherUnits(state, owner) {
   return Math.max(0, voucherBalance(state, owner)) + depositWithdrawableUnits(state, owner);
@@ -4852,7 +4874,7 @@ function maximumPayableValueUnitsFromContext(context) {
     remainingComposition: voucherOnlyObligation(remaining)
   };
 }
-return { ensureMonetaryReform, hasCompletedBank, hasBankAccess, depositWithdrawableUnits, spendableVoucherUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment };
+return { ensureMonetaryReform, hasCompletedBank, hasBankAccess, depositWithdrawableUnits, householdSpendableVoucherUnits, spendableVoucherUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment };
 })();
 
 // ===== systems/employer.js =====
@@ -6113,10 +6135,9 @@ function townWheatSaleReserveUnits(state, content) {
   const value = price < listPrice ? Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content)) : fullValue;
   const householdId = householdIdOf(buyerOwner);
   const household = householdId ? state.households?.byId?.[householdId] : null;
-  const maxWheatUnits = household ? householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) : undefined;
   // 货款进入镇库。
   const payment = settleMonetaryPayment(state, buyerOwner, "town", currentPaymentComposition(state, value), content,
-    "wholesale_sale", reason, { requireFull: true, ...(maxWheatUnits === undefined ? {} : { maxWheatUnits }) });
+    "wholesale_sale", reason, { requireFull: true });
   if (!payment.ok) return { ok: false, boughtUnits: 0, paidVoucherUnits: 0, reason: payment.reason || "支付失败" };
   let removed;
   if (itemId === "wheat") {
@@ -10586,12 +10607,26 @@ function recentConsumerSalesUnits(state, itemId, content) {
   return rollingAverage(rows, "soldUnits", content.rules.operatingObservationDays || 7);
 }
 
-function residentAffordableUnits(state, itemId, price, content) {
-  if (!Number.isFinite(price) || price <= 0) return 0;
+// 居民全体能付的价值额与物价无关；一次计划刷新里状态不变，面包、盐、酒、布共用同一个结果（遍历全体家庭，较贵）。
+let residentBudgetMemo = null;
+function residentBudgetUnits(state, content) {
+  if (residentBudgetMemo && residentBudgetMemo.state === state) {
+    if (residentBudgetMemo.value === undefined) residentBudgetMemo.value = computeResidentBudgetUnits(state, content);
+    return residentBudgetMemo.value;
+  }
+  return computeResidentBudgetUnits(state, content);
+}
+
+function computeResidentBudgetUnits(state, content) {
   const maxWheatUnits = householdList(state).filter(isActiveHousehold).reduce((sum, household) =>
     sum + householdConvertibleWheatUnits(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30), 0);
   const limit = maximumPayableValueUnits(state, "residents", content);
-  const budget = maximumFullyPayableValueUnits(state, "residents", limit, content, { maxWheatUnits });
+  return maximumFullyPayableValueUnits(state, "residents", limit, content, { maxWheatUnits });
+}
+
+function residentAffordableUnits(state, itemId, price, content) {
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  const budget = residentBudgetUnits(state, content);
   return Math.max(0, Math.floor(budget * content.precision.inventoryUnitsPerJin / (price * content.precision.currencyUnitsPerVoucher)));
 }
 
@@ -10804,6 +10839,16 @@ function productionTargetForType(state, typeId, content, downstreamUnits) {
 }
 
        function refreshOperatingPlan(state, content, force = false) {
+  const previousMemo = residentBudgetMemo;
+  residentBudgetMemo = { state, value: undefined };
+  try {
+    return refreshOperatingPlanNow(state, content, force);
+  } finally {
+    residentBudgetMemo = previousMemo;
+  }
+}
+
+function refreshOperatingPlanNow(state, content, force = false) {
   const plan = ensureOperatingPlanState(state);
   const serial = daySerial(state, content);
   const interval = Math.max(1, content.rules.operatingPlanIntervalDays || 3);
@@ -11433,7 +11478,7 @@ const { makeTransactionId, recordEvent, recordLedger } = __mxmod16;
 const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod23;
 const { putStock, takeStock } = __mxmod33;
 const { nextRandom } = __mxmod32;
-const { householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold, householdWorkingAge, jobReleaseRank, releaseJobFromHousehold, syncResidentAggregates, setHouseholdJobCount, setJobCount, jobCount, jobAssignments } = __mxmod24;
+const { householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold, householdWorkingAge, jobReleaseRank, releaseJobFromHousehold, syncResidentAggregates, setHouseholdJobCount, setJobCount, jobCount, jobAssignments, reserveWheatPaymentOptions } = __mxmod24;
 const { shopTradePrices, recentAverage } = __mxmod56;
 const { shopEffectiveMarginPercent } = __mxmod55;
 const { currentUnitPrice } = __mxmod35;
@@ -12242,10 +12287,10 @@ function removeShopInventoryCost(shop, itemId, units) {
   const actual = Math.min(quantity, remainingGoodsCapacity);
   if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * prices.retailVoucherPerUnit * currencyScale(content));
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
-  const maxWheatUnits = buyerHousehold ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30) : undefined;
+  const wheatOptions = reserveWheatPaymentOptions(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30);
   // 镇营店的零售收入直接进镇库（付给 "town"），店里没有自己的钱。
   const payment = settleMonetaryPayment(state, buyerOwner, shopAccountName(shop), currentPaymentComposition(state, paymentUnits), content,
-    "shop_retail_sale", reason, { requireFull: true, ...(maxWheatUnits === undefined ? {} : { maxWheatUnits }) });
+    "shop_retail_sale", reason, { requireFull: true, ...wheatOptions });
   if (!payment.ok) return payment;
   const cogs = removeShopInventoryCost(shop, itemId, actual);
   const pricingCogs = shop.town ? takePricingBasis(shop, itemId, shop.inventory[itemId] || 0, actual) : cogs;
@@ -12334,9 +12379,8 @@ function removeShopInventoryCost(shop, itemId, units) {
     const need = Math.round(Math.max(0, row.quantity || 0) * content.precision.inventoryUnitsPerJin);
     if ((shop.inventory?.[row.itemId] || 0) < need) return { ok: false, reason: `缺${content.items[row.itemId]?.name || row.itemId}` };
   }
-  const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
   const payment = settleMonetaryPayment(state, `household:${householdId}`, `shop:${shopId}`, currentPaymentComposition(state, priceUnits), content,
-    "shop_service_sale", `${household.name}购买${service.name}`, { requireFull: true, maxWheatUnits });
+    "shop_service_sale", `${household.name}购买${service.name}`, { requireFull: true });
   if (!payment.ok) return payment;
   let cogs = 0;
   for (const row of consumables) {
@@ -19739,12 +19783,12 @@ return { stallKeeperLimit, manageStalls };
 // ===== systems/consumer-market.js =====
 const __mxmod87 = (() => {
 const { maximumResidentAutoExchangeWheatUnits, currencyScale } = __mxmod27;
-const { createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits } = __mxmod29;
+const { createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits, householdSpendableVoucherUnits } = __mxmod29;
 const { voucherUnitsForWheatUnits } = __mxmod26;
 const { sellCompanyProduct, companySalePrice } = __mxmod62;
 const { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedHouseholds, registerShopStockoutDemand } = __mxmod59;
 const { shopTradePrices } = __mxmod56;
-const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdFoodQeqUnits, householdReserveQeqUnits, creditHouseholdInventory, residentInventoryUnits, syncResidentAggregates } = __mxmod24;
+const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdFoodQeqUnits, householdReserveQeqUnits, creditHouseholdInventory, residentInventoryUnits, syncResidentAggregates, reserveWheatPaymentOptions } = __mxmod24;
 const { qeqUnitsForInventoryUnits } = __mxmod18;
 const { removeTownInventoryWithCost } = __mxmod23;
 const { populationStats } = __mxmod46;
@@ -19827,14 +19871,18 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
 }
 
 // 粗估一户按某价能买多少（粮券 + 今日还能换券的小麦）：不走支付层报价，用于需求统计和二分查找的初值。
-function quickAffordableUnits(state, household, price, content, reserveDays) {
+function quickAffordableUnits(state, household, price, content, reserveDays, capUnits = Number.POSITIVE_INFINITY) {
   if (!(price > 0)) return 0;
-  const wheatUnits = Math.min(householdConvertibleWheatUnits(state, household, content, reserveDays),
-    householdExchangeAllowanceUnits(state, household.id, content));
+  const spendable = householdSpendableVoucherUnits(state, household);
+  const unitsPerVoucherUnit = content.precision.inventoryUnitsPerJin / (price * currencyScale(content));
+  // 手头粮券加存款已够买到 capUnits：换券部分只会更多，调用方取 min(cap, 结果)，结果相同，不必再算小麦。
+  if (Number.isFinite(capUnits) && Math.max(0, Math.floor(spendable * unitsPerVoucherUnit)) >= capUnits) return capUnits;
+  const convertible = householdConvertibleWheatUnits(state, household, content, reserveDays);
+  const wheatUnits = convertible > 0 ? Math.min(convertible, householdExchangeAllowanceUnits(state, household.id, content)) : 0;
   // 以粮换券还受镇库券池限制（与支付层同口径），券池见底时不能把富余小麦算作买得起。
   const wheatValue = voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
   const exchangeValue = Math.min(wheatValue, Math.max(0, state.currency?.balances?.town || 0));
-  const value = spendableVoucherUnits(state, `household:${household.id}`) + exchangeValue;
+  const value = spendable + exchangeValue;
   return Math.max(0, Math.floor(value * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))));
 }
 
@@ -19868,11 +19916,11 @@ function transactSeller(state, seller, household, itemId, units, content, reason
   const scale = currencyScale(content);
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   const cost = Math.round(units / inventoryScale * seller.price * scale);
-  const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
+  const wheatOptions = reserveWheatPaymentOptions(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
   if (seller.type === "town") {
     if ((state.accounts.town?.[itemId] || 0) < units) return { ok: false, reason: "镇库库存不足" };
     const payment = settleMonetaryPayment(state, `household:${household.id}`, "town", currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, maxWheatUnits });
+      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
     if (!payment.ok) return payment;
     const removal = removeTownInventoryWithCost(state, itemId, units, content);
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost, paidValueUnits: cost, payment, sellerCostVoucherUnits: removal.costWheatUnits };
@@ -19889,7 +19937,7 @@ function transactSeller(state, seller, household, itemId, units, content, reason
     const source = state.households?.byId?.[seller.householdId];
     if (!source || (source.inventory?.[itemId] || 0) < units) return { ok: false, reason: "卖方库存不足" };
     const payment = settleMonetaryPayment(state, `household:${household.id}`, `household:${seller.householdId}`, currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, maxWheatUnits });
+      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
     if (!payment.ok) return payment;
     source.inventory[itemId] -= units;
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost };
@@ -19925,7 +19973,7 @@ function affordableUnmetHouseholds(state, unmetUnits, minPrice, householdNeed, c
       ? householdNeed.get(household.id) || 0
       : Math.ceil(unmetUnits * householdPopulation(household) / totalPeople);
     if (need <= 0) continue;
-    const canBuy = Math.min(need, quickAffordableUnits(state, household, minPrice, content, reserveDays));
+    const canBuy = Math.min(need, quickAffordableUnits(state, household, minPrice, content, reserveDays, need));
     if (canBuy <= 0) continue;
     affordable += canBuy;
     households.push(household.id);
@@ -20912,9 +20960,8 @@ function settleHousingRent(state, housingAtStart, content) {
     const household = state.households?.byId?.[row.householdId];
     if (!household) continue;
     recordHouseholdRentDue(state, household.id, row.units, content);
-    const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
     const moved = settleMonetaryPayment(state, `household:${household.id}`, "town", currentPaymentComposition(state, row.units), content,
-      "rent_payment", "家庭支付公租房日租金", { requireFull: false, maxWheatUnits });
+      "rent_payment", "家庭支付公租房日租金", { requireFull: false });
     const paid = moved.paidValueUnits || 0;
     if (paid > 0) { collectedUnits += paid; recordHouseholdRentPaid(state, household.id, paid, content); }
   }
