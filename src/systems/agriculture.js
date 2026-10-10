@@ -3,7 +3,7 @@ import { bookAddAll, ensureBook } from "../economy/books.js";
 import { recordEvent, recordLedger } from "../economy/ledger.js";
 import { jobAssignments, jobCount, distributeResidentInventory, householdList, householdIdleWorkers, householdEmploymentCount } from "./households.js";
 import { addTownCostBasis } from "../economy/business.js";
-import { recordHouseholdInKind, recordHouseholdWageDue } from "./household-life.js";
+import { recordHouseholdBudgetInKind, recordHouseholdInKind, recordHouseholdWageDue } from "./household-life.js";
 import { emptyReclaimState, emptyReclaimPeriod } from "../core/state.js";
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
@@ -208,12 +208,14 @@ export function harvest(state, content) {
         for (const row of fallback.rows || []) {
           const qeq = row.units * content.precision.qeqUnitsPerJin / content.precision.inventoryUnitsPerJin;
           recordHouseholdInKind(state, row.householdId, "inKindIncomeQeqUnits", qeq, content);
+          recordHouseholdBudgetInKind(state, row.householdId, row.units, content);
         }
       }
     } else {
       for (const row of distributed.rows || []) {
         const qeq = row.units * content.precision.qeqUnitsPerJin / content.precision.inventoryUnitsPerJin;
         recordHouseholdInKind(state, row.householdId, "inKindIncomeQeqUnits", qeq, content);
+        recordHouseholdBudgetInKind(state, row.householdId, row.units, content);
       }
     }
     recordLedger(state, { type: "harvest", transactionId: txId, source: "field", destination: "residents",

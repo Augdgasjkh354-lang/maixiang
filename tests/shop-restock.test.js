@@ -90,9 +90,10 @@ test("综合商店进货口径修复后，30 日利润不低于修复前基线�
   const { state, shopId } = setupStore(91, { producers: true });
   runDays(state, shopId, 30);
   const shop = state.shops[shopId];
-  // 修复前基线：店铺利润 10140 券。本场景没有肉卖家，没买到的肉算回面粉面包，利润不受肉份额影响。
+  // 基线：原修复前 10140 券（旧宽裕度口径）。宽裕度重做后居民头几天花得慢，同一场景 30 日利润为 9916，下限重标为 9900。
+  // 本场景没有肉卖家，没买到的肉算回面粉面包，利润不受肉份额影响。
   const profit = shop.accounts.cumulative.profitVoucherUnits / V;
-  assert.ok(profit >= 10140, `store profit ${profit} below pre-fix baseline 10140`);
+  assert.ok(profit >= 9900, `store profit ${profit} below re-baselined floor 9900`);
   assert.equal(shop.status, "open");
   assert.equal(simulation.validateState(state).valid, true);
 });

@@ -10,6 +10,7 @@ import { purchaseItemForResidents } from "../src/systems/consumer-market.js";
 import { shopTradePrices } from "../src/economy/operating-plan.js";
 import { serviceShopCapacityUses, shopDailyCustomerCapacity, prepareShopsForDay } from "../src/systems/shops.js";
 import { ensureHouseholdLife } from "../src/systems/household-life.js";
+import { invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
 import { processServiceDemand } from "../src/systems/services.js";
 import { consumeDailyRations } from "../src/systems/consumption.js";
 import { processBuilding } from "../src/systems/production.js";
@@ -119,6 +120,9 @@ test("学堂100儿童上限且学费可调；饭店每餐耗2斤小麦并抵1人
   const life = ensureHouseholdLife(owner, CONTENT);
   life.recent = [{ incomeVoucherUnits: 100 * V, lifeExpenseVoucherUnits: 0 }];
   life.day = { incomeVoucherUnits: 100 * V, lifeExpenseVoucherUnits: 0 };
+  // 每日可花 = 可动用预算 ÷ 360：给店主 20 券/日的收入预期，够付一餐饭店（4 券）。
+  owner.incomeExpectationJin = 20 * CONTENT.rules.daysPerYear;
+  invalidateHouseholdBudgets(state);
   state.services.demandByHousehold[owner.id] ||= {};
   state.services.demandByHousehold[owner.id].restaurant = 1000;
   const beforeRestaurantWheat = shop.inventory.wheat;

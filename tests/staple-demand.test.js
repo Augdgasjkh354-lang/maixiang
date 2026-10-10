@@ -8,6 +8,7 @@ import { buyStaplesForResidents, stapleDemandShares, breadDemandShare } from "..
 import { buyRepairWoodForResidents } from "../src/systems/housing.js";
 import { householdList, setJobCount } from "../src/systems/households.js";
 import { grantResidentVouchers, setResidentInventoryJin } from "./helpers-v16.js";
+import { setAllHouseholdsAffluenceAtLeast } from "./budget-fixture.js";
 
 const SCALE = CONTENT.precision.inventoryUnitsPerJin;
 // 每日修缮木材：户数 × 7.3 斤/户年 ÷ 365（开局户数随人口，660 户时为 13.2 斤/日，整除无结转）。
@@ -57,6 +58,7 @@ test("主食：宽裕人家把口粮换成面粉、面包（标准比例 × 宽�
   const population = 250;
   const rich = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE, bread: 3000 * SCALE });
   grantResidentVouchers(rich, 10000000, CONTENT);
+  setAllHouseholdsAffluenceAtLeast(rich, 3, CONTENT);
   clearStaples(rich);
   const need = residentPeople(rich) * CONTENT.rules.foodPerPersonDay;
   const rows = buyStaplesForResidents(rich, population, CONTENT).staples.rows;
@@ -84,6 +86,7 @@ test("主食替代：买不到面包改买面粉；已有库存扣减当日购�
   const population = 250;
   const noBread = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE });
   grantResidentVouchers(noBread, 10000000, CONTENT);
+  setAllHouseholdsAffluenceAtLeast(noBread, 3, CONTENT);
   clearStaples(noBread);
   const rows = Object.fromEntries(buyStaplesForResidents(noBread, population, CONTENT).staples.rows.map(row => [row.itemId, row]));
   assert.equal(rows.bread.purchasedJin, 0);
@@ -94,6 +97,7 @@ test("主食替代：买不到面包改买面粉；已有库存扣减当日购�
   // 已有面粉多于目标：不再买面粉。
   const stocked = withGeneralStore(voucherState(), { flour: 3000 * SCALE, bread: 3000 * SCALE });
   grantResidentVouchers(stocked, 10000000, CONTENT);
+  setAllHouseholdsAffluenceAtLeast(stocked, 3, CONTENT);
   clearStaples(stocked);
   setResidentInventoryJin(stocked, "flour", residentPeople(stocked) * CONTENT.rules.foodPerPersonDay, CONTENT);
   const flour = buyStaplesForResidents(stocked, population, CONTENT).staples.rows.find(row => row.itemId === "flour");

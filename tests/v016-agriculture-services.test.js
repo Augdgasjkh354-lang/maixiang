@@ -7,7 +7,7 @@ import { householdList, householdPopulation, householdIdleWorkers, jobCount, set
 import { ensureHouseholdLife } from "../src/systems/household-life.js";
 import { accrueServiceDemand, processServiceDemand } from "../src/systems/services.js";
 import { prepareShopsForDay, finishShopsDay, resetShopDaily, sellShopProduct, shopSalesCapacityUnits } from "../src/systems/shops.js";
-import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js";
+import { issueTownVouchers, transferVouchers, voucherBalance } from "../src/economy/currency.js";
 import { exportState, parseSaveFile } from "../src/persistence/storage.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { advancePopulation } from "../src/systems/population.js";
@@ -33,15 +33,26 @@ function idleHouseholds(state, count = 2) {
   return rows.slice(0, count);
 }
 
-// 服务预算 = 家底 / wealthSpendDays × serviceShare（household-budget）。这里把"每日可花"设成 voucherPerDay：
-// 家底 = voucherPerDay × wealthSpendDays，全放在粮券里，小麦清零以免多出来的存粮也算进家底。
+// 服务预算 = 每日可花 × serviceShare，每日可花 = 可动用预算 ÷ daysPerYear，可动用预算 = 近期收入 × daysPerYear + usableWealthShare × 家底（household-budget）。
+// 这里把"每日可花"设成 voucherPerDay：收入清零（收入预期与近期日收入都清为 0），家底 = voucherPerDay × daysPerYear ÷ usableWealthShare。
+// 开局即粮券阶段，服务按粮券付款，所以超出 30 天口粮的家底放在粮券里（经 setHouseholdVoucherUnits 保持镇库找平、粮券守恒），小麦只留 30 天口粮。
 function setBudget(household, voucherPerDay, state) {
+  if (!state) throw new Error("setBudget 需要 state：粮券家底要经镇库记账");
   ensureHouseholdLife(household, CONTENT).day = {};
   const rules = CONTENT.rules.householdBudget;
   const keepDays = rules.wealthFoodReserveDays; // 家底只扣 30 天口粮（与 householdWealthUnits 一致）
   const keepJin = householdPopulation(household) * CONTENT.rules.foodPerPersonDay * keepDays;
-  // 开局即粮券：超出口粮储备的家底全部放在粮券里（服务按粮券付款）；小麦只留 30 天口粮。
-  setHouseholdVoucherUnits(state, household, Math.round(voucherPerDay * rules.wealthSpendDays * CONTENT.precision.currencyUnitsPerVoucher));
+  household.incomeExpectationJin = 0;
+  household.recentIncomeUnits = 0;
+  const wealthUnits = Math.round(voucherPerDay * CONTENT.rules.daysPerYear / rules.usableWealthShare * CONTENT.precision.currencyUnitsPerVoucher);
+  // 每日可花 300 券的家庭要 10 万多券家底，全部家户加起来远超镇库券池：不足时先印券（计入发行量，守恒照常通过）。
+  const shortfall = wealthUnits - voucherBalance(state, `household:${household.id}`) - voucherBalance(state, "town");
+  if (shortfall > 0) {
+    state.monetaryReform.legacyBankAccess = true; // 测试夹具没有银行建筑，印券走 legacy 通道
+    const issued = issueTownVouchers(state, shortfall, CONTENT, "测试印制服务预算家底");
+    if (!issued.ok) throw new Error(issued.reason);
+  }
+  setHouseholdVoucherUnits(state, household, wealthUnits);
   for (const itemId of ["flour", "bread"]) household.inventory[itemId] = 0;
   household.inventory.wheat = Math.round(keepJin * CONTENT.precision.inventoryUnitsPerJin);
   budgetDirty = true;

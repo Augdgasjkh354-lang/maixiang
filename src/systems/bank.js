@@ -3,6 +3,7 @@ import { recordEvent } from "../economy/ledger.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { withdrawFromBank } from "../economy/deposits.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
+import { recordHouseholdBudgetIncome } from "./household-life.js";
 import { wholesalePrice } from "./wealth-stats.js";
 import { companyWorkingCapitalReserve } from "./companies.js";
 import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEHOLD_RESERVE_DAYS } from "./investment-preference.js";
@@ -283,6 +284,7 @@ function settleDepositInterestDay(state, content, bank, dailyDepositRate) {
     if (!payment.ok || payment.paidValueUnits !== credited) throw new Error("存款利息付款预检后失败");
     for (const { householdId, credit } of credits) {
       bank.deposits[householdId] = (bank.deposits[householdId] || 0) + credit;
+      recordHouseholdBudgetIncome(state, householdId, credit, content);
       bank.stats.interestPaidVoucherUnits += credit;
     }
   }

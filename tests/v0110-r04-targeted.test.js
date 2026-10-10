@@ -7,6 +7,7 @@ import { payDailyWages } from "../src/systems/payroll.js";
 import { prepareShopsForDay, serviceShopCapacityUses } from "../src/systems/shops.js";
 import { accrueServiceDemand, processServiceDemand } from "../src/systems/services.js";
 import { ensureHouseholdLife } from "../src/systems/household-life.js";
+import { invalidateHouseholdBudgets } from "../src/systems/household-budget.js";
 import { issueVouchersFromWheat } from "../src/economy/currency.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../src/economy/payment.js";
 import { companyActualProfitValuation } from "../src/systems/companies.js";
@@ -37,10 +38,13 @@ function openTeaShop(state, id = "street-r04") {
   return { street, owner, shop: state.shops[opened.shopId] };
 }
 
-function setServiceBudget(household, voucherPerDay) {
+// 每日可花 = 可动用预算 ÷ 360，可动用预算主要来自收入预期：收入预期 = 每日可花 × 360（斤 ≈ 券）。
+function setServiceBudget(state, household, voucherPerDay) {
   const life = ensureHouseholdLife(household, CONTENT);
-  life.recent = [{ incomeVoucherUnits: Math.round(voucherPerDay * V), lifeExpenseVoucherUnits: 0 }];
+  life.recent = [];
   life.day = {};
+  household.incomeExpectationJin = voucherPerDay * CONTENT.rules.daysPerYear;
+  invalidateHouseholdBudgets(state);
 }
 
 function valuationCompany({ capitalVoucher = 20000, inventoryCostVoucher = 0, dailyProfitVoucher = 10 } = {}) {
@@ -75,8 +79,10 @@ test("r04 服务收入只来自真实居民消费；无支付能力时记录未�
   const poor = buyers[0];
   poor.inventory.wheat = 0;
   poor.voucherUnits = 0;
+  poor.incomeExpectationJin = 0;
   syncResidentAggregates(state, CONTENT);
-  setServiceBudget(poor, 100);
+  // 没有收入也没有家底：每日可花为 0，买不起。
+  invalidateHouseholdBudgets(state);
   state.services.demandByHousehold[poor.id] = { tea: 1000, haircut: 0, repair: 0 };
   const revenueBefore = shop.accounts.day.revenueVoucherUnits;
   const poorResult = processServiceDemand(state, CONTENT);
@@ -85,7 +91,7 @@ test("r04 服务收入只来自真实居民消费；无支付能力时记录未�
   assert.equal(shop.accounts.day.revenueVoucherUnits, revenueBefore);
 
   const buyer = buyers[1];
-  setServiceBudget(buyer, 100);
+  setServiceBudget(state, buyer, 100);
   state.services.demandByHousehold[buyer.id] = { tea: 1000, haircut: 0, repair: 0 };
   // 开局即粮券：服务付的是粮券，进店铺的粮券现金。
   const beforeCash = shop.cashVoucherUnits;

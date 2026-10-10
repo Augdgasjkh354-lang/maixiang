@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { simulation, CONTENT } from "../src/engine.js";
 import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js";
 import { grantResidentVouchers, setResidentInventoryJin } from "./helpers-v16.js";
+import { setAllHouseholdsAffluenceAtLeast } from "./budget-fixture.js";
 import { householdList, householdPopulation, householdIdleWorkers, setJobCount } from "../src/systems/households.js";
 import { buyStaplesForResidents, meatStapleShare, updateMeatHabit } from "../src/systems/market.js";
 import { planDailyFoodConsumption } from "../src/systems/consumption.js";
@@ -39,7 +40,8 @@ function town(seed, { square = true, store: withStore = true } = {}) {
   const plaza = square ? add("times_square") : null;
   simulation.setEmployment(state, `${market}::${CONTENT.buildings.wholesale_market.jobs[0].id}`, 3);
   assert.equal(state.monetaryReform.stage, "voucher"); // 开局即粮券阶段
-  grantResidentVouchers(state, 300000);
+  // 居民每日可花 = 可动用预算 ÷ 360（宽裕度重做后比旧口径少很多），粮券要给够，集市才有现金从养殖场进肉。
+  grantResidentVouchers(state, 600000);
   if (!withStore) return { state, street, base, plaza, storeId: null };
   const store = simulation.openResidentShop(state, street, "general");
   assert.equal(store.ok, true, store.reason);
@@ -95,7 +97,7 @@ test("宽裕度 1/2/3 时肉占口粮约 5%/27%/75%，宽裕度 0 时没有肉",
   assert.ok(Math.abs(meatStapleShare(2, CONTENT) - 0.27) < 0.005, `宽裕度 2: ${meatStapleShare(2, CONTENT)}`);
   assert.ok(Math.abs(meatStapleShare(3, CONTENT) - 0.75) < 1e-9, `宽裕度 3: ${meatStapleShare(3, CONTENT)}`);
   assert.equal(meatStapleShare(0, CONTENT), 0);
-  // 封顶：宽裕度超过 maxAffluence 也只有 maxShare。
+  // 封顶：宽裕度超过 fullAffluence 也只有 maxShare。
   assert.ok(Math.abs(meatStapleShare(10, CONTENT) - CONTENT.rules.meatStaple.maxShare) < 1e-9);
 });
 
@@ -103,6 +105,7 @@ test("宽裕人家买主食先买肉（按鸡鸭鹅猪权重分），有肉时�
   const population = 250;
   const state = withGeneralStore(voucherState(), { wheat: 3000 * I, flour: 3000 * I, bread: 3000 * I, pork: 3000 * I, chicken: 3000 * I, duck: 3000 * I, goose: 3000 * I });
   grantResidentVouchers(state, 10000000, CONTENT);
+  setAllHouseholdsAffluenceAtLeast(state, 3, CONTENT); // 很富：宽裕度到封顶
   clearStaples(state);
   const need = people(state) * CONTENT.rules.foodPerPersonDay;
   const rows = rowsOf(state, population);
@@ -118,6 +121,7 @@ test("宽裕人家买主食先买肉（按鸡鸭鹅猪权重分），有肉时�
 test("没有肉（无养殖场、无卖家）时，没买到的肉算回其余口粮，面粉面包按正常比例买", () => {
   const state = withGeneralStore(voucherState(), { wheat: 3000 * I, flour: 3000 * I, bread: 3000 * I });
   grantResidentVouchers(state, 10000000, CONTENT);
+  setAllHouseholdsAffluenceAtLeast(state, 3, CONTENT);
   clearStaples(state);
   const need = people(state) * CONTENT.rules.foodPerPersonDay;
   const rows = rowsOf(state);
@@ -166,6 +170,9 @@ test("集市也卖肉：没有综合商店时，肉直接从养殖场进集市�
   state.wholesaleMarket.inventory.cloth = 500 * I;
   assert.equal(simulation.setStallKeeperLimit(state, 6).ok, true);
   const farm = simulation.openResidentShop(state, base, "pig_farm").shopId;
+  // 养殖场开局没有现金，要靠卖肉才有钱付工资和饲料；居民宽裕度重做后头几天花得慢，先给养殖场启动资金，免得欠薪超期清算。
+  assert.equal(issueTownVouchers(state, 2000 * V, CONTENT, "测试").ok, true);
+  assert.equal(transferVouchers(state, "town", `shop:${farm}`, 2000 * V, CONTENT, "test", "测试养殖场启动资金").ok, true);
   simulation.advanceDays(state, 40);
   const market = Object.values(state.shops).find(s => s.typeId === "stall" && s.collective);
   assert.ok(market, "有集体集市");
