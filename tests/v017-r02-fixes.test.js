@@ -26,7 +26,6 @@ function addBuilding(state, typeId, id, level = 1) {
 function openExchange(state) {
   state.stockExchange ||= { legacyAccess: false, rotation: 0 };
   state.stockExchange.legacyAccess = true;
-  state.monetaryReform.stage = "voucher";
 }
 
 function listedCompany(state, buildingId, { levels = 1, capital = 10000, ticker = "171", shares = 1000, offer = 0, price = 1 } = {}) {

@@ -4,7 +4,6 @@ import { householdList, householdPopulation, syncResidentAggregates } from "../s
 
 function enableLegacyVoucherFixture(state) {
   state.monetaryReform ||= {};
-  state.monetaryReform.stage = "voucher";
   state.monetaryReform.targetVoucherBps = 10000;
   state.monetaryReform.residentExchangeEnabled = true;
   state.monetaryReform.legacyBankAccess = true;

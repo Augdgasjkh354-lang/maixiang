@@ -103,7 +103,6 @@ test("镇营店付款路由：第一天零售收入直接进镇库；40 天内�
   const shop = state.shops[shopId];
   assert.ok((shop.accounts.cumulative.revenueVoucherUnits || 0) > 0, "镇营店应有零售收入");
   assert.equal(shop.cashVoucherUnits, 0, "镇营店没有自己的钱");
-  assert.equal(shop.cashWheatUnits, 0);
   // 镇营店不交店租、不交利润税，不分红；利润每日上缴（留存额清零）。
   assert.equal(shop.liabilities.rentVoucherUnits, 0);
   assert.equal(shop.liabilities.taxVoucherUnits, 0);

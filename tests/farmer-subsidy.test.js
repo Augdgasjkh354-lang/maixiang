@@ -84,7 +84,7 @@ test("基金不足：镇库垫付并记为基金负债", () => {
   const state = fixture(9203);
   const { a } = withFarmers(state);
   simulation.setSocialSecurityPolicy(state, { farmerSubsidyPerFarmerJin: 1 });
-  assert.equal(state.socialSecurity.cashVoucherUnits + state.socialSecurity.cashWheatUnits, 0, "基金初始无现金");
+  assert.equal(voucherBalance(state, "social"), 0, "基金初始无现金");
   const debtBefore = state.socialSecurity.debtToTownUnits;
   const advancedBefore = state.socialSecurity.totalAdvancedUnits;
   const aBefore = voucherBalance(state, `household:${a.id}`);

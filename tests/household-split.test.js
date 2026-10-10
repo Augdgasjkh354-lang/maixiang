@@ -173,7 +173,6 @@ test("商人岗位与店铺主人留在原户", () => {
   const state = simulation.createInitialState({ seed: 7003 });
   addBuilding(state, "bank-split", "bank");
   const street = addBuilding(state, "street-split", "commercial_street");
-  assert.equal(state.monetaryReform.stage, "voucher"); // 开局即粮券阶段
   // 开店需要空闲劳动力，挑一户还有闲人的家庭。
   const owner = households(state).find(household => householdIdleWorkers(household) > 0 && householdWorkingAge(household) >= 2);
   grantResidentVouchers(state, 300000, CONTENT, owner.id);

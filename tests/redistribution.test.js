@@ -181,7 +181,6 @@ test("富人税：口粮储备不动，小麦最多付到储备以外的部分�
   // 股票市值大、小麦只有一点储备以外的余量：税付不完。小麦阶段只付小麦。
   const state = legacyVoucherState({ seed: 6108 });
   const { company, companyId } = listedFixture(state, 50);
-  state.monetaryReform.stage = "wheat";
   simulation.setWealthTax(state, { ratesPercent: [20, 20, 20] });
   const holder = householdList(state).find(row => householdPopulation(row) > 0);
   isolate(state, holder);

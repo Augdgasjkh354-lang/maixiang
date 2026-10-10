@@ -115,11 +115,11 @@ test("进口关税 10%：关税 = 付给外镇的货款 × 10%（容许 1 单位
     assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
     assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 3.0).ok, true);
     if (rate) assert.equal(simulation.setTradeTariff(state, { importPercent: rate }).ok, true);
-    shop.cashWheatUnits = 1000 * I;
-    const wheatBefore = shop.cashWheatUnits;
+    // 进口的小麦由贸易行用粮券向镇库买，镇库小麦减少即付给外镇的量。
+    const wheatBefore = state.accounts.town.wheat;
     const townBefore = voucherBalance(state, "town");
     settleTradingHouses(state, CONTENT);
-    return { state, shop, row: lastRow(shop), wheatPaid: wheatBefore - shop.cashWheatUnits, townGain: voucherBalance(state, "town") - townBefore };
+    return { state, shop, row: lastRow(shop), wheatPaid: wheatBefore - state.accounts.town.wheat, townGain: voucherBalance(state, "town") - townBefore };
   };
   const plain = run(0);
   const taxed = run(10);
@@ -167,7 +167,6 @@ test("同等利润率时先出口：出口与进口都达标时，运力先给�
   const { state, shop } = tradeFixture(9206);
   assert.equal(simulation.configureWholesalePrice(state, "salt", 9.37).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.68).ok, true);
-  shop.cashWheatUnits = 1000 * I;
   settleTradingHouses(state, CONTENT);
   const row = lastRow(shop);
   assert.ok(row.exportJin.salt > 0, "应当先出口盐");
@@ -180,7 +179,6 @@ test("进口利润 15%（>10%、<25%）不做；同样 15% 的出口则照做", 
   const imp = tradeFixture(9207);
   assert.equal(simulation.configureWholesalePrice(imp.state, "salt", 15).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(imp.state, "flour", 2.37).ok, true);
-  imp.shop.cashWheatUnits = 1000 * I;
   settleTradingHouses(imp.state, CONTENT);
   assert.equal(lastRow(imp.shop).importJin.flour, undefined, "15% 利润的进口不做");
   assert.equal(lastRow(imp.shop).trades, 0);

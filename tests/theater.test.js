@@ -38,7 +38,6 @@ function idleHouseholds(state, count) {
 // 粮券必须走发行与转账，否则总账不守恒（validateState 会报错）。
 function useVoucherMoney(state) {
   // 开局即粮券阶段，但测试夹具没有银行建筑：印券要靠 legacyBankAccess（同 helpers-v16 的 enableLegacyVoucherFixture）。
-  state.monetaryReform.stage = "voucher";
   state.monetaryReform.targetVoucherBps = 10000;
   state.monetaryReform.residentExchangeEnabled = false;
   state.monetaryReform.legacyBankAccess = true;

@@ -123,6 +123,7 @@ test("出口：批发存货有余量、利润率够 10% 时卖给外镇，运费
   const town = ensureOutsideTowns(state, CONTENT).minzhen;
   const beforeStock = town.stocks.salt;
   const beforeWheat = town.wheatStockJin;
+  const beforeTownWheat = state.accounts.town.wheat;
   const beforeStats = { trades: town.stats.trades, exportJin: town.stats.exportJin };
   const beforeMarket = state.wholesaleMarket.inventory.salt;
   const beforeTownVouchers = voucherBalance(state, "town");
@@ -151,8 +152,9 @@ test("出口：批发存货有余量、利润率够 10% 时卖给外镇，运费
   assert.equal(row.cogsVoucherUnits, sold * 10 * V, "成本按批发售价");
   assert.equal(row.freightVoucherUnits, Math.ceil(sold * RULES.freightVoucherPerJin * V - 1e-9), "运费按 0.06 券/斤付镇库");
   assert.ok(row.profitVoucherUnits > 0, "有利润");
-  assert.ok(shop.cashWheatUnits > 0, "收到的小麦存在贸易行账上");
-  assert.ok(voucherBalance(state, "town") > beforeTownVouchers, "运费进了镇库");
+  assert.ok(state.accounts.town.wheat > beforeTownWheat, "外镇付的小麦进镇库");
+  // 镇库付货款给贸易行（出口收来的小麦），运费收进镇库：净额 = 运费 - 货款（券池不足时补发只会让镇库更多）。
+  assert.ok(voucherBalance(state, "town") - beforeTownVouchers + row.revenueVoucherUnits >= row.freightVoucherUnits - 1, "运费进了镇库（扣掉付给贸易行的货款后）");
   valid(state, "出口后");
 });
 
@@ -202,12 +204,11 @@ test("进口：店里有小麦、批发收购价够高时，向外镇买面粉�
   // 盐的外镇收购价约 14.7，批发售价 15 时利润为负，不出口（只测进口）。
   assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
-  shop.cashWheatUnits = 1000 * I;
   const town = ensureOutsideTowns(state, CONTENT).minzhen;
   const beforeFlour = town.stocks.flour;
   const beforeWheat = town.wheatStockJin;
   const beforeMarket = state.wholesaleMarket.inventory.flour || 0;
-  const beforeShopWheat = shop.cashWheatUnits;
+  const beforeTownWheat = state.accounts.town.wheat;
   const beforeShopVouchers = shop.cashVoucherUnits;
 
   settleTradingHouses(state, CONTENT);
@@ -217,17 +218,17 @@ test("进口：店里有小麦、批发收购价够高时，向外镇买面粉�
   assert.ok(bought <= 20 + 0.01, "没有销量历史时进口封顶 20 斤");
   assert.ok(Math.abs(town.stocks.flour - (beforeFlour - bought)) < 0.02, "外镇面粉减少");
   assert.ok(town.wheatStockJin > beforeWheat, "外镇收到小麦");
-  assert.ok(shop.cashWheatUnits < beforeShopWheat, "店里付出小麦");
+  assert.ok(state.accounts.town.wheat < beforeTownWheat, "镇库小麦付给外镇");
   assert.equal(state.wholesaleMarket.inventory.flour, beforeMarket + Math.round(bought * I), "面粉入批发市场");
   assert.ok(shop.cashVoucherUnits > beforeShopVouchers, "批发市场付粮券给店里");
   assert.ok(row.profitVoucherUnits > 0, "进口有利润");
   valid(state, "进口后");
 });
 
-test("进口没有小麦就不做", () => {
+test("进口：镇库小麦不高于口粮储备线就不做", () => {
   const { state, shop } = tradeFixture(9108);
   assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
-  shop.cashWheatUnits = 0;
+  state.accounts.town.wheat = 0;
   settleTradingHouses(state, CONTENT);
   assert.equal(lastRow(shop).importJin.flour, undefined);
 });
@@ -237,7 +238,6 @@ test("进口量封顶：市场存量不超过 30 天销量", () => {
   // 盐的批发售价抬到 15（外镇收购价约 14.7，利润为负），不让盐出口抢走运力池（出口排序优先，会先用光运力）。
   assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
-  shop.cashWheatUnits = 1000 * I;
   setMarketSales(state, "flour", 10); // 日销 10 斤 → 封顶 300 斤，减去现存 0
   settleTradingHouses(state, CONTENT);
   const bought = lastRow(shop).importJin.flour || 0;
@@ -321,7 +321,7 @@ test("存档往返：贸易行日志、账与库存读回后不变，状态合�
   const loaded = migrateSave(saved, CONTENT);
   const id = Object.keys(state.shops)[0];
   assert.deepEqual(loaded.shops[id].tradeLog, state.shops[id].tradeLog);
-  assert.equal(loaded.shops[id].cashWheatUnits, state.shops[id].cashWheatUnits);
+  assert.equal(loaded.shops[id].cashVoucherUnits, state.shops[id].cashVoucherUnits);
   valid(loaded, "读档后");
 });
 
@@ -410,7 +410,6 @@ function drainTradeHouseCash(state, shop, content) {
   if (shop.cashVoucherUnits > 0) {
     assert.equal(transferVouchers(state, `shop:${shop.id}`, "town", shop.cashVoucherUnits, content, "test_drain", "测试抽干店里现金").ok, true);
   }
-  shop.cashWheatUnits = 0;
   assert.equal(maximumPayableValueUnits(state, `shop:${shop.id}`, content), 0, "店里一分钱都没有");
 }
 

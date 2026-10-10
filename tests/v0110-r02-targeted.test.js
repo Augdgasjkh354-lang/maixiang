@@ -120,8 +120,6 @@ test("0.1.10-r02 就业面板的公司岗位读取公司工资，并只提交到
   simulation.setWageRate(state, "millers", 10);
   simulation.configureCompanyWage(state, a.companyId, 20);
   simulation.configureCompanyWage(state, b.companyId, 30);
-  state.companies[a.companyId].cashWheatUnits = 1000 * SCALE;
-  state.companies[b.companyId].cashWheatUnits = 1000 * SCALE;
   setJobCount(state, listedJobKeyForBuilding("mill-a", "millers"), 1, CONTENT, { type: "company", id: a.companyId });
   setJobCount(state, listedJobKeyForBuilding("mill-b", "millers"), 1, CONTENT, { type: "company", id: b.companyId });
 

@@ -11,7 +11,7 @@ import { settleOwnershipTakeovers } from "../src/systems/ownership-takeover.js";
 import { settleOwnerUpgrades } from "../src/systems/building-development.js";
 import { arrangePrivateWorkers, processPrivateBuilding, processPrivateIndustries } from "../src/systems/private-industry.js";
 import { wholesalePurchasePrice } from "../src/systems/wholesale-market.js";
-import { spendableVoucherUnits, paymentWheatBalanceUnits } from "../src/economy/payment.js";
+import { spendableVoucherUnits } from "../src/economy/payment.js";
 import { voucherBalance } from "../src/economy/currency.js";
 import { refreshOperatingPlan } from "../src/economy/operating-plan.js";
 import { grantResidentVouchers, richestHousehold } from "./helpers-v16.js";
@@ -151,7 +151,7 @@ test("存货不够抵欠薪时余额由镇库偿付给工人，记事件", () =>
     arrearsVoucherUnits: arrears, cumulativeAccruedVoucherUnits: arrears, cumulativePaidVoucherUnits: 0,
     claimsVoucherUnits: { [workerHouse.id]: arrears }, claimsPayment: {}
   };
-  const holderValue = () => voucherBalance(state, `household:${workerHouse.id}`) + paymentWheatBalanceUnits(state, `household:${workerHouse.id}`);
+  const holderValue = () => voucherBalance(state, `household:${workerHouse.id}`);
   const workerBefore = holderValue();
   const townTotal = () => voucherBalance(state, "town") + state.accounts.town.wheat;
   const townBefore = townTotal();
@@ -378,7 +378,7 @@ test("回购：镇库按整栋估值付给业主，建筑与岗位回到镇营",
   setJobCount(state, privateJobKeyForBuilding(salt.id, "salt_workers"), 4, CONTENT);
   const valuation = simulation.selectOperatingRightPreview(state, salt.id).valuationWheatJin;
   assert.ok(valuation > 0);
-  const ownerValue = () => voucherBalance(state, `household:${owner.id}`) + paymentWheatBalanceUnits(state, `household:${owner.id}`);
+  const ownerValue = () => voucherBalance(state, `household:${owner.id}`);
   const ownerBefore = ownerValue();
   const result = simulation.buyBuildingBackFromPrivate(state, salt.id);
   assert.equal(result.ok, true, result.reason);

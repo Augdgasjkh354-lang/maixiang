@@ -32,7 +32,7 @@ function withGeneralStore(state, stock = {}) {
     "shop-test": {
       id: "shop-test", name: "测试综合商店", buildingId: "street-test", typeId: "general",
       primaryItemId: "wheat", itemId: "wheat", itemIds: ["wheat", "flour", "bread", "salt"],
-      ownerHouseholdId: owner.id, cashVoucherUnits: 0, cashWheatUnits: 0,
+      ownerHouseholdId: owner.id, cashVoucherUnits: 0,
       inventory: { wheat: 0, flour: 0, bread: 0, salt: 0, wood: 0, ...stock },
       inventoryCostVoucherUnits: {}, status: "open", statusReason: "准备营业",
       accounts: { day: { soldUnits: {} }, year: { soldUnits: {} }, cumulative: { soldUnits: {} } },
