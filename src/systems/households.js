@@ -459,6 +459,32 @@ export function syncResidentAggregates(state, content) {
   state.currency.balances.residents = voucherUnits;
 }
 
+// 测试用开关：为真时每次改动都整表重算居民汇总（即旧的"逐笔全量同步"路径），用来与增量路径逐字段比对。
+let forceFullResidentSync = false;
+export function setForceFullResidentSync(on) {
+  const previous = forceFullResidentSync;
+  forceFullResidentSync = Boolean(on);
+  return previous;
+}
+
+// 逐户改动后的居民汇总增量维护：调用方已知改动量（户粮券合计加减了多少、某物品合计加减了多少），直接加到汇总上，O(1)。
+// 约定：调用前户数据已经写好（户粮券/户库存已改）；传入的 delta 必须与这次改动精确相等。
+// 延迟同步期间只记脏（批末整表同步一次，读数走逐户求和）；镜像缺键或不可信时整表重算。
+// 户数据若有未经本函数或整表同步的直接改动，之后的增量会沿用旧偏差，直到下一次整表同步——所以直接改户库存后要补一次 syncResidentAggregates。
+// 用位置参数而不用对象参数：这是每笔付款都会走的热路径，少一次对象分配。
+export function applyResidentAggregateDelta(state, content, voucherUnits = 0, itemId = null, itemUnits = 0) {
+  if (!hasHouseholds(state)) return;
+  if (state._deferHouseholdSync || forceFullResidentSync || !residentAggregatesReady(state, content)) { syncResidentAggregates(state, content); return; }
+  if (itemId && itemUnits) state.accounts.residents[itemId] += itemUnits;
+  if (voucherUnits) state.currency.balances.residents += voucherUnits;
+}
+
+function residentAggregatesReady(state, content) {
+  const mirror = state.accounts?.residents;
+  if (!mirror || !Number.isInteger(state.currency?.balances?.residents)) return false;
+  return Object.keys(content.items).every(itemId => Number.isInteger(mirror[itemId]));
+}
+
 export function residentInventoryUnits(state, itemId) {
   if (!hasHouseholds(state)) return state.accounts?.residents?.[itemId] || 0;
   if (state._deferHouseholdSync) return householdList(state).reduce((sum, household) => sum + (household.inventory?.[itemId] || 0), 0);
@@ -557,7 +583,7 @@ export function creditHouseholdInventory(state, householdId, itemId, units, cont
   const before = household.inventory?.[itemId] || 0;
   if (!Number.isSafeInteger(before + units)) return { ok: false, reason: "家庭库存超过安全范围" };
   household.inventory[itemId] = before + units;
-  syncResidentAggregates(state, content);
+  applyResidentAggregateDelta(state, content, 0, itemId, units);
   return { ok: true, householdId, units };
 }
 

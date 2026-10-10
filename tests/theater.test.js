@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CONTENT, simulation } from "../src/engine.js";
-import { householdList, householdPopulation } from "../src/systems/households.js";
+import { householdList, householdPopulation, syncResidentAggregates } from "../src/systems/households.js";
 import { householdIdleWorkers, isActiveHousehold } from "../src/systems/households.js";
 import { initializeBuildingJobs } from "../src/systems/employment.js";
 import { accrueServiceDemand, processServiceDemand } from "../src/systems/services.js";
@@ -51,6 +51,7 @@ function setAffluence(state, household, affluence) {
   household.inventory.wheat = Math.round(people * CONTENT.rules.foodPerPersonDay * keepDays * I);
   household.inventory.flour = 0;
   household.inventory.bread = 0;
+  syncResidentAggregates(state, CONTENT);
   const target = voucherWealthForAffluence(state, household, affluence, CONTENT);
   const owner = `household:${household.id}`;
   const current = voucherBalance(state, owner);

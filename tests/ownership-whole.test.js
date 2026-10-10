@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { simulation } from "../src/engine.js";
 import { CONTENT } from "../src/content/index.js";
 import { DAILY_STEPS } from "../src/systems/daily.js";
-import { householdList, isActiveHousehold, jobCount, setJobCount } from "../src/systems/households.js";
+import { householdList, isActiveHousehold, jobCount, setJobCount, syncResidentAggregates } from "../src/systems/households.js";
 import { jobKeyForBuilding, privateJobKeyForBuilding } from "../src/selectors/labor.js";
 import { buildingOwner, transferBuildingOwnership } from "../src/systems/ownership.js";
 import { settleOwnershipTakeovers } from "../src/systems/ownership-takeover.js";
@@ -112,6 +112,7 @@ test("民营欠薪连续超过30天：整栋收回镇营；存货先抵欠薪，
   const mill = addBuilding(state, "mill", "mill-take", { owner: "household", ownerId: owner.id, level: 1 });
   setHouseholdVoucherUnits(state, owner, 0);
   owner.inventory.flour = 50 * I;
+  syncResidentAggregates(state, CONTENT);
   const flourPrice = wholesalePurchasePrice(state, "flour", CONTENT);
   // 欠薪 40 券：存货 50 斤面粉按收购价约 80 券，抵掉 40 券需 25 斤。
   const arrears = 40 * V;
@@ -143,6 +144,7 @@ test("存货不够抵欠薪时余额由镇库偿付给工人，记事件", () =>
   const mill = addBuilding(state, "mill", "mill-advance", { owner: "household", ownerId: owner.id, level: 1 });
   setHouseholdVoucherUnits(state, owner, 0);
   owner.inventory.flour = 0;
+  syncResidentAggregates(state, CONTENT);
   const arrears = 30 * V;
   const workerHouse = householdList(state).filter(isActiveHousehold)[2];
   state.privateEconomy.payrollByBuilding[mill.id] = {
@@ -306,6 +308,7 @@ test("民营招工受业主可用资金限制：日工资总额不超过可用�
   const mill = addBuilding(state, "mill", "mill-hire", { owner: "household", ownerId: owner.id, level: 1 });
   setHouseholdVoucherUnits(state, owner, 0);
   owner.inventory.wheat = 0;
+  syncResidentAggregates(state, CONTENT);
   refreshOperatingPlan(state, CONTENT);
   arrangePrivateWorkers(state, CONTENT);
   assert.equal(jobCount(state, privateJobKeyForBuilding(mill.id, "millers")), 0, "没有资金不招工");

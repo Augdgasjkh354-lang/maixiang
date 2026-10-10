@@ -150,6 +150,7 @@ test("居民汇总付款也能动用存款：先取回存款最多的家庭的�
   const { state, depositors } = depositorFixture(9303, 3);
   for (const household of depositors) {
     household.inventory.wheat = 0;
+    syncResidentAggregates(state, CONTENT);
     takeHouseholdVouchers(state, household);
   }
   syncResidentAggregates(state, CONTENT);

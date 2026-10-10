@@ -249,8 +249,8 @@ test("无人可接手：店铺保持暂停并记一次事件，之后每日不�
     kill(state, household);
     if (household.voucherUnits > 0) transferVouchers(state, `household:${household.id}`, "town", household.voucherUnits, CONTENT, "test", "测试：他户资金清空");
     household.inventory = Object.fromEntries(Object.keys(household.inventory).map(itemId => [itemId, 0]));
+    syncResidentAggregates(state, CONTENT);
   }
-  syncResidentAggregates(state, CONTENT);
   kill(state, owner);
   settleEscheat(state, CONTENT);
   assert.equal(shop.ownerHouseholdId, owner.id, "没有接手人，业主不变");

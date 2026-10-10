@@ -24,7 +24,7 @@ import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/busine
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
 import { setCurrentUnitPrice, currentUnitPrice } from "../economy/prices.js";
 import { nextPriceFactor } from "../economy/price-adjust.js";
-import { householdConvertibleWheatUnits, householdList, householdPopulation, syncResidentAggregates } from "./households.js";
+import { applyResidentAggregateDelta, householdConvertibleWheatUnits, householdList, householdPopulation, syncResidentAggregates } from "./households.js";
 
 
 // 镇营统购统销的商品（不含小麦——小麦继续归镇库直管）。
@@ -377,6 +377,7 @@ function buyPrivateOutput(state, householdId, itemId, requestedUnits, content) {
     "wholesale_private_purchase", `批发市场收购${household.name}的${content.items[itemId]?.name || itemId}`, { requireFull: true });
   if (!payment.ok) return 0;
   household.inventory[itemId] -= units;
+  applyResidentAggregateDelta(state, content, 0, itemId, -units);
   addInventory(market, itemId, units, value);
   addPeriodMap(market, "intakeUnits", itemId, units);
   addPeriodValue(market, "purchaseVoucherUnits", value);

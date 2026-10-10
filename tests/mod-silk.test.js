@@ -6,7 +6,7 @@ import { CORE_CONTENT } from "../src/content/index.js";
 import { createInitialState } from "../src/core/state.js";
 import { validateState } from "../src/core/validation.js";
 import { CORE_DAILY_STEPS, runDay } from "../src/systems/daily.js";
-import { householdList, householdPopulation, isActiveHousehold, setJobCount, householdIdleWorkers } from "../src/systems/households.js";
+import { householdList, householdPopulation, isActiveHousehold, setJobCount, householdIdleWorkers, syncResidentAggregates } from "../src/systems/households.js";
 import { initializeBuildingJobs } from "../src/systems/employment.js";
 import { openShop } from "../src/systems/shops.js";
 import { buyGoodsForResidents } from "../src/systems/goods-demand.js";
@@ -63,6 +63,7 @@ function setAffluence(state, household, affluence) {
   household.inventory.wheat = Math.round(people * content.rules.foodPerPersonDay * keepDays * I);
   household.inventory.flour = 0;
   household.inventory.bread = 0;
+  syncResidentAggregates(state, content);
   const target = voucherWealthForAffluence(state, household, affluence, content);
   const owner = `household:${household.id}`;
   const current = voucherBalance(state, owner);

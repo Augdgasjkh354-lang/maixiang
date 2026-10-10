@@ -64,6 +64,7 @@ function isolateHousehold(state, keepId) {
       assert.equal(moved.ok, true, moved.reason);
     }
     other.inventory.wheat = 0;
+    syncResidentAggregates(state, CONTENT);
   }
   syncResidentAggregates(state, CONTENT);
 }
@@ -188,6 +189,7 @@ test("报价与结算一致：有可换券小麦时，换券只用垫付之后�
   const state = fixtureState();
   const household = weakBank(state, richestHousehold(state), { deposit: 800 * SCALE, cash: 100 * SCALE });
   household.inventory.wheat = 5000 * I;
+  syncResidentAggregates(state, CONTENT);
   setTownVouchers(state, 200 * SCALE, household.id);
   const full = maximumFullyPayableValueUnits(state, `household:${household.id}`, 3000 * SCALE, CONTENT);
   const max = maximumPayableValueUnits(state, `household:${household.id}`, CONTENT);
