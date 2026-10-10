@@ -333,7 +333,7 @@ export function renderSite(view) {
   } else if (building?.typeId === "bank") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${bankManagementMarkup(view, true)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
-    actions = `<button class="secondary" data-go="policy">查看货币改革政策</button>`;
+    actions = `<button class="secondary" data-go="policy">查看货币政策</button>`;
   } else if (building?.typeId === "foreign_trade_house") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${buildingStaffingMarkup(view, building)}${renderOutsideTown(view)}${developmentMarkup(view, building, development)}`;

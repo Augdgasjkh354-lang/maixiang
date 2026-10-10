@@ -271,7 +271,7 @@ function renderExchangeSummary(view) {
 function renderListingTab(view) {
   const rows = townListingRows(view);
   const expanded = view.ipoExpandedBuildingId || null;
-  const gate = view.ipo?.gateReason ? `<div class="subtle">${escapeHtml(view.ipo.gateReason)}；建成交易所并完成货币改革后可上市。</div>` : "";
+  const gate = view.ipo?.gateReason ? `<div class="subtle">${escapeHtml(view.ipo.gateReason)}；建成交易所后可上市。</div>` : "";
   const list = rows.length
     ? rows.map(row => renderTownListingRow(view, row, row.buildingId === expanded)).join("")
     : `<div class="cardlet subtle">暂无镇营产业可整栋上市。</div>`;
@@ -341,7 +341,7 @@ export function renderExchangeEntry(view) {
     : legacy
       ? `<button class="secondary" data-site="exchange-compat">前往交易所</button>`
       : `<button class="secondary" data-go="build">去建设交易所</button>`;
-  const gate = view.ipo?.gateReason ? `<div class="subtle">${escapeHtml(view.ipo.gateReason)}；建成交易所并完成货币改革后可上市。</div>` : "";
+  const gate = view.ipo?.gateReason ? `<div class="subtle">${escapeHtml(view.ipo.gateReason)}；建成交易所后可上市。</div>` : "";
   return `<div class="cardlet">
     <div class="row"><span class="label">可上市 ${number(totals.listableCount)} 栋 · 挂牌 ${number(totals.listedCount)} 家 · 待批 ${number(totals.applicationCount)} 份</span></div>
     <div class="settings-actions">${button}</div>

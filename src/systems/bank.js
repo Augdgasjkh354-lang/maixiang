@@ -212,7 +212,7 @@ export function bankLoanableVoucherUnits(state) {
 }
 
 export function depositToBank(state, householdId, voucherUnits, content = null) {
-  if (!bankAvailable(state)) return { ok: false, reason: "银行尚未可用（需建成银行并完成货币改革）" };
+  if (!bankAvailable(state)) return { ok: false, reason: "银行尚未可用（需先建成银行）" };
   const units = Math.floor(Number(voucherUnits) || 0);
   if (!Number.isSafeInteger(units) || units <= 0) return { ok: false, reason: "存款金额必须为正整数" };
   const household = state.households?.byId?.[householdId];
