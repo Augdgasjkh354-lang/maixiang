@@ -239,6 +239,8 @@ export function createInitialState(options) {
       tradeMarginPercent: content.rules.tradeHouseTargetMarginPercent ?? 20,
       tradeImportMarginPercent: content.rules.tradeHouseImportMarginPercent ?? 25,
       employmentExchangeJin: content.rules.employmentExchangeDefaultJin ?? 5,
+      // 公租房日租（斤/人·日，0—20，一位小数；0 = 免租）。
+      publicHousingRentPerResidentDayJin: content.rules.rentPerResidentDayWheatJin ?? 1,
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
       stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,

@@ -9,7 +9,7 @@ import { productionStatus } from "./production.js";
 import { selectHarvestForecast } from "./agriculture.js";
 import { reclaimCostEstimate, reclaimWorkDaysForAcres, reclaimedAcres, reclaimedAcresMaximum } from "../systems/agriculture.js";
 import { qeqUnitsToJin } from "../economy/inventory.js";
-import { selectHousing } from "./housing.js";
+import { selectHousing, publicHousingRentPerResidentDayJin } from "./housing.js";
 import { selectSaltCoverage } from "../systems/salt.js";
 import { selectDemolitionPreview, selectUpgradePreview } from "../systems/building-development.js";
 import { selectOperatingRightPreview } from "./operating-rights.js";
@@ -726,8 +726,10 @@ export function selectDashboard(state, content, selection) {
     payroll: (needBusiness || needResidents || needSite) ? state.payroll : null,
     housing: (needBusiness || needResidents || needSite || needPolicy) ? {
       ...housing,
-      rentPerResidentDayWheatJin: content.rules.rentPerResidentDayWheatJin,
-      rentPerResidentDayVoucher: content.rules.rentPerResidentDayWheatJin,
+      rentPerResidentDayWheatJin: publicHousingRentPerResidentDayJin(state, content),
+      rentPerResidentDayVoucher: publicHousingRentPerResidentDayJin(state, content),
+      rentMinimumJin: content.rules.publicHousingRentMinimumJin ?? 0,
+      rentMaximumJin: content.rules.publicHousingRentMaximumJin ?? 20,
       lastRentDay: state.fiscal?.lastRentDay || null,
       rentFiscal: state.fiscal || null
     } : null,
