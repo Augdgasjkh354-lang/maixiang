@@ -1,4 +1,5 @@
 import { inOpeningPeriod } from "./employment-contracts.js";
+import { cancelHouseholdLoan, householdLiquidValueUnits, issueHouseholdLoan, quoteHouseholdLoan } from "./household-loans.js";
 import { payDayFor } from "./paydays.js";
 import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { householdIdOf } from "../economy/accounts.js";
@@ -478,6 +479,26 @@ function shopStartupUnits(def, content) {
   return Math.round((def?.startupVoucher ?? content.rules.shopMerchantStartupVoucher ?? 120) * currencyScale(content));
 }
 
+// 没有家庭凑得齐启动资金时，按"总值 ≥ 启动资金 + 生活储备"补缺口放贷（docs/LENDING.md）。
+// 依次试候选（可动用资金多的在前）：放了贷、又能开店才算成功；否则当天冲销，换下一户。返回 { household, loanId } 或 null。
+function borrowForShopStartup(state, content, preferredId, startup) {
+  const candidates = householdList(state)
+    .filter(household => isActiveHousehold(household) && householdIdleWorkers(household) > 0
+      && (!preferredId || household.id === preferredId))
+    .map(household => ({ household, liquid: householdLiquidValueUnits(state, household, content) }))
+    .sort((a, b) => b.liquid - a.liquid || String(a.household.id).localeCompare(String(b.household.id)));
+  for (const { household } of candidates) {
+    const need = startup + householdStartupReserveUnits(household, content);
+    const quote = quoteHouseholdLoan(state, household.id, "shop", need, content);
+    if (!quote.ok || !quote.covers) continue;
+    const issued = issueHouseholdLoan(state, household.id, "shop", need, content);
+    if (!issued.ok) continue;
+    if (chooseMerchantHousehold(state, content, household.id, startup)) return { household, loanId: issued.loan.id };
+    cancelHouseholdLoan(state, issued.loan.id, content);
+  }
+  return null;
+}
+
 function chooseMerchantHousehold(state, content, preferredId = null, startup = shopStartupUnits(null, content)) {
   const candidates = householdList(state).filter(household => {
     if (!isActiveHousehold(household) || householdIdleWorkers(household) <= 0) return false;
@@ -504,7 +525,13 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
   if (active.length >= shopHostSlots(building, content)) return { ok: false, reason: `${hostName}没有空位` };
   if (requestedDefinition?.town) return openTownShopRecord(state, building, normalizedTypeId, definition, content);
   const startupUnits = shopStartupUnits(definition, content);
-  const household = chooseMerchantHousehold(state, content, preferredHouseholdId, startupUnits);
+  let household = chooseMerchantHousehold(state, content, preferredHouseholdId, startupUnits);
+  // 开店失败时同日冲销这笔贷款（见下方各失败分支）。
+  let loanId = null;
+  if (!household) {
+    const borrowed = borrowForShopStartup(state, content, preferredHouseholdId, startupUnits);
+    if (borrowed) ({ household, loanId } = borrowed);
+  }
   if (!household) return { ok: false, reason: "没有同时满足生活储备、启动资金和空闲劳动力的家庭" };
   if (householdIdleWorkers(household) <= 0) return { ok: false, reason: "该家庭没有可开店的劳动力" };
   const shopId = `shop-${state.nextShopNumber++}`;
@@ -536,7 +563,11 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
   const payment = settleMonetaryPayment(state, `household:${household.id}`, `shop:${shopId}`, currentPaymentComposition(state, startupUnits), content,
     "shop_capital", `${household.name}投入开店资金`,
     { requireFull: true, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) });
-  if (!payment.ok) { delete state.shops[shopId]; return payment; }
+  if (!payment.ok) {
+    delete state.shops[shopId];
+    if (loanId) cancelHouseholdLoan(state, loanId, content);
+    return payment;
+  }
   shop.initialCapital.voucherValueUnits = payment.voucherPaidValueUnits || 0;
   const assignment = setHouseholdJobCount(state, household.id, `shop:${shopId}:merchant`, 1, content);
   if (!assignment.ok) {
@@ -564,6 +595,7 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
       }
     }
     delete state.shops[shopId];
+    if (loanId) cancelHouseholdLoan(state, loanId, content);
     // 回退店铺编号，避免出现空洞（之前只删店不回退编号）。
     state.nextShopNumber = Math.max(1, (state.nextShopNumber || 2) - 1);
     return assignment;

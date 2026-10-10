@@ -7,6 +7,7 @@ import { recordHouseholdBudgetIncome } from "./household-life.js";
 import { wholesalePrice } from "./wholesale-price.js";
 import { companyWorkingCapitalReserve } from "./companies.js";
 import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEHOLD_RESERVE_DAYS } from "./investment-preference.js";
+import { settleHouseholdLoanRepayDay } from "./household-loans.js";
 
 // 银行系统（金融扩展第二期）：镇营银行。
 // - 只存粮券不存粮食；存款按日计息；可向上市公司放贷
@@ -20,7 +21,7 @@ import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSE
 // - 粮券恒等式：银行现金计入 totalVoucherBalances（currency.js）。存款台账的守恒关系是
 //   存款 + 欠镇库 + 应付利息 = 银行现金 + 在贷余额 + 持有国债 − 留存利润（bankLedgerInvariant，validateState 校验）。
 export const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
-export const DEFAULT_LOAN_RATE_ANNUAL_PERCENT = 6;
+export const DEFAULT_LOAN_RATE_ANNUAL_PERCENT = 5;
 export const DEFAULT_RESERVE_REQUIREMENT_PERCENT = 10;
 // 还债时银行必须保留的安全垫（占存款比例），规则键 rules.bankDebtRepayBufferShare。
 export const DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE = 0.05;
@@ -256,6 +257,7 @@ function setBorrowerCashUnits(state, loan, units) {
 
 function borrowerName(state, loan) {
   if (loan.borrowerKind === "company") return state.companies?.[loan.borrowerId]?.name || "未知公司";
+  if (loan.borrowerKind === "household") return state.households?.byId?.[loan.borrowerId]?.name || "未知住户";
   return "未知";
 }
 
@@ -295,16 +297,18 @@ export function issueBankLoan(state, borrowerKind, borrowerId, voucherUnits, con
 
 function settleBankLoansDay(state, content, bank, policy, dayIndex) {
   const daysPerYear = content.rules.daysPerYear || 360;
-  const dailyLoanRate = policy.loanRateAnnualPercent / 100 / daysPerYear;
   for (const loan of bank.loans) {
     if (loan.status !== "active") continue;
-    const interest = Math.floor((loan.outstandingVoucherUnits || 0) * dailyLoanRate);
+    // 住户贷款读发放时固定的利率（rateAnnualPercent），不随政策利率变化；还款由 settleHouseholdLoanRepayDay 按月供处理。
+    const rate = loan.borrowerKind === "household" ? loan.rateAnnualPercent : policy.loanRateAnnualPercent;
+    const interest = Math.floor((loan.outstandingVoucherUnits || 0) * (rate / 100 / daysPerYear));
     if (interest > 0) {
       loan.outstandingVoucherUnits += interest;
       loan.accruedInterestVoucherUnits += interest;
       // 应计利息是银行收入（资产增加、无人付现金）：计入留存利润，保证台账守恒。
       bank.retainedVoucherUnits += interest;
     }
+    if (loan.borrowerKind === "household") continue;
     if (dayIndex < loan.issuedDayIndex + loan.termDays) continue;
     // 到期：从借款方现金自动扣款
     const cash = borrowerCashUnits(state, loan);
@@ -480,6 +484,8 @@ export function settleBankDay(state, content) {
   rollBankBooks(state, bank);
   settleBankDepositsDay(state, content, bank, policy, daysPerYear);
   settleBankLoansDay(state, content, bank, policy, dayIndex);
+  // 住户贷款月供：到期扣款、欠期、有富余补还（docs/LENDING.md）。
+  settleHouseholdLoanRepayDay(state, content);
   // 先还镇库托底的债，再放新贷款：超出准备金与安全垫的现金优先还债，不把垫付的钱又借给公司。
   settleBankDebtRepay(state, content);
   settleBankAutoLoans(state, content, bank);

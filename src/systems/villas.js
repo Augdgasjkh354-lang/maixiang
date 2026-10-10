@@ -1,11 +1,11 @@
 import { currencyScale, voucherBalance } from "../economy/currency.js";
-import { currentPaymentComposition, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
+import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
-import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import {
   householdConvertibleWheatUnits, householdList, householdPopulation,
   isActiveHousehold, syncResidentAggregates
 } from "./households.js";
+import { cancelHouseholdLoan, householdLiquidValueUnits, issueHouseholdLoan, quoteHouseholdLoan } from "./household-loans.js";
 
 // 别墅群系统：富人购房（购房款全额进入镇库）、年度房产税（1月1日征收）。
 // 购房款经统一支付层 household -> town 流转，不破坏粮券发行恒等式。
@@ -32,13 +32,6 @@ export function villaPolicy(state, content) {
   policy.priceWheatJin ??= DEFAULT_VILLA_PRICE_WHEAT_JIN;
   policy.taxRatePercent ??= DEFAULT_VILLA_TAX_RATE_PERCENT;
   return policy;
-}
-
-// 家庭流动资产（小麦等值单位）：粮券 + 超出基本口粮储备的可折算小麦。
-function householdLiquidValueUnits(state, household, content) {
-  const vouchers = spendableVoucherUnits(state, `household:${household.id}`);
-  const wheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-  return vouchers + voucherUnitsForWheatUnits(wheatUnits, content, "floor");
 }
 
 function villaComplexes(state) {
@@ -113,18 +106,39 @@ export function settleVillaPurchases(state, content) {
     })
     .filter(row => row.affordable >= priceUnits)
     .sort((a, b) => b.liquid - a.liquid || String(a.household.id).localeCompare(String(b.household.id)));
-  if (!candidates.length) return { sold: 0 };
+  // 资金不足的候选（按可动用资金从多到少）：候选用完后再借款补缺口买房（docs/LENDING.md）。
+  const loanCandidates = householdList(state)
+    .filter(household => isActiveHousehold(household) && !owners.has(household.id))
+    .map(household => {
+      const reserve = Math.round(householdPopulation(household) * minimumPerCapita * scale);
+      return { household, liquid: householdLiquidValueUnits(state, household, content), reserve };
+    })
+    .filter(row => row.liquid - row.reserve < priceUnits)
+    .sort((a, b) => b.liquid - a.liquid || String(a.household.id).localeCompare(String(b.household.id)));
+  let loanIndex = 0;
+  if (!candidates.length && !loanCandidates.length) return { sold: 0 };
   let sold = 0;
   let revenue = 0;
   for (const villa of vacant) {
-    const candidate = candidates[sold];
-    if (!candidate) break;
+    let candidate = candidates[sold];
+    let loanId = null;
+    if (!candidate) {
+      // 无现款候选：逐户试借款补缺口，借到并买下才算成功，否则当天冲销。
+      const borrowed = loanCandidates[loanIndex++];
+      if (!borrowed) break;
+      const household = state.households?.byId?.[borrowed.household.id];
+      if (!household || owners.has(household.id)) continue;
+      const issued = issueHouseholdLoan(state, household.id, "villa", borrowed.reserve + priceUnits, content);
+      if (!issued.ok) continue;
+      loanId = issued.loan.id;
+      candidate = { household };
+    }
     const household = state.households?.byId?.[candidate.household.id];
-    if (!household || owners.has(household.id)) continue;
+    if (!household || owners.has(household.id)) { if (loanId) cancelHouseholdLoan(state, loanId, content); continue; }
     // 成交前复核一次购买力（同一日多人购房时资产已变动）。
     const minimum = content.rules.householdLiving?.difficultPerCapitaVoucher ?? 30;
     const reserve = Math.round(householdPopulation(household) * minimum * scale);
-    if (householdLiquidValueUnits(state, household, content) - reserve < priceUnits) continue;
+    if (householdLiquidValueUnits(state, household, content) - reserve < priceUnits) { if (loanId) cancelHouseholdLoan(state, loanId, content); continue; }
     const exchange = settleMonetaryPayment(state, `household:${household.id}`, "town",
       currentPaymentComposition(state, priceUnits), content,
       "villa_purchase", `${household.name}购买别墅（第${villa.villaIndex + 1}栋）；购房款全额进入镇库`,
@@ -132,7 +146,7 @@ export function settleVillaPurchases(state, content) {
         requireFull: true,
         maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30)
       });
-    if (!exchange.ok) continue;
+    if (!exchange.ok) { if (loanId) cancelHouseholdLoan(state, loanId, content); continue; }
     villas.sold.push({
       householdId: household.id,
       instanceId: villa.instanceId,

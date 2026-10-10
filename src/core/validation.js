@@ -285,6 +285,18 @@ export function validateState(state, content) {
   if (!currencyCheck.valid) errors.push("粮券总账不守恒：账户余额与未注销发行量不一致");
   // 存款台账 = 银行现金 + 在贷余额 + 国债本金 − 留存利润：存款利息必须有现金支撑。
   if (!bankLedgerInvariant(state).valid) errors.push("银行存款台账与现金、贷款、国债不守恒");
+  // 住户贷款（docs/LENDING.md）：引用的住户须存在（已核销的除外），数值有限且非负，月供为正、期限至少 1 月。
+  for (const loan of state?.bank?.loans || []) {
+    if (loan.borrowerKind !== "household") continue;
+    const id = loan.id || "?";
+    if (loan.status !== "written_off" && !state.households?.byId?.[loan.borrowerId]) errors.push("住户贷款引用了不存在的住户：" + id);
+    for (const key of ["principalVoucherUnits", "outstandingVoucherUnits", "accruedInterestVoucherUnits", "repaidVoucherUnits", "missedInstalments", "overdueDays"]) {
+      const value = loan[key] ?? 0;
+      if (!Number.isFinite(value) || value < 0) errors.push("住户贷款数值无效：" + id + "." + key);
+    }
+    if (loan.status === "active" && !(loan.instalmentVoucherUnits > 0)) errors.push("住户贷款月供无效：" + id);
+    if (!(loan.termMonths >= 1) && loan.purpose) errors.push("住户贷款期限无效：" + id);
+  }
   // 镇库托底（银行欠镇库的债）：账目都是非负安全整数。
   if (state?.bank) {
     for (const key of ["debtToTownUnits", "totalAdvancedUnits", "totalRepaidUnits"]) {

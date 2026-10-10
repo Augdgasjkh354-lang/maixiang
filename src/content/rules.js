@@ -262,6 +262,8 @@ export const RULES = Object.freeze({
   townShop: Object.freeze({ supplyShareMax: 0.5, maxPerStreet: 1 }),
   // 银行镇库托底（systems/bank.js）：还债时银行须保留的安全垫（占存款比例）；缺省与 DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE 一致。
   bankDebtRepayBufferShare: 0.05,
+  // 民间贷款（systems/household-loans.js，规格 docs/LENDING.md）：净家底口径下的负债上限、月供占近 30 天收入上限、单户余额上限（斤）、期限（月）。
+  lending: Object.freeze({ maxDebtToWealthShare: 0.6, maxServiceShareOfIncome: 0.3, maxPerHouseholdJin: 20000, shopTermMonths: 24, villaTermMonths: 60 }),
   shopTypes: Object.freeze({
     general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),

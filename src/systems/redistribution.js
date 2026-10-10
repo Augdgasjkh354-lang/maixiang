@@ -1,6 +1,6 @@
 // 再分配工具箱（docs/REDISTRIBUTION.md 第 1、2 条）：富人税、遗产税、家产归公，以及贫富基尼统计。
 //
-// 征税口径（家底，全口径）= 粮券 + 银行存款 + 超出口粮储备的小麦（householdWealthUnits）
+// 征税口径（家底，全口径）= 粮券 + 银行存款 + 超出口粮储备的小麦（householdGrossWealthUnits）−民间贷款余额（下限 0，见 taxBaseUnits）
 //                 + 股票市值（household.shares × 公司实时股价）+ 名下民营建筑估值（operating-rights 整栋估值）
 //                 + 名下存续国债本金（bonds.js 的 holdings，按户汇总）。贫富统计（基尼、最富占比）同口径。
 // - 富人税：每 30 天（日序号 % 30 === 0）按人均家底超额累进；年税率 ÷ 12 作为当月应纳。
@@ -19,7 +19,8 @@ import { recordEvent, recordLedger, makeTransactionId } from "../economy/ledger.
 import { bookAdd, ensureBook } from "../economy/books.js";
 import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, syncResidentAggregates, withDeferredHouseholdSync } from "./households.js";
-import { daysUntilHarvest, householdWealthUnits } from "./household-budget.js";
+import { daysUntilHarvest, householdGrossWealthUnits } from "./household-budget.js";
+import { householdLoanBalanceMap, settleHouseholdLoansAtEscheat } from "./household-loans.js";
 import { wholesalePrice } from "./wholesale-price.js";
 import { householdBondPrincipalMap } from "./bonds.js";
 import { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
@@ -138,15 +139,17 @@ function shareValueUnits(state, household) {
 
 // 全口径家底所需的全镇一次性汇总（只读）：民营建筑估值（按户）与国债本金（按户）。每次调用只算一遍。
 function wealthContext(state, content) {
-  return { valuations: privateBuildingValuations(state, content), bonds: householdBondPrincipalMap(state) };
+  return { valuations: privateBuildingValuations(state, content), bonds: householdBondPrincipalMap(state), loans: householdLoanBalanceMap(state) };
 }
 
 // 征税口径（单位：内部货币单位）。
+// 净家底口径（docs/LENDING.md）：全口径家底 − 民间贷款余额，下限 0。
 function taxBaseUnits(state, household, content, ctx) {
-  return householdWealthUnits(state, household, content)
+  const gross = householdGrossWealthUnits(state, household, content)
     + shareValueUnits(state, household)
     + (ctx.valuations.get(household.id) || 0)
     + (ctx.bonds.get(household.id) || 0);
+  return Math.max(0, gross - (ctx.loans?.get(household.id) || 0));
 }
 
 function ownedPrivateBuildings(state, householdId) {
@@ -266,6 +269,8 @@ function householdHasEscheatableAssets(state, household) {
   if (Object.values(household.inventory || {}).some(units => units > 0)) return true;
   if (Object.values(household.shares || {}).some(count => count > 0)) return true;
   if ((state.villas?.sold || []).some(row => row.householdId === household.id)) return true;
+  // 仍有未还的民间贷款：整户无人时要核销（即使没有其他家产）。
+  if ((state.bank?.loans || []).some(loan => loan.borrowerKind === "household" && loan.status === "active" && loan.borrowerId === household.id)) return true;
   // 店铺在等业主更替（无人接手时也算，直到有人接手或店铺关闭）。
   if (shopsAwaitingSuccession(state, household.id).length > 0) return true;
   return ownedPrivateBuildings(state, household.id).length > 0;
@@ -278,6 +283,8 @@ function escheatHousehold(state, household, content) {
   const scale = currencyScale(content);
   const reason = `${household.name}整户失效，家产归镇库`;
   const totals = { voucherUnits: 0, inventoryValueUnits: 0, shareCount: 0, buildingCount: 0, villaCount: 0 };
+  // 0. 民间贷款：先用手头与存款还一部分，剩余核销（留存利润减少）。须先于下面的家产划转。
+  settleHouseholdLoansAtEscheat(state, household, content);
 
   // 1. 存款：银行现金不够时镇库可垫付（记为银行欠镇库），两者都不够才取不回；取不回的留在存款台账，之后每日再试。
   const deposit = Math.max(0, state.bank?.deposits?.[id] || 0);

@@ -20,6 +20,7 @@ import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold } from "./households.js";
 import { householdLastHarvestIncomeUnits, householdRecentIncomeUnitsPerDay } from "./household-life.js";
+import { householdLoanBalanceMap, householdLoanBalanceUnits } from "./household-loans.js";
 
 const cache = new WeakMap();
 
@@ -74,13 +75,21 @@ export function daysUntilHarvest(state, content) {
   return left === 0 ? year : left;
 }
 
-export function householdWealthUnits(state, household, content) {
+// 家底（毛）：粮券 + 存款 + 超出 30 天口粮的小麦，不扣贷款。
+export function householdGrossWealthUnits(state, household, content) {
   const rules = budgetRules(content);
   // 只留 30 天口粮：留到秋收会让秋收前余粮被截成 0，宽裕度在 0.3 和 2.7 之间来回跳。
   const keepDays = rules.wealthFoodReserveDays ?? 30;
   const surplusWheat = householdConvertibleWheatUnits(state, household, content, keepDays);
   const deposit = Math.max(0, state.bank?.deposits?.[household.id] || 0);
   return Math.max(0, household.voucherUnits || 0) + deposit + voucherUnitsForWheatUnits(surplusWheat, content, "floor");
+}
+
+// 净家底 = 家底 − 该户民间贷款余额，下限 0（docs/LENDING.md）。loanMap 可传入全镇一次汇总的余额表（住户 id → 余额）。
+export function householdWealthUnits(state, household, content, loanMap = null) {
+  const gross = householdGrossWealthUnits(state, household, content);
+  const debt = loanMap ? (loanMap.get(household.id) || 0) : householdLoanBalanceUnits(state, household.id);
+  return Math.max(0, gross - debt);
 }
 
 // 一户一年的收入（券单位）= 近期日收入 × 一年天数 + 最近一次秋收所得。
@@ -98,10 +107,10 @@ function householdBudgetUnits(household, wealthUnits, content, rules) {
   return householdAnnualIncomeUnits(household, content) + rules.usableWealthShare * wealthUnits;
 }
 
-function computeRow(state, household, content, priceIndex = null) {
+function computeRow(state, household, content, priceIndex = null, loanMap = null) {
   const rules = budgetRules(content);
   const people = Math.max(1, householdPopulation(household));
-  const wealthUnits = householdWealthUnits(state, household, content);
+  const wealthUnits = householdWealthUnits(state, household, content, loanMap);
   const index = priceIndex ?? householdPriceIndex(state, content);
   const scale = currencyScale(content);
   const budgetUnits = householdBudgetUnits(household, wealthUnits, content, rules);
@@ -122,7 +131,8 @@ export function householdBudgets(state, content) {
   const hit = cache.get(state);
   if (hit && hit.serial === serial) return hit.rows;
   const priceIndex = householdPriceIndex(state, content);
-  const rows = new Map(householdList(state).filter(isActiveHousehold).map(h => [h.id, computeRow(state, h, content, priceIndex)]));
+  const loanMap = householdLoanBalanceMap(state);
+  const rows = new Map(householdList(state).filter(isActiveHousehold).map(h => [h.id, computeRow(state, h, content, priceIndex, loanMap)]));
   cache.set(state, { serial, rows });
   return rows;
 }
