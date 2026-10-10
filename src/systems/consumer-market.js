@@ -3,7 +3,7 @@ import {
   currencyScale
 } from "../economy/currency.js";
 import {
-  createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits
+  createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits, householdSpendableVoucherUnits
 } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { sellCompanyProduct, companySalePrice } from "./companies.js";
@@ -13,6 +13,7 @@ import {
   householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits,
   householdFoodQeqUnits, householdReserveQeqUnits,
   creditHouseholdInventory, residentInventoryUnits, syncResidentAggregates
+  , reserveWheatPaymentOptions
 } from "./households.js";
 import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { removeTownInventoryWithCost } from "../economy/business.js";
@@ -97,14 +98,18 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
 }
 
 // 粗估一户按某价能买多少（粮券 + 今日还能换券的小麦）：不走支付层报价，用于需求统计和二分查找的初值。
-function quickAffordableUnits(state, household, price, content, reserveDays) {
+function quickAffordableUnits(state, household, price, content, reserveDays, capUnits = Number.POSITIVE_INFINITY) {
   if (!(price > 0)) return 0;
-  const wheatUnits = Math.min(householdConvertibleWheatUnits(state, household, content, reserveDays),
-    householdExchangeAllowanceUnits(state, household.id, content));
+  const spendable = householdSpendableVoucherUnits(state, household);
+  const unitsPerVoucherUnit = content.precision.inventoryUnitsPerJin / (price * currencyScale(content));
+  // 手头粮券加存款已够买到 capUnits：换券部分只会更多，调用方取 min(cap, 结果)，结果相同，不必再算小麦。
+  if (Number.isFinite(capUnits) && Math.max(0, Math.floor(spendable * unitsPerVoucherUnit)) >= capUnits) return capUnits;
+  const convertible = householdConvertibleWheatUnits(state, household, content, reserveDays);
+  const wheatUnits = convertible > 0 ? Math.min(convertible, householdExchangeAllowanceUnits(state, household.id, content)) : 0;
   // 以粮换券还受镇库券池限制（与支付层同口径），券池见底时不能把富余小麦算作买得起。
   const wheatValue = voucherUnitsForWheatUnits(Math.max(0, wheatUnits), content, "floor");
   const exchangeValue = Math.min(wheatValue, Math.max(0, state.currency?.balances?.town || 0));
-  const value = spendableVoucherUnits(state, `household:${household.id}`) + exchangeValue;
+  const value = spendable + exchangeValue;
   return Math.max(0, Math.floor(value * content.precision.inventoryUnitsPerJin / (price * currencyScale(content))));
 }
 
@@ -138,11 +143,11 @@ function transactSeller(state, seller, household, itemId, units, content, reason
   const scale = currencyScale(content);
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   const cost = Math.round(units / inventoryScale * seller.price * scale);
-  const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
+  const wheatOptions = reserveWheatPaymentOptions(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
   if (seller.type === "town") {
     if ((state.accounts.town?.[itemId] || 0) < units) return { ok: false, reason: "镇库库存不足" };
     const payment = settleMonetaryPayment(state, `household:${household.id}`, "town", currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, maxWheatUnits });
+      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
     if (!payment.ok) return payment;
     const removal = removeTownInventoryWithCost(state, itemId, units, content);
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost, paidValueUnits: cost, payment, sellerCostVoucherUnits: removal.costWheatUnits };
@@ -159,7 +164,7 @@ function transactSeller(state, seller, household, itemId, units, content, reason
     const source = state.households?.byId?.[seller.householdId];
     if (!source || (source.inventory?.[itemId] || 0) < units) return { ok: false, reason: "卖方库存不足" };
     const payment = settleMonetaryPayment(state, `household:${household.id}`, `household:${seller.householdId}`, currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, maxWheatUnits });
+      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
     if (!payment.ok) return payment;
     source.inventory[itemId] -= units;
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost };
@@ -195,7 +200,7 @@ function affordableUnmetHouseholds(state, unmetUnits, minPrice, householdNeed, c
       ? householdNeed.get(household.id) || 0
       : Math.ceil(unmetUnits * householdPopulation(household) / totalPeople);
     if (need <= 0) continue;
-    const canBuy = Math.min(need, quickAffordableUnits(state, household, minPrice, content, reserveDays));
+    const canBuy = Math.min(need, quickAffordableUnits(state, household, minPrice, content, reserveDays, need));
     if (canBuy <= 0) continue;
     affordable += canBuy;
     households.push(household.id);

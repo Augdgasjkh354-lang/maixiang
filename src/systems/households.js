@@ -446,14 +446,17 @@ export function syncResidentAggregates(state, content) {
   state._householdSyncDirty = false;
   state.accounts ||= {};
   const itemIds = Object.keys(content.items);
-  const totals = Object.fromEntries(itemIds.map(itemId => [itemId, 0]));
+  const count = itemIds.length;
+  const totals = new Array(count).fill(0);
   let voucherUnits = 0;
   for (const household of householdList(state)) {
     voucherUnits += household.voucherUnits || 0;
-    for (const itemId of itemIds) totals[itemId] += household.inventory?.[itemId] || 0;
+    const inventory = household.inventory;
+    if (!inventory) continue;
+    for (let i = 0; i < count; i += 1) totals[i] += inventory[itemIds[i]] || 0;
   }
   state.accounts.residents ||= emptyInventory(content);
-  for (const itemId of itemIds) state.accounts.residents[itemId] = totals[itemId];
+  for (let i = 0; i < count; i += 1) state.accounts.residents[itemIds[i]] = totals[i];
   state.currency ||= {};
   state.currency.balances ||= { town: 0, residents: 0 };
   state.currency.balances.residents = voucherUnits;
@@ -532,6 +535,14 @@ export function householdConvertibleWheatUnits(state, household, content, reserv
   const wheatQeqPerUnit = qeqUnitsForInventoryUnits(content.items.wheat, 1, content);
   const requiredWheatUnits = Math.max(0, Math.ceil((reserve - otherFoodQeq) / Math.max(1, wheatQeqPerUnit)));
   return Math.max(0, wheat - requiredWheatUnits);
+}
+
+// 付款选项里的"小麦换券上限"：支付层本来就按 householdFoodReserveDays 自算同一个上限（取两者较小值），
+// 所以口粮天数与默认相同时不必预先算（每笔付款省一次遍历）；不同时才显式传入。
+export function reserveWheatPaymentOptions(state, household, content, reserveDays) {
+  const base = content.rules.householdFoodReserveDays ?? 30;
+  if (!household || reserveDays === base) return {};
+  return { maxWheatUnits: householdConvertibleWheatUnits(state, household, content, reserveDays) };
 }
 
 export function householdExchangeAllowanceUnits(state, householdId, content) {

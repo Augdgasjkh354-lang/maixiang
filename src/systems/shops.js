@@ -14,6 +14,7 @@ import {
   householdWorkingAge, jobReleaseRank, releaseJobFromHousehold,
   syncResidentAggregates,
   setHouseholdJobCount, setJobCount, jobCount, jobAssignments
+  , reserveWheatPaymentOptions
 } from "./households.js";
 import { shopTradePrices, recentAverage } from "../economy/operating-plan.js";
 import { shopEffectiveMarginPercent } from "../economy/margin-policy.js";
@@ -827,10 +828,10 @@ export function sellShopProduct(state, shopId, buyerOwner, units, content, reaso
   const actual = Math.min(quantity, remainingGoodsCapacity);
   if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * prices.retailVoucherPerUnit * currencyScale(content));
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
-  const maxWheatUnits = buyerHousehold ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30) : undefined;
+  const wheatOptions = reserveWheatPaymentOptions(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30);
   // 镇营店的零售收入直接进镇库（付给 "town"），店里没有自己的钱。
   const payment = settleMonetaryPayment(state, buyerOwner, shopAccountName(shop), currentPaymentComposition(state, paymentUnits), content,
-    "shop_retail_sale", reason, { requireFull: true, ...(maxWheatUnits === undefined ? {} : { maxWheatUnits }) });
+    "shop_retail_sale", reason, { requireFull: true, ...wheatOptions });
   if (!payment.ok) return payment;
   const cogs = removeShopInventoryCost(shop, itemId, actual);
   const pricingCogs = shop.town ? takePricingBasis(shop, itemId, shop.inventory[itemId] || 0, actual) : cogs;
@@ -919,9 +920,8 @@ export function recordShopServiceSale(state, shopId, householdId, serviceId, con
     const need = Math.round(Math.max(0, row.quantity || 0) * content.precision.inventoryUnitsPerJin);
     if ((shop.inventory?.[row.itemId] || 0) < need) return { ok: false, reason: `缺${content.items[row.itemId]?.name || row.itemId}` };
   }
-  const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
   const payment = settleMonetaryPayment(state, `household:${householdId}`, `shop:${shopId}`, currentPaymentComposition(state, priceUnits), content,
-    "shop_service_sale", `${household.name}购买${service.name}`, { requireFull: true, maxWheatUnits });
+    "shop_service_sale", `${household.name}购买${service.name}`, { requireFull: true });
   if (!payment.ok) return payment;
   let cogs = 0;
   for (const row of consumables) {
