@@ -128,19 +128,49 @@ function bankManagementMarkup(view, physical = true) {
     <div class="row"><span class="label">操作后镇库粮券</span><strong class="value">${number(preview.afterTownVoucher, 2)}粮券</strong></div>
     <div class="business-sticky-actions"><button class="secondary" data-currency-preview-cancel>取消</button><button class="primary" data-currency-confirm="${preview.type}">确认${preview.type === "issue" ? "印制发行" : "注销"}</button></div>
   </div>` : "";
-  const controls = reform.stage === "wheat"
+  const bank = view.policy?.bankStats || {};
+  const bonds = view.policy?.bondStats || {};
+  const reformWheat = reform.stage === "wheat";
+  const issueControls = reformWheat
     ? `<div class="subtle">启动货币改革后立即改用粮券结算：镇库按小麦存量印制等额粮券，居民可随时以粮换券。</div><button class="secondary wide" data-go="policy">前往政策</button>`
     : `<div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: reform.employmentExchangeMinimumJin, maximum: reform.employmentExchangeMaximumJin, className: "setting-editor" })}<b>斤</b></div></div>
-      <h3>粮券印制与注销</h3>
       <div class="row"><span class="label">镇库 / 居民粮券</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">粮券总量（含镇库）</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">镇库外流通</span><strong class="value">${number(c.outsideTownVoucher, 2)}粮券</strong></div>
       <div class="subtle">总量只在印制、注销时变；居民以粮换券、用券兑粮只是在镇库与民间之间流动。</div>
       <div class="business-form-row"><label>数量${stagedBankInput(view, "currency-amount", "发行或兑付数量", 1000)}</label><div class="settings-actions"><button class="secondary" data-currency-preview="issue">印制粮券</button><button class="secondary" data-currency-preview="redeem">注销粮券</button></div></div>
       ${previewMarkup}`;
+  // 顶部摘要：一屏内看清制度、券池、发行量与存贷款总额。
+  const summary = `<div class="cardlet bank-summary">
+      <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
+      <div class="row"><span class="label">镇库券池</span><strong class="value">${number(c.townVoucher, 2)}粮券</strong></div>
+      <div class="row"><span class="label">发行量</span><strong class="value">${number(c.issuedVoucher, 2)}粮券</strong></div>
+      <div class="row"><span class="label">存款总额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">贷款总额</span><strong class="value">${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
+    </div>`;
+  // 三个折叠分组：印券与换券（默认展开，保持第一屏）、利率与存款、国债。
+  const issueGroup = `<details class="detail-block bank-group" data-detail-key="bank-issue" open><summary><span>印券与换券</span><span class="subtle">流通 ${number(c.circulationVoucher, 0)}券</span></summary><div class="detail-body">${issueControls}</div></details>`;
+  const ratesGroup = `<details class="detail-block bank-group" data-detail-key="bank-rates"><summary><span>利率与存款</span><span class="subtle">存款 ${numberMax(bank.depositRateAnnualPercent ?? 2, 2)}% · 贷款 ${numberMax(bank.loanRateAnnualPercent ?? 6, 2)}%</span></summary><div class="detail-body">
+      <div class="row"><span class="label">存款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-deposit-rate", kind: "bank-deposit-rate", target: "bank", value: bank.depositRateAnnualPercent ?? 2, label: "银行存款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">贷款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-loan-rate", kind: "bank-loan-rate", target: "bank", value: bank.loanRateAnnualPercent ?? 6, label: "银行贷款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">准备金率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-reserve", kind: "bank-reserve", target: "bank", value: bank.reserveRequirementPercent ?? 10, label: "银行准备金率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)} / ${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(bank.loanableVoucher || 0, 1)} / ${number(bank.badDebtVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(bank.interestEarnedVoucher || 0, 1)} / ${number(bank.interestPaidVoucher || 0, 1)}券</strong></div>
+      <div class="subtle">按日计息；逾期30天核销坏账。</div>
+    </div></details>`;
+  const bondsGroup = reformWheat
+    ? `<div class="cardlet subtle">国债：启用粮券结算后可发行。</div>`
+    : `<details class="detail-block bank-group" data-detail-key="bank-bonds"><summary><span>国债</span><span class="subtle">在售 ${number(bonds.activeCount || 0)} 笔</span></summary><div class="detail-body">
+      <div class="row"><span class="label">发行总额</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-total", kind: "bond-issue-total", target: "bonds", value: 100000, label: "国债发行总额", minimum: 1, maximum: 1000000000, className: "setting-editor" })}<b>券</b></div></div>
+      <div class="row"><span class="label">期限</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-years", kind: "bond-issue-years", target: "bonds", value: 3, label: "国债期限", minimum: 1, maximum: 10, className: "setting-editor" })}<b>年</b><button class="secondary" data-bond-issue>发行</button></div></div>
+      <div class="row"><span class="label">票面年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-rate", kind: "bond-issue-rate", target: "bonds", value: 3, label: "国债票面年利率", minimum: 0, maximum: 20, className: "setting-editor" })}<b>%</b></div></div>
+      ${(bonds.issues || []).map(issue => `<div class="row"><span class="label">${issue.id} · ${issue.statusLabel}</span><strong class="value">${number(issue.totalVoucher)}券 · 票面${number(issue.couponRateAnnualPercent, 2)}% · ${issue.termYears}年</strong></div>`).join("")}
+      <div class="subtle">发行当天居民与银行按闲钱认购，利率高于存款利率才有人买；每年付息，到期还本。</div>
+    </div></details>`;
   return `<div class="status-strip"><span class="status-light working"></span><strong>${physical ? "银行" : "兼容银行入口"}</strong><span>${reform.stageName}</span></div>
-    <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
-    ${controls}`;
+    ${summary}
+    <div class="bank-groups">${issueGroup}${ratesGroup}${bondsGroup}</div>`;
 }
 
 function reclaimSection(view) {
