@@ -133,7 +133,7 @@ function bankManagementMarkup(view, physical = true) {
   const bank = view.policy?.bankStats || {};
   const bonds = view.policy?.bondStats || {};
   const issueControls = `<div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: reform.employmentExchangeMinimumJin, maximum: reform.employmentExchangeMaximumJin, className: "setting-editor" })}<b>斤</b></div></div>
-      <div class="row"><span class="label">镇库 / 居民粮券</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentVoucher, 2)}粮券</strong></div>
+      <div class="row"><span class="label">镇库 / 居民资金</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentFundsJin ?? c.residentVoucher, 2)}粮券 <small class="subtle">（手头 ${number(c.residentFunds?.handJin ?? c.residentVoucher, 2)} + 存款 ${number(c.residentFunds?.depositJin ?? 0, 2)}）</small></strong></div>
       <div class="row"><span class="label">粮券总量（含镇库）</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">镇库外流通</span><strong class="value">${number(c.outsideTownVoucher, 2)}粮券</strong></div>
       <div class="subtle">总量只在印制、注销时变；居民以粮换券、用券兑粮只是在镇库与民间之间流动。</div>
@@ -146,14 +146,16 @@ function bankManagementMarkup(view, physical = true) {
       <div class="row"><span class="label">发行量</span><strong class="value">${number(c.issuedVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">存款总额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)}券</strong></div>
       <div class="row"><span class="label">贷款总额</span><strong class="value">${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">闲置现金</span><strong class="value">${number(bank.idleCashJin ?? bank.loanableVoucher ?? 0, 1)}券</strong></div>
+      <div class="row"><span class="label">住户贷款（笔数 / 余额 / 有欠期）</span><strong class="value">${number(bank.householdLoans?.count || 0)}笔 / ${number(bank.householdLoans?.outstandingJin || 0, 1)}券 / 有欠期${number(bank.householdLoans?.overdueCount || 0)}笔</strong></div>
       <div class="row"><span class="label">欠镇库</span><strong class="value">${number(bank.debtToTownJin || 0, 1)}券（累计垫付 ${number(bank.totalAdvancedJin || 0, 1)} · 累计还款 ${number(bank.totalRepaidJin || 0, 1)} · 可还 ${number(bank.debtRepayableJin || 0, 1)}）</strong></div>
       <div class="row"><span class="label">偿还镇库</span><div class="setting-input">${stagedBankInput(view, "bank-repay", "偿还镇库金额", Math.round((bank.debtRepayableJin || 0) * 100) / 100)}<b>券</b><button class="secondary" data-bank-repay ${(bank.debtRepayableJin || 0) > 0 ? "" : "disabled"}>偿还</button></div></div>
     </div>`;
   // 三个折叠分组：印券与换券（默认展开，保持第一屏）、利率与存款、国债。
   const issueGroup = `<details class="detail-block bank-group" data-detail-key="bank-issue" open><summary><span>印券与换券</span><span class="subtle">流通 ${number(c.circulationVoucher, 0)}券</span></summary><div class="detail-body">${issueControls}</div></details>`;
-  const ratesGroup = `<details class="detail-block bank-group" data-detail-key="bank-rates"><summary><span>利率与存款</span><span class="subtle">存款 ${numberMax(bank.depositRateAnnualPercent ?? 2, 2)}% · 贷款 ${numberMax(bank.loanRateAnnualPercent ?? 6, 2)}%</span></summary><div class="detail-body">
+  const ratesGroup = `<details class="detail-block bank-group" data-detail-key="bank-rates"><summary><span>利率与存款</span><span class="subtle">存款 ${numberMax(bank.depositRateAnnualPercent ?? 2, 2)}% · 贷款 ${numberMax(bank.loanRateAnnualPercent ?? 5, 2)}%</span></summary><div class="detail-body">
       <div class="row"><span class="label">存款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-deposit-rate", kind: "bank-deposit-rate", target: "bank", value: bank.depositRateAnnualPercent ?? 2, label: "银行存款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">贷款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-loan-rate", kind: "bank-loan-rate", target: "bank", value: bank.loanRateAnnualPercent ?? 6, label: "银行贷款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">贷款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-loan-rate", kind: "bank-loan-rate", target: "bank", value: bank.loanRateAnnualPercent ?? 5, label: "银行贷款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">准备金率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-reserve", kind: "bank-reserve", target: "bank", value: bank.reserveRequirementPercent ?? 10, label: "银行准备金率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)} / ${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
       <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(bank.loanableVoucher || 0, 1)} / ${number(bank.badDebtVoucher || 0, 1)}券</strong></div>

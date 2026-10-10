@@ -217,14 +217,42 @@ function buildingWageTotals(state, content, building, definition, ownership, run
   return company ? { owner: "company", ...companyWageTotals(state, content, company) } : null;
 }
 
-// 顶栏粮券胶囊（只读）：居民手头粮券、居民银行存款、镇库券池余额，单位均为粮券。
+// 居民资金（只读）：手头粮券 + 银行存款的合计，以及拆分。数值单位为粮券（1 券 ≈ 1 斤）。
+function residentFundsView(state, scale) {
+  let depositUnits = 0;
+  for (const units of Object.values(state.bank?.deposits || {})) depositUnits += units || 0;
+  const handJin = voucherBalance(state, "residents") / scale;
+  const depositJin = depositUnits / scale;
+  return { residentFundsJin: handJin + depositJin, residentFunds: { handJin, depositJin } };
+}
+
+// 住户贷款（只读）：只统计 active 的住户贷款；按住户汇总余额、月供与欠期，并给出全镇合计。
+function householdLoanView(state, scale) {
+  const byHousehold = new Map();
+  const totals = { count: 0, outstandingJin: 0, overdueCount: 0, instalmentTotalJin: 0 };
+  for (const loan of state.bank?.loans || []) {
+    if (loan.borrowerKind !== "household" || loan.status !== "active") continue;
+    const outstanding = (loan.outstandingVoucherUnits || 0) / scale;
+    const instalment = (loan.instalmentVoucherUnits || 0) / scale;
+    const missed = loan.missedInstalments || 0;
+    const row = byHousehold.get(loan.borrowerId) || { loanBalanceJin: 0, loanInstalmentJin: 0, loanMissedInstalments: 0 };
+    row.loanBalanceJin += outstanding;
+    row.loanInstalmentJin += instalment;
+    row.loanMissedInstalments += missed;
+    byHousehold.set(loan.borrowerId, row);
+    totals.count += 1;
+    totals.outstandingJin += outstanding;
+    totals.instalmentTotalJin += instalment;
+    if (missed > 0) totals.overdueCount += 1;
+  }
+  return { byHousehold, totals };
+}
+
+// 顶栏粮券胶囊（只读）：居民资金合计与拆分、镇库券池余额，单位均为粮券。
 function selectHeaderVoucher(state, content) {
   const scale = currencyScale(content);
-  let residentDepositUnits = 0;
-  for (const units of Object.values(state.bank?.deposits || {})) residentDepositUnits += units || 0;
   return {
-    residentsHandVoucher: voucherBalance(state, "residents") / scale,
-    residentsDepositVoucher: residentDepositUnits / scale,
+    ...residentFundsView(state, scale),
     townVoucher: voucherBalance(state, "town") / scale
   };
 }
@@ -400,6 +428,7 @@ export function selectDashboard(state, content, selection) {
   const dailyNeed = people.total * content.rules.foodPerPersonDay;
   const season = selectSeason(state.day, content.rules.monthDays || 30);
   const voucherScale = currencyScale(content);
+  const loanView = householdLoanView(state, voucherScale);
   const needMarket = full || needBusiness;
   const breadPrice = needMarket ? currentUnitPrice(state, "bread", content) : 0;
   const targetBreadShare = needMarket ? Math.max(0, Math.min(
@@ -434,7 +463,8 @@ export function selectDashboard(state, content, selection) {
     if ((housingRow.unhousedPeople || 0) > 0) issues.push(`住房不足${housingRow.unhousedPeople}人`);
     if ((factors.wageCoverage ?? 1) < 0.999) issues.push(`欠薪：今日到账${Math.round((factors.wageCoverage || 0) * 100)}%`);
     if (!issues.length && foodDays < (content.rules.householdLiving?.difficultFoodDays || 14)) issues.push(`口粮储备仅${foodDays.toFixed(1)}日`);
-    return { id: household.id, name: household.name, people: householdPopulation(household), satisfaction: life.satisfaction ?? state.satisfaction, incomeExpectationJin: household.incomeExpectationJin || 0, depositPropensity: household.depositPropensity ?? null, stockPropensity: household.stockPropensity ?? null, voucher: (household.voucherUnits || 0) / voucherScale, foodDays, saltJin: (household.inventory?.salt || 0) / content.precision.inventoryUnitsPerJin, rentalPeople: housingRow.rentalPeople || 0, unhousedPeople: housingRow.unhousedPeople || 0, issues: issues.slice(0,2), recent: { days: recent.days, incomeVoucher: recent.incomeVoucherUnits / voucherScale, lifeExpenseVoucher: recent.lifeExpenseVoucherUnits / voucherScale, investmentVoucher: recent.investmentVoucherUnits / voucherScale, inKindIncomeJin: recent.inKindIncomeQeqUnits / content.precision.qeqUnitsPerJin, foodConsumedJin: recent.foodConsumedQeqUnits / content.precision.qeqUnitsPerJin, wageDueVoucher: recent.wageDueVoucherUnits / voucherScale, wagePaidVoucher: recent.wagePaidVoucherUnits / voucherScale } };
+    const loan = loanView.byHousehold.get(household.id) || { loanBalanceJin: 0, loanInstalmentJin: 0, loanMissedInstalments: 0 };
+    return { id: household.id, name: household.name, people: householdPopulation(household), loanBalanceJin: loan.loanBalanceJin, loanInstalmentJin: loan.loanInstalmentJin, loanMissedInstalments: loan.loanMissedInstalments, satisfaction: life.satisfaction ?? state.satisfaction, incomeExpectationJin: household.incomeExpectationJin || 0, depositPropensity: household.depositPropensity ?? null, stockPropensity: household.stockPropensity ?? null, voucher: (household.voucherUnits || 0) / voucherScale, foodDays, saltJin: (household.inventory?.salt || 0) / content.precision.inventoryUnitsPerJin, rentalPeople: housingRow.rentalPeople || 0, unhousedPeople: housingRow.unhousedPeople || 0, issues: issues.slice(0,2), recent: { days: recent.days, incomeVoucher: recent.incomeVoucherUnits / voucherScale, lifeExpenseVoucher: recent.lifeExpenseVoucherUnits / voucherScale, investmentVoucher: recent.investmentVoucherUnits / voucherScale, inKindIncomeJin: recent.inKindIncomeQeqUnits / content.precision.qeqUnitsPerJin, foodConsumedJin: recent.foodConsumedQeqUnits / content.precision.qeqUnitsPerJin, wageDueVoucher: recent.wageDueVoucherUnits / voucherScale, wagePaidVoucher: recent.wagePaidVoucherUnits / voucherScale } };
   }) : [];
   const categoryDefs = [
     ["农民家庭", h => (h.jobs?.farmers || 0) > 0],
@@ -510,6 +540,7 @@ export function selectDashboard(state, content, selection) {
     unemploymentRate: laborMarket.unemploymentRate,
     residentWheatJin: (state.accounts.residents.wheat || 0) / jinScale,
     residentVoucher: voucherBalance(state, "residents") / voucherScale,
+    ...residentFundsView(state, voucherScale),
     townWheatJin: (state.accounts.town.wheat || 0) / jinScale,
     townVoucher: voucherBalance(state, "town") / voucherScale,
     wheatPrice: Number.isFinite(macroLastHistory.wheatPrice) ? macroLastHistory.wheatPrice : null,
@@ -540,7 +571,7 @@ export function selectDashboard(state, content, selection) {
       recentPoach: (state.laborCompetition?.recent || []).slice(0, 5)
     },
     accounts,
-    households: { count: households.length, living: householdLiving, occupations, exchangeRemainingJin: exchangeRemainingUnits / content.precision.inventoryUnitsPerJin, details: householdDetails, categories: householdCategories, issueCounts: state.satisfactionFactors?.issueCounts || { food:0,salt:0,housing:0,wage:0 }, satisfactionChange },
+    households: { count: households.length, loans: needResidents ? loanView.totals : null, living: householdLiving, occupations, exchangeRemainingJin: exchangeRemainingUnits / content.precision.inventoryUnitsPerJin, details: householdDetails, categories: householdCategories, issueCounts: state.satisfactionFactors?.issueCounts || { food:0,salt:0,housing:0,wage:0 }, satisfactionChange },
     shops,
     stallSquares,
     wholesaleMarket: (needBusiness || needSite) ? wholesaleSummary(state, content) : null,
@@ -627,14 +658,19 @@ export function selectDashboard(state, content, selection) {
           if (loan.status === "active") outstanding += loan.outstandingVoucherUnits || 0;
         }
         const reservePct = state.policy?.bank?.reserveRequirementPercent ?? 10;
+        // 闲置现金 = 可贷额度（与 systems/bank.js 的 bankLoanableVoucherUnits 同口径：现金 − 准备金 − 欠镇库 − 应付利息；
+        // 此处不能调用它，因其会写入默认政策）。
+        const idleCashUnits = Math.max(0, (bank.cashVoucherUnits || 0) - Math.floor(totalDeposits * reservePct / 100)
+          - Math.max(0, bank.debtToTownUnits || 0) - Math.max(0, bank.interestPayableUnits || 0));
         return {
           depositRateAnnualPercent: state.policy?.bank?.depositRateAnnualPercent ?? 2,
-          loanRateAnnualPercent: state.policy?.bank?.loanRateAnnualPercent ?? 6,
+          loanRateAnnualPercent: state.policy?.bank?.loanRateAnnualPercent ?? 5,
           reserveRequirementPercent: reservePct,
           totalDepositsVoucher: totalDeposits / voucherScale,
           outstandingLoansVoucher: outstanding / voucherScale,
-          // 可贷额 = 现金 − 准备金 − 欠镇库（与 systems/bank.js 的 bankLoanableVoucherUnits 同口径；此处不能调用它，因其会写入默认政策）。
-          loanableVoucher: Math.max(0, (bank.cashVoucherUnits || 0) - Math.floor(totalDeposits * reservePct / 100) - (bank.debtToTownUnits || 0)) / voucherScale,
+          idleCashJin: idleCashUnits / voucherScale,
+          loanableVoucher: idleCashUnits / voucherScale,
+          householdLoans: loanView.totals,
           badDebtVoucher: (bank.stats?.badDebtVoucherUnits || 0) / voucherScale,
           interestEarnedVoucher: (bank.stats?.interestEarnedVoucherUnits || 0) / voucherScale,
           interestPaidVoucher: (bank.stats?.interestPaidVoucherUnits || 0) / voucherScale,
@@ -727,6 +763,7 @@ export function selectDashboard(state, content, selection) {
     currency: needSite ? {
       townVoucher: voucherBalance(state, "town") / voucherScale,
       residentVoucher: voucherBalance(state, "residents") / voucherScale,
+      ...residentFundsView(state, voucherScale),
       issuedVoucher: (state.currency?.issuedUnits || 0) / voucherScale,
       circulationVoucher: currencyInvariant.balances / voucherScale,
       // 镇库以外流通：全体粮券减镇库余额（居民、店铺、公司、银行、社保基金手里的券）。

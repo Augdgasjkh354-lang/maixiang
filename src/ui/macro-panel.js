@@ -44,7 +44,7 @@ export function renderMacroPanel(view) {
     : DASH;
   return row("失业率", `${number(macro.unemploymentRate * 100, 1)}%`)
     + row("民间小麦", jin(macro.residentWheatJin))
-    + row("民间粮券", voucher(macro.residentVoucher))
+    + row("民间资金", macro.residentFundsJin == null ? DASH : `${voucher(macro.residentFundsJin)}<small class="subtle">（手头 ${compact(macro.residentFunds?.handJin ?? 0)} + 存款 ${compact(macro.residentFunds?.depositJin ?? 0)}）</small>`)
     + row("镇库小麦", jin(macro.townWheatJin))
     + row("镇库粮券", voucher(macro.townVoucher))
     + row("小麦价格", macro.wheatPrice == null ? DASH : `${number(macro.wheatPrice, 2)}券/斤`)

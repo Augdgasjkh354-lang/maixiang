@@ -43,7 +43,7 @@ test("银行面板：三个折叠分组，印券默认展开，摘要带关键�
   assert.ok(html.includes("<span>利率与存款</span>"));
   assert.ok(html.includes("<span>国债</span>"));
   assert.ok(html.includes("在售 0 笔"), "国债摘要应给出在售笔数");
-  assert.ok(html.includes("存款 2% · 贷款 6%"), "利率摘要应给出存贷款利率");
+  assert.ok(html.includes("存款 2% · 贷款 5%"), "利率摘要应给出存贷款利率");
   for (const label of ["货币", "镇库券池", "发行量", "存款总额", "贷款总额"]) {
     assert.ok(html.includes(`<span class="label">${label}</span>`), `摘要卡应有「${label}」`);
   }
@@ -56,7 +56,7 @@ test("政策页：不再包含银行与国债折叠块，只留摘要和前往�
   assert.ok(!html.includes(`data-detail-key="policy-bonds"`), "政策页不应有国债折叠块");
   assert.ok(!html.includes(`data-draft-key="bank-deposit-rate"`), "政策页不应有存款利率输入框");
   assert.ok(!html.includes(`data-bond-issue`), "政策页不应有国债发行按钮");
-  assert.ok(html.includes("存款 2% · 贷款 6% · 国债 0 笔"), "政策页应有一行银行摘要");
+  assert.ok(html.includes("存款 2% · 贷款 5% · 国债 0 笔"), "政策页应有一行银行摘要");
   assert.ok(html.includes("前往银行") && html.includes("data-bank-open"), "政策页应有前往银行按钮");
 });
 
