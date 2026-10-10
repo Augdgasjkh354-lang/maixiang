@@ -141,7 +141,7 @@ function bankManagementMarkup(view, physical = true) {
       ${previewMarkup}`;
   // 顶部摘要：一屏内看清制度、券池、发行量与存贷款总额。
   const summary = `<div class="cardlet bank-summary">
-      <div class="row"><span class="label">当前制度</span><strong class="value">粮券</strong></div>
+      <div class="row"><span class="label">货币</span><strong class="value">粮券</strong></div>
       <div class="row"><span class="label">镇库券池</span><strong class="value">${number(c.townVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">发行量</span><strong class="value">${number(c.issuedVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">存款总额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)}券</strong></div>
