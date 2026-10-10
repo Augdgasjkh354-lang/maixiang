@@ -6,8 +6,8 @@ export const SHELL_HTML = `<main class="shell">
     <div class="resource-bar" aria-label="小镇资源">
       <button class="resource-pill" data-resource="residents" aria-label="查看小镇人口"><span class="resource-icon">${uiIcon("people")}</span><span><span class="resource-label">人口</span> <b id="populationStat">1,000</b></span></button>
       <button class="resource-pill" data-resource="residents" aria-label="查看待业人数"><span class="resource-icon idle-icon">${uiIcon("idle")}</span><span><span class="resource-label">待业</span> <b id="idleStat">200</b></span></button>
-      <button class="resource-pill" data-resource="business" aria-label="查看居民口粮"><span class="resource-icon grain-icon">${uiIcon("grain")}</span><span><span class="resource-label">居民</span> <b id="residentStat">73万</b></span></button>
-      <button class="resource-pill" data-resource="business" aria-label="查看镇库储备"><span class="resource-icon store-icon">${uiIcon("store")}</span><span><span class="resource-label">镇库</span> <b id="townStat">73万</b></span></button>
+      <button class="resource-pill" id="residentPill" data-resource="business" aria-label="查看居民粮券"><span class="resource-icon grain-icon">${uiIcon("grain")}</span><span><span class="resource-label">居民</span> <b id="residentStat">73万</b></span></button>
+      <button class="resource-pill" id="townPill" data-resource="business" aria-label="查看镇库券池"><span class="resource-icon store-icon">${uiIcon("store")}</span><span><span class="resource-label">镇库</span> <b id="townStat">73万</b></span></button>
     </div>
     <div class="time-row">
       <div class="date-block" aria-live="polite"><div class="brand-title">麦乡 <span>镇务簿</span></div><strong id="dateLabel">第1年 · 春 · 第1天</strong><span id="timeLabel">时光暂停</span></div>

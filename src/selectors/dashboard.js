@@ -215,6 +215,18 @@ function buildingWageTotals(state, content, building, definition, ownership, run
   return company ? { owner: "company", ...companyWageTotals(state, content, company) } : null;
 }
 
+// 顶栏粮券胶囊（只读）：居民手头粮券、居民银行存款、镇库券池余额，单位均为粮券。
+function selectHeaderVoucher(state, content) {
+  const scale = currencyScale(content);
+  let residentDepositUnits = 0;
+  for (const units of Object.values(state.bank?.deposits || {})) residentDepositUnits += units || 0;
+  return {
+    residentsHandVoucher: voucherBalance(state, "residents") / scale,
+    residentsDepositVoucher: residentDepositUnits / scale,
+    townVoucher: voucherBalance(state, "town") / scale
+  };
+}
+
 export function selectDashboard(state, content, selection) {
   const panel = selection?.panel || "all";
   const full = panel === "all";
@@ -535,6 +547,7 @@ export function selectDashboard(state, content, selection) {
     annualNeed: dailyNeed * content.rules.daysPerYear,
     totalQeq: needBusiness ? selectTotalQeq(state, content) : 0,
     forecast: selectHarvestForecast(state, content),
+    headerVoucher: selectHeaderVoucher(state, content),
     satisfaction: state.satisfaction,
     shortageQeq: state.shortageQeq,
     autoRelief: state.autoRelief,

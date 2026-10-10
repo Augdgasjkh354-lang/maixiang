@@ -264,8 +264,14 @@ export function mountGame(root) {
     $("#timeLabel").textContent = `${season.field} · ${view.paused ? "暂停" : `${view.speed}×`}`;
     $("#populationStat").textContent = number(view.people.total);
     $("#idleStat").textContent = number(view.labor.idle);
-    $("#residentStat").textContent = compact(view.accounts.residents.qeq);
-    $("#townStat").textContent = compact(view.accounts.town.qeq);
+    // 顶栏胶囊显示粮券；口粮储备（斤）放在悬浮提示里。
+    const hv = view.headerVoucher || { residentsHandVoucher: 0, residentsDepositVoucher: 0, townVoucher: 0 };
+    $("#residentStat").textContent = compact(hv.residentsHandVoucher);
+    $("#townStat").textContent = compact(hv.townVoucher);
+    const residentPill = $("#residentPill");
+    if (residentPill) residentPill.title = `居民手头粮券 ${number(hv.residentsHandVoucher)} 券；银行存款 ${number(hv.residentsDepositVoucher)} 券\n口粮储备：${number(view.accounts.residents.qeq)} 斤`;
+    const townPill = $("#townPill");
+    if (townPill) townPill.title = `镇库券池余额 ${number(hv.townVoucher)} 券\n口粮储备：${number(view.accounts.town.qeq)} 斤`;
     $("#forecastMap").textContent = `${number(view.forecast)}斤`;
     $("#daysMap").textContent = `${numberMax(view.residentFoodDays, 1)}天`;
     $("#mapStage").dataset.season = season.key;
