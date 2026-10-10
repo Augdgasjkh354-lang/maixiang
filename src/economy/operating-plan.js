@@ -110,12 +110,26 @@ function recentConsumerSalesUnits(state, itemId, content) {
   return rollingAverage(rows, "soldUnits", content.rules.operatingObservationDays || 7);
 }
 
-function residentAffordableUnits(state, itemId, price, content) {
-  if (!Number.isFinite(price) || price <= 0) return 0;
+// 居民全体能付的价值额与物价无关；一次计划刷新里状态不变，面包、盐、酒、布共用同一个结果（遍历全体家庭，较贵）。
+let residentBudgetMemo = null;
+function residentBudgetUnits(state, content) {
+  if (residentBudgetMemo && residentBudgetMemo.state === state) {
+    if (residentBudgetMemo.value === undefined) residentBudgetMemo.value = computeResidentBudgetUnits(state, content);
+    return residentBudgetMemo.value;
+  }
+  return computeResidentBudgetUnits(state, content);
+}
+
+function computeResidentBudgetUnits(state, content) {
   const maxWheatUnits = householdList(state).filter(isActiveHousehold).reduce((sum, household) =>
     sum + householdConvertibleWheatUnits(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30), 0);
   const limit = maximumPayableValueUnits(state, "residents", content);
-  const budget = maximumFullyPayableValueUnits(state, "residents", limit, content, { maxWheatUnits });
+  return maximumFullyPayableValueUnits(state, "residents", limit, content, { maxWheatUnits });
+}
+
+function residentAffordableUnits(state, itemId, price, content) {
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  const budget = residentBudgetUnits(state, content);
   return Math.max(0, Math.floor(budget * content.precision.inventoryUnitsPerJin / (price * content.precision.currencyUnitsPerVoucher)));
 }
 
@@ -328,6 +342,16 @@ export function ensureOperatingPlanState(state) {
 }
 
 export function refreshOperatingPlan(state, content, force = false) {
+  const previousMemo = residentBudgetMemo;
+  residentBudgetMemo = { state, value: undefined };
+  try {
+    return refreshOperatingPlanNow(state, content, force);
+  } finally {
+    residentBudgetMemo = previousMemo;
+  }
+}
+
+function refreshOperatingPlanNow(state, content, force = false) {
   const plan = ensureOperatingPlanState(state);
   const serial = daySerial(state, content);
   const interval = Math.max(1, content.rules.operatingPlanIntervalDays || 3);
