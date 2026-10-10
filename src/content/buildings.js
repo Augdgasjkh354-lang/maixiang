@@ -49,7 +49,7 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 200, recommendedWorkers: 10
     }),
-    upgrade: Object.freeze({ maxLevel: 10, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+    upgrade: Object.freeze({ maxLevel: 20, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
   saltworks: Object.freeze({
     id: "saltworks", name: "盐场", icon: "🧂",
@@ -68,7 +68,7 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 300, recommendedWorkers: 10
     }),
-    upgrade: Object.freeze({ maxLevel: 10, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+    upgrade: Object.freeze({ maxLevel: 20, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
 
   winery: Object.freeze({

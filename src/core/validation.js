@@ -7,6 +7,7 @@ import { householdList, householdPopulation, householdWorkingAge, householdEmplo
 import { validateContent } from "../content/validate.js";
 import { validateCurrencyInvariant } from "../economy/currency.js";
 import { bankLedgerInvariant } from "../systems/bank.js";
+import { buildingMaxLevel } from "../content/building-level.js";
 
 export function validateState(state, content) {
   const errors = [];
@@ -467,7 +468,7 @@ export function validateState(state, content) {
       errors.push("建筑实例 ID 或类型无效");
     }
     buildingIds.add(building.id);
-    if (!Number.isInteger(building.level || 1) || (building.level || 1) < 1 || (building.level || 1) > (content.rules.buildingMaxLevel || 10)) {
+    if (!Number.isInteger(building.level || 1) || (building.level || 1) < 1 || (building.level || 1) > buildingMaxLevel(content, building.typeId)) {
       errors.push("建筑等级无效：" + building.id);
     }
     if (building.materialInvestments !== undefined && (!Array.isArray(building.materialInvestments) ||

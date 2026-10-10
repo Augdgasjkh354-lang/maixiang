@@ -300,7 +300,7 @@ export const RULES = Object.freeze({
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
-  townOutputStockDays: 30, // 备货天数：目标库存相当于多少天的需求
+  townOutputStockDays: 360, // 备货天数：目标库存相当于多少天的需求
   // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
   townWheatReserveDays: 180,
   // 外贸稳定性（docs/TRADE.md「外镇价格与贸易行暂停」）。

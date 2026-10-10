@@ -3,6 +3,7 @@ import { householdList, householdEmploymentCount, householdWorkingAge, jobCount 
 import { reclaimedAcres } from "../systems/agriculture.js";
 import { computePoachable } from "../systems/labor-market.js";
 import { privateWageRate, wageControlFactor } from "../systems/payroll.js";
+import { buildingMaxLevel } from "../content/building-level.js";
 
 export function jobKeyForBuilding(buildingId, roleId) { return buildingId + "::" + roleId; }
 export function privateJobKeyForBuilding(buildingId, roleId) { return buildingId + "::" + roleId + "::private"; }
@@ -65,7 +66,7 @@ export function selectJobRows(state, content, runtime = null) {
     if (!definition) continue;
     for (const job of definition.jobs || []) {
       const ownership = building.ownership || { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
-      const townLevels = Math.max(0, Math.min(content.rules.buildingMaxLevel || 10, ownership.townLevels ?? building.level ?? 1));
+      const townLevels = Math.max(0, Math.min(buildingMaxLevel(content, building.typeId), ownership.townLevels ?? building.level ?? 1));
       const localCapacity = job.capacityMode === "building" ? job.slots : job.slots * townLevels;
       const managedShop = job.managedBy === "shops";
       rows.push({

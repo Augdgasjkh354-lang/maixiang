@@ -18,7 +18,8 @@ test("building level cap is 10 and every upgrade definition agrees with it", () 
   assert.equal(CONTENT.rules.buildingMaxLevel, MAX_LEVEL);
   for (const [id, definition] of Object.entries(CONTENT.buildings)) {
     if (!definition.upgrade) continue;
-    assert.equal(definition.upgrade.maxLevel, MAX_LEVEL, `${id} upgrade.maxLevel`);
+    const expected = id === "lumberyard" || id === "saltworks" ? 20 : MAX_LEVEL;
+    assert.equal(definition.upgrade.maxLevel, expected, `${id} upgrade.maxLevel`);
   }
 });
 
