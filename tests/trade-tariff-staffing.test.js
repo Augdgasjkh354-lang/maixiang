@@ -184,11 +184,17 @@ test("进口利润 15%（>10%、<25%）不做；同样 15% 的出口则照做", 
   assert.equal(lastRow(imp.shop).importJin.flour, undefined, "15% 利润的进口不做");
   assert.equal(lastRow(imp.shop).trades, 0);
 
-  // 出口：盐外镇收购约 12.25，批发售价 10.6 → 成本 10.66，利润约 15%，过出口门槛 10%，照做。
+  // 出口：盐外镇收购约 12.25，批发售价 10.6 → 成本 10.66，利润约 15%。
+  // 开局出口门槛已是 20%（政策 tradeMarginPercent），这里把门槛降到 10% 再看它照做；默认 20% 时同一笔不做。
+  const dflt = tradeFixture(9207);
+  assert.equal(simulation.configureWholesalePrice(dflt.state, "salt", 10.6).ok, true);
+  settleTradingHouses(dflt.state, CONTENT);
+  assert.equal(lastRow(dflt.shop).exportJin?.salt || 0, 0, "默认 20% 门槛下 15% 利润的出口不做");
   const exp = tradeFixture(9207);
   assert.equal(simulation.configureWholesalePrice(exp.state, "salt", 10.6).ok, true);
+  assert.equal(simulation.setMarginPolicy(exp.state, { tradeMarginPercent: 10 }).ok, true);
   settleTradingHouses(exp.state, CONTENT);
-  assert.ok(lastRow(exp.shop).exportJin.salt > 0, "同样 15% 利润的出口照做");
+  assert.ok(lastRow(exp.shop).exportJin.salt > 0, "出口门槛 10% 时，同样 15% 利润的出口照做");
   valid(exp.state, "15% 利润");
 });
 

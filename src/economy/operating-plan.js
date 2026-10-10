@@ -8,6 +8,7 @@ import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from
 import { targetBatchCap } from "../systems/production.js";
 import { industryTypeIds } from "../content/buildings.js";
 import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
+import { policyShopMarginPercent, shopEffectiveMarginPercent } from "./margin-policy.js";
 
 
 function daySerial(state, content) {
@@ -15,8 +16,9 @@ function daySerial(state, content) {
 }
 
 // 店铺交易价：批发价取当前单位价（= 批发市场售价），零售价按店铺定价策略计算。
-// 0.2.3：综合商店若启用动态加价（shop.pricing.targetMarginPercent / 促销模式），
+// 0.2.3：综合商店若启用动态加价（shop.pricing 的目标利润率 / 促销模式），
 // 零售价 = 进货价 × (1 + 目标利润率)，并由 7 天复核写入 pricing.retailPriceVoucherPerUnit；
+// 目标利润率 = 单店覆盖或全局政策 policy.shopMarginPercent（见 economy/margin-policy.js）。
 // 其他小店沿用 generalStoreMarkupPercent 固定加价。shop 可省略（旧调用/摘要只读场景）。
 export function shopTradePrices(state, typeId, content, itemId = null, shop = null) {
   const raw = content.rules.shopTypes?.[typeId];
@@ -27,13 +29,13 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
   if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
   const wholesale = currentUnitPrice(state, productId, content);
   if (def.kind === "stall") return stallTradePrices(state, def, content, productId, wholesale);
-  const markup = def.id === "general" ? Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
+  const markup = def.id === "general" ? policyShopMarginPercent(state, content) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
   let retail = wholesale * (1 + markup);
   if (def.id === "general" && shop) {
     const explicit = Number(shop.pricing?.retailPriceVoucherPerUnit?.[productId]);
     let base;
     if (Number.isFinite(explicit) && explicit > 0) base = explicit;
-    else base = wholesale * (1 + shopTargetMarginPercentFor(shop, content) / 100);
+    else base = wholesale * (1 + shopEffectiveMarginPercent(state, shop, content) / 100);
     // 物价会动：库存系数作用在基准价上（见 economy/price-adjust.js）。
     // 售价下限不低于进货价（用户拍板的定价约束）；只有清库存（库存够卖超过 clearanceStockDays）时才可降到进货价 × minFactor。
     const floor = retailFloorOf(shop.pricing, productId, wholesale, content.rules.priceAdjust);
@@ -57,14 +59,6 @@ function stallTradePrices(state, def, content, productId, wholesale) {
   return { ...def, itemId: productId, retailVoucherPerUnit: Math.max(cost, reference), wholesaleVoucherPerUnit: cost, listWholesaleVoucherPerUnit: wholesale };
 }
 
-// 内联版本，避免 operating-plan 反向 import 整个 shop-pricing 模块造成循环依赖。
-function shopTargetMarginPercentFor(shop, content) {
-  if (shop?.pricing?.promotion) return Math.max(0, Number(content.rules.generalStorePromotionTargetPercent ?? 5));
-  const value = Number(shop?.pricing?.targetMarginPercent);
-  if (Number.isFinite(value)) return Math.max(0, Math.min(100, value));
-  return Math.max(0, content.rules.generalStoreMarkupPercent ?? 20);
-}
-
 // 居民实际面对的综合商店零售价：营业中综合商店里最便宜的一家（与集市参考价同口径）；没有综合商店时按批发价加成。
 // 只用于需求测算（主食/盐/日用品的可买量），口径跟随店铺的目标利润率、现售价与物价系数。
 function generalStoreReferenceRetail(state, itemId, content) {
@@ -73,7 +67,7 @@ function generalStoreReferenceRetail(state, itemId, content) {
     .map(shop => shopTradePrices(state, "general", content, itemId, shop)?.retailVoucherPerUnit)
     .filter(price => price > 0);
   if (prices.length) return Math.min(...prices);
-  return currentUnitPrice(state, itemId, content) * (1 + Math.max(0, content.rules.generalStoreMarkupPercent ?? 20) / 100);
+  return currentUnitPrice(state, itemId, content) * (1 + policyShopMarginPercent(state, content) / 100);
 }
 
 function rollingAverage(rows, key, window) {

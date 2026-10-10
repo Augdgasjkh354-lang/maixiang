@@ -234,6 +234,10 @@ export function createInitialState(options) {
       privateProductionTaxPercent: Object.fromEntries(
         Object.keys(content.buildings).map(typeId => [typeId, content.rules.privateProductionTaxDefaultPercent ?? 10])
       ),
+      // 利润率政策（0—200，一位小数）：综合商店全局目标利润率；贸易行出口 / 进口利润门槛。
+      shopMarginPercent: content.rules.generalStoreMarkupPercent ?? 20,
+      tradeMarginPercent: content.rules.tradeHouseTargetMarginPercent ?? 20,
+      tradeImportMarginPercent: content.rules.tradeHouseImportMarginPercent ?? 25,
       employmentExchangeJin: content.rules.employmentExchangeDefaultJin ?? 5,
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,

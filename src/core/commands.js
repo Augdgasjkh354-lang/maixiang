@@ -17,7 +17,8 @@ import { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndust
 import { setPublicProcurementIntent as setPublicProcurementIntentSystem, clearPublicProcurementIntent as clearPublicProcurementIntentSystem } from "../systems/public-procurement.js";
 import { openShop, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } from "../systems/shops.js";
 import { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, setWholesaleAutoPricing, stockpileWholesale as stockpileWholesaleSystem, releaseWholesale as releaseWholesaleSystem } from "../systems/wholesale-market.js";
-import { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice } from "../systems/shop-pricing.js";
+import { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice, isDynamicPricingShop } from "../systems/shop-pricing.js";
+import { MARGIN_POLICY_MAX_PERCENT, pinGlideBeforeChange, policyShopMarginPercent, policyTradeMarginPercent, shopOverrideMarginPercent } from "../economy/margin-policy.js";
 import { setBuildingOutputTarget } from "../systems/production.js";
 import { setServiceUnitPrice } from "../systems/services.js";
 import { reclaimFarmland as reclaimFarmlandSystem } from "../systems/agriculture.js";
@@ -367,6 +368,38 @@ export function setTradeTariff(state, patch, content) {
   return { ok: true, value: { ...tariff } };
 }
 
+// 利润率政策：patch = { shopMarginPercent?, tradeMarginPercent?, tradeImportMarginPercent? }，0—200，一位小数。
+// 综合商店全局目标变了：先把未单独设置的店当前生效的目标记下（pinGlideBeforeChange），再写政策；
+// 之后各店按 7 天复核平滑追上新目标，不跳价。单店覆盖不受影响。
+export function setMarginPolicy(state, patch, content) {
+  const keys = ["shopMarginPercent", "tradeMarginPercent", "tradeImportMarginPercent"];
+  const next = {};
+  for (const key of keys) {
+    const raw = patch?.[key];
+    if (raw === undefined) continue;
+    if (raw === null || (typeof raw === "string" && raw.trim() === "")) return { ok: false, reason: "利润率须为0—200%之间的有限数" };
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0 || value > MARGIN_POLICY_MAX_PERCENT) return { ok: false, reason: "利润率须为0—200%之间的有限数" };
+    next[key] = Math.round(value * 10) / 10;
+  }
+  if (next.shopMarginPercent !== undefined && next.shopMarginPercent !== policyShopMarginPercent(state, content)) {
+    for (const shop of Object.values(state.shops || {})) {
+      if (!isDynamicPricingShop(shop, content) || shopOverrideMarginPercent(shop) !== null) continue;
+      pinGlideBeforeChange(state, shop, content);
+      shop.pricing.lastReviewSerial = -1;
+    }
+  }
+  state.policy ||= {};
+  for (const key of keys) {
+    if (next[key] !== undefined) state.policy[key] = next[key];
+  }
+  return { ok: true, value: {
+    shopMarginPercent: policyShopMarginPercent(state, content),
+    tradeMarginPercent: policyTradeMarginPercent(state, content, "export"),
+    tradeImportMarginPercent: policyTradeMarginPercent(state, content, "import")
+  } };
+}
+
 export function openResidentShop(state, buildingId, typeId, householdId, content) {
   return openShop(state, buildingId, typeId, content, householdId || null);
 }
@@ -402,7 +435,7 @@ export function configureWholesaleAutoPricing(state, itemId, enabled, content) {
   return setWholesaleAutoPricing(state, itemId, enabled, content);
 }
 
-// 0.2.3 综合商店动态加价：单店或全镇统一设置目标利润率（0~100%）。
+// 0.2.3 综合商店动态加价：单店或全镇统一设置目标利润率（0~200%；percent 为 null 时取消单店设置，改跟随全局政策）。
 export function configureShopTargetMargin(state, shopId, percent, content) {
   return setShopTargetMarginPercent(state, shopId, percent, content);
 }

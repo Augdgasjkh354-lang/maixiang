@@ -7,7 +7,8 @@
 //   运费：每运一斤付 freightVoucherPerJin 给镇库（同一条运费规则）。
 //   关税：出口按外镇付的货款收 policy.tradeTariff.exportPercent%，进口按付给外镇的货款收 importPercent%，交镇库。
 //   利润率 = (卖价 − 买价 − 运费 − 关税) / (买价 + 运费 [+ 进口关税]) 须达到门槛才做：
-//   出口 tradeHouseTargetMarginPercent，进口 tradeHouseImportMarginPercent（更高，偏向出口）。
+//   出口利润门槛 policy.tradeMarginPercent（缺省 rules.tradeHouseTargetMarginPercent，20%），
+//   进口 policy.tradeImportMarginPercent（缺省 rules.tradeHouseImportMarginPercent，25%，更高，偏向出口）。
 //   排序时出口的利润率乘 tradeHouseExportPriority，同等条件先做出口。
 //   成交量：min(店员 × tradeHouseJinPerClerk, 当日运力 × tradeHouseCapacityShare 按店员数分的份额)，实际运力从运力池扣。
 //   只在外贸房在岗时做买卖（与镇长手动外贸同一条规则）。
@@ -16,6 +17,7 @@
 // 每天的候选按入口利润率排序，贪心执行，直到运力、店员额度、资金、外镇库存或小麦用完。
 // 复杂度：O(贸易行 × 外镇 × 商品)（一天一次，没有逐户循环）。
 import { currencyScale } from "../economy/currency.js";
+import { policyTradeMarginPercent } from "../economy/margin-policy.js";
 import { currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { putStock, takeStock, valueOf } from "../economy/trade.js";
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
@@ -116,11 +118,9 @@ function freightUnitsOf(qJin, freight, content) {
   return Math.ceil(qJin * freight * currencyScale(content) - 1e-9);
 }
 
-function marginTarget(content, direction = "export") {
-  const percent = direction === "import"
-    ? content.rules.tradeHouseImportMarginPercent ?? content.rules.tradeHouseTargetMarginPercent ?? 10
-    : content.rules.tradeHouseTargetMarginPercent ?? 10;
-  return 1 + percent / 100;
+// 利润门槛乘数：1 + 政策利润率（policy.tradeMarginPercent / tradeImportMarginPercent，缺省取 rules）。
+export function tradeMarginTarget(state, content, direction = "export") {
+  return 1 + policyTradeMarginPercent(state, content, direction) / 100;
 }
 
 // 关税税率（0—1）。只对贸易行生效；镇长手动外贸与长期协定是镇里自己的货，不对自己收税。
@@ -175,7 +175,7 @@ function planExport(state, content, run, cand) {
   const freight = freightVoucherPerJin(state, content);
   const cost = price + freight;
   const keep = 1 - tradeTariffRate(state, "export");
-  const minSell = cost * marginTarget(content, "export");
+  const minSell = cost * tradeMarginTarget(state, content, "export");
   if (unitPrice(town, good, "sell") * keep < minSell) return null;
   const market = ensureWholesaleMarket(state, content);
   const stockJin = nonNegative(market.inventory?.[itemId]) / scale;
@@ -200,7 +200,7 @@ function planImport(state, content, run, cand) {
   const price = wholesalePurchasePrice(state, itemId, content);
   if (!(price > 0)) return null;
   const freight = freightVoucherPerJin(state, content);
-  const maxCost = price / marginTarget(content, "import");
+  const maxCost = price / tradeMarginTarget(state, content, "import");
   const duty = 1 + tradeTariffRate(state, "import");
   if (unitPrice(town, good, "buy") * duty + freight > maxCost) return null;
   const market = ensureWholesaleMarket(state, content);
@@ -358,7 +358,7 @@ export function settleTradingHouses(state, content) {
   if (runs.some(run => run.remainingJin >= MIN_JIN) && freightPoolJin(state) >= MIN_JIN) {
     const ranked = candidatesFor(state, content)
       .map(cand => ({ cand, ratio: quickMarginRatio(state, content, cand) }))
-      .filter(row => row.ratio !== null && row.ratio + 1 >= marginTarget(content, row.cand.direction) - 1e-9)
+      .filter(row => row.ratio !== null && row.ratio + 1 >= tradeMarginTarget(state, content, row.cand.direction) - 1e-9)
       .map(row => ({ ...row, rank: row.cand.direction === "export" ? row.ratio * exportPriority : row.ratio }))
       .sort((a, b) => b.rank - a.rank);
     for (const { cand } of ranked) {

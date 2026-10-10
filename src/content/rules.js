@@ -47,8 +47,8 @@ export const RULES = Object.freeze({
   freightVoucherPerJin: 0.06,
   dockFreightVoucherPerJin: 0.03,
   // 贸易中心 / 贸易行（docs/TRADE.md「贸易中心与贸易行」）：贸易行每天按店员数定成交量，另受当日运力的份额限制。
-  tradeHouseTargetMarginPercent: 10, // 单斤利润率（卖价 − 买价 − 运费）达到这个百分比（相对买价+运费）才做
-  tradeHouseImportMarginPercent: 25, // 进口的利润率门槛（高于出口，贸易行偏向出口）
+  tradeHouseTargetMarginPercent: 20, // 出口利润率门槛的开局默认（政策页 policy.tradeMarginPercent 可调 0—200%）：单斤利润率（卖价 − 买价 − 运费）达到这个百分比（相对买价+运费）才做
+  tradeHouseImportMarginPercent: 25, // 进口利润率门槛的开局默认（政策 policy.tradeImportMarginPercent 可调；高于出口，贸易行偏向出口）
   tradeHouseExportPriority: 1.5, // 排序时出口利润率乘这个系数，同等条件先做出口
   tradeHouseJinPerClerk: 300, // 每名店员（含商人）每天可成交的斤数
   tradeHouseCapacityShare: 0.8, // 各贸易行合计最多占当日运力的这个比例，按店员数分配；其余留给镇里
@@ -139,7 +139,7 @@ export const RULES = Object.freeze({
   shopMaxMerchants: 4,
   shopMaxClerks: 20,
   generalStoreMaxClerks: 50,
-  generalStoreMarkupPercent: 20,
+  generalStoreMarkupPercent: 20, // 综合商店目标利润率的开局默认（政策 policy.shopMarginPercent 缺省值；未单独设置的店跟随，0—200%）；其他小店固定加价仍用它
   // 一位客人（一户人家）一天在一家店平均买多少斤：决定商店卖货能力（客流 × 这个数）和加店员是否划算。
   shopJinPerCustomer: 20,
   generalStoreCustomersPerStaff: 20, // 客流按户计：每名店员（含商人）每天接待 20 户（旧口径一户约算 3 位客人、每人 60，用工规模不变）

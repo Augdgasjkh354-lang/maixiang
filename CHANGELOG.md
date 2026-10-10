@@ -1,3 +1,11 @@
+## 未发布 · 利润率政策
+
+- 综合商店目标利润率可调：政策页「商店与贸易利润率」新增全局默认 `policy.shopMarginPercent`（0—200，一位小数，开局 20）。未单独设置的店跟随全局；店铺面板可单店覆盖，或改回跟随。命令 `setMarginPolicy`（政策）与 `configureShopTargetMargin`（单店，传 `null` 取消覆盖）。
+- 改目标平滑：改之前记下生效中的目标（`pricing.glidePercent`），之后每次 7 天复核按价格 ±10% 追上新目标，不再一次跳价。无销量的商品按进货价 × (1 + 目标) 追价。
+- 旧档：`targetMarginPercent` 旧版开局烘焙的 20 视为"跟随全局"，其他值视为单店设定（新增 `targetMarginOwn` 标记后以标记为准）。
+- 贸易行：出口利润门槛开局由 10% 改为 20%，进口仍为 25%（已显式配置，未改）；两者改为政策项 `policy.tradeMarginPercent` / `tradeImportMarginPercent`（0—200，政策页可调）。读取处 `systems/trading-houses.js` 的 `tradeMarginTarget`。
+- 代码：`economy/margin-policy.js`（新）集中解析全局 / 单店 / 生效目标与复核步进；`systems/shop-pricing.js`、`economy/operating-plan.js`、`systems/shops.js`（综合商店招工利润估算）、`selectors/trade-houses.js` 都走它。
+
 ## 未发布 · 开局即粮券
 
 - 新开局直接处于粮券阶段，不再需要建银行后启动货币改革。开局一次发行 1000 万斤粮券：居民每人 1000 斤（按户人口，3300 人共 330 万斤），镇库券池 670 万斤（`rules.INITIAL.openingVoucherPerResidentJin` / `openingVoucherTownPoolJin`，发放在 `core/state.js` 的 `issueOpeningVouchers`）。开局发行不经银行闸门；之后印券、以粮换券仍需银行。居民与镇库的小麦库存不动，小麦仍是口粮与价值尺度。

@@ -1,6 +1,7 @@
 // 贸易行只读视图（docs/TRADE.md「贸易中心与贸易行」）：每家贸易行今日与近 7 日的买卖、利润、运费、小麦与运力份额，
 // 以及批发市场各商品的存货天数（紧缺标记）。只读，不写 state。
 import { currencyScale } from "../economy/currency.js";
+import { policyTradeMarginPercent } from "../economy/margin-policy.js";
 import { maximumPayableValueUnits } from "../economy/payment.js";
 import { shopClerkCount, shopClerkLimit, shopDefinition, shopMaxMerchants, shopMerchantCount } from "../systems/shops.js";
 import { dailyCapacityJin, freightPoolJin, freightVoucherPerJin } from "../systems/logistics.js";
@@ -126,7 +127,8 @@ export function selectTradeHouseView(state, content) {
     dailyCapacityJin: dailyCapacityJin(state, content),
     poolJin: freightPoolJin(state),
     freightVoucherPerJin: freightVoucherPerJin(state, content),
-    targetMarginPercent: content.rules.tradeHouseTargetMarginPercent ?? 10,
+    targetMarginPercent: policyTradeMarginPercent(state, content, "export"),
+    importMarginPercent: policyTradeMarginPercent(state, content, "import"),
     jinPerClerk: content.rules.tradeHouseJinPerClerk ?? 100,
     capacitySharePercent: round1((content.rules.tradeHouseCapacityShare ?? 0.5) * 100),
     exportMinStockDays: content.rules.tradeHouseExportMinStockDays ?? 10,

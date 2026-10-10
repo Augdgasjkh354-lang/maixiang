@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { createSimulation, CONTENT } from "../src/engine.js";
 import { APP_VERSION } from "../src/content/version.js";
 import { currentPrice } from "../src/systems/outside-town.js";
+import { shopEffectiveMarginPercent } from "../src/economy/margin-policy.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { populationStats, selectJobRows } = await import(path.join(root, "src", "selectors", "labor.js"));
@@ -642,7 +643,7 @@ const METRICS = [
     compute: (ctx) => {
       const shops = Object.values(ctx.state.shops || {}).filter(s => s.typeId === "general" && s.status !== "closed");
       if (!shops.length) return 0;
-      const total = shops.reduce((sum, s) => sum + Number(s.pricing?.targetMarginPercent ?? CONTENT.rules.generalStoreMarkupPercent ?? 20), 0);
+      const total = shops.reduce((sum, s) => sum + shopEffectiveMarginPercent(ctx.state, s, CONTENT), 0);
       return round2(total / shops.length);
     },
   },

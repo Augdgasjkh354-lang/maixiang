@@ -182,6 +182,7 @@ test("利润率复核按基准价口径核算：降价去库存不会被利润�
   assert.equal(simulation.configureWholesalePrice(state, "flour", 2).ok, true);
   assert.equal(simulation.configureShopTargetMargin(state, shopId, 16).ok, true);
   const pricing = ensureShopPricing(shop, CONTENT);
+  delete pricing.glidePercent; // 目标已追平为 16%（生效目标即设定目标），本用例只验证基准价口径核算
   shop.inventory.flour = 0; // 空库存、无销量：没有库存信号，系数只做回归
   // 窗口内系数 0.9：基准价 2.4 → 实售 2.16；成本 2。按基准价口径利润率 16.7%（贴近目标 16%），按实售口径只有 7.4%。
   pricing.priceFactor.flour = 0.9;

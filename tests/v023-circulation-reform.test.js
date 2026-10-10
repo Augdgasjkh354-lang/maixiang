@@ -13,7 +13,7 @@ import { employmentSnapshot } from "../src/systems/employment.js";
 import { shopTradePrices } from "../src/economy/operating-plan.js";
 import { openShop, prepareShopsForDay, finishShopsDay, resetShopDaily, sellShopProduct } from "../src/systems/shops.js";
 import { ensureShopPricing, reviewShopPricing, clampPriceStep, updateShopLossProtection,
-  selectShopPricingView, priceElasticityDemandMultiplier, setShopTargetMarginPercent } from "../src/systems/shop-pricing.js";
+  selectShopPricingView, priceElasticityDemandMultiplier, setShopTargetMarginPercent, shopTargetMarginPercent } from "../src/systems/shop-pricing.js";
 import { voucherBalance, totalVoucherBalances } from "../src/economy/currency.js";
 import { SAVE_VERSION } from "../src/content/rules.js";
 
@@ -167,7 +167,7 @@ test("0.2.3 综合商店动态加价：目标利润率默认20%，售价=进货�
   const opened = simulation.openResidentShop(state, street.id, "general", owner.id);
   assert.equal(opened.ok, true, opened.reason);
   const shop = state.shops[opened.shopId];
-  assert.equal(ensureShopPricing(shop, CONTENT).targetMarginPercent, 20);
+  assert.equal(shopTargetMarginPercent(state, shop, CONTENT), 20, "未单独设置的店跟随全局默认 20%");
   assert.equal(simulation.configureWholesalePrice(state, "flour", 2).ok, true);
   const prices = shopTradePrices(state, "general", CONTENT, "flour", shop);
   assert.equal(prices.wholesaleVoucherPerUnit, 2);
@@ -183,7 +183,10 @@ test("0.2.3 动态加价：目标利润率可调，且售价下限不低于进�
   const shop = state.shops[opened.shopId];
   assert.equal(simulation.configureWholesalePrice(state, "bread", 2).ok, true);
   assert.equal(simulation.configureShopTargetMargin(state, shop.id, 50).ok, true);
-  assert.ok(Math.abs(shopTradePrices(state, "general", CONTENT, "bread", shop).retailVoucherPerUnit - 3) < 1e-9, "2 × 1.5 = 3");
+  // 改目标不跳价：当场仍是 2 × 1.2，之后按复核每次最多 ±10% 分步追上 2 × 1.5 = 3。
+  assert.ok(Math.abs(shopTradePrices(state, "general", CONTENT, "bread", shop).retailVoucherPerUnit - 2.4) < 1e-9, "改目标当场不跳价");
+  for (let i = 0; i < 4 && shop.pricing.glidePercent !== undefined; i += 1) reviewShopPricing(state, shop, CONTENT, { force: true });
+  assert.ok(Math.abs(shopTradePrices(state, "general", CONTENT, "bread", shop).retailVoucherPerUnit - 3) < 1e-9, "分步追平：2 × 1.5 = 3");
   // 直接设一个低于进货价的售价，应被夹到进货价
   const clamped = simulation.configureShopRetailPrice(state, shop.id, "bread", 1);
   assert.equal(clamped.ok, true);

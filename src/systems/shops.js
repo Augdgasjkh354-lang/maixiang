@@ -14,6 +14,7 @@ import {
   setHouseholdJobCount, setJobCount, jobCount, jobAssignments
 } from "./households.js";
 import { shopTradePrices, recentAverage } from "../economy/operating-plan.js";
+import { shopEffectiveMarginPercent } from "../economy/margin-policy.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { accrueWages, payWages, pendingWages, wageArrears, wageBook } from "./employer.js";
 import { buyWholesaleForOwner, hasWholesaleMarket, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
@@ -1109,7 +1110,7 @@ function autoAdjustShopClerks(state, shop, content) {
       // 增员经济性（用户 0.1.11）：增1店员的日增量毛利 b vs 店员日薪；资金 u 是否够备货+3天工资。
       const wage = shopWage(state, shop, content);
       const avgWholesale = averageWholesalePriceJin(state, shop, content, history);
-      const markup = (content.rules.generalStoreMarkupPercent ?? 20) / 100;
+      const markup = shopEffectiveMarginPercent(state, shop, content) / 100;
       const marginalJin = perStaff * shopJinPerCustomer(content);
       const marginalProfit = marginalJin * avgWholesale * markup;
       const profitable = marginalProfit > wage;

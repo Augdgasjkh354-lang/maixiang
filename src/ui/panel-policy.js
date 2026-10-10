@@ -47,6 +47,21 @@ function inheritanceTaxCard(view) {
     </div></details>`;
 }
 
+// 商店与贸易利润率（政策 shopMarginPercent / tradeMarginPercent / tradeImportMarginPercent，0—200，一位小数）。
+// 旧档没有这些字段时回落到 rules 的开局默认值，与读档后的实际取值一致。
+function marginPolicyCard(view) {
+  const policy = view.policy || {};
+  const shopDefault = policy.shopMarginPercent ?? CONTENT.rules.generalStoreMarkupPercent ?? 20;
+  const tradeExport = policy.tradeMarginPercent ?? CONTENT.rules.tradeHouseTargetMarginPercent ?? 20;
+  const tradeImport = policy.tradeImportMarginPercent ?? CONTENT.rules.tradeHouseImportMarginPercent ?? 25;
+  return `<details class="detail-block" data-detail-key="policy-margin"><summary>商店与贸易利润率</summary><div class="detail-body">
+      <div class="row"><span class="label">综合商店默认目标利润率</span><div class="setting-input">${renderNumericInput(view, { key: "shop-margin-default", kind: "shop-margin-default", target: "policy", value: shopDefault, label: "综合商店默认目标利润率", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">贸易行出口利润门槛</span><div class="setting-input">${renderNumericInput(view, { key: "trade-margin-export", kind: "trade-margin-export", target: "policy", value: tradeExport, label: "贸易行出口利润门槛", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">贸易行进口利润门槛</span><div class="setting-input">${renderNumericInput(view, { key: "trade-margin-import", kind: "trade-margin-import", target: "policy", value: tradeImport, label: "贸易行进口利润门槛", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="subtle">综合商店：未单独设置的店铺跟随默认值，改动后按7天复核平滑过渡（每次价格最多±10%），单店可在店铺详情里覆盖。贸易行：卖价（或买价）相对成本加运费的利润率达到门槛才成交；门槛越高成交越少。</div>
+    </div></details>`;
+}
+
 export function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
   const last = view.policy.lastDay || {};
@@ -76,6 +91,7 @@ export function renderPolicy(view) {
       ${reformAction}
     </div></details>`;
   return `${reformCard}
+    ${marginPolicyCard(view)}
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
       <div class="row"><span class="label">营业店铺日租</span><div class="setting-input">${renderNumericInput(view, { key: "shop-rent", kind: "shop-rent", target: "shops", value: view.policy.shopRentVoucher ?? 1, label: "每间营业店铺每日租金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       ${hasStall ? `<div class="row"><span class="label">摊位日租</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent", kind: "stall-rent", target: "stalls", value: view.policy.stallRentVoucher ?? 2, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>

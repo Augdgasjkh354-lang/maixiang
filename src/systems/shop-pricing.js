@@ -1,7 +1,8 @@
 // 综合商店动态加价（0.2.3 流通改革，v1 只做综合商店）。
 //
 // 用户拍板：
-// - 目标利润率默认 20%（面板可调 0~100%），全镇店铺统一一个目标。
+// - 目标利润率默认 20%（政策 shopMarginPercent 可调 0~200%），未单独设置的店跟随全局；单店可覆盖（margin-policy.js）。
+// - 改目标不跳价：按 7 天复核、价格每次最多 ±10% 平滑追上（shop.pricing.glidePercent 记过渡中的目标）。
 // - 定价公式：售价 = 进货价 × (1 + 目标利润率)。
 // - 7 天复核一次：实际利润率连续偏离目标超过 ±3% 才调价；单次涨跌幅 ≤ ±10%；售价下限不低于进货价。
 // - 利润率口径：(销售收入 − 进货成本 − 店员工资) / 销售收入，按商品核算。
@@ -9,7 +10,7 @@
 // - 亏损保护：连续 30 天亏损 → 促销模式（目标利润率临时降至 5% 清库存）+ 向玩家发预警事件。
 //
 // 设计取舍：
-// - 目标利润率是"店铺级"设置（shop.pricing.targetMarginPercent），因为用户明确要求"店铺统一一个目标"；
+// - 目标利润率是"店铺级"设置（单店覆盖 shop.pricing.targetMarginPercent，或跟随全局政策），
 //   但实际利润率与调价决策是"按商品"的（每个商品有独立的进货价与售价）。
 // - 其他小店（legacy 别名店）沿用 content.rules.generalStoreMarkupPercent 固定加价，不受本模块影响。
 // - 所有新字段一律 ||= 初始化。
@@ -17,6 +18,8 @@
 import { recordEvent } from "../economy/ledger.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { nextPriceFactor, priceFactorOf, retailFloorOf, stockDaysOf } from "../economy/price-adjust.js";
+import { glideStepMarginPercent, pinGlideBeforeChange, policyShopMarginPercent, promotionMarginPercent,
+  shopConfiguredMarginPercent, shopEffectiveMarginPercent, shopInForceMarginPercent, shopOverrideMarginPercent, MARGIN_POLICY_MAX_PERCENT } from "../economy/margin-policy.js";
 
 export const PRICING_REVIEW_INTERVAL_DAYS = 7;
 export const PRICING_DEVIATION_TOLERANCE_PERCENT = 3;
@@ -24,8 +27,7 @@ export const PRICING_MAX_STEP_PERCENT = 10;
 export const LOSS_PROMOTION_DAYS = 30;
 export const LOSS_PROMOTION_TARGET_PERCENT = 5;
 export function promotionTargetMarginPercent(content) {
-  const v = Number(content.rules.generalStorePromotionTargetPercent);
-  return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : LOSS_PROMOTION_TARGET_PERCENT;
+  return promotionMarginPercent(content);
 }
 export const PRICE_HISTORY_WINDOW_DAYS = 30;
 
@@ -35,38 +37,44 @@ export function isDynamicPricingShop(shop, content) {
   return def?.id === "general";
 }
 
-// 目标利润率（%）：店铺级设置，缺省取规则默认 20%。促销模式下临时降到 5%。
+// 定价使用的目标利润率（%）：促销模式优先；否则生效中的目标（玩家设定的单店覆盖或全局默认，平滑过渡中可能尚未追平）。
 export function shopTargetMarginPercent(state, shop, content) {
-  const fallback = content.rules.generalStoreMarkupPercent ?? 20;
-  if (shop?.pricing?.promotion) return promotionTargetMarginPercent(content);
-  const value = Number(shop?.pricing?.targetMarginPercent);
-  if (Number.isFinite(value)) return Math.max(0, Math.min(100, value));
-  return fallback;
+  return shopEffectiveMarginPercent(state, shop, content);
 }
 
-// 玩家命令：设置某综合商店的目标利润率（0~100%），全镇统一口径由 UI 逐店提交。
+// 玩家命令：设置某综合商店的单店目标利润率（0~200%）；percent 为 null 时取消单店设置，改为跟随全局默认。
+// 改目标不立即改价：先记下生效中的目标（pinGlideBeforeChange），之后每次复核按价格 ±10% 平滑追上。
 export function setShopTargetMarginPercent(state, shopId, percent, content) {
   const shop = state.shops?.[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
   if (!isDynamicPricingShop(shop, content)) return { ok: false, reason: "只有综合商店支持目标利润率定价" };
-  const value = Number(percent);
-  if (!Number.isFinite(value) || value < 0 || value > 100) return { ok: false, reason: "目标利润率须在0—100%之间" };
   shop.pricing ||= {};
+  if (percent === null) {
+    pinGlideBeforeChange(state, shop, content);
+    shop.pricing.targetMarginOwn = false;
+    shop.pricing.lastReviewSerial = -1;
+    return { ok: true, shopId, followsPolicy: true, targetMarginPercent: policyShopMarginPercent(state, content) };
+  }
+  const value = Number(percent);
+  if (!Number.isFinite(value) || value < 0 || value > MARGIN_POLICY_MAX_PERCENT) return { ok: false, reason: "目标利润率须在0—200%之间" };
+  pinGlideBeforeChange(state, shop, content);
+  shop.pricing.targetMarginOwn = true;
   shop.pricing.targetMarginPercent = Math.round(value * 100) / 100;
-  // 目标变了就允许下一次复核立即响应，不必再等 7 天。
+  // 目标变了允许下一次复核立即开始追价（仍按步幅限制）。
   shop.pricing.lastReviewSerial = -1;
   return { ok: true, shopId, targetMarginPercent: shop.pricing.targetMarginPercent };
 }
 
-// 全镇统一设置目标利润率（"店铺统一一个目标"）。
+// 全镇统一设置目标利润率（"应用到所有综合商店"）：把每家综合商店都设为单店覆盖值。
 export function setAllShopsTargetMarginPercent(state, percent, content) {
   const value = Number(percent);
-  if (!Number.isFinite(value) || value < 0 || value > 100) return { ok: false, reason: "目标利润率须在0—100%之间" };
+  if (!Number.isFinite(value) || value < 0 || value > MARGIN_POLICY_MAX_PERCENT) return { ok: false, reason: "目标利润率须在0—200%之间" };
   let updated = 0;
   for (const shop of Object.values(state.shops || {})) {
     if (shop.status === "closed") continue;
     if (!isDynamicPricingShop(shop, content)) continue;
-    shop.pricing ||= {};
+    pinGlideBeforeChange(state, shop, content);
+    shop.pricing.targetMarginOwn = true;
     shop.pricing.targetMarginPercent = Math.round(value * 100) / 100;
     shop.pricing.lastReviewSerial = -1;
     updated += 1;
@@ -81,7 +89,7 @@ function emptyItemMap(content) {
 // 店铺定价状态初始化（||= 幂等，新档/旧档都安全）。
 export function ensureShopPricing(shop, content) {
   shop.pricing ||= {};
-  shop.pricing.targetMarginPercent ??= content.rules.generalStoreMarkupPercent ?? 20;
+  // 目标利润率不再在这里烘焙默认值：未单独设置的店跟随全局政策（见 economy/margin-policy.js）。
   shop.pricing.lastReviewSerial ??= -1;
   shop.pricing.promotion ??= false;
   shop.pricing.lossStreakDays ??= 0;
@@ -197,32 +205,50 @@ export function reviewShopPricing(state, shop, content, options = {}) {
   if (!options.force && Number.isFinite(pricing.lastReviewSerial) && pricing.lastReviewSerial >= 0
       && serial - pricing.lastReviewSerial < interval) return { reviewed: false, changes: [], factorChanges: [] };
   pricing.lastReviewSerial = serial;
-  const target = shopTargetMarginPercent(state, shop, content);
   const tolerance = Math.max(0, content.rules.generalStorePricingTolerancePercent ?? PRICING_DEVIATION_TOLERANCE_PERCENT);
   const maxStep = Math.max(0, content.rules.generalStorePricingMaxStepPercent ?? PRICING_MAX_STEP_PERCENT);
   const rules = content.rules.priceAdjust || {};
   const itemIds = shopRetailItemIdsSafe(shop, content);
+  // 目标平滑：生效目标每次复核最多按价格 ±maxStep 追向玩家设定的目标。
+  // targetOld 是本次复核前的价格口径（窗口内的基准价按它算），target 是复核后的目标。
+  const promotion = Boolean(pricing.promotion);
+  const configured = shopConfiguredMarginPercent(state, shop, content);
+  const inForceOld = shopInForceMarginPercent(state, shop, content);
+  const inForceNew = glideStepMarginPercent(inForceOld, configured, maxStep);
+  if (inForceNew === configured) delete pricing.glidePercent;
+  else pricing.glidePercent = inForceNew;
+  const targetOld = promotion ? promotionMarginPercent(content) : inForceOld;
+  const target = promotion ? promotionMarginPercent(content) : inForceNew;
+  const gliding = Math.abs(target - targetOld) > 1e-9;
   const changes = [];
   for (const itemId of itemIds) {
-    const factorInWindow = priceFactorOf(pricing, itemId);
-    const actual = shopItemActualMarginPercent(pricing, itemId, factorInWindow);
-    if (actual === null) continue;
-    const deviation = actual - target;
-    if (Math.abs(deviation) <= tolerance) continue;
     const wholesale = currentUnitPrice(state, itemId, content) || 0;
     if (!(wholesale > 0)) continue;
-    const currentPrice = shopBaseRetailPrice(itemId, wholesale, target, pricing);
-    // 由本窗口的实际利润率反推目标售价：利润率 m = 1 − 成本/收入，故 成本/收入 = 1 − m。
-    // 达到目标利润率 t 需要 成本/收入 = 1 − t，即 收入 需放大 (1−m)/(1−t) 倍；
-    // 成本结构不变时，价格同比例放大即可。这就是"实际偏离多少就补多少"。
-    const targetFraction = Math.min(0.95, Math.max(0, target / 100));
-    const actualFraction = Math.min(0.95, Math.max(-10, actual / 100));
-    const desiredPrice = currentPrice * (1 - actualFraction) / (1 - targetFraction);
+    const factorInWindow = priceFactorOf(pricing, itemId);
+    const actual = shopItemActualMarginPercent(pricing, itemId, factorInWindow);
+    const currentPrice = shopBaseRetailPrice(itemId, wholesale, targetOld, pricing);
+    let desiredPrice;
+    if (actual !== null) {
+      const deviation = actual - target;
+      if (!gliding && Math.abs(deviation) <= tolerance) continue;
+      // 由本窗口的实际利润率反推目标售价：利润率 m = 1 − 成本/收入，故 成本/收入 = 1 − m。
+      // 达到目标利润率 t 需要 成本/收入 = 1 − t，即 收入 需放大 (1−m)/(1−t) 倍；
+      // 成本结构不变时，价格同比例放大即可。这就是"实际偏离多少就补多少"（目标变化也走这一步）。
+      const targetFraction = Math.min(0.95, Math.max(0, target / 100));
+      const actualFraction = Math.min(0.95, Math.max(-10, actual / 100));
+      desiredPrice = currentPrice * (1 - actualFraction) / (1 - targetFraction);
+    } else if (gliding) {
+      // 本窗口没有销量：按进货价 × (1 + 新目标) 追价。
+      desiredPrice = wholesale * (1 + target / 100);
+    } else {
+      continue;
+    }
     const bounded = clampPriceStep(currentPrice, desiredPrice, maxStep, wholesale);
     if (Math.abs(bounded - currentPrice) < 1e-9) continue;
     pricing.retailPriceVoucherPerUnit ||= {};
     pricing.retailPriceVoucherPerUnit[itemId] = bounded;
-    changes.push({ itemId, from: currentPrice, to: bounded, actualMarginPercent: actual, targetMarginPercent: target, deviationPercent: deviation });
+    changes.push({ itemId, from: currentPrice, to: bounded, actualMarginPercent: actual, targetMarginPercent: target,
+      deviationPercent: actual === null ? null : actual - target });
   }
   const factorChanges = updateShopPriceFactors(shop, pricing, itemIds, content, rules);
   // 窗口滚动：本轮判断用过的数据清零，下一轮重新累计 7 天，
@@ -364,6 +390,7 @@ export function selectShopPricingView(state, shop, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   const currency = content.precision.currencyUnitsPerVoucher;
   const target = shopTargetMarginPercent(state, shop, content);
+  const configuredTarget = shopConfiguredMarginPercent(state, shop, content);
   const rows = shopRetailItemIdsSafe(shop, content).map(itemId => {
     const wholesale = currentUnitPrice(state, itemId, content) || 0;
     const base = shopBaseRetailPrice(itemId, wholesale, target, pricing);
@@ -407,7 +434,11 @@ export function selectShopPricingView(state, shop, content) {
     shopName: shop.name,
     dynamic: isDynamicPricingShop(shop, content),
     targetMarginPercent: target,
-    configuredTargetMarginPercent: Number(pricing.targetMarginPercent ?? target),
+    // 玩家设定的目标（单店覆盖或跟随全局）；平滑过渡中 gliding 为 true，生效目标正向它追赶。
+    configuredTargetMarginPercent: configuredTarget,
+    followsPolicy: shopOverrideMarginPercent(shop) === null,
+    policyMarginPercent: policyShopMarginPercent(state, content),
+    gliding: Number.isFinite(pricing.glidePercent),
     promotion: Boolean(pricing.promotion),
     lossStreakDays: pricing.lossStreakDays || 0,
     lastReviewSerial: Number.isFinite(pricing.lastReviewSerial) ? pricing.lastReviewSerial : -1,

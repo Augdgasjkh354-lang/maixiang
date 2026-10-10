@@ -535,6 +535,19 @@ export function mountGame(root) {
     } else if (kind === "employment-exchange") {
       result = simulation.setEmploymentExchangeQuota(state, parsed.value);
       successMessage = `在岗居民每日换券额度已设为${number(parsed.value, 2)}斤。`;
+    } else if (kind === "shop-target-margin") {
+      // 单店目标利润率（覆盖全局默认）。
+      result = simulation.configureShopTargetMargin(state, input.dataset.draftTarget, parsed.value);
+      successMessage = `本店目标利润率已设为${number(parsed.value, 1)}%（价格按复核平滑追上）。`;
+    } else if (kind === "shop-margin-default") {
+      result = simulation.setMarginPolicy(state, { shopMarginPercent: parsed.value });
+      successMessage = `综合商店默认目标利润率已设为${number(parsed.value, 1)}%；未单独设置的店铺按复核平滑跟随。`;
+    } else if (kind === "trade-margin-export") {
+      result = simulation.setMarginPolicy(state, { tradeMarginPercent: parsed.value });
+      successMessage = `贸易行出口利润门槛已设为${number(parsed.value, 1)}%。`;
+    } else if (kind === "trade-margin-import") {
+      result = simulation.setMarginPolicy(state, { tradeImportMarginPercent: parsed.value });
+      successMessage = `贸易行进口利润门槛已设为${number(parsed.value, 1)}%。`;
     } else if (kind === "shop-rent") {
       result = simulation.setShopRent(state, parsed.value);
       successMessage = `营业店铺日租已设为${number(parsed.value, 2)}小麦等值。`;
@@ -1730,6 +1743,17 @@ export function mountGame(root) {
       changed(true);
       render(true);
       showToast(`已将${number(result.shops)}家综合商店的目标利润率设为${number(result.targetMarginPercent, 1)}%。`);
+      return;
+    }
+    // 单店目标利润率改回跟随全局政策（click 处理，不走输入框提交）。
+    const followMarginButton = closest(target, "[data-shop-margin-follow]");
+    if (followMarginButton && state) {
+      const result = simulation.configureShopTargetMargin(state, followMarginButton.dataset.shopMarginFollow, null);
+      if (!result?.ok) { showToast(result?.reason || "设置失败", 3600); return; }
+      numericDrafts.delete(`shop-margin:${followMarginButton.dataset.shopMarginFollow}`);
+      changed(true);
+      render(true);
+      showToast(`本店已改为跟随全局默认 ${number(result.targetMarginPercent, 1)}%。`);
       return;
     }
     const buildCategoryTab = closest(target, "[data-build-category]");
