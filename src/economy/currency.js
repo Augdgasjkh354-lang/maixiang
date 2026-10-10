@@ -8,7 +8,7 @@ function holdsCashWheat(owner) {
 }
 import { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } from "./business.js";
 import {
-  hasHouseholds, householdList, residentVoucherUnits, syncResidentAggregates,
+  hasHouseholds, householdList, residentVoucherUnits, syncResidentAggregates, applyResidentAggregateDelta,
   takeResidentVouchers, distributeResidentVouchers, householdConvertibleWheatUnits,
   householdExchangeAllowanceUnits, consumeHouseholdExchangeAllowance,
   maximumResidentExchangeWheatUnits
@@ -72,8 +72,9 @@ function setVoucherBalance(state, owner, value, content = null) {
   if (owner === "residents" && hasHouseholds(state)) throw new Error("居民汇总粮券账户为只读；应落到具体家庭");
   const slot = voucherSlot(state, owner);
   if (!slot) throw new Error("粮券账户不存在：" + owner);
+  const before = readSlot(slot);
   slot.holder[slot.key] = value;
-  if (isHouseholdOwner(owner) && content) syncResidentAggregates(state, content);
+  if (isHouseholdOwner(owner) && content) applyResidentAggregateDelta(state, content, value - before);
 }
 
 function currencyLedger(state, row, content) {
@@ -263,14 +264,14 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
     if (!taken.ok) return taken;
     householdRows = taken.rows.map(row => ({ ...row, wheatUnits: wheatUnitsForVoucherUnits(row.units, content, "floor") }));
     for (const row of householdRows) state.households.byId[row.householdId].inventory.wheat += row.wheatUnits;
-    syncResidentAggregates(state, content);
+    applyResidentAggregateDelta(state, content, 0, "wheat", householdRows.reduce((sum, row) => sum + row.wheatUnits, 0));
   } else if (isHouseholdOwner(owner)) {
     const household = state.households?.byId?.[householdIdOf(owner)];
     if (!household || (household.voucherUnits || 0) < voucherUnits) return { ok: false, reason: "粮券余额不足" };
     household.voucherUnits -= voucherUnits;
     household.inventory.wheat = (household.inventory.wheat || 0) + wheatUnits;
     householdRows = [{ householdId: household.id, units: voucherUnits, wheatUnits }];
-    syncResidentAggregates(state, content);
+    applyResidentAggregateDelta(state, content, -voucherUnits, "wheat", wheatUnits);
   } else if (owner === "town") {
     setVoucherBalance(state, owner, voucherBalance(state, owner) - voucherUnits, content);
   } else if (holdsCashWheat(owner)) {

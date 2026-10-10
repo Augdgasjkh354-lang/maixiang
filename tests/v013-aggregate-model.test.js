@@ -182,6 +182,7 @@ test("无人家庭停止生活消费和福利；家产当日归镇库（再分�
   }
   for (const jobKey of Object.keys(empty.jobs || {})) releaseJobFromHousehold(state, empty.id, jobKey);
   empty.inventory.wheat += 1234;
+  syncResidentAggregates(state, CONTENT);
   assert.equal(grantResidentVouchers(state, 77, CONTENT, empty.id).ok, true);
   state.payroll.creditorClaims ||= {};
   state.payroll.creditorClaims.legacy_test = { [empty.id]: 9 * V };

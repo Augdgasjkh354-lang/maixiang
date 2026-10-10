@@ -3,7 +3,7 @@ import { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot
 import { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } from "./business.js";
 import { makeTransactionId, recordLedger } from "./ledger.js";
 import { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits } from "./money-units.js";
-import { distributeResidentInventory, takeResidentInventory, syncResidentAggregates, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList, hasHouseholds, isActiveHousehold, withDeferredHouseholdSync } from "../systems/households.js";
+import { distributeResidentInventory, takeResidentInventory, syncResidentAggregates, applyResidentAggregateDelta, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList, hasHouseholds, isActiveHousehold, withDeferredHouseholdSync } from "../systems/households.js";
 import { recordHouseholdVoucherTransfer } from "../systems/household-life.js";
 import { withdrawFromBank } from "./deposits.js";
 
@@ -171,8 +171,9 @@ function setSimpleWheatBalance(state, owner, value, content) {
   // 居民汇总的小麦要落到具体家庭，由 transferPaymentWheat 单独处理。
   const slot = owner === "residents" ? null : paymentWheatSlot(state, owner);
   if (!slot) throw new Error("未知小麦支付账户：" + owner);
+  const before = readSlot(slot);
   slot.holder[slot.key] = value;
-  if (isHouseholdOwner(owner)) syncResidentAggregates(state, content);
+  if (isHouseholdOwner(owner)) applyResidentAggregateDelta(state, content, 0, "wheat", value - before);
 }
 
 function transferPaymentWheat(state, from, to, wheatUnits, valueUnits, content, type, reason, transactionId) {
