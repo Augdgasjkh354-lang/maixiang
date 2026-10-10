@@ -10,8 +10,10 @@ import {
 } from "./outside-town.js";
 
 // 长期贸易协定：外贸房签约 → 每年定额、每月交付 1/12，价格按签约时的外镇收购价锁定。
-// 只从批发市场取货；我方交不出货算违约（赔年货值 10%、关系分 −5，连续 3 次对方解约）；
-// 外镇付不起小麦算对方违约（本月顺延）。交付的货进入外镇库存，照常影响现货价格。
+// 只从批发市场取货；每月交付 = min(本月应交, 批发可售量, 运力余量)，能交的照常交付，不足的一截算一次违约
+// （赔偿 = 年货值 10% × 未交占比、关系分 −5，连续 3 次对方解约）；外镇付不起小麦算对方违约（本月顺延）。
+// 期限按结算月计：N 年 = 12N 次月结算，到 0 即到期（不再按年结算递减，避免签在年初/年末少算一年）。
+// 交付的货进入外镇库存，照常影响现货价格。贸易行出口会先留出同品长协的本月应交（trading-houses.js 的 exportReserveJin）。
 export const AGREEMENT_MIN_YEARS = 1;
 export const AGREEMENT_MAX_YEARS = 5;
 export const AGREEMENT_BREACH_PENALTY_RATE = 0.1;
@@ -31,6 +33,22 @@ export function ensureTradeAgreements(state) {
 export function readTradeAgreements(state) {
   const rows = Array.isArray(state.tradeAgreements) ? state.tradeAgreements : [];
   return rows.filter(row => row && typeof row === "object").map(row => ({ ...row }));
+}
+
+// 期限按结算月计：每次月结算消耗一个月，N 年 = 12N 次结算（与签约是哪一天无关）。旧档只有 yearsLeft，折成月。
+function agreementMonthsLeft(agreement) {
+  if (Number.isFinite(agreement.monthsLeft)) return agreement.monthsLeft;
+  return Math.max(0, Math.floor(Number(agreement.yearsLeft) || 0)) * 12;
+}
+
+// 某商品所有生效长协的本月应交量（斤）：年量/12 + 顺延。贸易行出口前要先留出这部分（trading-houses.js 的 exportReserveJin）。只读。
+export function agreementMonthlyDueJin(state, itemId) {
+  let total = 0;
+  for (const row of readTradeAgreements(state)) {
+    if (row.status !== "active" || row.itemId !== itemId) continue;
+    total += (Number(row.monthlyJin) || 0) + (Number(row.carryJin) || 0);
+  }
+  return round2(total);
 }
 
 // 一年切 12 段（每月一段），每段交付一次。
@@ -81,6 +99,7 @@ export function signTradeAgreement(state, { itemId, annualJin, years, content, t
     annualJin: quantity,
     yearsTotal: term,
     yearsLeft: term,
+    monthsLeft: term * 12,
     pricePerUnit: price,
     monthlyJin: round2(quantity / 12),
     breachCount: 0,
@@ -113,15 +132,16 @@ function payBreachPenalty(state, town, amountJin, content, reason) {
   return { paidJin, shortfallJin: round2(Math.max(0, amountJin - paidJin)) };
 }
 
-function penaltyFor(agreement, town) {
+// 赔偿 = 年货值 × 10%（关系融洽减半）；ratio 为本次违约的未交占比（部分交付时按未交部分折算，整月未交为 1）。
+function penaltyFor(agreement, town, ratio = 1) {
   const rate = AGREEMENT_BREACH_PENALTY_RATE * (town.relations >= RELATIONS_TRUSTED ? RELATIONS_TRUSTED_PENALTY_FACTOR : 1);
-  return round2(agreement.annualJin * agreement.pricePerUnit * rate);
+  return round2(agreement.annualJin * agreement.pricePerUnit * rate * ratio);
 }
 
 // 违约一次：从镇库扣赔偿（不够就记欠）、关系分下降、违约次数 +1；连续违约到上限就单方面解约。
-// 库存不足和运力不足都走这里，只是事件文字不同。
-function breachAgreement(state, agreement, town, profile, content, { itemName, ledgerReason, eventLead }) {
-  const paid = payBreachPenalty(state, town, penaltyFor(agreement, town), content, ledgerReason);
+// 部分交付的短缺也走这里（penaltyRatio 为未交占本月应交的比例）；库存与运力不足文字不同。
+function breachAgreement(state, agreement, town, profile, content, { itemName, ledgerReason, eventLead, penaltyRatio = 1 }) {
+  const paid = payBreachPenalty(state, town, penaltyFor(agreement, town, penaltyRatio), content, ledgerReason);
   agreement.breachCount = (agreement.breachCount || 0) + 1;
   changeRelations(town, -AGREEMENT_BREACH_RELATIONS_LOSS);
   const owedText = paid.shortfallJin > 0 ? `，镇库小麦不足，尚欠${Math.round(paid.shortfallJin)}斤` : "";
@@ -141,86 +161,83 @@ export function settleTradeAgreementsMonth(state, content) {
   result.settled = true;
   for (const agreement of rows) {
     if (agreement.status !== "active") continue;
-    const townId = agreement.townId || DEFAULT_OUTSIDE_TOWN_ID;
-    const profile = outsideTownProfile(content, townId);
-    const town = outsideTown(state, content, townId);
-    if (!profile || !town) continue;
-    const itemName = content.items[agreement.itemId]?.name || agreement.itemId;
-    // 商路断绝（关系破裂）：本月交付不计违约，顺延累计到下月一起交（不能静默丢掉这 1/12）。
-    if (town.tradeClosed) {
-      agreement.carryJin = round2((agreement.carryJin || 0) + agreement.monthlyJin);
-      result.postponed = (result.postponed || 0) + 1;
-      recordEvent(state, `因${profile.name}商路断绝，${itemName}长期协定本月交付顺延（待交累计${Math.round(agreement.carryJin)}斤）。`, content);
-      continue;
-    }
-    // 本月应交 = 当月 1/12 + 之前顺延的部分；这次交付（或违约）结束后清零。
-    const dueJin = round2(agreement.monthlyJin + (agreement.carryJin || 0));
-    agreement.carryJin = 0;
-    const wantUnits = quantityToUnits(dueJin, content);
-    // 运力：本月能运出的量不超过运力池余量（运力不够的部分在下面按违约处理）。
-    const askUnits = Math.min(wantUnits, freightCapacityUnits(state, content));
-    const takenUnits = hasWholesaleMarket(state) && askUnits > 0 ? (takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content)?.units || 0) : 0;
-    if (takenUnits < askUnits) {
-      // 库存不足：整月交付取消，按违约处理（与运力无关）。
-      returnToMarket(state, agreement.itemId, takenUnits);
-      const breach = breachAgreement(state, agreement, town, profile, content, {
-        itemName,
-        ledgerReason: `长期协定违约赔偿（${itemName}，欠${unitsToQuantity(wantUnits - takenUnits, content)}）`,
-        eventLead: `长期协定未按期交付${itemName}`
-      });
-      result.breached += 1;
-      if (breach.terminated) result.terminated += 1;
-      continue;
-    }
-    const actualJin = unitsToQuantity(takenUnits, content);
-    const orderJin = round2(actualJin * agreement.pricePerUnit);
-    if (payableWheatJin(town, profile) < orderJin) {
-      returnToMarket(state, agreement.itemId, takenUnits);
-      changeRelations(town, -AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS);
-      result.partnerBreached += 1;
-      recordEvent(state, `${profile.name}余粮不足，本月长期协定未能付款，交付顺延。`, content);
-      continue;
-    }
-    if (takenUnits > 0) {
-      town.wheatStockJin = round2(town.wheatStockJin - orderJin);
-      addInventory(state, "town", "wheat", orderJin, `对${profile.name}长期协定交付${itemName}所得`, "trade_export", content);
-      deliverToOutsideTown(town, agreement.itemId, actualJin);
-      recordTradeStats(town, "sell", orderJin, agreement.itemId, actualJin);
-      takeFreightCapacity(state, actualJin, content);
-      agreement.totalDeliveredJin = round2((agreement.totalDeliveredJin || 0) + actualJin);
-      result.delivered += 1;
-      result.revenueJin = round2(result.revenueJin + orderJin);
-    }
-    if (takenUnits < wantUnits) {
-      // 运力不够：能运的已经运出，余下的按违约处理（赔偿、关系分、违约次数，与库存不足相同）。
-      const shortJin = unitsToQuantity(wantUnits - takenUnits, content);
-      const breach = breachAgreement(state, agreement, town, profile, content, {
-        itemName,
-        ledgerReason: `长期协定违约赔偿（${itemName}，运力不足欠${shortJin}）`,
-        eventLead: `长期协定运力不足，${itemName}本月只运出${Math.round(actualJin)}斤（欠${Math.round(shortJin)}斤）`
-      });
-      result.breached += 1;
-      if (breach.terminated) result.terminated += 1;
-      continue;
-    }
-    agreement.breachCount = 0;
+    settleAgreementMonth(state, agreement, content, result);
+    consumeAgreementTerm(state, agreement, content);
   }
   return result;
 }
 
-export function settleTradeAgreementsYear(state, content) {
-  const expired = [];
-  for (const agreement of ensureTradeAgreements(state)) {
-    if (agreement.status !== "active") continue;
-    agreement.yearsLeft = Math.max(0, (agreement.yearsLeft || 0) - 1);
-    if (agreement.yearsLeft <= 0) {
-      agreement.status = "expired";
-      expired.push(agreement.id);
-      const name = outsideTownProfile(content, agreement.townId || DEFAULT_OUTSIDE_TOWN_ID)?.name || "外镇";
-      recordEvent(state, `与${name}的${content.items[agreement.itemId]?.name || agreement.itemId}长期协定已到期，可续签。`, content, { day: 1 });
-    }
+// 一笔协定的一个结算月。交付量 = min(本月应交, 批发可售量, 运力余量)，能交的部分照常交付；
+// 不足的一截算一次违约（赔偿按未交占比折算、关系分 −5、违约次数 +1）。库存与运力不足走同一口径。
+function settleAgreementMonth(state, agreement, content, result) {
+  const townId = agreement.townId || DEFAULT_OUTSIDE_TOWN_ID;
+  const profile = outsideTownProfile(content, townId);
+  const town = outsideTown(state, content, townId);
+  if (!profile || !town) return;
+  const itemName = content.items[agreement.itemId]?.name || agreement.itemId;
+  // 商路断绝（关系破裂）：本月交付不计违约，顺延累计到下月一起交（不能静默丢掉这 1/12）。
+  if (town.tradeClosed) {
+    agreement.carryJin = round2((agreement.carryJin || 0) + agreement.monthlyJin);
+    result.postponed = (result.postponed || 0) + 1;
+    recordEvent(state, `因${profile.name}商路断绝，${itemName}长期协定本月交付顺延（待交累计${Math.round(agreement.carryJin)}斤）。`, content);
+    return;
   }
-  return { expired };
+  // 本月应交 = 当月 1/12 + 之前顺延的部分；这次交付（或违约）结束后清零。
+  const dueJin = round2(agreement.monthlyJin + (agreement.carryJin || 0));
+  agreement.carryJin = 0;
+  const wantUnits = quantityToUnits(dueJin, content);
+  // 运力：本月能运出的量不超过运力池余量；批发市场可售量再限一次。
+  const askUnits = Math.min(wantUnits, freightCapacityUnits(state, content));
+  const takenUnits = hasWholesaleMarket(state) && askUnits > 0 ? (takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content)?.units || 0) : 0;
+  const actualJin = unitsToQuantity(takenUnits, content);
+  const orderJin = round2(actualJin * agreement.pricePerUnit);
+  if (payableWheatJin(town, profile) < orderJin) {
+    returnToMarket(state, agreement.itemId, takenUnits);
+    changeRelations(town, -AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS);
+    result.partnerBreached += 1;
+    recordEvent(state, `${profile.name}余粮不足，本月长期协定未能付款，交付顺延。`, content);
+    return;
+  }
+  if (takenUnits > 0) {
+    town.wheatStockJin = round2(town.wheatStockJin - orderJin);
+    addInventory(state, "town", "wheat", orderJin, `对${profile.name}长期协定交付${itemName}所得`, "trade_export", content);
+    deliverToOutsideTown(town, agreement.itemId, actualJin);
+    recordTradeStats(town, "sell", orderJin, agreement.itemId, actualJin);
+    takeFreightCapacity(state, actualJin, content);
+    agreement.totalDeliveredJin = round2((agreement.totalDeliveredJin || 0) + actualJin);
+    result.delivered += 1;
+    result.revenueJin = round2(result.revenueJin + orderJin);
+  }
+  const shortUnits = wantUnits - takenUnits;
+  if (shortUnits > 0) {
+    // 没交够：库存不足（批发可售量不到 askUnits）或运力不足（运力先于库存用完）。
+    const shortJin = unitsToQuantity(shortUnits, content);
+    const reason = takenUnits < askUnits ? "库存不足" : "运力不足";
+    const breach = breachAgreement(state, agreement, town, profile, content, {
+      itemName,
+      penaltyRatio: shortUnits / wantUnits,
+      ledgerReason: `长期协定违约赔偿（${itemName}，${reason}欠${shortJin}）`,
+      eventLead: takenUnits > 0
+        ? `长期协定${reason}，${itemName}本月只交付${Math.round(actualJin)}斤（应交${Math.round(dueJin)}斤，欠${Math.round(shortJin)}斤）`
+        : `长期协定${reason}，${itemName}本月未能交付（应交${Math.round(dueJin)}斤）`
+    });
+    result.breached += 1;
+    if (breach.terminated) result.terminated += 1;
+    return;
+  }
+  agreement.breachCount = 0;
+}
+
+// 每个结算月消耗一个月期限；期限用完即到期。商路断绝顺延、违约、交付都消耗（期限按日历走）。
+function consumeAgreementTerm(state, agreement, content) {
+  if (agreement.status !== "active") return;
+  const left = Math.max(0, agreementMonthsLeft(agreement) - 1);
+  agreement.monthsLeft = left;
+  agreement.yearsLeft = Math.ceil(left / 12);
+  if (left > 0) return;
+  agreement.status = "expired";
+  const name = outsideTownProfile(content, agreement.townId || DEFAULT_OUTSIDE_TOWN_ID)?.name || "外镇";
+  recordEvent(state, `与${name}的${content.items[agreement.itemId]?.name || agreement.itemId}长期协定已到期，可续签。`, content);
 }
 
 // 主动解约：赔年货值 10%（关系融洽减半），关系分 −5。

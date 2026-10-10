@@ -1,7 +1,7 @@
 // 贸易行（docs/TRADE.md「贸易中心与贸易行」）：贸易中心里的店铺（kind "trade"），店主与店员每天自己做外镇买卖。
 //
 //   出口：从批发市场按售价进货 → 卖给外镇（外镇付小麦，小麦存进店里的支付小麦）。
-//         批发市场存量不到 tradeHouseExportMinStockDays 天销量时不出口；只出存量超出这部分的余量。
+//         批发市场存量不到保留量（tradeHouseExportMinStockDays 天销量与保本线取大，再加同品长协本月应交）时不出口；只出超出这部分的余量。
 //   进口：向外镇买（付店里的小麦）→ 按批发收购价卖给批发市场（市场付粮券）。
 //         进口量封顶：市场存量不超过 30 天销量（至少 20 斤）。
 //   运费：每运一斤付 freightVoucherPerJin 给镇库（同一条运费规则）。
@@ -26,6 +26,7 @@ import {
   addBookMap, addBookValue, applyProfit, ensureShops, releaseShopStaffing, reopenTradeHouse, shopClerkCount, shopDefinition,
   shopMerchantCount, shopMinimumCapitalUnits, topUpShopCapital
 } from "./shops.js";
+import { agreementMonthlyDueJin } from "./trade-agreements.js";
 import {
   buyWholesaleForOwner, depositWholesalePurchasedInventory, ensureWholesaleMarket, hasWholesaleMarket,
   wholesaleAvgSoldUnits, wholesaleMonopolyItemIds, wholesalePurchasePrice, wholesaleUnitPrice
@@ -196,12 +197,18 @@ function quickMarginRatio(state, content, cand) {
   return price / (unitPrice(cand.town, cand.good, "buy") * (1 + tradeTariffRate(state, "import")) + freight) - 1;
 }
 
-// 批发市场某商品超出保本线（与 planExport 同一口径）的可出口余量（斤）。只读。
+// 批发市场某商品的出口保留量（斤）：本镇保本线（底线 200 斤与 10 天销量取大）+ 同品长协的本月应交（含顺延）。
+// 长协每月 1 日从批发市场交货，贸易行不能先把这部分出口掉（否则长协每月违约）。只读。
+export function exportReserveJin(state, content, itemId) {
+  const baseJin = Math.max(content.rules.townOutputMinStockJin ?? 200, (content.rules.tradeHouseExportMinStockDays ?? 10) * localAvgSoldJin(state, content, itemId));
+  return baseJin + agreementMonthlyDueJin(state, itemId);
+}
+
+// 批发市场某商品超出保留量（与 planExport 同一口径）的可出口余量（斤）。只读。
 function exportSurplusJin(state, content, itemId) {
   const scale = content.precision.inventoryUnitsPerJin;
   const stockJin = nonNegative(state.wholesaleMarket?.inventory?.[itemId]) / scale;
-  const reserveJin = Math.max(content.rules.townOutputMinStockJin ?? 200, (content.rules.tradeHouseExportMinStockDays ?? 10) * localAvgSoldJin(state, content, itemId));
-  return Math.max(0, stockJin - reserveJin);
+  return Math.max(0, stockJin - exportReserveJin(state, content, itemId));
 }
 
 // 出口计划：返回 { units, qJin } 或 null。只读，不改 state。
@@ -217,9 +224,8 @@ function planExport(state, content, run, cand) {
   if (unitPrice(town, good, "sell") * keep < minSell) return null;
   const market = ensureWholesaleMarket(state, content);
   const stockJin = nonNegative(market.inventory?.[itemId]) / scale;
-  // 至少留 townOutputMinStockJin（200 斤）：还没有销量记录时也不把批发市场卖空。
-  const reserveJin = Math.max(content.rules.townOutputMinStockJin ?? 200, (content.rules.tradeHouseExportMinStockDays ?? 10) * localAvgSoldJin(state, content, itemId));
-  // 保本地供应：存量不到 reserve 天销量时不出口，只出超出的余量。
+  // 保留量 = 保本线（至少 townOutputMinStockJin 斤）+ 同品长协本月应交；存量不够留就不出口，只出超出的余量。
+  const reserveJin = exportReserveJin(state, content, itemId);
   if (stockJin - reserveJin < MIN_JIN) return null;
   // 恢复检查时按补资后的营运资金（run.assumeCashUnits）规划，真正成交时用店里的实际资金。
   const cashUnits = run.assumeCashUnits ?? maximumPayableValueUnits(state, owner(run.shop), content);

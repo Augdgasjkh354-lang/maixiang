@@ -557,7 +557,7 @@ export function mountGame(root) {
       successMessage = `综合商店默认目标利润率已设为${number(parsed.value, 1)}%；未单独设置的店铺按复核平滑跟随。`;
     } else if (kind === "trade-margin-export") {
       result = simulation.setMarginPolicy(state, { tradeMarginPercent: parsed.value });
-      successMessage = `贸易行出口利润门槛已设为${number(parsed.value, 1)}%。`;
+      successMessage = `贸易行出口利润门槛已设为${number(parsed.value, 1)}%。${result?.ok && result.note ? result.note : ""}`;
     } else if (kind === "trade-margin-import") {
       result = simulation.setMarginPolicy(state, { tradeImportMarginPercent: parsed.value });
       successMessage = `贸易行进口利润门槛已设为${number(parsed.value, 1)}%。`;

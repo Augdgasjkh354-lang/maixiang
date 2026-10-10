@@ -23,7 +23,7 @@ import { settleHousingRent, buyRepairWoodForResidents } from "./housing.js";
 import { settleVillaPurchases, settleVillaPropertyTax } from "./villas.js";
 import { collectSocialContributions, payFarmerSubsidies, payPensions } from "./social-security.js";
 import { advanceOutsideTownDay, settleOutsideTownYear, settleWheatLoansYear } from "./outside-town.js";
-import { settleTradeAgreementsMonth, settleTradeAgreementsYear } from "./trade-agreements.js";
+import { settleTradeAgreementsMonth } from "./trade-agreements.js";
 import { resetLaborCompetitionYear } from "./labor-market.js";
 import { recordEconomyHistory } from "./wealth-stats.js";
 import { accrueSaltNeed, buySaltForResidents, consumeDailySalt, finishSaltGraceDay, selectSaltCoverage } from "./salt.js";
@@ -272,7 +272,6 @@ export const CORE_DAILY_STEPS = [
   { id: "outsideTownYear", when: newYearDay, run: settleOutsideTownYear },
   { id: "wheatLoanYear", when: newYearDay, run: settleWheatLoansYear },
   { id: "tradeAgreementMonth", run: settleTradeAgreementsMonth },
-  { id: "tradeAgreementYear", when: newYearDay, run: settleTradeAgreementsYear },
   { id: "outsideTownDay", run: advanceOutsideTownDay },
   // 家庭近期收入：放在最后，把当天所有收入（含店铺利润分配、收获分粮）并入滑动平均。
   { id: "householdIncome", run: finalizeHouseholdIncomeDay },
