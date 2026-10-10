@@ -49,7 +49,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 小麦（斤） | 价值尺度，所有价格以小麦斤计 |
 | 粮券 | 货币，1 券 ≈ 1 斤；内部整数单位，换算见 `content.precision` |
 | 镇库 | 镇财政：收税、发工资与救济、存战略小麦 |
-| 货币阶段 | 新开局即 `voucher`（粮券）：开局一次发行 1000 万斤粮券，居民每人 1000 斤（按户人口）、镇库券池 670 万斤（`rules.INITIAL.openingVoucher*`，`core/state.js` 的 `issueOpeningVouchers`，不经银行闸门）。小麦仍是口粮与价值尺度。印券、以粮换券需先建成银行。`wheat`（实物）只见于旧档，读档沿用存档自带的阶段，没有切换入口 |
+| 货币 | 粮券是唯一货币，已无“货币阶段”：开局一次发行 1000 万斤粮券，居民每人 1000 斤（按户人口）、镇库券池 670 万斤（`rules.INITIAL.openingVoucher*`，`core/state.js` 的 `issueOpeningVouchers`，不经银行闸门）。小麦是口粮、商品与价值尺度，不当货币付款；`state.monetaryReform` 只剩 `legacyBankAccess`（模拟用的兼容银行入口）。印券、以粮换券需先建成银行。外贸小麦收支由镇库按 1:1 收购/卖出（`economy/foreign-wheat.js`，卖出须留够口粮储备）。存档版本 18，更早的存档（含小麦阶段）一律不读 |
 | 批发市场 | 镇营做市商：对面粉/面包/木材/盐挂收购价与售价、管库存；镇营产品统购入库。**没有自己的钱**，收付款都走镇库；小麦一直在镇库 |
 | 综合商店 | 居民买面粉/面包/盐和日用品的主渠道；目标利润率加价 × 库存系数（见下一行"调价"）；肉直接向养殖场进货。**镇营综合商店**（商业街开「镇营综合商店」，店型别名 `town_general`，`town` 标记）：镇里持有、占店位、无业主与商人；店员由玩家设定（`configureShopClerks`，上限同综合商店，自动审核不覆盖），接待能力 min(1000, 20×店员)。定价沿用政策利润率与动态定价；动态定价的成本口径用「定价成本基础」（`pricingBasisVoucherUnits`，按私营店进货的同一价逐笔入账，只供调价复核），镇库库存成本账仍是内部调拨成本。进货优先，但每日每种商品最多拿进货前批发库存的 `rules.townShop.supplyShareMax`（默认 0.5），余下留给私营店；每条商业街最多 `rules.townShop.maxPerStreet`（默认 1）家。没有自己的钱：零售收入付给镇库，工资与辞退补偿由镇库付（发薪日 5 号），进货从批发市场内部调拨（市场→镇库→店，只搬货不付钱，成本随货转移，计入市场镇营需求），肉仍由镇库向养殖场买。不交店租与利润税、不分红、不参与 30 天亏损自动关店（由玩家关）；利润每日上缴镇库。停业时库存归镇库、欠薪由镇库偿付（付不起记为镇库欠家庭），不进清算。付款一律经 `shopAccountName(shop)`（镇营为 `town`），不得出现镇库→镇库付款 |
 | 调价（物价会动） | 规则在 `economy/price-adjust.js`（`nextPriceFactor`，阈值见 `content/rules.js` 的 `priceAdjust`）。综合商店每 7 天按库存够卖天数、日均销量、断货记录给每个商品定系数（积压降价、紧缺涨价、正常回归 1），售价 = 基准价 × 系数，清库存才可降到进货价 × 0.7，在 `systems/shop-pricing.js`。**综合商店目标利润率**：政策页「商店与贸易利润率」的全局默认 `state.policy.shopMarginPercent`（0—200，一位小数，开局 20），未单独设置（`shop.pricing.targetMarginOwn` 为假）的店跟随；单店可在店铺面板覆盖，或改回跟随。改目标**不跳价**：改之前记下生效中的目标（`shop.pricing.glidePercent`），之后每次 7 天复核价格按 ±10% 步幅追上，追平后删除该字段；促销模式不受影响。配置与解析在 `economy/margin-policy.js`，命令 `setMarginPolicy` / `configureShopTargetMargin`；批发市场自动调价默认关闭，玩家逐品开启后以开启时售价为锚定、±30% 内浮动，在 `systems/wholesale-market.js` 的 `reviewWholesaleAutoPricing`（日结 `pricing` 步） |
@@ -104,7 +104,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 **流通口径**
 - 小麦归镇库直管：磨坊直接用镇库小麦，公司/民营经批发市场按售价从镇库存量买小麦。做市清单 `WHOLESALE_MONOPOLY_ITEM_IDS` 由物品的 `wholesale` 标记推导。
 - 带 `storeOnly` 标记的商品（面粉/面包/盐/酒/布）只能经综合商店卖给居民；测试 fixture 要先建商店。
-- 新开局即粮券阶段；只有旧档才可能是小麦阶段（小麦阶段居民直接从镇库买主粮、不经过市场和商店）。测小麦行为用 `tests/helpers-monetary.js` 的 `wheatEraState`，测粮券行为用 `legacyVoucherState` 或直接用新开局。
+- 只有粮券一种货币；测需要兼容银行入口的粮券行为用 `tests/helpers-monetary.js` 的 `legacyVoucherState`，其余直接用新开局。
 - 主食按户算：口粮默认吃自家小麦，宽裕人家换一部分面粉面包（面包买不到改面粉，再不够买小麦）；需求弹性只在综合商店是卖家时生效。
 - 居民实际能花多少还受每日就业换券额度限制（政策 `employmentExchangeJin`），家底多但粮券少时这是最常见的瓶颈。
 - 付款顺序：手头粮券 → 银行存款自动取回 → 以粮换券（镇库券池封顶）。取回存款时银行现金不够，镇库托底垫付缺口（记为银行欠镇库的债 `bank.debtToTownUnits`，见「国债」一行后的银行负债）；报价的可取回额 = min(银行现金 + 镇库粮券, 存款)，换券池扣掉垫付额。判断"付不付得起"一律用 `spendableVoucherUnits`（含存款），别只看 `voucherUnits`。
