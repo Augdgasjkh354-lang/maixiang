@@ -55,7 +55,7 @@ export function signTradeAgreement(state, { itemId, annualJin, years, content, t
   const profile = outsideTownProfile(content, townId);
   const town = outsideTown(state, content, townId);
   if (!profile || !town) return { ok: false, reason: "没有这个外镇" };
-  if (town.tradeClosed) return { ok: false, reason: `商路中断，无法与${profile.name}签约` };
+  if (town.tradeClosed) return { ok: false, reason: `商路断绝，无法与${profile.name}签约` };
   if (!buildingOperational(state, "foreign_trade_house")) return { ok: false, reason: "外贸房无人值守，无法签约" };
   if (!profile.goods[itemId]) return { ok: false, reason: `${profile.name}不收购这种货` };
   const quantity = round2(Number(annualJin));
@@ -144,9 +144,19 @@ export function settleTradeAgreementsMonth(state, content) {
     const townId = agreement.townId || DEFAULT_OUTSIDE_TOWN_ID;
     const profile = outsideTownProfile(content, townId);
     const town = outsideTown(state, content, townId);
-    if (!profile || !town || town.tradeClosed) continue;
+    if (!profile || !town) continue;
     const itemName = content.items[agreement.itemId]?.name || agreement.itemId;
-    const wantUnits = quantityToUnits(agreement.monthlyJin, content);
+    // 商路断绝（关系破裂）：本月交付不计违约，顺延累计到下月一起交（不能静默丢掉这 1/12）。
+    if (town.tradeClosed) {
+      agreement.carryJin = round2((agreement.carryJin || 0) + agreement.monthlyJin);
+      result.postponed = (result.postponed || 0) + 1;
+      recordEvent(state, `因${profile.name}商路断绝，${itemName}长期协定本月交付顺延（待交累计${Math.round(agreement.carryJin)}斤）。`, content);
+      continue;
+    }
+    // 本月应交 = 当月 1/12 + 之前顺延的部分；这次交付（或违约）结束后清零。
+    const dueJin = round2(agreement.monthlyJin + (agreement.carryJin || 0));
+    agreement.carryJin = 0;
+    const wantUnits = quantityToUnits(dueJin, content);
     // 运力：本月能运出的量不超过运力池余量（运力不够的部分在下面按违约处理）。
     const askUnits = Math.min(wantUnits, freightCapacityUnits(state, content));
     const takenUnits = hasWholesaleMarket(state) && askUnits > 0 ? (takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content)?.units || 0) : 0;

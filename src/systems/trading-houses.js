@@ -20,9 +20,12 @@ import { currencyScale } from "../economy/currency.js";
 import { policyTradeMarginPercent } from "../economy/margin-policy.js";
 import { currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { putStock, takeStock, valueOf } from "../economy/trade.js";
-import { makeTransactionId, recordLedger } from "../economy/ledger.js";
+import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits } from "../economy/money-units.js";
-import { addBookMap, addBookValue, applyProfit, ensureShops, shopClerkCount, shopDefinition, shopMerchantCount } from "./shops.js";
+import {
+  addBookMap, addBookValue, applyProfit, ensureShops, releaseShopStaffing, reopenTradeHouse, shopClerkCount, shopDefinition,
+  shopMerchantCount, shopMinimumCapitalUnits, topUpShopCapital
+} from "./shops.js";
 import {
   buyWholesaleForOwner, depositWholesalePurchasedInventory, ensureWholesaleMarket, hasWholesaleMarket,
   wholesaleAvgSoldUnits, wholesaleMonopolyItemIds, wholesalePurchasePrice, wholesaleUnitPrice
@@ -166,6 +169,14 @@ function quickMarginRatio(state, content, cand) {
   return price / (unitPrice(cand.town, cand.good, "buy") * (1 + tradeTariffRate(state, "import")) + freight) - 1;
 }
 
+// 批发市场某商品超出保本线（与 planExport 同一口径）的可出口余量（斤）。只读。
+function exportSurplusJin(state, content, itemId) {
+  const scale = content.precision.inventoryUnitsPerJin;
+  const stockJin = nonNegative(state.wholesaleMarket?.inventory?.[itemId]) / scale;
+  const reserveJin = Math.max(content.rules.townOutputMinStockJin ?? 200, (content.rules.tradeHouseExportMinStockDays ?? 10) * localAvgSoldJin(state, content, itemId));
+  return Math.max(0, stockJin - reserveJin);
+}
+
 // 出口计划：返回 { units, qJin } 或 null。只读，不改 state。
 function planExport(state, content, run, cand) {
   const { town, profile, itemId, good } = cand;
@@ -183,7 +194,9 @@ function planExport(state, content, run, cand) {
   const reserveJin = Math.max(content.rules.townOutputMinStockJin ?? 200, (content.rules.tradeHouseExportMinStockDays ?? 10) * localAvgSoldJin(state, content, itemId));
   // 保本地供应：存量不到 reserve 天销量时不出口，只出超出的余量。
   if (stockJin - reserveJin < MIN_JIN) return null;
-  const cashJin = maximumPayableValueUnits(state, owner(run.shop), content) / (currencyScale(content) * cost);
+  // 恢复检查时按补资后的营运资金（run.assumeCashUnits）规划，真正成交时用店里的实际资金。
+  const cashUnits = run.assumeCashUnits ?? maximumPayableValueUnits(state, owner(run.shop), content);
+  const cashJin = cashUnits / (currencyScale(content) * cost);
   const avgSell = x => quoteValue(town, good, "sell", x) * keep / x;
   let q = Math.min(stockJin - reserveJin, run.remainingJin, freightPoolJin(state), cashJin);
   q = largestWhere(q, x => avgSell(x) >= minSell);
@@ -339,8 +352,86 @@ function pushRow(row, cand, result) {
   row.profitVoucherUnits += result.profitVoucherUnits;
 }
 
+// 排好序的候选：只留当下走得通、利润率够门槛的路（出口的利润率乘 tradeHouseExportPriority）。
+function rankCandidates(state, content) {
+  const exportPriority = content.rules.tradeHouseExportPriority ?? 1;
+  return candidatesFor(state, content)
+    .map(cand => ({ cand, ratio: quickMarginRatio(state, content, cand) }))
+    .filter(row => row.ratio !== null && row.ratio + 1 >= tradeMarginTarget(state, content, row.cand.direction) - 1e-9)
+    .map(row => ({ ...row, rank: row.cand.direction === "export" ? row.ratio * exportPriority : row.ratio }))
+    .sort((a, b) => b.rank - a.rank);
+}
+
+// ---------------------------------------------------------------- 无生意时暂停（外贸稳定性）
+// 连续 outsideTrade.tradeHousePauseDays 天没有成交、且这段时间经营亏损（工资与店租都计入）→ 暂停营业：
+//   店员遣散（不再发工资、不计店租），业主权益保留，不进入清算；暂停由 shop.tradePause 标记，店铺状态为 paused。
+// 每 outsideTrade.tradeHouseResumeCheckDays 天检查一次：店主在岗、外贸房在岗，且有任一可做的买卖（利润门槛、货源、运力、外镇可付小麦、本店资金都满足）→ 恢复营业并补足店员。
+
+function outsideTradeDays(content, key, fallback) {
+  return Math.max(1, Math.floor(Number(content.rules.outsideTrade?.[key] ?? fallback) || fallback));
+}
+
+// 今天的账已含当日工资与租金（日结准备步骤里计提），历史行是已归档的前几天。
+export function tradeHousePauseDue(shop, content) {
+  const days = outsideTradeDays(content, "tradeHousePauseDays", 30);
+  const history = days > 1 ? (shop.history || []).slice(-(days - 1)) : [];
+  if (history.length + 1 < days) return false;
+  const today = shop.accounts?.day || {};
+  const soldJin = history.reduce((sum, row) => sum + Math.max(0, Number(row.soldUnits) || 0), 0)
+    + Object.values(today.soldUnits || {}).reduce((sum, units) => sum + Math.max(0, Number(units) || 0), 0);
+  if (soldJin > 0) return false;
+  const profit = history.reduce((sum, row) => sum + (Number(row.profitVoucherUnits) || 0), 0) + (Number(today.profitVoucherUnits) || 0);
+  return profit < 0;
+}
+
+function enterTradePause(state, shop, content) {
+  const days = outsideTradeDays(content, "tradeHousePauseDays", 30);
+  shop.tradePause = { sinceSerial: serialOf(state, content), clerksBefore: shopClerkCount(state, shop), merchantsBefore: shopMerchantCount(state, shop) };
+  releaseShopStaffing(state, shop);
+  shop.status = "paused";
+  shop.statusReason = "暂无可做的买卖，暂停营业";
+  recordEvent(state, `${shop.name}连续${days}天无买卖且亏损，暂停营业（店员遣散，业主保留）。`, content, { day: state.day + 1 });
+}
+
+// 有没有任一可做的买卖：只读。budgetJin 用暂停前的人手估算；assumeCashUnits 为补资后的营运资金（不要求店里现在有钱）。
+function tradeHouseCanTrade(state, content, shop, budgetJin, assumeCashUnits = null) {
+  if (!(budgetJin >= MIN_JIN) || freightPoolJin(state) < MIN_JIN) return false;
+  const run = { shop, remainingJin: budgetJin, row: null, assumeCashUnits };
+  return rankCandidates(state, content).some(({ cand }) => {
+    const plan = cand.direction === "export" ? planExport(state, content, run, cand) : planImport(state, content, run, cand);
+    return Boolean(plan);
+  });
+}
+
+function resumeTradeHouses(state, content) {
+  if (!buildingOperational(state, "foreign_trade_house")) return;
+  const serial = serialOf(state, content);
+  const every = outsideTradeDays(content, "tradeHouseResumeCheckDays", 10);
+  const dailyJin = dailyCapacityJin(state, content);
+  const share = content.rules.tradeHouseCapacityShare ?? 0.5;
+  const perClerk = content.rules.tradeHouseJinPerClerk ?? 300;
+  for (const shop of Object.values(ensureShops(state, content))) {
+    if (shop.status !== "paused" || !shop.tradePause || !isTradeHouse(shop, content)) continue;
+    const elapsed = serial - (shop.tradePause.sinceSerial || 0);
+    if (elapsed <= 0 || elapsed % every !== 0) continue;
+    const clerksBefore = shop.tradePause.clerksBefore || 0;
+    const merchantsBefore = Math.max(1, shop.tradePause.merchantsBefore || 1);
+    const staff = clerksBefore + merchantsBefore;
+    const budgetJin = Math.min(staff * perClerk, dailyJin * share);
+    // 不要求店里现在有钱：按最低营运资金规划；有可做的买卖才由业主补足营运资金（付不起则继续暂停）。
+    const minUnits = shopMinimumCapitalUnits(state, shop, content);
+    if (!tradeHouseCanTrade(state, content, shop, budgetJin, minUnits)) continue;
+    const topped = topUpShopCapital(state, shop, minUnits, content);
+    if (!topped.ok) continue;
+    const reopened = reopenTradeHouse(state, shop, { merchants: merchantsBefore, clerks: clerksBefore }, content);
+    if (!reopened.ok) continue;
+    recordEvent(state, `${shop.name}恢复营业，业主补资${Math.round(topped.toppedUnits / currencyScale(content))}券，补足店员${reopened.clerks}人。`, content, { day: state.day + 1 });
+  }
+}
+
 // 日结步骤 "tradeHouses"：每家营业中的贸易行做一天买卖。
 export function settleTradingHouses(state, content) {
+  resumeTradeHouses(state, content);
   const serial = serialOf(state, content);
   const houses = Object.values(ensureShops(state, content))
     .filter(shop => shop.status === "open" && isTradeHouse(shop, content))
@@ -354,27 +445,57 @@ export function settleTradingHouses(state, content) {
     const budgetJin = operational ? Math.min(staff * (content.rules.tradeHouseJinPerClerk ?? 100), shareJin) : 0;
     return { shop, remainingJin: budgetJin, row: blankTradeRow(serial, staff, shareJin, budgetJin) };
   });
-  const exportPriority = content.rules.tradeHouseExportPriority ?? 1;
   if (runs.some(run => run.remainingJin >= MIN_JIN) && freightPoolJin(state) >= MIN_JIN) {
-    const ranked = candidatesFor(state, content)
-      .map(cand => ({ cand, ratio: quickMarginRatio(state, content, cand) }))
-      .filter(row => row.ratio !== null && row.ratio + 1 >= tradeMarginTarget(state, content, row.cand.direction) - 1e-9)
-      .map(row => ({ ...row, rank: row.cand.direction === "export" ? row.ratio * exportPriority : row.ratio }))
-      .sort((a, b) => b.rank - a.rank);
+    const ranked = rankCandidates(state, content);
+    // 两遍分配（防止利润率最高的镇独占预算与批发存货，另一镇整月为 0）：
+    // 第一遍：每家贸易行把当日预算平分给当日有可做买卖的各镇，各镇只在自己的配额内成交；
+    // 第二遍：配额没用完的预算再按利润排序分给所有能做的买卖。单笔的利润门槛、定价与逐段计价不变。
+    const townIds = [...new Set(ranked.map(({ cand }) => cand.town.id))];
+    for (const run of runs) run.townQuotaJin = Object.fromEntries(townIds.map(id => [id, run.remainingJin / Math.max(1, townIds.length)]));
+    // 同一种货的超保本线余量（批发市场）也按镇平分：各镇在第一遍只能取自己那一份。
+    const exportTownsByItem = {};
     for (const { cand } of ranked) {
-      for (const run of runs) {
-        if (run.remainingJin < MIN_JIN || freightPoolJin(state) < MIN_JIN) continue;
-        const plan = cand.direction === "export" ? planExport(state, content, run, cand) : planImport(state, content, run, cand);
-        if (!plan) continue;
-        const result = cand.direction === "export" ? executeExport(state, content, run, cand, plan) : executeImport(state, content, run, cand, plan);
-        if (!result?.ok) continue;
-        run.remainingJin = Math.max(0, run.remainingJin - result.qJin);
-        pushRow(run.row, cand, result);
+      if (cand.direction === "export") (exportTownsByItem[cand.itemId] ||= new Set()).add(cand.town.id);
+    }
+    const itemTownQuotaJin = {};
+    for (const [itemId, towns] of Object.entries(exportTownsByItem)) {
+      const surplusJin = exportSurplusJin(state, content, itemId);
+      for (const id of towns) itemTownQuotaJin[`${itemId}|${id}`] = surplusJin / towns.size;
+    }
+    for (const pass of [1, 2]) {
+      for (const { cand } of ranked) {
+        const itemKey = `${cand.itemId}|${cand.town.id}`;
+        for (const run of runs) {
+          if (run.remainingJin < MIN_JIN || freightPoolJin(state) < MIN_JIN) continue;
+          let capJin = run.remainingJin;
+          if (pass === 1) {
+            const quota = run.townQuotaJin[cand.town.id] || 0;
+            if (quota < MIN_JIN) continue;
+            capJin = Math.min(capJin, quota);
+            if (cand.direction === "export") {
+              const itemQuota = itemTownQuotaJin[itemKey] || 0;
+              if (itemQuota < MIN_JIN) continue;
+              capJin = Math.min(capJin, itemQuota);
+            }
+          }
+          const planRun = { ...run, remainingJin: capJin };
+          const plan = cand.direction === "export" ? planExport(state, content, planRun, cand) : planImport(state, content, planRun, cand);
+          if (!plan) continue;
+          const result = cand.direction === "export" ? executeExport(state, content, run, cand, plan) : executeImport(state, content, run, cand, plan);
+          if (!result?.ok) continue;
+          run.remainingJin = Math.max(0, run.remainingJin - result.qJin);
+          if (pass === 1) {
+            run.townQuotaJin[cand.town.id] = Math.max(0, (run.townQuotaJin[cand.town.id] || 0) - result.qJin);
+            if (cand.direction === "export") itemTownQuotaJin[itemKey] = Math.max(0, (itemTownQuotaJin[itemKey] || 0) - result.qJin);
+          }
+          pushRow(run.row, cand, result);
+        }
       }
     }
   }
   return runs.map(run => {
     run.shop.tradeLog = [...(Array.isArray(run.shop.tradeLog) ? run.shop.tradeLog : []), run.row].slice(-HISTORY_LIMIT);
+    if (tradeHousePauseDue(run.shop, content)) enterTradePause(state, run.shop, content);
     return { shopId: run.shop.id, budgetJin: run.row.budgetJin, usedJin: run.row.usedJin, trades: run.row.trades,
       profitVoucherUnits: run.row.profitVoucherUnits, freightVoucherUnits: run.row.freightVoucherUnits, tariffVoucherUnits: run.row.tariffVoucherUnits };
   });

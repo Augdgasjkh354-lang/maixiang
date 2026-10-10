@@ -284,7 +284,18 @@ export const RULES = Object.freeze({
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
   townOutputStockDays: 30, // 备货天数：目标库存相当于多少天的需求
   // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
-  townWheatReserveDays: 180
+  townWheatReserveDays: 180,
+  // 外贸稳定性（docs/TRADE.md「外镇价格与贸易行暂停」）。
+  outsideTrade: Object.freeze({
+    // 外镇对我方出口品（盐、木材、酒、布）的价格因子每天最多朝目标变动这么多（相对当前值），默认 1%。
+    priceEasePerDay: 0.01,
+    // 价格因子的下限（相对基准价）：外镇收购价再跌也不低于基准价的这个比例。
+    minBuyPriceFactor: 0.9,
+    // 贸易行连续这么多天没有买卖、且这段时间经营亏损（含工资与店租）时暂停营业，而不是减员到清算。
+    tradeHousePauseDays: 30,
+    // 暂停中的贸易行每隔这么多天检查一次，出现任一可做的买卖就恢复营业并补足店员。
+    tradeHouseResumeCheckDays: 10
+  })
 });
 
 export const AGRICULTURE = Object.freeze({

@@ -246,7 +246,7 @@ export function shopDailyCustomerCapacity(state, shop, content) {
   return Math.min(content.rules.generalStoreMaxDailyCustomers || 1000, staff * (content.rules.generalStoreCustomersPerStaff || 20));
 }
 
-function releaseAllShopClerks(state, shop) {
+export function releaseAllShopClerks(state, shop) {
   setJobCount(state, clerkJobKey(shop), 0, null);
 }
 
@@ -270,6 +270,11 @@ export function syncShopEmployment(state, content) {
       if (shop.status === "paused") { shop.status = "open"; shop.statusReason = "准备营业"; }
       continue;
     }
+    // 贸易行因无买卖暂停（tradePause）：保持暂停，复业由 trading-houses.js 的定期检查决定。
+    if (shop.tradePause) {
+      shop.status = "paused";
+      continue;
+    }
     const owner = state.households?.byId?.[shop.ownerHouseholdId];
     const ownerMerchantCount = owner?.jobs?.[merchantJobKey(shop)] || 0;
     if (!owner || !isActiveHousehold(owner) || ownerMerchantCount < 1) {
@@ -277,12 +282,54 @@ export function syncShopEmployment(state, content) {
       releaseAllShopClerks(state, shop);
       shop.status = "paused";
       shop.statusReason = "商人缺位，店员已遣散";
-    } else if (shop.status === "paused") {
+    } else if (shop.status === "paused" && !shop.tradePause) {
+      // 贸易行因无买卖暂停（tradePause）时不在这里复业，由 trading-houses.js 的定期检查恢复。
       shop.status = "open";
       shop.statusReason = "准备营业";
     }
   }
   return state.shops;
+}
+
+// 贸易行暂停（无买卖）：商人与店员岗位一并释放（非营业店铺不能保留岗位），业主身份保留。
+export function releaseShopStaffing(state, shop) {
+  setJobCount(state, merchantJobKey(shop), 0, null);
+  releaseAllShopClerks(state, shop);
+}
+
+// 店铺的最低营运资金：开店时的启动资金与一段周转（workingCapitalReserve）取大者。
+export function shopMinimumCapitalUnits(state, shop, content) {
+  return Math.max(shop.initialCapital?.valueUnits || 0, Math.ceil(shopWorkingCapitalReserve(state, shop, content) || 0));
+}
+
+// 业主家庭为店铺补足营运资金到 minUnits：只补业主付得起的全额（付不起则一分不动，店铺继续保持原状）。
+export function topUpShopCapital(state, shop, minUnits, content) {
+  const owner = state.households?.byId?.[shop.ownerHouseholdId];
+  if (!owner || !isActiveHousehold(owner)) return { ok: false, reason: "业主不在", toppedUnits: 0 };
+  const need = Math.max(0, Math.ceil(Number(minUnits) || 0) - maximumPayableValueUnits(state, `shop:${shop.id}`, content));
+  if (need <= 0) return { ok: true, toppedUnits: 0 };
+  const maxWheatUnits = householdConvertibleWheatUnits(state, owner, content, content.rules.householdFoodReserveDays ?? 30);
+  const affordable = maximumFullyPayableValueUnits(state, `household:${owner.id}`, need, content, { maxWheatUnits });
+  if (affordable < need) return { ok: false, reason: "业主付不起周转金", toppedUnits: 0 };
+  const transfer = settleMonetaryPayment(state, `household:${owner.id}`, `shop:${shop.id}`, currentPaymentComposition(state, need), content,
+    "shop_capital_topup", `${owner.name}为${shop.name}补足营运资金`, { requireFull: true, maxWheatUnits });
+  if (!transfer.ok) return { ok: false, reason: "补资未能全额支付", toppedUnits: 0 };
+  return { ok: true, toppedUnits: need };
+}
+
+// 贸易行复业：业主先回到商人岗位（店主兼商人），再补足商人与店员。业主不在或无人手可上岗则不动任何东西。
+export function reopenTradeHouse(state, shop, { merchants = 1, clerks = 0 } = {}, content) {
+  const owner = state.households?.byId?.[shop.ownerHouseholdId];
+  if (!owner || !isActiveHousehold(owner)) return { ok: false, reason: "业主不在" };
+  const merchantKey = merchantJobKey(shop);
+  if (!setHouseholdJobCount(state, owner.id, merchantKey, 1, content).ok) return { ok: false, reason: "业主无法上岗" };
+  delete shop.tradePause;
+  shop.status = "open";
+  shop.statusReason = "准备营业";
+  const wantMerchants = Math.max(1, Math.min(shopMaxMerchants(shop, content), Math.floor(Number(merchants) || 1)));
+  setJobCount(state, merchantKey, wantMerchants, content, { type: "shop", id: shop.id });
+  setShopClerks(state, shop.id, Math.min(Math.max(0, Math.floor(Number(clerks) || 0)), shopClerkLimit(shop, content)), content);
+  return { ok: true, merchants: shopMerchantCount(state, shop), clerks: shopClerkCount(state, shop) };
 }
 
 // ---------------------------------------------------------------- 业主更替（docs/REDISTRIBUTION.md 第 2 条）
@@ -348,7 +395,8 @@ export function transferShopOwnership(state, shopId, newHouseholdId, content) {
     return { ok: false, reason: "商人岗位已满，新业主无法上岗" };
   }
   if (previous && previousMerchants > 0) setHouseholdJobCount(state, previous.id, merchantKey, 0, null);
-  if (!nextIsMerchant) {
+  // 暂停中的贸易行没有岗位：新业主只换身份，复业时再上岗。
+  if (!nextIsMerchant && !shop.tradePause) {
     if ((next.jobs?.[clerkKey] || 0) > 0) setHouseholdJobCount(state, next.id, clerkKey, next.jobs[clerkKey] - 1, null);
     if (householdIdleWorkers(next) <= 0) {
       const key = Object.keys(next.jobs || {}).filter(jobKey => next.jobs[jobKey] > 0)
@@ -549,7 +597,7 @@ export function setShopClerks(state, shopId, requested, content) {
   let target = Math.max(0, Math.min(max, Math.floor(Number(requested) || 0)));
   if (shop.status !== "open") {
     if (shop.status === "paused" && target === 0) return { ok: true, assigned: 0, paused: true };
-    return { ok: false, reason: shop.status === "paused" ? "商人缺位，店员已遣散" : "店铺未营业" };
+    return { ok: false, reason: shop.status === "paused" ? (shop.tradePause ? "贸易行暂停营业中" : "商人缺位，店员已遣散") : "店铺未营业" };
   }
   const before = shopClerkCount(state, shop);
   const hired = syncClerkTenure(state, shop, content).slice();
@@ -1326,7 +1374,7 @@ function recentlyLosing(shop) {
 
 // 贸易行店员目标（与商业街店铺一样自己增减人）：看近 7 天成交额度用了多少。
 // 额度用满（≥85%）、额度卡在人手上（没到运力份额）、多一人的成交利润高于日薪且付得起 3 天工资 → 加人（每周期最多 +2）；
-// 用不到 40% 或亏损 → 减一人。
+// 用不到 40% 或亏损 → 减一人；7 天一笔买卖都没有则不减员（由暂停机制处理）。
 function tradeHouseTargetClerks(state, shop, content) {
   const observation = Math.max(1, content.rules.operatingObservationDays || 7);
   const rows = (shop.tradeLog || []).slice(-observation);
@@ -1350,7 +1398,10 @@ function tradeHouseTargetClerks(state, shop, content) {
   const fundsVoucher = maximumPayableValueUnits(state, `shop:${shop.id}`, content) / currencyScale(content);
   let target = current;
   let diagnosis = "生意与人手匹配";
-  if (profitVoucher < 0 && current > 0) {
+  if (used <= 0) {
+    // 没有买卖时不减员：连续 tradeHousePauseDays 天无买卖且亏损由 trading-houses.js 暂停营业（暂停即遣散店员，不再逐月减到清算）。
+    diagnosis = "暂无可做的买卖，待满暂停期限";
+  } else if (profitVoucher < 0 && current > 0) {
     target = current - 1;
     diagnosis = "亏损，减人";
   } else if (utilization >= 0.85 && staffBound && marginalProfit > wage) {
@@ -1363,7 +1414,7 @@ function tradeHouseTargetClerks(state, shop, content) {
     diagnosis = "运力份额已满，加人无用";
   } else if (utilization < 0.4 && current > 0) {
     target = current - 1;
-    diagnosis = used > 0 ? "生意清淡，减人" : "暂无可做的买卖，减人";
+    diagnosis = "生意清淡，减人";
   }
   shop.plan.staffingDiagnosis = diagnosis;
   shop.plan.expectedDailyTradeJin = used;
@@ -1468,17 +1519,15 @@ export function finishShopsDay(state, content, forceSettlement = false) {
     const activity = sold + serviceUses;
     const arrears = (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + (shop.liabilities.taxVoucherUnits || 0);
     const farmDef = shopKind(shop, content) === "farm" ? shopDefinition(content, shop.typeId) : null;
-    // 贸易行没有零售货架：存货按全部品类计（买卖当日即出，平时多为 0）。
+    // 贸易行没有零售货架，不计存货。
+    const tradeHouse = shopKind(shop, content) === "trade";
     const retailStock = farmDef
       ? (shop.inventory[farmDef.productItemId] || 0) + (shop.inventory[farmDef.feedItemId] || 0)
-      : shopKind(shop, content) === "trade"
-        ? Object.values(shop.inventory || {}).reduce((sum, units) => sum + Math.max(0, units || 0), 0)
-        : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
-    // 贸易行的本钱是现金和小麦（货当天进出），没生意但还有本钱时不算坏日子，不会因此关门。
-    const noOperatingAssets = shopIsService(shop, content) ? false
-      : shopKind(shop, content) === "trade" ? retailStock <= 0 && maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 && !(shop.cashWheatUnits > 0)
-        : retailStock <= 0;
-    if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
+      : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
+    const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
+    // 贸易行不因无生意而累计坏日子：连续 tradeHousePauseDays 天无买卖且亏损由 trading-houses.js 暂停营业，暂停中不进清算。
+    if (tradeHouse) shop.badDays = 0;
+    else if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
@@ -1676,7 +1725,7 @@ export function shopSummaries(state, content) {
     const inventoryDays = avgSalesUnits > 0 ? itemIds.reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0) / avgSalesUnits : null;
     let operatingStatus = shop.statusReason || "营业中";
     if (shop.status === "liquidating") operatingStatus = shopLiabilityTotal(shop) > 0 ? "待清算" : "待返还剩余资产";
-    else if (shop.status === "paused") operatingStatus = "商人缺位，店员已遣散";
+    else if (shop.status === "paused") operatingStatus = shop.tradePause ? "暂无可做的买卖，已暂停" : "商人缺位，店员已遣散";
     else if ((shop.liabilities.wageVoucherUnits || 0) > 0) operatingStatus = "欠薪";
     else if ((shop.liabilities.rentVoucherUnits || 0) > 0 || (shop.liabilities.taxVoucherUnits || 0) > 0) operatingStatus = "资金不足";
     else if (Number.isFinite(shop.plan?.targetClerks) && shop.plan.targetClerks > shopClerkCount(state, shop)) operatingStatus = "缺员工";

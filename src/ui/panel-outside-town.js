@@ -99,7 +99,7 @@ export function renderOutsideTown(view) {
   const goods = ot.goods || [];
   const eventText = ot.event ? `${escapeHtml(ot.event.type)}（${number(ot.event.year)}年）` : "无";
   const tradeClosedLine = ot.tradeClosed
-    ? `<div class="row"><span class="label">商路</span><strong class="value">中断中（今年无法贸易）</strong></div>`
+    ? `<div class="row"><span class="label">商路</span><strong class="value">断绝中（今年无法贸易）</strong></div>`
     : "";
   const staffLine = ot.foreignTradeOperational
     ? `<div class="row"><span class="label">外贸房</span><strong class="value">在岗 ${number(ot.foreignTradeStaff)}人 · 可同时跟 ${number(ot.foreignTradeCapacity)}笔长协</strong></div>`
