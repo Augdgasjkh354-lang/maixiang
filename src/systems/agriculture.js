@@ -3,7 +3,7 @@ import { bookAddAll, ensureBook } from "../economy/books.js";
 import { recordEvent, recordLedger } from "../economy/ledger.js";
 import { jobAssignments, jobCount, distributeResidentInventory, householdList, householdIdleWorkers, householdEmploymentCount } from "./households.js";
 import { addTownCostBasis } from "../economy/business.js";
-import { recordHouseholdBudgetInKind, recordHouseholdInKind, recordHouseholdWageDue } from "./household-life.js";
+import { recordHouseholdInKind, recordHouseholdWageDue, setHouseholdLastHarvestIncome } from "./household-life.js";
 import { emptyReclaimState, emptyReclaimPeriod } from "../core/state.js";
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
@@ -195,6 +195,11 @@ export function harvest(state, content) {
   const residentUnits = totalUnits - townUnits;
   const cropItemId = content.agriculture.cropItemId;
   const txId = "harvest-y" + state.year;
+  // 每户本次秋收分到的斤数（务农分粮）：不进近期日收入，整年按此值计入，见 household-life.js 的 setHouseholdLastHarvestIncome。
+  const harvestJinByHousehold = new Map();
+  const addHarvestJin = (householdId, inventoryUnits) => {
+    harvestJinByHousehold.set(householdId, (harvestJinByHousehold.get(householdId) || 0) + inventoryUnits / content.precision.inventoryUnitsPerJin);
+  };
   if (residentUnits > 0) {
     const weights = Object.fromEntries(householdList(state).map(h => [h.id, h.agricultureWorkUnits || 0]));
     const distributed = distributeResidentInventory(state, cropItemId, residentUnits, content, { weights, byMembers: false });
@@ -208,14 +213,14 @@ export function harvest(state, content) {
         for (const row of fallback.rows || []) {
           const qeq = row.units * content.precision.qeqUnitsPerJin / content.precision.inventoryUnitsPerJin;
           recordHouseholdInKind(state, row.householdId, "inKindIncomeQeqUnits", qeq, content);
-          recordHouseholdBudgetInKind(state, row.householdId, row.units, content);
+          addHarvestJin(row.householdId, row.units);
         }
       }
     } else {
       for (const row of distributed.rows || []) {
         const qeq = row.units * content.precision.qeqUnitsPerJin / content.precision.inventoryUnitsPerJin;
         recordHouseholdInKind(state, row.householdId, "inKindIncomeQeqUnits", qeq, content);
-        recordHouseholdBudgetInKind(state, row.householdId, row.units, content);
+        addHarvestJin(row.householdId, row.units);
       }
     }
     recordLedger(state, { type: "harvest", transactionId: txId, source: "field", destination: "residents",
@@ -223,6 +228,7 @@ export function harvest(state, content) {
       qeqUnits: residentUnits * content.precision.qeqUnitsPerJin / content.precision.inventoryUnitsPerJin,
       reason: "麦收：按农民实际劳动贡献分到家庭" }, content, { day: state.day });
   }
+  setHouseholdLastHarvestIncome(state, harvestJinByHousehold);
   if (townUnits > 0) {
     changeInventory(
       state, "town", cropItemId, townUnits, "麦收：入镇库的农业税粮",

@@ -205,17 +205,18 @@ export const RULES = Object.freeze({
   operatingStockCorrectionDays: 5,
   // 家庭购买力（systems/household-budget.js）：宽裕度 m = maxAffluence × tanh(a × √(B/R))，a = atanh(1/maxAffluence)。
   //   maxAffluence 是渐近上限（不是硬封顶）；B = 可动用预算（斤/人/年）= 人均年收入 + usableWealthShare × 人均家底；
-  //   年收入 = 近期日收入 × 360（household.recentIncomeUnits，收入类付款的指数滑动平均，半衰期 incomeHalfLifeDays；白名单见 systems/household-life.js 的 BUDGET_INCOME_TYPES）；
-  //   无记录时用收入预期 incomeExpectationJin ÷ 360 作初值。
+  //   年收入 = 近期日收入 × 360 + 最近一次秋收所得（household.lastHarvestIncomeJin，斤）。近期日收入是收入类付款的指数滑动平均，半衰期 incomeHalfLifeDays，白名单见 systems/household-life.js 的 BUDGET_INCOME_TYPES；
+  //   务农分粮不进指数平均（秋收一次性入账，进了会让秋收后几周虚高、随后快速衰减），整年按上一次秋收所得计入；
+  //   开局无记录时，近期日收入用（收入预期 incomeExpectationJin − 务农部分）÷ 360 作初值，秋收所得用务农部分作初值。
   //   R = referenceBudgetPerCapitaJin × 物价指数（篮子 basket：面粉、面包、盐，相对开局售价 wholesaleDefaultSalePrices 的加权平均；小麦钉价，不进篮子）。
-  //   B = R 时 m = 1（正常人家）。referenceBudgetPerCapitaJin 按"有店主、有贫富差距"的探针镇第 2 年末人口加权宽裕度中位数 ≈ 1 标定（见 CHANGELOG）。
+  //   B = R 时 m = 1（正常人家）。referenceBudgetPerCapitaJin = 1890 按"有店主、有贫富差距"的探针镇第 2 年末（秋收后的稳态年）各月第 15 天人口加权宽裕度中位数的平均 ≈ 1 标定：2000 时为 0.972，按中位数对 R 的敏感度（约 R^-0.48）反推；v023 同口径为 0.975（相差 < 5%，取探针镇值）。
   // 家底只算粮券 + 存款 + 留够 wealthFoodReserveDays 天口粮后多出的小麦（不留到秋收，免得秋收前宽裕度断崖）；
   // harvestBufferDays 只用于富人税等付款保护（留到下次秋收再加这么多天）；每日可花 = B ÷ 360，服务预算 = 每日可花 × serviceShare；
   // 主食里面粉、面包的比例 = 标准比例 × 宽裕度（最多 stapleUpgradeMax 倍）。
   // 批发市场对外卖小麦（养殖场饲料、公司原料）时给镇库留的口粮底线天数。
   townWheatSaleReserveDays: 60,
   householdBudget: Object.freeze({
-    referenceBudgetPerCapitaJin: 2000, maxAffluence: 4, usableWealthShare: 0.1, incomeHalfLifeDays: 30,
+    referenceBudgetPerCapitaJin: 1890, maxAffluence: 4, usableWealthShare: 0.1, incomeHalfLifeDays: 30,
     basket: Object.freeze({ flour: 0.5, bread: 0.3, salt: 0.2 }),
     wealthFoodReserveDays: 30, harvestBufferDays: 30, serviceShare: 0.35, stapleUpgradeMax: 1.5
   }),

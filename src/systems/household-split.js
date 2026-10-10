@@ -96,6 +96,12 @@ function splitOne(state, original, number, content) {
   const perDayIncome = householdRecentIncomeUnitsPerDay(original, content);
   original.recentIncomeUnits = perDayIncome * (1 - share);
   household.recentIncomeUnits = perDayIncome * share;
+  // 秋收所得同样按人口比例分（无记录的户留到开日用收入预期的务农部分补）。
+  if (Number.isFinite(original.lastHarvestIncomeJin)) {
+    const harvestJin = original.lastHarvestIncomeJin;
+    original.lastHarvestIncomeJin = harvestJin * (1 - share);
+    household.lastHarvestIncomeJin = harvestJin * share;
+  }
   const satisfaction = original.life?.satisfaction;
   if (Number.isFinite(satisfaction)) household.life = { satisfaction };
   return household;

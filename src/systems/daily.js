@@ -39,7 +39,7 @@ import { settleBankDay } from "./bank.js";
 import { settleBondsDay } from "./bonds.js";
 import { settleStockMarketDay, settleHouseholdStockBuying } from "./stock-exchange.js";
 import { settleLiquidityDay } from "./liquidity.js";
-import { maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
+import { fillMissingHouseholdLastHarvestIncome, maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
 import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
 import { accrueIndustryExperience } from "./productivity.js";
@@ -124,6 +124,7 @@ export const CORE_DAILY_STEPS = [
     day.saltDemandUnits = accrueSaltNeed(state, day.peopleAtStart.total, content);
     accrueGoodsDemand(state, day.peopleAtStart.total, content);
     resetDayBooks(state, content);
+    fillMissingHouseholdLastHarvestIncome(state, content);
   } },
   // 新年首日：先结上一年公司利润（居民到账进入新一年账本），再收别墅房产税。
   { id: "yearStartCompanyDistributions", run: (state, content) => {

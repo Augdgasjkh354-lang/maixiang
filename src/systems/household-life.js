@@ -53,7 +53,7 @@ const CAPITAL_RETURN_TYPES = new Set(["shop_capital_refund", "shop_close_distrib
 // 家庭"近期日收入"（household-budget 的可动用预算）的收入白名单：钱真正到达家庭账户的收入类付款才计入。
 // 不计入：以粮换券、存款取回、镇库与银行之间的内部转移、买卖资产（股票、国债本金、别墅、经营权、店铺资本）、
 // 清算返还、开店垫付、一次性辞退补偿（severance_payment）、镇库还欠款（town_debt_repayment）、救济（实物口粮 relief）、
-// 家庭之间的商品买卖（消费与店铺零售）。利息（存款、国债）与务农分粮（实物）由专门入口计入，见 recordHouseholdBudgetIncome / recordHouseholdBudgetInKind。
+// 家庭之间的商品买卖（消费与店铺零售）。利息（存款、国债）由 recordHouseholdBudgetIncome 计入；务农分粮见 setHouseholdLastHarvestIncome。
 export const BUDGET_INCOME_TYPES = new Set([
   // 工资：月薪发薪、欠薪补付、建筑与开荒工资、民营/公司/店铺雇员工资
   "wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment",
@@ -101,23 +101,33 @@ export function recordHouseholdInKind(state, householdId, key, units, content) {
   if (household) add(household, key, units, content);
 }
 
-// 利息（存款利息、国债利息）与务农分粮（实物，按券值 = 斤 × 1 券）计入家庭近期收入。
+// 利息（存款利息、国债利息）计入家庭近期收入。
 export function recordHouseholdBudgetIncome(state, householdId, units, content) {
   const household = state.households?.byId?.[householdId];
   if (household && Number.isFinite(units) && units > 0) add(household, "budgetIncomeVoucherUnits", units, content);
 }
-export function recordHouseholdBudgetInKind(state, householdId, wheatInventoryUnits, content) {
-  const scale = content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin;
-  const units = Math.floor((Number(wheatInventoryUnits) || 0) / content.precision.inventoryUnitsPerJin * scale);
-  recordHouseholdBudgetIncome(state, householdId, units, content);
+
+// 务农分粮不进近期日收入：秋收是一次性入账，进指数平均会让秋收后几周宽裕度虚高、随后快速衰减。
+// 改为每户保存最近一次秋收所得（斤；1 斤折 1 券），整年连续计入年收入；每次秋收整体覆盖（没有分到的户记 0）。
+export function setHouseholdLastHarvestIncome(state, jinByHousehold) {
+  for (const household of householdList(state)) {
+    household.lastHarvestIncomeJin = Math.max(0, Number(jinByHousehold.get(household.id)) || 0);
+  }
+}
+// 最近一次秋收所得折券单位（1 斤 = 1 券，与 currencyScale 同口径）。字段缺失时按 0（开日会用收入预期的务农部分补上，见 income-expectation.js）。
+export function householdLastHarvestIncomeUnits(household, content) {
+  const jin = Number.isFinite(household.lastHarvestIncomeJin) ? Math.max(0, household.lastHarvestIncomeJin) : 0;
+  return jin * (content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin);
 }
 
-// 近期日收入（券/日，指数滑动平均）。没有记录（开局、旧档）时用收入预期 ÷ daysPerYear 作初值。
+// 近期日收入（券/日，指数滑动平均，不含务农分粮）。没有记录（开局、旧档）时用收入预期 ÷ daysPerYear 作初值；
+// 收入预期里的务农部分已由 lastHarvestIncomeJin 按年计入，所以初值要先扣掉它，免得重复。
 export function householdRecentIncomeUnitsPerDay(household, content) {
   const stored = household.recentIncomeUnits;
   if (Number.isFinite(stored)) return Math.max(0, stored);
   const scale = content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin;
-  return Math.max(0, Number(household.incomeExpectationJin) || 0) * scale / (content.rules.daysPerYear || 360);
+  const harvestJin = Number.isFinite(household.lastHarvestIncomeJin) ? household.lastHarvestIncomeJin : 0;
+  return Math.max(0, (Number(household.incomeExpectationJin) || 0) - harvestJin) * scale / (content.rules.daysPerYear || 360);
 }
 
 // 每日结束时把当天的净收入（收入 − 经营成本）并入指数滑动平均，半衰期 incomeHalfLifeDays（默认 30 天）。

@@ -3,9 +3,10 @@
 // 家底（存量）= 手头粮券 + 银行存款 + 留够 wealthFoodReserveDays（30）天口粮之后多出来的小麦（按券值）。
 //   存款随时可取回付款（支付层自动取回），算家底。
 // 可动用预算 B（斤/人/年）= 人均年收入 + usableWealthShare（默认 10%）× 人均家底。
-//   年收入 = 该户的近期日收入 × 360（household.recentIncomeUnits，指数滑动平均，半衰期 incomeHalfLifeDays；
-//   收入类付款与利息、分红、养老金、补贴、务农分粮等见 household-life.js 的 BUDGET_INCOME_TYPES）。
-//   没有记录时（开局、旧档）用收入预期 incomeExpectationJin ÷ 360 作初值。它是"流量"，家底是"存量"，两者相加才是这户一年能动用的钱。
+//   年收入 = 近期日收入 × 360 + 最近一次秋收所得（household.lastHarvestIncomeJin，斤，1 斤 = 1 券）。
+//   近期日收入 = household.recentIncomeUnits，指数滑动平均，半衰期 incomeHalfLifeDays，只含收入类付款与利息、分红、养老金、补贴等（见 household-life.js 的 BUDGET_INCOME_TYPES）；
+//   务农分粮不进指数平均（秋收一次性入账，进了会让秋收后几周虚高、随后快速衰减），而是整年连续按上一次秋收所得计入。
+//   没有近期记录时（开局、旧档）用收入预期 incomeExpectationJin ÷ 360 作初值（扣掉务农部分）。它是"流量"，家底是"存量"，两者相加才是这户一年能动用的钱。
 // 参照预算 R（斤/人/年）= referenceBudgetPerCapitaJin × 物价指数。物价指数 = 篮子（面粉、面包、盐，权重见 rules）
 //   当前价相对开局价（rules.wholesaleDefaultSalePrices，开局时批发市场的售价）的加权平均；缺价格按 1。小麦钉在 1 券/斤，不进篮子。
 // 宽裕度 m = Mmax × tanh(a × √(B / R))，a = atanh(1 / Mmax)，Mmax = maxAffluence（渐近上限，不是硬封顶）：
@@ -18,13 +19,13 @@ import { currencyScale } from "../economy/currency.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold } from "./households.js";
-import { householdRecentIncomeUnitsPerDay } from "./household-life.js";
+import { householdLastHarvestIncomeUnits, householdRecentIncomeUnitsPerDay } from "./household-life.js";
 
 const cache = new WeakMap();
 
 function budgetRules(content) {
   return {
-    referenceBudgetPerCapitaJin: 2000, maxAffluence: 4, usableWealthShare: 0.1, basket: { flour: 0.5, bread: 0.3, salt: 0.2 },
+    referenceBudgetPerCapitaJin: 1890, maxAffluence: 4, usableWealthShare: 0.1, basket: { flour: 0.5, bread: 0.3, salt: 0.2 },
     harvestBufferDays: 30, serviceShare: 0.35,
     ...(content.rules.householdBudget || {})
   };
@@ -82,16 +83,19 @@ export function householdWealthUnits(state, household, content) {
   return Math.max(0, household.voucherUnits || 0) + deposit + voucherUnitsForWheatUnits(surplusWheat, content, "floor");
 }
 
-// 一户一年的收入（券单位）= 近期日收入 × 一年天数。近期日收入见 household-life.js（指数滑动平均，无记录时用收入预期 ÷ 360）。
+// 一户一年的收入（券单位）= 近期日收入 × 一年天数 + 最近一次秋收所得。
+function householdAnnualIncomeUnits(household, content) {
+  return householdRecentIncomeUnitsPerDay(household, content) * (content.rules.daysPerYear || 360) + householdLastHarvestIncomeUnits(household, content);
+}
+
 export function householdIncomePerCapitaJin(household, content) {
   const people = Math.max(1, householdPopulation(household));
-  return householdRecentIncomeUnitsPerDay(household, content) * (content.rules.daysPerYear || 360) / currencyScale(content) / people;
+  return householdAnnualIncomeUnits(household, content) / currencyScale(content) / people;
 }
 
 // 一户的可动用预算（券单位）：一年收入 + usableWealthShare × 家底。
 function householdBudgetUnits(household, wealthUnits, content, rules) {
-  const incomeUnits = householdRecentIncomeUnitsPerDay(household, content) * (content.rules.daysPerYear || 360);
-  return incomeUnits + rules.usableWealthShare * wealthUnits;
+  return householdAnnualIncomeUnits(household, content) + rules.usableWealthShare * wealthUnits;
 }
 
 function computeRow(state, household, content, priceIndex = null) {
