@@ -6,6 +6,7 @@ import { isIndustryType } from "../content/buildings.js";
 import { villaCapacityOf } from "../systems/villas.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 import { renderShopPricing } from "./panel-shop-pricing.js";
+import { renderExchangeBody, renderCompanySection } from "./panel-exchange.js";
 
 // 商业街能开的店：综合商店与服务类（无宿主建筑，或宿主为商业街），排除旧别名。新增服务店自动出现在按钮里。
 const COMMERCIAL_STREET_SHOP_TYPES = Object.values(CONTENT.rules.shopTypes || {})
@@ -289,6 +290,10 @@ export function renderSite(view) {
     title = "银行 · 旧存档兼容入口";
     body = bankManagementMarkup(view, false);
     actions = `<button class="secondary" data-go="policy">返回政策</button>`;
+  } else if (site === "exchange-compat" && view.stockExchange?.legacyAccess && !view.stockExchange?.physical) {
+    title = "交易所 · 旧存档兼容入口";
+    body = renderExchangeBody(view);
+    actions = `<button class="secondary" data-go="business">查看经营与粮账</button>`;
   } else if (building?.typeId === "social_security_office") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${socialSecurityMarkup(view)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
@@ -392,6 +397,10 @@ export function renderSite(view) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const perLevel = CONTENT.buildings.villa_complex.villaCapacity;
     body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">别墅栋数（本座）</span><strong class="value">${number(villaCapacityOf(building, CONTENT))}栋（每级${number(perLevel)}栋）</strong></div><div class="subtle">购房与房产税在政策页统一结算。</div>${developmentMarkup(view, building, development)}`;
+  } else if (building?.typeId === "stock_exchange") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = `${renderExchangeBody(view)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
+    actions = `<button class="secondary" data-go="business">查看经营与粮账</button>`;
   } else if (building) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const payroll = view.payroll?.lastDay?.workers?.find(row => row.buildingId === building.id);
@@ -413,11 +422,8 @@ export function renderSite(view) {
     const ownerText = townOwned ? "镇里"
       : building.ownership.privateLevels > 0 ? (ownerExtras?.ownerName || "业主")
       : companyRow ? companyRow.ownerName : "公司";
-    const listedWorkers = (building.listedJobs || []).reduce((sum, row) => sum + row.workers, 0);
-    const listedCapacity = (building.listedJobs || []).reduce((sum, row) => sum + row.capacity, 0);
-    const companySection = building.ownership.listedLevels > 0
-      ? `<h3>公司 · ${number(building.ownership.listedLevels)}级</h3><div class="row"><span class="label">状态 / 用工</span><strong class="value">${number(listedWorkers)}/${number(listedCapacity)}人</strong></div><div class="subtle">公司由业主自主经营；工资、产品价与股票在经营与粮账面板管理。</div>${building.wages?.owner === "company" ? wageSplitRow(view, building.wages, unit) : ""}`
-      : "";
+    // 公司经营控件（工资、用工、售价、注资、清算）与账目跟着公司走，放在这栋建筑的面板里；上市与股票在交易所面板。
+    const companySection = renderCompanySection(view, building, { wageRow: building.wages?.owner === "company" ? wageSplitRow(view, building.wages, unit) : "" });
     // 人均产出：等级加成 × 熟练度加成，只对产业建筑显示。
     const productivityRow = building.productivityFactor == null ? "" : `<div class="row"><span class="label">人均产出</span><strong class="value">×${number(building.productivityFactor, 2)}（等级 +${numberMax(building.levelBonusPercent, 0)}% · 熟练 +${numberMax(building.experienceBonusPercent, 1)}%）</strong></div>`;
     const privateOutputText = building.privateOutputToday.map(row => `${escapeHtml(view.itemNames[row.itemId] || row.itemId)} ${number(row.residentUnits / view.inventoryUnitsPerJin)}${escapeHtml(view.itemUnits[row.itemId] || "单位")}`).join(" · ") || "暂无产出";
@@ -429,11 +435,11 @@ export function renderSite(view) {
       if (row.kind === "input") return `${name} 采购${number(row.priceVoucherPerJin, 2)}${escapeHtml(unit)}/${itemUnit} · 市场有货${number(row.marketStockJin, 0)}${itemUnit}`;
       return `${name} 预期${number(row.priceVoucherPerJin, 2)}${escapeHtml(unit)}/${itemUnit}`;
     }).join(" · ") || "未建批发市场";
-    // 民营/公司的业主与欠薪（欠薪超过宽限天数由镇里整栋收回）；待批上市申请在企业面板处理。
+    // 民营/公司的业主与欠薪（欠薪超过宽限天数由镇里整栋收回）；待批上市申请在交易所面板处理。
     const extras = view.ownershipExtras?.[building.id] || null;
     const takeoverDays = CONTENT.rules.ownershipTakeoverArrearsDays ?? 30;
     const ipoApplication = (view.ipo?.applications || []).find(row => row.buildingId === building.id) || null;
-    const privateOwnerMarkup = `${extras ? `<div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(extras.ownerName)}</strong></div>` : ""}${extras?.arrears ? `<div class="shortage-banner visible">欠薪${number(extras.arrearsVoucher, 2)}${escapeHtml(unit)}，已欠${number(extras.arrearsDays)}天；欠薪超过${number(takeoverDays)}天将被镇里收回</div>` : ""}${ipoApplication ? `<div class="subtle">业主已递交上市申请，待镇长在企业面板批准。</div>` : ""}`;
+    const privateOwnerMarkup = `${extras ? `<div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(extras.ownerName)}</strong></div>` : ""}${extras?.arrears ? `<div class="shortage-banner visible">欠薪${number(extras.arrearsVoucher, 2)}${escapeHtml(unit)}，已欠${number(extras.arrearsDays)}天；欠薪超过${number(takeoverDays)}天将被镇里收回</div>` : ""}${ipoApplication ? `<div class="subtle">业主已递交上市申请，待镇长在交易所面板批准。</div>` : ""}`;
     const privateSection = building.ownership.privateLevels > 0
       ? `<h3>民营 · ${number(building.ownership.privateLevels)}级${extras?.arrears ? ` <span class="badge red">欠薪</span>` : ""}</h3>${privateOwnerMarkup}<div class="row"><span class="label">状态 / 用工</span><strong class="value">${escapeHtml(building.privateReason || privateStatusLabel(building.privateStatus))} · ${number(privateJobs.reduce((sum, row) => sum + row.workers, 0))}/${number(privateJobs.reduce((sum, row) => sum + row.capacity, 0))}人</strong></div>${privateJobs.map(job => `<div class="row"><span class="label">${escapeHtml(job.name)}</span><strong class="value">${escapeHtml(monthlyWageText(view, job.effectiveWagePerWorkerDay, 2))}${job.wageDiagnosis ? ` · ${escapeHtml(job.wageDiagnosis)}` : ""}</strong></div>`).join("")}${building.wages?.owner === "private" ? wageSplitRow(view, building.wages, unit) : ""}<div class="row"><span class="label">今日产出</span><strong class="value">${privateOutputText}</strong></div><details class="detail-block" data-detail-key="private-stock:${escapeHtml(building.id)}"><summary>原料与预期价格</summary><div class="detail-body"><div class="row"><span class="label">批发市场</span><strong class="value">${privateMarketText}</strong></div><div class="subtle">原料从批发市场按采购价购买；产品预期售价为批发市场当前收购价。</div></div></details>` : "";
     const right = building.operatingRight;

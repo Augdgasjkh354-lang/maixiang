@@ -111,6 +111,9 @@ export function mountGame(root) {
   let stockListingPreview = null;
   let sharePreviewCompanyId = null;
   let buybackPreview = null;
+  // 交易所面板：当前标签页（挂牌 / 民营申请 / 公司 / 状态）与“上市”展开的那一栋（同一时间只展开一栋）。
+  let exchangeTab = "listing";
+  let ipoExpandedBuildingId = null;
   let lastBuildPreviewPlotId = null;
   let renderedPanelMarkup = null;
   const setText = (element, text) => {
@@ -237,6 +240,8 @@ export function mountGame(root) {
       stockListingPreview,
       sharePreviewCompanyId,
       buybackPreview,
+      exchangeTab,
+      ipoExpandedBuildingId,
       ownershipExtras: ownershipExtras(),
     };
   }
@@ -1252,6 +1257,20 @@ export function mountGame(root) {
       showToast(`${{ flour: "面粉", bread: "面包", wood: "木材" }[itemId] || itemId}价格已设为${number(result.value, 3)}小麦等值/${itemId === "wood" ? "单位" : "斤"}。`);
       return;
     }
+    // 交易所面板：切换标签页；“上市”展开/收起某一栋的表单（再点同一栋即收起）。
+    const exchangeTabButton = closest(target, "[data-exchange-tab]");
+    if (exchangeTabButton) {
+      exchangeTab = exchangeTabButton.dataset.exchangeTab;
+      render(true);
+      return;
+    }
+    const ipoExpandButton = closest(target, "[data-ipo-expand]");
+    if (ipoExpandButton) {
+      const buildingId = ipoExpandButton.dataset.ipoExpand;
+      ipoExpandedBuildingId = ipoExpandedBuildingId === buildingId ? null : buildingId;
+      render(true);
+      return;
+    }
     // 整栋上市（镇营建筑，镇长直接上市）：表单草稿在 ipo:<建筑>:* 下，留空代码由引擎分配。
     const ipoListButton = closest(target, "[data-ipo-list]");
     if (ipoListButton && state) {
@@ -1262,6 +1281,7 @@ export function mountGame(root) {
       const result = simulation.listBuilding(state, buildingId, options);
       if (!result.ok) { showToast(ipoFailureText(result)); render(true); return; }
       for (const suffix of ["total", "offer", "price"]) numericDrafts.delete(`ipo:${buildingId}:${suffix}`);
+      ipoExpandedBuildingId = null;
       changed(true); renderedMapSignature = ""; latestMapModel = null; render(true);
       showToast(result.offeredShares > 0
         ? `${result.ticker} 已整栋上市：挂牌${number(result.offeredShares)}股，镇库保留${number(result.keptShares)}股。`
@@ -1356,7 +1376,8 @@ export function mountGame(root) {
       if (value === null) return;
       const result = simulation.configureCompanyWage(state, companyId, value);
       if (!result.ok) { showToast(result.reason); return; }
-      numericDrafts.delete(`company:${companyId}:wage`); changed(true); render(true); return;
+      numericDrafts.delete(`company:${companyId}:wage`); changed(true); render(true);
+      showToast(`公司日薪已设为${number(value, 2)}${moneyUnit(buildView())}/人日。`); return;
     }
     const companyTarget = closest(target, "[data-company-target]");
     if (companyTarget && state) {
@@ -1367,7 +1388,8 @@ export function mountGame(root) {
       if (value === null) return;
       const result = simulation.configureCompanyTargetWorkers(state, companyId, value);
       if (!result.ok) { showToast(result.reason); return; }
-      numericDrafts.delete(`company:${companyId}:target`); changed(true); render(true); return;
+      numericDrafts.delete(`company:${companyId}:target`); changed(true); render(true);
+      showToast(`公司目标用工已设为${number(value)}人。`); return;
     }
     const companyPrice = closest(target, "[data-company-price]");
     if (companyPrice && state) {
@@ -1376,7 +1398,8 @@ export function mountGame(root) {
       if (value === null) return;
       const result = simulation.configureCompanySalePrice(state, companyId, itemId, value);
       if (!result.ok) { showToast(result.reason); return; }
-      numericDrafts.delete(`company:${companyId}:price:${itemId}`); changed(true); render(true); return;
+      numericDrafts.delete(`company:${companyId}:price:${itemId}`); changed(true); render(true);
+      showToast(`公司售价已设为${number(value, 2)}${moneyUnit(buildView())}/斤。`); return;
     }
     const liquidate = closest(target, "[data-company-liquidate]");
     if (liquidate && state) {

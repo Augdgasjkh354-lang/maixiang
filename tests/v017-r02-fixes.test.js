@@ -216,7 +216,7 @@ test("r02 回购与上市公司等级变动预览不改状态，并给出执行�
 
 test("r02 操作面板使用预览确认并在确认前重算；沿用移动端44px按钮与安全区操作栏", () => {
   const app = readFileSync(new URL("../src/ui/app.js", import.meta.url), "utf8");
-  const panel = readFileSync(new URL("../src/ui/panel-enterprises.js", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../src/ui/panel-exchange.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/main.css", import.meta.url), "utf8");
   assert.match(panel, /data-company-buyback-preview/);
   assert.match(panel, /申请 \/ 居民愿售/);

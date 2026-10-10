@@ -448,7 +448,8 @@ export function selectDashboard(state, content, selection) {
     : 0;
   const shops = (full || needPolicy || needSite) ? shopSummaries(state, content).map(function (row) { const shopState = state.shops?.[row.id]; return { ...withFarmPricing(state, row, content), ...(shopState ? shopPayTotals(state, content, shopState) : {}) }; }) : [];
   const stallSquares = (full || needPolicy || needSite) ? stallSquareSummaries(state, content, shops) : [];
-  const companies = needBusiness ? Object.values(state.companies || {}).map(company => {
+  // 公司经营控件也放在公司所在建筑的地方详情里，所以地方详情同样需要公司视图。
+  const companies = (needBusiness || needSite) ? Object.values(state.companies || {}).map(company => {
     const summary = companySummary(state, company, content);
     const subscription = company.listing?.listed ? previewShareSubscription(state, company.id, content) : { available: false, reason: "公司尚未上市" };
     const reference = company.listing?.listed ? stockReference(state, company, content) : companyActualReferencePlaceholder(company, content);
@@ -726,7 +727,7 @@ export function selectDashboard(state, content, selection) {
       guidancePending: Boolean(state.currency?.guidancePending)
     } : null,
     companies,
-    stockExchange: needBusiness ? {
+    stockExchange: (needBusiness || needSite) ? {
       available: hasStockExchange(state),
       physical: runtime.buildingTypeCounts.has("stock_exchange"),
       legacyAccess: Boolean(state.stockExchange?.legacyAccess),
