@@ -1,6 +1,6 @@
 // 贫富面板数据（docs/REDISTRIBUTION.md 第 5 条）。只读：不写 state。
-// 基尼与最富占比用 computeWealthStats 同口径（粮券 + 存粮存货）；税档人家数取最近一次富人税评估（lastRun），
-// 那次评估的征税口径包含存款、股票与民营建筑。逐年基尼由日结年末写入 state.redistribution.giniHistory。
+// 基尼与最富占比用全口径家底（wealthDistributionRows：粮券 + 存款 + 超额小麦 + 股票 + 民营建筑 + 国债本金，与富人税征税口径一致）；
+// 税档人家数取最近一次富人税评估（lastRun）。逐年基尼由日结年末写入 state.redistribution.giniHistory（同口径，旧档的旧口径曲线不迁移）。
 import { currencyScale } from "../economy/currency.js";
 import { giniCoefficient, inheritanceTaxPercent, topWealthSharePercent, wealthDistributionRows, wealthTaxPolicy } from "../systems/redistribution.js";
 
@@ -21,6 +21,7 @@ export function selectInequality(state, content) {
   return {
     households: rows.length,
     people,
+    // wealth 为内部单位，除以 scale 得粮券。
     wealthPerCapita: people > 0 ? round(wealth / scale / people) : 0,
     gini: gini === null ? null : Math.round(gini * 10000) / 10000,
     top1SharePercent: round(topWealthSharePercent(rows, 0.01)),

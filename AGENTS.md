@@ -58,7 +58,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 国债 | 需已建成银行（粮券阶段，开局即是）；玩家定总额/期限/固定利率；发行当天住户和银行按闲钱认购 |
 | 外镇 | 档案在 `content/outside-towns.js`，算法共用 `systems/outside-town.js`（状态 `state.outsideTowns[id]`）。每天按人口自产/消耗各商品、吃口粮；进口品（盐、木材、酒、布）存货不足 3 年用量都按正常价收，超过 3 年才压价，繁荣度越低越肯出高价；自产外卖品（面粉、面包）按库存比目标定价；买卖价差随关系分收窄，大单逐段计价，没有套利。繁荣度跟随供应满足率；人口只增不减（每年 0.5%—3%，随繁荣度），口粮不足的年份停止增长、每年开垦新耕地，秋收入库。只用口粮储备以上的小麦付款。外贸房在岗才能交易、签长协。关税只对贸易行征收（`trading-houses.js` 的 `tradeTariffRate`，见 `docs/TRADE.md`），镇里自己的外贸与长协不收。加新外镇 = 加一份档案 |
 | 运力 / 贸易行 | `systems/logistics.js` 管运力池（外贸房基础 + 物流中心 + 码头），所有对外镇的货都要 `takeFreightCapacity`；镇里自己的货不付运费。贸易中心的贸易行是 kind `trade` 的店铺（`systems/trading-houses.js`），自己做进出口（偏向出口，进口利润门槛更高：出口门槛 `policy.tradeMarginPercent` 开局 20%，进口门槛 `policy.tradeImportMarginPercent` 开局 25%，政策页可调 0—200%）、付运费和关税给镇库，像商业街店铺一样自己增减店员。河岸地块只建码头和外贸房。详见 `docs/TRADE.md` |
-| 再分配 | `systems/redistribution.js`：富人税（人均家底三档超额累进，每 30 天）、遗产税（年终按去世成年人份额）、整户无人家产归镇库；基尼与逐年曲线在 `selectors/inequality.js`。社保由雇主替员工交（`socialSecurity.employerSharePercent`，岗位 → 雇主映射在 `social-security.js`）。服务可设 `minAffluence`（戏园只有宽裕人家去）。详见 `docs/REDISTRIBUTION.md` |
+| 再分配 | `systems/redistribution.js`：富人税（人均家底三档超额累进，每 30 天）、遗产税（年终按去世成年人份额）、整户无人家产归镇库；基尼与逐年曲线在 `selectors/inequality.js`，统计口径为全口径家底（含存款、股票、房产、国债本金，与富人税同口径，`wealthDistributionRows`）。社保由雇主替员工交（`socialSecurity.employerSharePercent`，岗位 → 雇主映射在 `social-security.js`）。服务可设 `minAffluence`（戏园只有宽裕人家去）。详见 `docs/REDISTRIBUTION.md` |
 | 整户无人 | 家产归镇库（`redistribution.js` 的 `escheatHousehold`）；别墅退回空置再卖；开的店不清算，由本店商人 → 店员 → 家底最厚的一户接手（`shops.js` 的 `transferShopOwnership`），旧档里的孤儿店在日结店铺步骤里自动接手 |
 | 社保基金 | 独立钱包（支付账户 `social`），操作入口在社保局建筑。养老金、失业金、农民补贴（按在岗务农人数发，`farmerSubsidyPerFarmerJin`，默认 0）由基金付，不够时镇库垫付并记为基金欠国库的债；镇库注资也记债，基金可还款；基金可买卖上市公司股票（`company.fundShares`）并分红 |
 

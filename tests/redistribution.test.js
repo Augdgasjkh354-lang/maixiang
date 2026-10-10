@@ -7,12 +7,13 @@ import { issueTownVouchers, validateCurrencyInvariant } from "../src/economy/cur
 import { grantResidentVouchers, richestHousehold } from "./helpers-v16.js";
 import { formCompany } from "./helpers-ipo.js";
 import { SAVE_KEY, exportState, importState } from "../src/persistence/storage.js";
-import { settleWealthTax, wealthTaxPerCapitaPerYear, snapshotEstates, settleYearEstates, settleEscheat, giniCoefficient, recordYearGini, householdTaxableWealthUnits, wealthDistributionRows, resetRedistributionYear } from "../src/systems/redistribution.js";
+import { settleWealthTax, wealthTaxPerCapitaPerYear, snapshotEstates, settleYearEstates, settleEscheat, giniCoefficient, recordYearGini, householdTaxableWealthUnits, wealthDistributionRows, resetRedistributionYear, topWealthSharePercent } from "../src/systems/redistribution.js";
+import { householdWealth } from "../src/systems/wealth-stats.js";
 import { householdWealthUnits } from "../src/systems/household-budget.js";
-import { householdList, householdPopulation, householdConvertibleWheatUnits, syncResidentAggregates } from "../src/systems/households.js";
+import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, syncResidentAggregates } from "../src/systems/households.js";
 import { transferBuildingOwnership, buildingOwner } from "../src/systems/ownership.js";
 import { selectInequality } from "../src/selectors/inequality.js";
-import { ensureBankState } from "../src/systems/bank.js";
+import { ensureBankState, depositToBank } from "../src/systems/bank.js";
 import { DAILY_STEPS } from "../src/systems/daily.js";
 
 const SCALE = CONTENT.precision.currencyUnitsPerVoucher;
@@ -471,6 +472,95 @@ test("税基口径：wealthDistributionRows 与选择器的人口一致", () => 
   const rows = wealthDistributionRows(state, CONTENT);
   assert.equal(rows.reduce((sum, row) => sum + row.people, 0), householdList(state).reduce((sum, h) => sum + householdPopulation(h), 0));
   assert.equal(selectInequality(state, CONTENT).people, rows.reduce((sum, row) => sum + row.people, 0));
+});
+
+// 构造一户"把钱全存银行 + 买国债"的富户：先印发 1000 券给富户，存入银行 900，余 100 粮券；另有国债本金 1000 券（住户持有）。
+// 走正常的印券与存款路径，保证粮券总账与银行台账守恒（validateState 通过）。
+function richBankBondState(seed) {
+  const state = voucherState(seed);
+  const rich = richestHousehold(state);
+  clearWheat(state, rich);
+  grantResidentVouchers(state, 1000, CONTENT, rich.id);
+  ensureBankState(state);
+  const deposited = depositToBank(state, rich.id, 900 * SCALE, CONTENT);
+  assert.equal(deposited.ok, true, "存入银行");
+  state.bonds = {
+    seq: 1, townOwesBankVoucherUnits: 0,
+    issues: [{
+      id: "GB1", totalVoucherUnits: 1000 * SCALE, subscribedVoucherUnits: 1000 * SCALE, subscriptions: {},
+      holdings: [{ holderKey: `household:${rich.id}`, principalVoucherUnits: 1000 * SCALE }],
+      termDays: 360, couponRateAnnualPercent: 3, status: "active", issuedDayIndex: 0, lastCouponDayIndex: 0,
+      extensions: 0, stats: { couponPaidVoucherUnits: 0, principalRepaidVoucherUnits: 0 }
+    }]
+  };
+  syncResidentAggregates(state, CONTENT);
+  return { state, rich };
+}
+
+test("全口径统计：存款与国债进入基尼/最富占比，旧口径（粮券+存粮）明显低估", () => {
+  const { state, rich } = richBankBondState(6201);
+  // 其余户压成人均 10 券（直接赋值只为构造对比，不做守恒校验）。
+  for (const other of householdList(state)) {
+    if (other.id === rich.id) continue;
+    other.voucherUnits = 10 * SCALE;
+    other.inventory.wheat = 0;
+  }
+  syncResidentAggregates(state, CONTENT);
+  const oldRows = householdList(state).filter(isActiveHousehold).map(h => ({ people: householdPopulation(h), wealth: householdWealth(state, h, CONTENT) }));
+  const oldTop1 = topWealthSharePercent(oldRows, 0.01);
+  const oldTop10 = topWealthSharePercent(oldRows, 0.1);
+  const after = selectInequality(state, CONTENT);
+  assert.ok(after.top1SharePercent > oldTop1 * 3, `新口径 top1 ${after.top1SharePercent} 应显著高于旧口径 ${oldTop1}`);
+  assert.ok(after.top10SharePercent > oldTop10, "新口径 top10 高于旧口径");
+  // 富户全口径家底 = 粮券（余 100）+ 存款 900 + 国债本金 1000（券）。
+  const richRow = wealthDistributionRows(state, CONTENT).find(row => row.householdId === rich.id);
+  assert.equal(richRow.wealth, householdTaxableWealthUnits(state, rich, CONTENT), "统计行与征税口径一致");
+  assert.equal(richRow.wealth - householdWealthUnits(state, rich, CONTENT), 1000 * SCALE, "国债本金计入");
+  assert.equal(householdWealthUnits(state, rich, CONTENT), rich.voucherUnits + 900 * SCALE, "粮券 + 存款");
+  assert.equal(Math.round(giniCoefficient(wealthDistributionRows(state, CONTENT)) * 10000) / 10000, after.gini, "选择器基尼与统计行同口径");
+});
+
+test("国债本金计入富人税与遗产税税基：持有户应纳随国债增加，不能直接付税则免征", () => {
+  const state = voucherState(6202);
+  const holder = richestHousehold(state);
+  isolate(state, holder);
+  clearWheat(state, holder);
+  holder.voucherUnits = 0;
+  simulation.setWealthTax(state, { ratesPercent: [10, 10, 10] });
+  simulation.setInheritanceTax(state, 10);
+  syncResidentAggregates(state, CONTENT);
+  const before = settleWealthTax(state, CONTENT);
+  assert.equal(before.dueUnits, 0, "没有家底不征");
+  ensureBankState(state);
+  state.bonds = {
+    seq: 1, townOwesBankVoucherUnits: 0,
+    issues: [{
+      id: "GB1", totalVoucherUnits: 5000 * SCALE, subscribedVoucherUnits: 5000 * SCALE, subscriptions: {},
+      holdings: [{ holderKey: `household:${holder.id}`, principalVoucherUnits: 5000 * SCALE }],
+      termDays: 360, couponRateAnnualPercent: 3, status: "active", issuedDayIndex: 0, lastCouponDayIndex: 0,
+      extensions: 0, stats: { couponPaidVoucherUnits: 0, principalRepaidVoucherUnits: 0 }
+    }]
+  };
+  assert.equal(householdTaxableWealthUnits(state, holder, CONTENT), 5000 * SCALE, "国债本金计入征税口径");
+  const after = settleWealthTax(state, CONTENT);
+  assert.ok(after.dueUnits > before.dueUnits, "持有国债后应纳富人税增加");
+  assert.equal(after.collectedUnits, 0, "国债不能直接付税，无现金则免征");
+  assert.equal(state.redistribution.lastRun.dueUnits, after.dueUnits);
+  const snapshot = snapshotEstates(state, CONTENT);
+  assert.equal(snapshot.get(holder.id).wealthUnits, 5000 * SCALE, "遗产税份额口径含国债");
+  // 到期兑付后不再计入。
+  state.bonds.issues[0].status = "matured";
+  assert.equal(householdTaxableWealthUnits(state, holder, CONTENT), 0, "到期后国债不计入");
+});
+
+test("全口径统计：选择器不写 state，状态校验通过", () => {
+  const { state } = richBankBondState(6203);
+  assert.equal(simulation.validateState(state).valid, true, "构造状态合法（存款与印券走正常路径）");
+  const before = JSON.stringify(state);
+  selectInequality(state, CONTENT);
+  wealthDistributionRows(state, CONTENT);
+  assert.equal(JSON.stringify(state), before, "选择器与统计只读");
+  assert.equal(simulation.validateState(state).valid, true);
 });
 
 // ---------------------------------------------------------------- 测试夹具

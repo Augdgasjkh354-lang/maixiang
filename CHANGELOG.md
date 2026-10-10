@@ -16,6 +16,14 @@
 - 测试：删除 `monetary-reform-switch.test.js`（小麦→粮券切换流程已不存在）；依赖小麦阶段的测试改为粮券开局，或显式用 `wheatEraState`。新增 `opening-voucher.test.js`。
 - 第一步只改开局；`startMonetaryReform` 与小麦支付代码保留，第二步删除。
 
+## 未发布 · 全口径贫富统计与国债计税
+
+- 基尼、最富 1% / 10% 占比与逐年基尼曲线改用全口径家底：粮券 + 存款 + 超额小麦 + 股票市值 + 民营建筑估值 + 国债本金（与富人税征税口径一致）。旧口径只计粮券与存粮，界面上最富 1% 约 5–7%，而税基口径约 46–69%，严重低估集中度。旧档 `giniHistory` 中的旧口径数据不迁移。
+- 国债本金（住户持有的存续国债）计入富人税与遗产税税基；银行持有的不计。国债不能直接付税，付不起的当月免征。到期兑付后不再计入。
+- 修复：贫富统计的 `wealthPerCapita` 之前把内部单位当粮券除了两次，现已修正。
+- 界面：基尼面板注明口径"含存款、股票、房产、国债"；贫富分布卡去掉与新口径冲突的"最富10%占比"，并注明人均家底仅计粮券与存粮。
+- 代码：`systems/bonds.js` 的 `householdBondPrincipalMap`（只读）；`systems/redistribution.js` 的 `wealthContext` / `taxBaseUnits`。
+
 ## 未发布 · 社保农民补贴
 
 - 社保基金新增支出"农民补贴"：政策页"每农民每日补贴"（`socialSecurity.farmerSubsidyPerFarmerJin`，默认 0，即不改变旧行为），按各户在岗务农人数每日发到家庭；与养老金同一套付款规则，基金不足时镇库垫付并计为基金负债。累计支出见"累计收支"（`totalSubsidyUnits`）。代码在 `systems/social-security.js` 的 `payFarmerSubsidies`，日结步骤 `farmerSubsidy` 紧随养老金。

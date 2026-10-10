@@ -67,6 +67,25 @@ export function bondOutstandingVoucherUnits(state) {
   return total;
 }
 
+// 只读：存续期国债中各住户持有的本金（内部单位），Map<householdId, units>。
+// 富人税与遗产税的征税口径、贫富统计都用它；不计银行持有的部分。选择器会调用，绝不写 state。
+export function householdBondPrincipalMap(state) {
+  const map = new Map();
+  const issues = state.bonds?.issues;
+  if (!Array.isArray(issues)) return map;
+  for (const issue of issues) {
+    if (issue.status !== "active") continue;
+    for (const holding of issue.holdings || []) {
+      const key = String(holding.holderKey || "");
+      if (!key.startsWith("household:")) continue;
+      const id = key.slice("household:".length);
+      const units = Math.max(0, holding.principalVoucherUnits || 0);
+      if (units > 0) map.set(id, (map.get(id) || 0) + units);
+    }
+  }
+  return map;
+}
+
 export function issueGovernmentBond(state, options, content) {
   if (!bondAvailable(state)) {
     return { ok: false, reason: state.monetaryReform?.stage === "voucher" ? "需先建成银行才能发行国债" : "需完成货币改革（粮券阶段）才能发行国债" };
