@@ -560,6 +560,11 @@ button.wide { width: 100%; }
 .detail-block[open] > summary { border-bottom-color: #f0eadc; }
 .detail-body { padding: 12px 14px 14px; }
 .detail-body .cardlet { box-shadow: none; }
+/* 批发市场商品卡：摘要行一行写清库存、售价、可售天数，窄屏自动换行。 */
+.wholesale-item > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 12px; }
+.wholesale-name { flex: none; font-weight: 750; color: #4d4535; }
+.wholesale-brief { flex: 1 1 auto; min-width: 0; text-align: right; color: #7a6f58; font-size: 12px; font-weight: 550; }
+.wholesale-item > .detail-body { padding-top: 4px; }
 
 /* 家庭分类：小标签换行排列 */
 .mini-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -621,6 +626,13 @@ button.wide { width: 100%; }
 
 /* 贫富面板：基尼系数逐年曲线 */
 .gini-sparkline { display: block; width: 100%; height: 56px; margin: 6px 0; }
+
+/* 银行建筑面板：摘要卡 + 三个折叠分组；数额整体不换行，「粮券」不会被拆到下一行 */
+.bank-summary .value, .bank-groups .value { white-space: nowrap; }
+.bank-groups .detail-block > summary .subtle { font-weight: 500; white-space: nowrap; }
+/* 面板标题与关闭按钮之间留出距离，长标题省略而不是顶到按钮 */
+.panel-heading { gap: 12px; }
+.panel-kicker { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -1284,8 +1296,13 @@ const THEATER_MIN_AFFLUENCE = 1.5;
   newBusinessTrialDays: 6,
   shopClerkUtilizationHireThreshold: 0.85,
   shopClerkUtilizationReleaseThreshold: 0.45,
+  // 镇营综合商店（systems/shops.js）：supplyShareMax = 每日每种商品最多进批发市场可售量的比例（余下留给私营店）；
+  // maxPerStreet = 每条商业街最多几家镇营综合商店。
+  townShop: Object.freeze({ supplyShareMax: 0.5, maxPerStreet: 1 }),
+  // 银行镇库托底（systems/bank.js）：还债时银行须保留的安全垫（占存款比例）；缺省与 DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE 一致。
+  bankDebtRepayBufferShare: 0.05,
   shopTypes: Object.freeze({
-    general: Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
+    general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
@@ -1309,7 +1326,9 @@ const THEATER_MIN_AFFLUENCE = 1.5;
     // 兼容旧调用；新开店会统一归一为综合商店。
     grain: Object.freeze({ id: "grain", name: "粮店", kind: "legacy_retail", itemId: "wheat", aliasOf: "general" }),
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),
-    salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" })
+    salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" }),
+    // 镇营综合商店：镇里持有的综合商店（systems/shops.js 的 openTownShop）。别名归一为综合商店，town 标记镇营。
+    town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true })
   }),
 
   marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
@@ -2872,7 +2891,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod19 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-e4c20ad";
+       const BUILD_ID = "0203-64ad7a1";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -4496,21 +4515,33 @@ return { currencyScale, shareTick, roundToShareTick, ensureCurrencyState, vouche
 // ===== economy/deposits.js =====
 const __mxmod27 = (() => {
 const { syncResidentAggregates } = __mxmod23;
+const { transferVouchers, voucherBalance } = __mxmod26;
 function withdrawFromBank(state, householdId, voucherUnits, content = null) {
   const units = Math.floor(Number(voucherUnits) || 0);
   if (!Number.isSafeInteger(units) || units <= 0) return { ok: false, reason: "取款金额必须为正整数" };
   const bank = state.bank;
   const deposited = bank?.deposits?.[householdId] || 0;
   if (deposited < units) return { ok: false, reason: "存款余额不足" };
-  if ((bank.cashVoucherUnits || 0) < units) return { ok: false, reason: "银行现金不足，暂无法兑付" };
   const household = state.households?.byId?.[householdId];
   if (!household) return { ok: false, reason: "住户不存在" };
+  const cash = Math.max(0, bank.cashVoucherUnits || 0);
+  const shortfall = Math.max(0, units - cash);
+  if (shortfall > Math.max(0, voucherBalance(state, "town"))) {
+    return { ok: false, reason: "银行现金不足，镇库垫付也不够，暂无法兑付" };
+  }
+  if (shortfall > 0) {
+    const advance = transferVouchers(state, "town", "bank", shortfall, content, "bank_town_advance",
+      "镇库垫付银行取款缺口，计入银行负债");
+    if (!advance.ok) return { ok: false, reason: "镇库垫付失败：" + advance.reason };
+    bank.debtToTownUnits = (bank.debtToTownUnits || 0) + shortfall;
+    bank.totalAdvancedUnits = (bank.totalAdvancedUnits || 0) + shortfall;
+  }
   bank.deposits[householdId] = deposited - units;
   bank.cashVoucherUnits -= units;
   household.voucherUnits = (household.voucherUnits || 0) + units;
   // 居民汇总粮券是缓存值，改动家庭券后必须同步。
   if (content) syncResidentAggregates(state, content);
-  return { ok: true, householdId, voucherUnits: units };
+  return { ok: true, householdId, voucherUnits: units, advancedUnits: shortfall };
 }
 return { withdrawFromBank };
 })();
@@ -4607,23 +4638,40 @@ function autoExchangeForPayment(state, owner, voucherNeedUnits, dueWheatValueUni
   return readSlot(paymentWheatSlot(state, owner));
 }
 
-// 存款可随时取回付款：住户存款与银行现金的较小者（银行现金不够时只能取到现金为止）。
+// 银行取款的镇库托底（银行负债，见 economy/deposits.js）：银行现金不够时，镇库粮券可以垫付缺口。
+// 镇库无存款、不参与换券以外的付款，所以它的可垫付额就是镇库粮券余额，与 maximumPayableValueUnits(state, "town") 同口径。
+function townAdvanceCapacityUnits(state) {
+  return Math.max(0, voucherBalance(state, "town"));
+}
+
+// 存款可随时取回付款：住户存款与“银行现金 + 镇库可垫付额”的较小者。
+// 银行现金不够时由镇库垫付（记为银行欠镇库的债），所以只有镇库也没钱时才取不出来。
 // 只有家庭（以及居民汇总，即全体家庭之和）有存款；其他经济主体返回 0。O(户数)。
        function depositWithdrawableUnits(state, owner) {
   const bank = state.bank;
-  const cash = Math.max(0, bank?.cashVoucherUnits || 0);
-  if (!bank || cash <= 0) return 0;
+  if (!bank) return 0;
+  const liquidity = Math.max(0, bank.cashVoucherUnits || 0) + townAdvanceCapacityUnits(state);
+  if (liquidity <= 0) return 0;
   const kind = parseOwner(owner).kind;
-  if (kind === "household") return Math.min(cash, Math.max(0, bank.deposits?.[householdIdOf(owner)] || 0));
+  if (kind === "household") return Math.min(liquidity, Math.max(0, bank.deposits?.[householdIdOf(owner)] || 0));
   if (owner === "residents" && hasHouseholds(state)) {
     let deposits = 0;
     for (const [householdId, units] of Object.entries(bank.deposits || {})) {
       const household = state.households?.byId?.[householdId];
       if (household && isActiveHousehold(household)) deposits += Math.max(0, units || 0);
     }
-    return Math.min(cash, deposits);
+    return Math.min(liquidity, deposits);
   }
   return 0;
+}
+
+// 换券用的镇库粮券池。镇库粮券同时是存款取回的垫付来源；付款顺序是
+// 手头粮券 → 存款取回（含镇库垫付）→ 换券，所以换券只发生在存款全部取回之后，此时垫付额 = 可取回额 − 银行现金。
+// withdrawableUnits 必须是 depositWithdrawableUnits 的结果，保证报价与结算用同一口径。
+function exchangeVoucherPoolUnits(state, owner, withdrawableUnits) {
+  if (owner === "town") return 0;
+  const advance = Math.max(0, withdrawableUnits - Math.max(0, state.bank?.cashVoucherUnits || 0));
+  return Math.max(0, townAdvanceCapacityUnits(state) - advance);
 }
 
 // 付款可动用的粮券 = 手头粮券 + 可取回的存款。所有"能不能付、最多付多少"的判断都用它。
@@ -4632,7 +4680,8 @@ function autoExchangeForPayment(state, owner, voucherNeedUnits, dueWheatValueUni
 }
 
 // 现金不够时先从存款取回（住户存款在银行台账里，取回后粮券回到住户手里再付款）。
-// 调用顺序：手头粮券 → 存款取回 → 换券（小麦）。居民汇总从存款最多的家庭开始取。
+// 调用顺序：手头粮券 → 存款取回（银行现金不足部分由镇库垫付）→ 换券（小麦）。居民汇总从存款最多的家庭开始取。
+// 取款总额不超过 depositWithdrawableUnits，所以镇库垫付一定够；垫付总额 = 取款总额 − 银行原有现金。
 function withdrawDepositsForPayment(state, owner, needUnits, content) {
   let left = Math.min(Math.max(0, needUnits), depositWithdrawableUnits(state, owner));
   if (left <= 0) return;
@@ -4650,7 +4699,7 @@ function withdrawDepositsForPayment(state, owner, needUnits, content) {
       .sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     for (const [householdId, units] of rows) {
       if (left <= 0) break;
-      const take = Math.min(left, units, state.bank.cashVoucherUnits || 0);
+      const take = Math.min(left, units);
       if (take <= 0) continue;
       const result = withdrawFromBank(state, householdId, take, content);
       if (!result.ok) throw new Error("存款取款预检后失败：" + result.reason);
@@ -4743,14 +4792,15 @@ function paymentCompositionFromContext(context, valueUnits) {
   const actualWheatUnits = paymentWheatBalanceUnits(state, owner);
   const wheatLimitUnits = Math.min(actualWheatUnits,
     Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheatUnits);
+  const withdrawable = depositWithdrawableUnits(state, owner);
   return {
     content,
     stage: reform.stage,
-    voucherUnits: spendableVoucherUnits(state, owner),
+    voucherUnits: Math.max(0, voucherBalance(state, owner)) + withdrawable,
     actualWheatUnits,
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, owner, content, options),
-    exchangeVoucherPoolUnits: owner === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
+    exchangeVoucherPoolUnits: exchangeVoucherPoolUnits(state, owner, withdrawable)
   };
 }
 
@@ -4873,12 +4923,13 @@ function maximumPayableValueUnitsFromContext(context) {
   const actualWheatUnits = paymentWheatBalanceUnits(state, from);
   const wheatLimitUnits = Math.min(actualWheatUnits,
     Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheatUnits);
+  const withdrawable = depositWithdrawableUnits(state, from);
   return quoteMonetaryPaymentFromCapability(due, {
     stage: reform.stage,
-    voucherUnits: spendableVoucherUnits(state, from),
+    voucherUnits: Math.max(0, voucherBalance(state, from)) + withdrawable,
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, from, content, options),
-    exchangeVoucherPoolUnits: from === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
+    exchangeVoucherPoolUnits: exchangeVoucherPoolUnits(state, from, withdrawable)
   }, content);
 }
 
@@ -7856,7 +7907,8 @@ function recentProfit(rows) {
 function employerRows(state, content) {
   const rows = [];
   for (const shop of Object.values(state.shops || {})) {
-    if (shop.status !== "open") continue;
+    // 镇营综合商店的发薪日固定为镇库的 5 号，不参与排名。
+    if (shop.status !== "open" || shop.town) continue;
     const staff = Math.max(1, jobCount(state, `shop:${shop.id}:clerk`) + jobCount(state, `shop:${shop.id}:merchant`));
     rows.push({ key: `shop:${shop.id}`, score: recentProfit(shop.history) / staff });
   }
@@ -8120,6 +8172,8 @@ function resolveSocialEmployerUncached(state, jobKey, ctx) {
   const shop = SHOP_JOB_KEY.exec(jobKey);
   if (shop) {
     const record = state.shops?.[shop[1]];
+    // 镇营综合商店：雇主是镇库（工资与社保都由镇库承担）。
+    if (record?.town && record.status !== "closed" && record.status !== "liquidating") return employerInfo(state, SOCIAL_EMPLOYER_TOWN);
     return shopCanEmploy(record)
       ? { employer: `shop:${shop[1]}`, kind: "shop", ownerHouseholdId: record.ownerHouseholdId || null }
       : SELF_EMPLOYED;
@@ -11515,14 +11569,16 @@ const { householdIdOf } = __mxmod13;
 const { PERIODS, bookAdd, bookAddMap, ensureBook } = __mxmod21;
 const { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } = __mxmod28;
 const { voucherUnitsForWheatUnits } = __mxmod25;
-const { recordEvent } = __mxmod15;
+const { makeTransactionId, recordEvent, recordLedger } = __mxmod15;
+const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod22;
+const { putStock, takeStock } = __mxmod32;
 const { nextRandom } = __mxmod31;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold, householdWorkingAge, jobReleaseRank, releaseJobFromHousehold, syncResidentAggregates, setHouseholdJobCount, setJobCount, jobCount, jobAssignments } = __mxmod23;
 const { shopTradePrices, recentAverage } = __mxmod55;
 const { shopEffectiveMarginPercent } = __mxmod54;
 const { currentUnitPrice } = __mxmod34;
 const { accrueWages, payWages, pendingWages, wageArrears, wageBook } = __mxmod29;
-const { buyWholesaleForOwner, hasWholesaleMarket, wholesaleMonopolyItemIds, wholesaleUnitPrice } = __mxmod36;
+const { allocateInputToTown, buyWholesaleForOwner, hasWholesaleMarket, recordTownInputConsumption, wholesaleMonopolyItemIds, wholesaleUnitPrice } = __mxmod36;
 const { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } = __mxmod44;
 const { farmSalePriceVoucher } = __mxmod56;
 const { ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory, updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop } = __mxmod57;
@@ -11680,7 +11736,14 @@ function clerkJobKey(shop) { return `shop:${shop.id}:clerk`; }
 
        function shopMerchantCount(state, shop) { return jobCount(state, merchantJobKey(shop)); }
 
+// 店铺的付款账户名：镇营综合商店没有自己的钱包，收付款一律走镇库（"town"）；其余店铺走 shop:<id>。
+       function shopAccountName(shop) {
+  return shop?.town ? "town" : `shop:${shop.id}`;
+}
+
 function shopMerchantOnDuty(state, shop) {
+  // 镇营综合商店：没有商人，有店员即营业（店员由镇里设定）。
+  if (shop.town) return shopClerkCount(state, shop) > 0;
   // 集体经营（时代广场）：有人在摊上就算营业，不认某一户店主。
   if (shop.collective) return shopMerchantCount(state, shop) > 0;
   const owner = state.households?.byId?.[shop.ownerHouseholdId];
@@ -11768,6 +11831,11 @@ function protectedClerkCount(state, shop, content) {
       continue;
     }
     if (shop.collective) {
+      if (shop.status === "paused") { shop.status = "open"; shop.statusReason = "准备营业"; }
+      continue;
+    }
+    // 镇营综合商店：没有业主与商人，店员由镇里设定，不因"商人缺位"暂停。
+    if (shop.town) {
       if (shop.status === "paused") { shop.status = "open"; shop.statusReason = "准备营业"; }
       continue;
     }
@@ -11884,6 +11952,7 @@ function livingWorkerHousehold(state, householdId) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
   if (shop.collective) return { ok: false, reason: "集体摊位没有业主" };
+  if (shop.town) return { ok: false, reason: "镇营店没有业主" };
   const next = livingWorkerHousehold(state, newHouseholdId);
   if (!next) return { ok: false, reason: "新业主必须是有劳动力的在世家庭" };
   const merchantKey = merchantJobKey(shop);
@@ -11947,7 +12016,7 @@ function succeedOrphanShop(state, shop, content) {
        function succeedOrphanShops(state, content) {
   const rows = [];
   for (const shop of Object.values(ensureShops(state, content))) {
-    if (shop.collective || shop.status === "closed" || shop.status === "liquidating") continue;
+    if (shop.collective || shop.town || shop.status === "closed" || shop.status === "liquidating") continue;
     const owner = state.households?.byId?.[shop.ownerHouseholdId];
     if (owner && isActiveHousehold(owner)) continue;
     rows.push({ shopId: shop.id, ...succeedOrphanShop(state, shop, content) });
@@ -11988,6 +12057,7 @@ function chooseMerchantHousehold(state, content, preferredId = null, startup = s
   if (!definition) return { ok: false, reason: "不支持这种店铺" };
   const active = shopsForStreet(state, buildingId);
   if (active.length >= shopHostSlots(building, content)) return { ok: false, reason: `${hostName}没有空位` };
+  if (requestedDefinition?.town) return openTownShopRecord(state, building, normalizedTypeId, definition, content);
   const startupUnits = shopStartupUnits(definition, content);
   const household = chooseMerchantHousehold(state, content, preferredHouseholdId, startupUnits);
   if (!household) return { ok: false, reason: "没有同时满足生活储备、启动资金和空闲劳动力的家庭" };
@@ -12063,9 +12133,58 @@ function chooseMerchantHousehold(state, content, preferredId = null, startup = s
   return { ok: true, shopId, householdId: household.id, startupVoucher: startupUnits / currencyScale(content) };
 }
 
+// 镇营综合商店（content 里的 town_general 别名 → 综合商店，带 town 标记）：镇里持有，不要业主与商人，
+// 没有自己的钱（收入直接进镇库、工资与进货由镇库付），店员由镇里设定（configureShopClerks）。占用商业街店位。
+function openTownShopRecord(state, building, typeId, definition, content) {
+  if (!hasWholesaleMarket(state)) return { ok: false, reason: "请先建成批发市场（镇营综合商店从批发市场进货）" };
+  // 每条商业街的镇营店数量上限（rules.townShop.maxPerStreet，默认 1）；停业中的不占名额。
+  const maxPerStreet = Math.max(1, Math.floor(Number(content.rules.townShop?.maxPerStreet ?? 1)));
+  const open = Object.values(state.shops || {}).filter(row => row.town && row.buildingId === building.id
+    && row.status !== "closed" && row.status !== "liquidating").length;
+  if (open >= maxPerStreet) return { ok: false, reason: `每条商业街最多${maxPerStreet}家镇营综合商店` };
+  const shopId = `shop-${state.nextShopNumber++}`;
+  const shop = {
+    id: shopId,
+    name: `镇营${definition.name}`,
+    buildingId: building.id,
+    typeId,
+    town: true,
+    primaryItemId: definition.itemIds?.[0] || null,
+    itemId: definition.itemIds?.[0] || null,
+    itemIds: definition.kind === "retail" ? [...(definition.itemIds || [])] : [],
+    serviceId: null,
+    ownerHouseholdId: null,
+    cashVoucherUnits: 0,
+    cashWheatUnits: 0,
+    inventory: emptyShopInventory(content),
+    inventoryCostVoucherUnits: {},
+    status: "open",
+    statusReason: "准备营业",
+    openedYear: state.year,
+    openedDay: state.day + 1,
+    badDays: 0,
+    accounts: { day: blankShopPeriod(), year: blankShopPeriod(), cumulative: blankShopPeriod() },
+    liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 },
+    settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
+    retainedEarningsVoucherUnits: 0,
+    initialCapital: { valueUnits: 0, voucherValueUnits: 0, wheatValueUnits: 0 }
+  };
+  state.shops[shopId] = shop;
+  ensureShopBooks(shop, content);
+  syncShopEmployment(state, content);
+  recordEvent(state, `镇里在商业街开出${shop.name}，店员由镇里设定。`, content, { day: state.day + 1 });
+  return { ok: true, shopId, householdId: null, town: true, startupVoucher: 0 };
+}
+
+// 镇里开一家镇营综合商店（命令 openTownShop 调用）。
+       function openTownShop(state, buildingId, content) {
+  return openShop(state, buildingId, "town_general", content);
+}
+
        function setShopMerchants(state, shopId, requested, content) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
+  if (shop.town) return { ok: false, reason: "镇营店没有商人，店员由镇里设定" };
   syncShopEmployment(state, content);
   if (shop.status !== "open") return { ok: false, reason: "店铺未营业" };
   const max = shopMaxMerchants(shop, content);
@@ -12132,7 +12251,7 @@ function chooseMerchantHousehold(state, content, preferredId = null, startup = s
     for (const row of result.releasedRows || []) {
       const due = perWorker * row.count;
       if (due <= 0) continue;
-      const paid = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${row.householdId}`, currentPaymentComposition(state, due), content,
+      const paid = settleMonetaryPayment(state, shopAccountName(shop), `household:${row.householdId}`, currentPaymentComposition(state, due), content,
         "severance_payment", `${shop.name}辞退店员补偿`, { requireFull: false }).paidValueUnits || 0;
       if (due > paid) {
         shop.liabilities.claimsVoucherUnits[row.householdId] = (shop.liabilities.claimsVoucherUnits[row.householdId] || 0) + (due - paid);
@@ -12213,6 +12332,25 @@ function shopWorkingCapitalReserve(state, shop, content) {
   return Math.round(shopSalesCapacityUnits(state, shop, content) / content.precision.inventoryUnitsPerJin * averageWholesale * days * currencyScale(content));
 }
 
+// 镇营店的定价成本基础：与库存成本账并行，按私营店进货的同一价（市场段为进货时的批发售价，养殖场段为养殖场售价）逐笔入账、
+// 按比例转出，只供动态定价复核算利润率；镇库的库存成本账不受影响。私营店不用，这些函数对非镇营店直接返回。
+function addPricingBasis(shop, itemId, valueUnits) {
+  if (!shop.town || !(valueUnits > 0)) return;
+  shop.pricingBasisVoucherUnits ||= {};
+  shop.pricingBasisVoucherUnits[itemId] = (shop.pricingBasisVoucherUnits[itemId] || 0) + Math.floor(valueUnits);
+}
+function takePricingBasis(shop, itemId, available, units) {
+  if (!shop.town) return 0;
+  shop.pricingBasisVoucherUnits ||= {};
+  const basis = shop.pricingBasisVoucherUnits[itemId] || 0;
+  const cost = units >= available ? basis : (available > 0 ? Math.floor(basis * units / available) : 0);
+  shop.pricingBasisVoucherUnits[itemId] = Math.max(0, basis - cost);
+  return cost;
+}
+function wholesaleValueUnits(state, itemId, units, content) {
+  return Math.round(units / content.precision.inventoryUnitsPerJin * wholesaleUnitPrice(state, itemId, content) * currencyScale(content));
+}
+
 function removeShopInventoryCost(shop, itemId, units) {
   const available = shop.inventory[itemId] || 0;
   const basis = shop.inventoryCostVoucherUnits[itemId] || 0;
@@ -12249,10 +12387,12 @@ function removeShopInventoryCost(shop, itemId, units) {
   if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * prices.retailVoucherPerUnit * currencyScale(content));
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
   const maxWheatUnits = buyerHousehold ? householdConvertibleWheatUnits(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30) : undefined;
-  const payment = settleMonetaryPayment(state, buyerOwner, `shop:${shopId}`, currentPaymentComposition(state, paymentUnits), content,
+  // 镇营店的零售收入直接进镇库（付给 "town"），店里没有自己的钱。
+  const payment = settleMonetaryPayment(state, buyerOwner, shopAccountName(shop), currentPaymentComposition(state, paymentUnits), content,
     "shop_retail_sale", reason, { requireFull: true, ...(maxWheatUnits === undefined ? {} : { maxWheatUnits }) });
   if (!payment.ok) return payment;
   const cogs = removeShopInventoryCost(shop, itemId, actual);
+  const pricingCogs = shop.town ? takePricingBasis(shop, itemId, shop.inventory[itemId] || 0, actual) : cogs;
   shop.inventory[itemId] -= actual;
   addBookValue(shop, "revenueVoucherUnits", paymentUnits);
   addBookValue(shop, "cogsVoucherUnits", cogs);
@@ -12275,7 +12415,8 @@ function removeShopInventoryCost(shop, itemId, units) {
   }
   applyProfit(shop, paymentUnits - cogs);
   // 0.2.3 动态加价：把这一笔成交记入按商品的利润率窗口（收入/进货成本/销量）。
-  recordShopItemSale(shop, itemId, actual, paymentUnits, cogs, content);
+  // 动态定价的成本口径用定价成本基础（镇营店按私营店同口径的进货价入账，见 addPricingBasis）；账上 COGS 仍是内部成本基础。
+  recordShopItemSale(shop, itemId, actual, paymentUnits, pricingCogs, content);
   return { ok: true, itemId, quantityUnits: actual, paidVoucherUnits: paymentUnits, paidValueUnits: paymentUnits, cogsVoucherUnits: cogs, transactionId: payment.transactionId };
 }
 
@@ -12356,8 +12497,31 @@ function removeShopInventoryCost(shop, itemId, units) {
   return { ok: true, paidValueUnits: priceUnits, cogsVoucherUnits: cogs, transactionId: payment.transactionId };
 }
 
+// 镇营综合商店从批发市场进货：市场 → 镇库 → 店，全部是镇里内部调拨（只搬货、不付钱），成本基础随货转移。
+// 返回的 paidVoucherUnits 是这批货的内部成本（不是现金）；库存与成本由调用方用 putStock 入账。
+// 同时记入批发市场的镇营需求（townConsumed），让做市商看见镇营店的进货量。
+function procureTownStoreFromMarket(state, shop, itemId, wantedUnits, content) {
+  const none = { boughtUnits: 0, paidVoucherUnits: 0, subsidyVoucherUnits: 0 };
+  if (!hasWholesaleMarket(state) || !wholesaleMonopolyItemIds(content).includes(itemId) || !(wantedUnits > 0)) return none;
+  // 供货份额上限：镇营店当日每种商品最多拿批发市场可售量（进货前的库存，镇营店先进货，即私营店尚未进货时的库存）的 supplyShareMax，余下留给私营店。
+  const stock = Math.max(0, state.wholesaleMarket.inventory?.[itemId] || 0);
+  const share = Math.min(1, Math.max(0, Number(content.rules.townShop?.supplyShareMax ?? 0.5)));
+  const capUnits = Math.floor(stock * share);
+  const askUnits = Math.min(Math.floor(wantedUnits), capUnits);
+  if (askUnits <= 0) return none;
+  const moved = allocateInputToTown(state, itemId, askUnits, content, `${shop.name}从批发市场进货（镇库内部调拨，不付钱）`);
+  if (!moved.ok || !(moved.movedUnits > 0)) return none;
+  const units = moved.movedUnits;
+  const out = removeTownInventoryWithCost(state, itemId, units, content);
+  recordLedger(state, { type: "town_store_restock", transactionId: makeTransactionId(state), source: "town", destination: `shop:${shop.id}`,
+    itemId, quantityUnits: units, qeqUnits: 0, reason: `${shop.name}从镇库领货（内部调拨，不付钱）` }, content);
+  recordTownInputConsumption(state, itemId, units, content);
+  return { boughtUnits: units, paidVoucherUnits: out.costWheatUnits, subsidyVoucherUnits: 0 };
+}
+
        function procureShopInventory(state, shop, content) {
   if (shop.status !== "open") return { purchasedUnits: 0, purchasedByItem: {}, reason: shop.status === "paused" ? "暂停经营" : "已停业" };
+  if (shop.town && !shopMerchantOnDuty(state, shop)) return { purchasedUnits: 0, purchasedByItem: {}, reason: "无店员，暂不进货" };
   const invScale = content.precision.inventoryUnitsPerJin;
   const def = shopDefinition(content, shop.typeId);
   let itemTargets = [];
@@ -12406,16 +12570,19 @@ function removeShopInventoryCost(shop, itemId, units) {
     // 综合商店和集市先从养殖场进肉，不够再找批发市场。
     const fromFarms = (def?.id === "general" || def?.kind === "stall") && content.items[row.itemId]?.livestock ? buyFromFarms(state, shop, row.itemId, need, content, row.dailyUnits) : 0;
     const purchase = need - fromFarms > 0
-      ? buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`,
-        { discountPerUnit: shop.collective ? stallDiscountPerUnit(state, content) : 0 })
+      ? (shop.town
+        ? procureTownStoreFromMarket(state, shop, row.itemId, need - fromFarms, content)
+        : buyWholesaleForOwner(state, `shop:${shop.id}`, row.itemId, need - fromFarms, content, `${shop.name}从批发市场进货`,
+          { discountPerUnit: shop.collective ? stallDiscountPerUnit(state, content) : 0 }))
       : { boughtUnits: 0, paidVoucherUnits: 0 };
     if (purchase.subsidyVoucherUnits > 0) addBookValue(shop, "subsidyVoucherUnits", purchase.subsidyVoucherUnits);
     const bought = (purchase.boughtUnits || 0) + fromFarms;
     const wholesaleBought = purchase.boughtUnits || 0;
     if (wholesaleBought > 0) {
-      shop.inventory[row.itemId] = (shop.inventory[row.itemId] || 0) + wholesaleBought;
-      shop.inventoryCostVoucherUnits[row.itemId] = (shop.inventoryCostVoucherUnits[row.itemId] || 0) + (purchase.paidVoucherUnits || 0);
-      addBookValue(shop, "purchaseVoucherUnits", purchase.paidVoucherUnits || 0);
+      putStock(shop, row.itemId, wholesaleBought, purchase.paidVoucherUnits || 0);
+      addPricingBasis(shop, row.itemId, wholesaleValueUnits(state, row.itemId, wholesaleBought, content));
+      // 镇营店的进货成本是镇库内部价，不是现金支出，不记入采购账。
+      if (!shop.town) addBookValue(shop, "purchaseVoucherUnits", purchase.paidVoucherUnits || 0);
       addBookMap(shop, "purchasedUnits", row.itemId, wholesaleBought);
     }
     purchasedByItem[row.itemId] = bought;
@@ -12423,7 +12590,8 @@ function removeShopInventoryCost(shop, itemId, units) {
   }
   if (hadNeed && purchasedTotal <= 0) {
     // 基线清理：无批发市场时走镇库直购，缺货提示要准确。
-    shop.statusReason = maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 ? "缺资金" : (hasWholesaleMarket(state) ? "批发市场缺货" : "镇库缺货");
+    if (shop.town) shop.statusReason = hasWholesaleMarket(state) ? "批发市场缺货" : "尚未建成批发市场";
+    else shop.statusReason = maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 ? "缺资金" : (hasWholesaleMarket(state) ? "批发市场缺货" : "镇库缺货");
   }
   return { purchasedUnits: purchasedTotal, purchasedByItem, reason: !hadNeed ? "库存充足" : (purchasedTotal > 0 ? "已补货" : shop.statusReason) };
 }
@@ -12451,7 +12619,8 @@ function accrueDailyLiabilities(state, shop, content) {
     : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
   // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
   const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
-  const rent = Math.max(0, Math.round(rentVoucher * rentUnits * scale));
+  // 镇营综合商店不交店租（镇库自己的店）。
+  const rent = shop.town ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
   if (rentFree) addBookValue(shop, "rentWaivedVoucherUnits", Math.round((state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2) * rentUnits * scale));
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
   if (!shop.collective) accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
@@ -12482,14 +12651,34 @@ function payLiability(state, shop, key, destination, content, type, reason) {
 
 function payDailyLiabilities(state, shop, content) {
   // 营业中按发薪日结；暂停、清算、收摊（非营业）时所有待发工资立即到期，进入欠薪清偿顺序。
-  const options = shop.status === "open" ? { payDay: payDayFor(state, `shop:${shop.id}`) } : {};
-  payWages(state, shop.liabilities, `shop:${shop.id}`, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`, options);
+  // 镇营店的工资由镇库付（发薪日按镇库的 5 号）。
+  const payer = shopAccountName(shop);
+  const options = shop.status === "open" ? { payDay: payDayFor(state, payer) } : {};
+  payWages(state, shop.liabilities, payer, content, "shop_wage_payment", `${shop.name}偿付具体债权家庭员工工资`, options);
   shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
+  // 镇营店不交店租与利润税（镇库自己的店，钱本来就在镇库）。
+  if (shop.town) return;
   payLiability(state, shop, "rentVoucherUnits", "town", content, "shop_rent_payment", `${shop.name}支付店租`);
   payLiability(state, shop, "taxVoucherUnits", "town", content, "shop_profit_tax_payment", `${shop.name}缴纳商业利润税`);
 }
 
+// 镇营综合商店的"结账"：收入已直接进镇库，店里没有留存现金，不交利润税、不分红。
+// 留存利润（收入减进货成本与工资）按账记为已上缴镇库，留存额清零。
+function settleTownShop(state, shop) {
+  const remitted = shop.retainedEarningsVoucherUnits || 0;
+  if (remitted) addBookValue(shop, "remittedVoucherUnits", remitted);
+  shop.retainedEarningsVoucherUnits = 0;
+  shop.settlement.days = 0;
+  shop.settlement.profitVoucherUnits = 0;
+  shop.settlement.lossCarryVoucherUnits = 0;
+  shop.settlement.lastSettlementYear = state.year;
+  shop.settlement.lastSettlementDay = state.day + 1;
+  return { settled: true, periodProfitVoucherUnits: 0, taxVoucherUnits: 0, lossCarryVoucherUnits: 0, distributedVoucherUnits: 0,
+    retainedEarningsVoucherUnits: 0, remittedVoucherUnits: remitted, reserveVoucherUnits: 0 };
+}
+
        function settleShopTaxAndDistribution(state, shop, content, force = false, options = {}) {
+  if (shop.town) return settleTownShop(state, shop);
   const interval = shopDefinition(content, shop.typeId)?.settlementDays || content.rules.shopSettlementDays || 30;
   if (!force && shop.settlement.days < interval) return { settled: false };
   const periodProfit = shop.settlement.profitVoucherUnits || 0;
@@ -12597,6 +12786,8 @@ function averageWholesalePriceJin(state, shop, content, history) {
 }
 
 function autoAdjustShopClerks(state, shop, content) {
+  // 镇营综合商店的店员由镇里设定（configureShopClerks），自动审核不覆盖。
+  if (shop.town) return;
   const serial = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
   // 正式员工：每月 1 号审核一次（新店第一次立即审核），一次最多增减一人。
   shop.plan ||= { lastAdjustedSerial: -1 };
@@ -12933,11 +13124,11 @@ function buyFromFarms(state, store, itemId, wantedUnits, content, dailyUnits = w
     const left = wantedUnits - bought;
     if (left <= 0) break;
     if (!(price > 0)) continue;
-    const affordable = Math.floor(maximumPayableValueUnits(state, `shop:${store.id}`, content) * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
+    const affordable = Math.floor(maximumPayableValueUnits(state, shopAccountName(store), content) * content.precision.inventoryUnitsPerJin / (price * currencyScale(content)));
     const units = Math.min(left, farm.inventory[itemId] || 0, affordable);
     if (units <= 0) break;
     const value = Math.round(units / content.precision.inventoryUnitsPerJin * price * currencyScale(content));
-    const payment = settleMonetaryPayment(state, `shop:${store.id}`, `shop:${farm.id}`, currentPaymentComposition(state, value), content,
+    const payment = settleMonetaryPayment(state, shopAccountName(store), `shop:${farm.id}`, currentPaymentComposition(state, value), content,
       "farm_sale", `${store.name}向${farm.name}进${content.items[itemId]?.name || itemId}`, { requireFull: true });
     if (!payment.ok) break;
     const cogs = removeShopInventoryCost(farm, itemId, units);
@@ -12947,8 +13138,8 @@ function buyFromFarms(state, store, itemId, wantedUnits, content, dailyUnits = w
     addBookMap(farm, "soldUnits", itemId, units);
     addBookMap(farm, "storeSoldUnits", itemId, units);
     applyProfit(farm, value - cogs);
-    store.inventory[itemId] = (store.inventory[itemId] || 0) + units;
-    store.inventoryCostVoucherUnits[itemId] = (store.inventoryCostVoucherUnits[itemId] || 0) + value;
+    putStock(store, itemId, units, value);
+    addPricingBasis(store, itemId, value);
     addBookValue(store, "purchaseVoucherUnits", value);
     addBookMap(store, "purchasedUnits", itemId, units);
     bought += units;
@@ -12972,7 +13163,9 @@ function buyFromFarms(state, store, itemId, wantedUnits, content, dailyUnits = w
   syncShopEmployment(state, content);
   const rows = [];
   // 集市先进货：它卖得少（摊位人手封顶），先拿一点养殖场的肉；综合商店需求大，排在后面会把肉全包走、集市进不到货。
-  const procureOrder = [...operating].sort((a, b) => (shopKind(a, content) === "stall" ? 0 : 1) - (shopKind(b, content) === "stall" ? 0 : 1));
+  // 镇营综合商店最先进货（镇里的店，进货优先于私营店）；其次集市。
+  const procureRank = shop => (shop.town ? 0 : shopKind(shop, content) === "stall" ? 1 : 2);
+  const procureOrder = [...operating].sort((a, b) => procureRank(a) - procureRank(b));
   for (const shop of procureOrder) {
     ensureShopBooks(shop, content);
     shop.settlement.days += 1;
@@ -13027,17 +13220,18 @@ function settleTownOwesHouseholds(state, content) {
       : shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory[itemId] || 0), 0);
     const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
     // 贸易行不因无生意而累计坏日子：连续 tradeHousePauseDays 天无买卖且亏损由 trading-houses.js 暂停营业，暂停中不进清算。
-    if (tradeHouse) shop.badDays = 0;
+    // 镇营综合商店不因连续无生意累计坏日子（不自动关店，由玩家关）。
+    if (tradeHouse || shop.town) shop.badDays = 0;
     else if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
-    else if (maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
+    else if (maximumPayableValueUnits(state, shopAccountName(shop), content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
     else if (shopKind(shop, content) === "trade") shop.statusReason = activity > 0 ? "营业中" : "暂无可做的买卖";
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";
     else shop.statusReason = "营业中";
-    if (!shop.collective && shop.badDays >= (content.rules.shopClosureBadDays || 30) && activity <= 0) {
+    if (!shop.collective && !shop.town && shop.badDays >= (content.rules.shopClosureBadDays || 30) && activity <= 0) {
       const closing = closeShop(state, shop.id, content, true);
       rows.push({ shopId: shop.id, closed: true, liquidationPending: closing.liquidationPending, settlement });
     } else rows.push({ shopId: shop.id, closed: false, settlement });
@@ -13090,10 +13284,42 @@ function finalizeShopLiquidation(state, shop, content) {
   return true;
 }
 
+// 镇营综合商店停业（玩家关店）：店员释放（不付辞退补偿，同其他店铺停业）；欠薪立即由镇库偿付，
+// 付不起的记为镇库欠家庭（household.townOwesVoucherUnits，之后镇库有钱就还）；库存归镇库，成本随货转移。
+// 镇营店没有自己的钱，所以不进清算。
+function windUpTownShop(state, shop, content) {
+  setJobCount(state, merchantJobKey(shop), 0, null);
+  setJobCount(state, clerkJobKey(shop), 0, null);
+  shop.status = "closed";
+  shop.statusReason = "已停业，库存归镇库";
+  payDailyLiabilities(state, shop, content);
+  for (const [householdId, due] of Object.entries(shop.liabilities.claimsVoucherUnits || {})) {
+    const household = state.households?.byId?.[householdId];
+    if (!(due > 0) || !household) continue;
+    household.townOwesVoucherUnits = (household.townOwesVoucherUnits || 0) + due;
+    delete shop.liabilities.claimsVoucherUnits[householdId];
+    if (shop.liabilities.claimsPayment) delete shop.liabilities.claimsPayment[householdId];
+  }
+  shop.liabilities.wageVoucherUnits = wageArrears(shop.liabilities);
+  for (const [itemId, units] of Object.entries(shop.inventory || {})) {
+    if (!(units > 0)) continue;
+    const taken = takeStock(shop, itemId, units, { strict: true });
+    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + taken.units;
+    addTownCostBasis(state, itemId, Math.max(0, Math.floor(taken.costUnits)));
+    recordLedger(state, { type: "town_store_stock_return", transactionId: makeTransactionId(state), source: `shop:${shop.id}`, destination: "town",
+      itemId, quantityUnits: taken.units, qeqUnits: 0, reason: `${shop.name}停业，库存归镇库` }, content);
+  }
+  shop.pricingBasisVoucherUnits = {};
+  syncShopEmployment(state, content);
+  recordEvent(state, `${shop.name}停业，库存归镇库。`, content, { day: state.day + 1 });
+  return { ok: true, shopId: shop.id, liquidationPending: false, status: shop.status, liabilitiesVoucherUnits: shopLiabilityTotal(shop) };
+}
+
        function closeShop(state, shopId, content, automatic = false) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
   if (shop.status === "closed") return { ok: true, shopId, alreadyClosed: true, liquidationPending: false };
+  if (shop.town) return windUpTownShop(state, shop, content);
   if (shop.status !== "liquidating") {
     settleShopTaxAndDistribution(state, shop, content, true, { allowDistribution: false });
     setJobCount(state, merchantJobKey(shop), 0, null);
@@ -13234,14 +13460,15 @@ function normalizeShopForSummary(shop, content) {
     else if (kind === "retail" && avgSalesUnits <= 0) operatingStatus = "暂无销量";
     else if (Number.isFinite(shop.plan?.targetClerks) && shop.plan.targetClerks < shopClerkCount(state, shop)) operatingStatus = "用工偏多";
     return {
-      id: shop.id, name: shop.name, buildingId: shop.buildingId, typeId: shop.typeId, typeName: def?.name || shop.typeId, kind, collective: Boolean(shop.collective),
+      id: shop.id, name: shop.name, buildingId: shop.buildingId, typeId: shop.typeId, typeName: def?.name || shop.typeId, kind, collective: Boolean(shop.collective), town: Boolean(shop.town),
       itemId: primary, itemName: primary ? (content.items[primary]?.name || primary) : "", itemIds, inventoryRows, serviceId,
       serviceName: serviceId ? (content.rules.serviceTypes?.[serviceId]?.name || serviceId) : null,
-      ownerHouseholdId: shop.ownerHouseholdId, ownerName: state.households?.byId?.[shop.ownerHouseholdId]?.name || shop.ownerHouseholdId, merchantHouseholdId: shop.ownerHouseholdId, merchantOnDuty: shopMerchantOnDuty(state, shop),
+      ownerHouseholdId: shop.ownerHouseholdId, ownerName: shop.town ? "镇库" : (state.households?.byId?.[shop.ownerHouseholdId]?.name || shop.ownerHouseholdId), merchantHouseholdId: shop.ownerHouseholdId, merchantOnDuty: shopMerchantOnDuty(state, shop),
       merchants: shopMerchantCount(state, shop), maxMerchants: shopMaxMerchants(shop, content),
       clerks: shopClerkCount(state, shop), maxClerks: shopClerkLimit(shop, content), occupiesStreet: shopOccupiesStreet(shop),
       cashVoucher: shop.cashVoucherUnits / scale, cashWheatJin: (shop.cashWheatUnits || 0) / invScale,
-      cashValue: maximumPayableValueUnits(state, `shop:${shop.id}`, content) / scale, inventory: stockUnits / invScale,
+      // 镇营店没有自己的钱（收入在镇库），可支付资金记 0。
+      cashValue: shop.town ? 0 : maximumPayableValueUnits(state, `shop:${shop.id}`, content) / scale, inventory: stockUnits / invScale,
       capacityJin: shopSalesCapacityUnits(state, shop, content) / invScale,
       customerCapacity: shopDailyCustomerCapacity(state, shop, content),
       serviceCapacity: serviceId ? serviceShopCapacityUses(state, shop, content) : 0,
@@ -13323,7 +13550,7 @@ function normalizeShopForSummary(shop, content) {
     };
   });
 }
-return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, farmsHaveStock, shopRetailItemIds, stallItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopMerchantCount, shopClerkCount, shopClerkLimit, shopJinPerCustomer, shopDailyCustomerCapacity, releaseAllShopClerks, shopsForStreet, streetShopCapacity, syncShopEmployment, releaseShopStaffing, shopMinimumCapitalUnits, topUpShopCapital, reopenTradeHouse, shopsAwaitingSuccession, chooseShopSuccessor, transferShopOwnership, succeedShopsOfHousehold, succeedOrphanShops, openShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerRejectedHouseholds, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, stallRentFreeDaysLeft, stallDiscountPerUnit, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
+return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, farmsHaveStock, shopRetailItemIds, stallItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopMerchantCount, shopAccountName, shopClerkCount, shopClerkLimit, shopJinPerCustomer, shopDailyCustomerCapacity, releaseAllShopClerks, shopsForStreet, streetShopCapacity, syncShopEmployment, releaseShopStaffing, shopMinimumCapitalUnits, topUpShopCapital, reopenTradeHouse, shopsAwaitingSuccession, chooseShopSuccessor, transferShopOwnership, succeedShopsOfHousehold, succeedOrphanShops, openShop, openTownShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerRejectedHouseholds, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, stallRentFreeDaysLeft, stallDiscountPerUnit, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
 })();
 
 // ===== systems/building-development.js =====
@@ -16602,7 +16829,7 @@ return { DEFAULT_VILLA_PRICE_WHEAT_JIN, DEFAULT_VILLA_TAX_RATE_PERCENT, ensureVi
 
 // ===== systems/bank.js =====
 const __mxmod72 = (() => {
-const { currencyScale, voucherBalance } = __mxmod26;
+const { currencyScale, transferVouchers, voucherBalance } = __mxmod26;
 const { recordEvent } = __mxmod15;
 const { currentPaymentComposition, settleMonetaryPayment } = __mxmod28;
 const { withdrawFromBank } = __mxmod27;
@@ -16614,6 +16841,8 @@ const { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEH
 const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
        const DEFAULT_LOAN_RATE_ANNUAL_PERCENT = 6;
        const DEFAULT_RESERVE_REQUIREMENT_PERCENT = 10;
+// 还债时银行必须保留的安全垫（占存款比例），规则键 rules.bankDebtRepayBufferShare。
+       const DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE = 0.05;
 // 投资比例改由流动性算法按日自动调整（五期），见 liquidity.js。
 // 生活储备天数与 investment-preference.js 共用同一常量，避免分流口径漂移。
        const BANK_HOUSEHOLD_RESERVE_DAYS = HOUSEHOLD_RESERVE_DAYS;
@@ -16665,6 +16894,10 @@ const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
   stats.loansIssuedVoucherUnits ||= 0;
   stats.loansRepaidVoucherUnits ||= 0;
   stats.badDebtVoucherUnits ||= 0;
+  // 镇库托底：必须先于留存利润补齐（留存利润的反推口径要减去欠镇库的债）。
+  bank.debtToTownUnits ??= 0;
+  bank.totalAdvancedUnits ??= 0;
+  bank.totalRepaidUnits ??= 0;
   if (!Number.isSafeInteger(bank.retainedVoucherUnits)) bank.retainedVoucherUnits = bankRetainedVoucherUnits(state);
   return bank;
 }
@@ -16686,19 +16919,26 @@ function bankDepositTotalVoucherUnits(state) {
   return total;
 }
 
+// 银行欠镇库的债（镇库托底累计，只减不增于还债之外的任何口径）。
+function bankDebtToTownVoucherUnits(state) {
+  return Math.max(0, state.bank?.debtToTownUnits || 0);
+}
+
 // 银行留存利润（可为负）：贷款利息应计 − 坏账核销 + 国债利息收入 − 国债违约损失。
-// 旧存档没有这个字段：此时按"资产 − 存款"反推。旧版存款利息只记台账不付现金，
+// 旧存档没有这个字段：此时按"资产 − 存款 − 欠镇库"反推。旧版存款利息只记台账不付现金，
 // 反推出的负数正是这部分无现金支撑的利息，存款人余额保持不变。
+// 镇库托底的垫付与还款同时改动现金和欠镇库，不改变留存利润。
        function bankRetainedVoucherUnits(state) {
   const bank = state.bank || {};
   if (Number.isSafeInteger(bank.retainedVoucherUnits)) return bank.retainedVoucherUnits;
-  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state);
+  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state) - bankDebtToTownVoucherUnits(state);
 }
 
-// 存款台账守恒（只读）：存款 = 现金 + 在贷余额 + 国债本金 − 留存利润。
+// 存款台账守恒（只读）：存款 + 欠镇库 = 现金 + 在贷余额 + 国债本金 − 留存利润。
        function bankLedgerInvariant(state) {
   const bank = state.bank || {};
   const deposits = bankDepositTotalVoucherUnits(state);
+  const debtToTown = bankDebtToTownVoucherUnits(state);
   const cash = bank.cashVoucherUnits || 0;
   let loans = 0;
   for (const loan of bank.loans || []) if (loan.status === "active") loans += loan.outstandingVoucherUnits || 0;
@@ -16707,7 +16947,61 @@ function bankDepositTotalVoucherUnits(state) {
     for (const holding of issue.holdings || []) if (holding.holderKey === "bank:bank") bonds += holding.principalVoucherUnits || 0;
   }
   const retained = bankRetainedVoucherUnits(state);
-  return { deposits, cash, loans, bonds, retained, valid: deposits === cash + loans + bonds - retained };
+  return { deposits, debtToTown, cash, loans, bonds, retained,
+    valid: deposits + debtToTown === cash + loans + bonds - retained };
+}
+
+// 还债用的安全垫比例：优先读规则 rules.bankDebtRepayBufferShare，缺省用模块默认值。
+       function bankDebtRepayBufferShare(content) {
+  const value = Number(content?.rules?.bankDebtRepayBufferShare);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE;
+}
+
+// 本日（或本次命令）可还给镇库的现金：银行现金超出 法定准备金（存款 × 准备金率）+ 安全垫（存款 × 安全垫比例）的部分，
+// 且不超过欠镇库余额。只读。
+       function bankDebtRepayableUnits(state, content) {
+  const debt = bankDebtToTownVoucherUnits(state);
+  if (debt <= 0 || !state.bank) return 0;
+  // 只读：不用 bankPolicy()（它会写入默认值），缺省时取模块默认准备金率。
+  const reservePercent = state.policy?.bank?.reserveRequirementPercent ?? DEFAULT_RESERVE_REQUIREMENT_PERCENT;
+  const deposits = bankDepositTotalVoucherUnits(state);
+  const reserve = Math.floor(deposits * (reservePercent / 100));
+  const buffer = Math.floor(deposits * bankDebtRepayBufferShare(content));
+  const excess = (state.bank.cashVoucherUnits || 0) - reserve - buffer;
+  return Math.max(0, Math.min(debt, excess));
+}
+
+// 还款：银行现金 → 镇库（统一转账，类型 bank_town_repay），欠镇库余额同步减少。
+function repayBankDebtVoucherUnits(state, content, amount) {
+  const bank = state.bank;
+  const result = transferVouchers(state, "bank", "town", amount, content, "bank_town_repay",
+    "银行向镇库还债（现金超出准备金与安全垫的部分）");
+  if (!result.ok) return { ok: false, reason: result.reason };
+  bank.debtToTownUnits = Math.max(0, (bank.debtToTownUnits || 0) - amount);
+  bank.totalRepaidUnits = (bank.totalRepaidUnits || 0) + amount;
+  return { ok: true, repaidValueUnits: amount };
+}
+
+// 每日还债步骤：把可还额一次还清（没有可还额时什么也不做）。返回本日还债额。
+       function settleBankDebtRepay(state, content) {
+  const amount = bankDebtRepayableUnits(state, content);
+  if (amount <= 0) return 0;
+  const result = repayBankDebtVoucherUnits(state, content, amount);
+  return result.ok ? amount : 0;
+}
+
+// 玩家命令：从银行现金还债给镇库，金额最多为可还额（超出准备金与安全垫的现金，且不超过欠款）。
+       function repayBankDebtToTown(state, amountJin, content) {
+  if (!state.bank || (state.bank.debtToTownUnits || 0) <= 0) return { ok: false, reason: "银行没有欠镇库的钱" };
+  const scale = currencyScale(content);
+  const requested = Math.round(Math.max(0, Number(amountJin) || 0) * scale);
+  if (!Number.isSafeInteger(requested) || requested <= 0) return { ok: false, reason: "还款金额必须大于0" };
+  const amount = Math.min(requested, bankDebtRepayableUnits(state, content));
+  if (amount <= 0) return { ok: false, reason: "银行现金需先超出准备金与安全垫，暂不能还债" };
+  const result = repayBankDebtVoucherUnits(state, content, amount);
+  if (!result.ok) return result;
+  return { ok: true, repaidValueUnits: amount, repaidJin: amount / scale,
+    debtJin: state.bank.debtToTownUnits / scale };
 }
 
        function bankAvailable(state) {
@@ -16731,12 +17025,13 @@ function bankDepositTotalVoucherUnits(state) {
   };
 }
 
-// 可贷额度 = 银行现金 - 法定准备金（存款×准备金率）
+// 可贷额度 = 银行现金 - 法定准备金（存款×准备金率）- 欠镇库（镇库托底垫付的债要先还，不能把镇库的钱再借出去）。
+// 放贷（issueBankLoan / settleBankAutoLoans）与国债认购（bonds.js）共用这一口径。
        function bankLoanableVoucherUnits(state) {
   const policy = bankPolicy(state);
   const totals = bankTotals(state);
   const required = Math.floor(totals.totalDepositsVoucherUnits * (policy.reserveRequirementPercent / 100));
-  return Math.max(0, totals.cashVoucherUnits - required);
+  return Math.max(0, totals.cashVoucherUnits - required - bankDebtToTownVoucherUnits(state));
 }
 
        function depositToBank(state, householdId, voucherUnits, content = null) {
@@ -16953,6 +17248,8 @@ function settleBankAutoLoans(state, content, bank) {
   const dayIndex = (state.year - 1) * daysPerYear + state.day;
   settleBankDepositsDay(state, content, bank, policy, daysPerYear);
   settleBankLoansDay(state, content, bank, policy, dayIndex);
+  // 先还镇库托底的债，再放新贷款：超出准备金与安全垫的现金优先还债，不把垫付的钱又借给公司。
+  settleBankDebtRepay(state, content);
   settleBankAutoLoans(state, content, bank);
   if ((bank.cashVoucherUnits || 0) < 0) {
     // 银行现金持续为负时逐日告警会刷屏；用事件合并机制折叠成一条聚合事件。
@@ -16970,10 +17267,11 @@ function settleBankAutoLoans(state, content, bank) {
     totalDepositsVoucherUnits: totals.totalDepositsVoucherUnits,
     outstandingLoansVoucherUnits: totals.outstandingLoansVoucherUnits,
     loanableVoucherUnits: bankLoanableVoucherUnits(state),
-    badDebtVoucherUnits: bank.stats.badDebtVoucherUnits
+    badDebtVoucherUnits: bank.stats.badDebtVoucherUnits,
+    debtToTownVoucherUnits: bank.debtToTownUnits
   };
 }
-return { DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT, DEFAULT_LOAN_RATE_ANNUAL_PERCENT, DEFAULT_RESERVE_REQUIREMENT_PERCENT, BANK_HOUSEHOLD_RESERVE_DAYS, BANK_LOAN_TERM_DAYS, BANK_LOAN_WRITEOFF_OVERDUE_DAYS, bankPolicy, setBankPolicy, ensureBankState, bankRetainedVoucherUnits, bankLedgerInvariant, bankAvailable, bankTotals, bankLoanableVoucherUnits, depositToBank, issueBankLoan, settleBankDay, withdrawFromBank };
+return { DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT, DEFAULT_LOAN_RATE_ANNUAL_PERCENT, DEFAULT_RESERVE_REQUIREMENT_PERCENT, DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE, BANK_HOUSEHOLD_RESERVE_DAYS, BANK_LOAN_TERM_DAYS, BANK_LOAN_WRITEOFF_OVERDUE_DAYS, bankPolicy, setBankPolicy, ensureBankState, bankRetainedVoucherUnits, bankLedgerInvariant, bankDebtRepayBufferShare, bankDebtRepayableUnits, settleBankDebtRepay, repayBankDebtToTown, bankAvailable, bankTotals, bankLoanableVoucherUnits, depositToBank, issueBankLoan, settleBankDay, withdrawFromBank };
 })();
 
 // ===== systems/bonds.js =====
@@ -17551,7 +17849,7 @@ return { AGREEMENT_MIN_YEARS, AGREEMENT_MAX_YEARS, AGREEMENT_BREACH_PENALTY_RATE
 // ===== systems/redistribution.js =====
 const __mxmod75 = (() => {
 const { currencyScale, transferVouchers } = __mxmod26;
-const { currentPaymentComposition, settleMonetaryPayment } = __mxmod28;
+const { currentPaymentComposition, depositWithdrawableUnits, settleMonetaryPayment } = __mxmod28;
 const { withdrawFromBank } = __mxmod27;
 const { addTownCostBasis, quoteTownCostRemoval } = __mxmod22;
 const { recordEvent, recordLedger, makeTransactionId } = __mxmod15;
@@ -17816,9 +18114,9 @@ function escheatHousehold(state, household, content) {
   const reason = `${household.name}整户失效，家产归镇库`;
   const totals = { voucherUnits: 0, inventoryValueUnits: 0, shareCount: 0, buildingCount: 0, villaCount: 0 };
 
-  // 1. 存款：银行现金够才能取回，取不回的留在存款台账，之后每日再试。
+  // 1. 存款：银行现金不够时镇库可垫付（记为银行欠镇库），两者都不够才取不回；取不回的留在存款台账，之后每日再试。
   const deposit = Math.max(0, state.bank?.deposits?.[id] || 0);
-  const takeable = Math.min(deposit, Math.max(0, state.bank?.cashVoucherUnits || 0));
+  const takeable = Math.min(deposit, depositWithdrawableUnits(state, owner));
   // 只剩取不回的存款：这一次什么也动不了，不记事件，等银行有现金再办。
   const movable = takeable > 0 || (household.voucherUnits || 0) > 0 || ownedPrivateBuildings(state, id).length > 0
     || Object.values(household.inventory || {}).some(units => units > 0)
@@ -18057,7 +18355,7 @@ const { listCompanyOnExchange, configureListedShareOffer, executeTownBuyback } =
 const { listBuilding: listBuildingSystem, approveIpoApplication: approveIpoApplicationSystem, rejectIpoApplication: rejectIpoApplicationSystem } = __mxmod68;
 const { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndustryPrices } = __mxmod34;
 const { setPublicProcurementIntent: setPublicProcurementIntentSystem, clearPublicProcurementIntent: clearPublicProcurementIntentSystem } = __mxmod47;
-const { openShop, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } = __mxmod58;
+const { openShop, openTownShop: openTownShopSystem, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } = __mxmod58;
 const { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, setWholesaleAutoPricing, stockpileWholesale: stockpileWholesaleSystem, releaseWholesale: releaseWholesaleSystem } = __mxmod36;
 const { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice, isDynamicPricingShop } = __mxmod57;
 const { MARGIN_POLICY_MAX_PERCENT, pinGlideBeforeChange, policyShopMarginPercent, policyTradeMarginPercent, shopOverrideMarginPercent } = __mxmod54;
@@ -18065,7 +18363,7 @@ const { setBuildingOutputTarget } = __mxmod53;
 const { setServiceUnitPrice } = __mxmod70;
 const { reclaimFarmland: reclaimFarmlandSystem } = __mxmod40;
 const { setVillaPolicy: setVillaPolicySystem } = __mxmod71;
-const { setBankPolicy: setBankPolicySystem } = __mxmod72;
+const { setBankPolicy: setBankPolicySystem, repayBankDebtToTown: repayBankDebtToTownSystem } = __mxmod72;
 const { issueGovernmentBond: issueGovernmentBondSystem } = __mxmod73;
 const { setWageControlPolicy: setWageControlPolicySystem } = __mxmod43;
 const { setSocialSecurityPolicy: setSocialSecurityPolicySystem, injectSocialSecurity: injectSocialSecuritySystem, repaySocialSecurityDebt: repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares, setEmployerSocialSharePercent: setEmployerSocialSharePercentSystem } = __mxmod42;
@@ -18148,6 +18446,10 @@ function setWageRate(state, roleId, dailyJin, content) {
 
        function terminateTradeAgreement(state, id, content) {
   return terminateTradeAgreementSystem(state, id, content);
+}
+
+       function repayBankDebtToTown(state, amountJin, content) {
+  return repayBankDebtToTownSystem(state, amountJin, content);
 }
 
        function injectSocialSecurity(state, amountJin, content) {
@@ -18445,6 +18747,11 @@ const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋�
   return openShop(state, buildingId, typeId, content, householdId || null);
 }
 
+// 镇里在商业街开一家镇营综合商店：镇库持有，店员由镇里设定，收入进镇库（systems/shops.js）。
+       function openTownShop(state, buildingId, content) {
+  return openTownShopSystem(state, buildingId, content);
+}
+
        function configureShopMerchants(state, shopId, count, content) {
   return setShopMerchants(state, shopId, count, content);
 }
@@ -18518,7 +18825,7 @@ const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋�
        function reclaimFarmland(state, acres, workers, content) {
   return reclaimFarmlandSystem(state, content, { acres, workers });
 }
-return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setEmployerSocialSharePercent, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setWealthTax, setInheritanceTax, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listBuilding, approveIpoApplication, rejectIpoApplication, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallRentFree, setStallDiscountTier, setStallKeeperLimit, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland };
+return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setEmployerSocialSharePercent, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, repayBankDebtToTown, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setWealthTax, setInheritanceTax, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listBuilding, approveIpoApplication, rejectIpoApplication, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallRentFree, setStallDiscountTier, setStallKeeperLimit, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland };
 })();
 
 // ===== mods/api.js =====
@@ -19199,6 +19506,13 @@ function validateState(state, content) {
   if (!currencyCheck.valid) errors.push("粮券总账不守恒：账户余额与未注销发行量不一致");
   // 存款台账 = 银行现金 + 在贷余额 + 国债本金 − 留存利润：存款利息必须有现金支撑。
   if (!bankLedgerInvariant(state).valid) errors.push("银行存款台账与现金、贷款、国债不守恒");
+  // 镇库托底（银行欠镇库的债）：账目都是非负安全整数。
+  if (state?.bank) {
+    for (const key of ["debtToTownUnits", "totalAdvancedUnits", "totalRepaidUnits"]) {
+      const value = state.bank[key] ?? 0;
+      if (!Number.isSafeInteger(value) || value < 0) errors.push("银行镇库托底账无效：" + key);
+    }
+  }
   if (!state.stockExchange || typeof state.stockExchange !== "object" || Array.isArray(state.stockExchange) || typeof state.stockExchange.legacyAccess !== "boolean") {
     errors.push("交易所状态无效");
   }
@@ -19286,7 +19600,7 @@ function validateState(state, content) {
       const street = state.buildings.find(row => row.id === shop.buildingId && row.typeId === (shopTypeDef?.hostBuildingTypeId || "commercial_street"));
       if (!street && shop.status !== "closed") errors.push("店铺引用了无效商业街：" + shop.id);
       const owner = state.households?.byId?.[shop.ownerHouseholdId];
-      if (!owner && !shop.collective) errors.push("店铺缺少家庭所有者：" + shop.id);
+      if (!owner && !shop.collective && !shop.town) errors.push("店铺缺少家庭所有者：" + shop.id);
       if (!content.rules.shopTypes?.[shop.typeId]) errors.push("店铺类型无效：" + shop.id);
       if (!Number.isSafeInteger(shop.cashVoucherUnits) || shop.cashVoucherUnits < 0) errors.push("店铺粮券余额无效：" + shop.id);
       if (!Number.isSafeInteger(shop.cashWheatUnits || 0) || (shop.cashWheatUnits || 0) < 0) errors.push("店铺支付小麦余额无效：" + shop.id);
@@ -19298,12 +19612,13 @@ function validateState(state, content) {
       const clerkKey = `shop:${shop.id}:clerk`;
       const merchantCount = jobCount(state, merchantKey);
       const clerkCount = jobCount(state, clerkKey);
-      if (!shop.collective && merchantCount > (shopTypeDef?.maxMerchants ?? content.rules.shopMaxMerchants ?? 4)) errors.push("商人超过上限：" + shop.id);
+      if (!shop.collective && !shop.town && merchantCount > (shopTypeDef?.maxMerchants ?? content.rules.shopMaxMerchants ?? 4)) errors.push("商人超过上限：" + shop.id);
+      if (shop.town && merchantCount > 0) errors.push("镇营店不应有商人：" + shop.id);
       const shopClerkMax = Number.isFinite(shopTypeDef?.maxClerks) ? shopTypeDef.maxClerks
         : shopTypeDef?.id === "general" ? (content.rules.generalStoreMaxClerks || 50) : (content.rules.shopMaxClerks || 20);
       if (clerkCount > shopClerkMax) errors.push("店员超过上限：" + shop.id);
       if (shop.status === "open") {
-        if (!shop.collective && (!owner || !isActiveHousehold(owner) || (owner.jobs?.[merchantKey] || 0) < 1 || merchantCount < 1)) errors.push("商人岗位归属无效：" + shop.id);
+        if (!shop.collective && !shop.town && (!owner || !isActiveHousehold(owner) || (owner.jobs?.[merchantKey] || 0) < 1 || merchantCount < 1)) errors.push("商人岗位归属无效：" + shop.id);
       } else if (merchantCount || clerkCount) {
         errors.push("非营业店铺仍保留岗位：" + shop.id);
       }
@@ -23067,7 +23382,7 @@ function townBookFor(state, jobKey) {
 }
 
        function shopPayTotals(state, content, shop) {
-  return { pendingWagesVoucher: voucherOf(pendingWages(shop?.liabilities || {}), content), payDay: payDayFor(state, `shop:${shop.id}`) };
+  return { pendingWagesVoucher: voucherOf(pendingWages(shop?.liabilities || {}), content), payDay: payDayFor(state, shop?.town ? "town" : `shop:${shop.id}`) };
 }
 return { employerBookTotals, decorateTownLaborRows, townBuildingWageTotals, privateBuildingWageTotals, companyWageTotals, shopPayTotals };
 })();
@@ -23114,6 +23429,7 @@ const { householdRecentTotalsReadonly, householdFoodDays } = __mxmod24;
 const { createDashboardRuntime, employmentExchangeRemainingUnits } = __mxmod107;
 const { selectVillaStats } = __mxmod71;
 const { selectSocialSecurityStats } = __mxmod42;
+const { bankDebtRepayableUnits } = __mxmod72;
 const { decorateTownLaborRows, townBuildingWageTotals, privateBuildingWageTotals, companyWageTotals, shopPayTotals } = __mxmod108;
 function selectSeason(day, monthDays = 30) {
   const month = Math.floor(day / monthDays) + 1;
@@ -23326,7 +23642,10 @@ function selectHeaderVoucher(state, content) {
   // 外镇选择：界面传入 selection.outsideTownId；未知或缺省时用默认外镇。
   const outsideTownIds = Object.keys(content.outsideTowns || {});
   const outsideTownId = outsideTownIds.includes(selection?.outsideTownId) ? selection.outsideTownId : DEFAULT_OUTSIDE_TOWN_ID;
-  const outsideTownViews = needBusiness ? outsideTownIds.map(id => selectOutsideTownView(state, content, id)).filter(Boolean) : [];
+  // 外贸数据：经营面板，或选中了外贸房的地方详情（外贸功能搬进了外贸房面板，docs/TRADE.md）。
+  const selectedForeignHouse = needSite && (state.buildings || []).some(building => building.typeId === "foreign_trade_house" && selection?.site === `building:${building.id}`);
+  const needOutsideTrade = needBusiness || selectedForeignHouse;
+  const outsideTownViews = needOutsideTrade ? outsideTownIds.map(id => selectOutsideTownView(state, content, id)).filter(Boolean) : [];
   const buildings = state.buildings.map(function (building) {
     const definition = content.buildings[building.typeId];
     const ownership = building.ownership || { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
@@ -23522,7 +23841,8 @@ function selectHeaderVoucher(state, content) {
     : 0;
   const shops = (full || needPolicy || needSite) ? shopSummaries(state, content).map(function (row) { const shopState = state.shops?.[row.id]; return { ...withFarmPricing(state, row, content), ...(shopState ? shopPayTotals(state, content, shopState) : {}) }; }) : [];
   const stallSquares = (full || needPolicy || needSite) ? stallSquareSummaries(state, content, shops) : [];
-  const companies = needBusiness ? Object.values(state.companies || {}).map(company => {
+  // 公司经营控件也放在公司所在建筑的地方详情里，所以地方详情同样需要公司视图。
+  const companies = (needBusiness || needSite) ? Object.values(state.companies || {}).map(company => {
     const summary = companySummary(state, company, content);
     const subscription = company.listing?.listed ? previewShareSubscription(state, company.id, content) : { available: false, reason: "公司尚未上市" };
     const reference = company.listing?.listed ? stockReference(state, company, content) : companyActualReferencePlaceholder(company, content);
@@ -23663,17 +23983,18 @@ function selectHeaderVoucher(state, content) {
     // 各 mod 的只读视图（mod.js 的 select）。
     mods: selectModViews(state, content, MODS),
     // 外镇：outsideTowns 是全部外镇的视图（界面切换用）；outsideTown / tradeAgreements 是当前选中的那一个。
-    outsideTowns: needBusiness ? outsideTownViews : null,
+    outsideTowns: needOutsideTrade ? outsideTownViews : null,
     outsideTownId: outsideTownId,
-    outsideTown: needBusiness ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
-    tradeAgreements: needBusiness ? selectTradeAgreementView(state, content, outsideTownId) : null,
-    logistics: needBusiness ? selectLogisticsView(state, content) : null,
+    outsideTown: needOutsideTrade ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
+    tradeAgreements: needOutsideTrade ? selectTradeAgreementView(state, content, outsideTownId) : null,
+    logistics: needOutsideTrade ? selectLogisticsView(state, content) : null,
     // 贸易行（只读）：每家贸易行今日与近 7 日的买卖、利润、运费、小麦与运力份额。
     tradeHouses: needBusiness || needSite ? selectTradeHouseView(state, content) : null,
     // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
     wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,
-    policy: needPolicy ? {
+    // 银行建筑面板也读 bankStats / bondStats（利率、准备金率、国债），所以站点面板同样需要这一块。
+    policy: (needPolicy || needSite) ? {
       ...(state.policy || { unemploymentBenefit: { enabled: false, dailyPerWorkerJin: 1 } }),
       unemployed: labor.idle,
       dailyExpectedWheatJin: labor.idle * (state.policy?.unemploymentBenefit?.dailyPerWorkerJin || 0),
@@ -23700,10 +24021,16 @@ function selectHeaderVoucher(state, content) {
           reserveRequirementPercent: reservePct,
           totalDepositsVoucher: totalDeposits / voucherScale,
           outstandingLoansVoucher: outstanding / voucherScale,
-          loanableVoucher: Math.max(0, (bank.cashVoucherUnits || 0) - Math.floor(totalDeposits * reservePct / 100)) / voucherScale,
+          // 可贷额 = 现金 − 准备金 − 欠镇库（与 systems/bank.js 的 bankLoanableVoucherUnits 同口径；此处不能调用它，因其会写入默认政策）。
+          loanableVoucher: Math.max(0, (bank.cashVoucherUnits || 0) - Math.floor(totalDeposits * reservePct / 100) - (bank.debtToTownUnits || 0)) / voucherScale,
           badDebtVoucher: (bank.stats?.badDebtVoucherUnits || 0) / voucherScale,
           interestEarnedVoucher: (bank.stats?.interestEarnedVoucherUnits || 0) / voucherScale,
-          interestPaidVoucher: (bank.stats?.interestPaidVoucherUnits || 0) / voucherScale
+          interestPaidVoucher: (bank.stats?.interestPaidVoucherUnits || 0) / voucherScale,
+          // 镇库托底（银行欠镇库的债）：只读，单位斤（与 social 口径一致，粮券按 currencyScale 折算）。
+          debtToTownJin: (bank.debtToTownUnits || 0) / voucherScale,
+          totalAdvancedJin: (bank.totalAdvancedUnits || 0) / voucherScale,
+          totalRepaidJin: (bank.totalRepaidUnits || 0) / voucherScale,
+          debtRepayableJin: bankDebtRepayableUnits(state, content) / voucherScale
         };
       })(),
       // 国债统计（金融扩展三期）：只读
@@ -23712,6 +24039,7 @@ function selectHeaderVoucher(state, content) {
         const daysPerYear = content.rules.daysPerYear || 360;
         const statusLabel = { active: "存续中", matured: "已兑付", failed: "未发行", defaulted: "已违约" };
         return {
+          activeCount: (bonds.issues || []).filter(issue => issue.status === "active").length,
           issues: (bonds.issues || []).slice(-5).reverse().map(issue => ({
             id: issue.id,
             status: issue.status,
@@ -23800,7 +24128,7 @@ function selectHeaderVoucher(state, content) {
       guidancePending: Boolean(state.currency?.guidancePending)
     } : null,
     companies,
-    stockExchange: needBusiness ? {
+    stockExchange: (needBusiness || needSite) ? {
       available: hasStockExchange(state),
       physical: runtime.buildingTypeCounts.has("stock_exchange"),
       legacyAccess: Boolean(state.stockExchange?.legacyAccess),
@@ -23899,7 +24227,7 @@ const { validateContent } = __mxmod18;
 const { createInitialState } = __mxmod39;
 const { settleOneDay, createDayRunner } = __mxmod101;
 const { advanceGameDays: advanceDaysWithClock } = __mxmod20;
-const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, issueGovernmentBond, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setWealthTax, setInheritanceTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, listBuilding, approveIpoApplication, rejectIpoApplication, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod76;
+const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, repayBankDebtToTown, issueGovernmentBond, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setWealthTax, setInheritanceTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, listBuilding, approveIpoApplication, rejectIpoApplication, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, startCurrencyReform, reclaimFarmland } = __mxmod76;
 const { selectDemolitionPreview, selectUpgradePreview } = __mxmod59;
 const { validateState } = __mxmod82;
 const { selectDashboard } = __mxmod109;
@@ -23971,6 +24299,9 @@ function createSimulation(content) {
     },
     setBankPolicy: function (state, patch) {
       return setBankPolicy(state, patch);
+    },
+    repayBankDebtToTown: function (state, amountJin) {
+      return repayBankDebtToTown(state, amountJin, definitions);
     },
     setAutosaveMonths: function (state, months) {
       return setAutosaveMonths(state, months);
@@ -24058,6 +24389,7 @@ function createSimulation(content) {
     setTradeTariff: function (state, patch) { return setTradeTariff(state, patch, definitions); },
     setMarginPolicy: function (state, patch) { return setMarginPolicy(state, patch, definitions); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
+    openTownShop: function (state, buildingId) { return openTownShop(state, buildingId, definitions); },
     configureShopMerchants: function (state, shopId, count) { return configureShopMerchants(state, shopId, count, definitions); },
     configureShopClerks: function (state, shopId, count) { return configureShopClerks(state, shopId, count, definitions); },
     closeResidentShop: function (state, shopId) { return closeResidentShop(state, shopId, definitions); },
@@ -27609,7 +27941,6 @@ return { renderResidents };
 // ===== ui/panel-trade.js =====
 const __mxmod136 = (() => {
 const { escapeHtml, number, moneyUnit, moneyMixHint } = __mxmod121;
-const { renderNumericInput } = __mxmod131;
 function renderTrade(view) {
   const unit = moneyUnit(view);
   const trade = view.market.trade || {};
@@ -27617,9 +27948,11 @@ function renderTrade(view) {
   const shares = staples.shares || { wheat: 0.6, flour: 0.2, bread: 0.2 };
   const rows = (staples.rows || []).filter(row => row.itemId !== "wheat");
   const price = view.market.breadPriceWheatPerJin;
+  const wholesale = (view.buildings || []).find(building => building.typeId === "wholesale_market") || null;
   const itemName = itemId => (view.itemNames && view.itemNames[itemId]) || itemId;
   return `<h2>居民主粮购买</h2>
-    <div class="cardlet"><div class="row"><span class="label">面包售价</span><div class="setting-input">${renderNumericInput(view, { key: "bread-price", kind: "bread-price", target: "bread", value: price, label: "每斤面包的小麦等值售价", minimum: 0, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${unit}/斤</b></div></div>
+    <div class="cardlet"><div class="row"><span class="label">面包售价</span><strong class="value">${number(price, 3)}${unit}/斤 <span class="subtle">批发价，在批发市场面板设置</span></strong></div>
+      <div class="site-actions">${wholesale ? `<button class="secondary" data-open-building="${escapeHtml(wholesale.id)}">前往批发市场</button>` : `<button class="secondary" disabled>尚未建批发市场</button>`}</div>
       <div class="row"><span class="label">居民 / 镇库面包库存</span><strong class="value">${number(view.market.residentBreadJin)} / ${number(view.market.townBreadJin)}斤</strong></div>
       ${rows.length ? rows.map(row => `<div class="row"><span class="label">${escapeHtml(itemName(row.itemId))} 目标 / 买到</span><strong class="value">${number(row.targetQeqJin, 1)} / ${number(row.purchasedJin, 1)}斤 · 付${number(row.paidVoucher, 1)}${unit}</strong></div>${row.purchasedJin <= 0 && row.limitReason ? `<div class="subtle">${escapeHtml(row.limitReason)}</div>` : ""}`).join("") : `<div class="subtle">时光流动后显示当日购买情况。</div>`}
     </div>
@@ -27720,6 +28053,27 @@ function townSwitch(view, selectedId) {
   }).join("")}</div>`;
 }
 
+// 经营面板的外贸摘要（外贸操作搬到外贸房面板）：一行概况 + 前往外贸房；运力池（全镇池）与贸易行合计各一行。
+       function renderOutsideTownSummary(view) {
+  const ot = view.outsideTown;
+  const house = (view.buildings || []).find(building => building.typeId === "foreign_trade_house") || null;
+  const ta = view.tradeAgreements || { activeCount: 0 };
+  const staffText = !house ? "尚未建外贸房" : ot?.foreignTradeOperational ? `在岗 ${number(ot.foreignTradeStaff || 0)} 人` : "无人值守";
+  const poolText = view.logistics ? `${number(view.logistics.poolJin, 0)} 斤` : "—";
+  const th = view.tradeHouses;
+  const tradeLine = th && th.houseCount
+    ? `<div class="row freight-row trade-house-summary"><span class="label">贸易行</span><strong class="value">${number(th.houseCount)}家 · 在岗${number(th.staff)}人 · 今日出口 ${number(th.todayTotals.exportTotalJin, 1)} / 进口 ${number(th.todayTotals.importTotalJin, 1)}斤 · 利润 ${number(th.todayTotals.profitVoucher, 2)}${escapeHtml(moneyUnit(view))}</strong></div>`
+    : "";
+  const button = house
+    ? `<button class="secondary" data-open-building="${escapeHtml(house.id)}">前往外贸房</button>`
+    : `<button class="secondary" disabled>前往外贸房</button>`;
+  return `<div class="cardlet">${freightRow(view.logistics)}
+      <div class="row"><span class="label">外贸${ot ? `（${escapeHtml(ot.name)}）` : ""}</span><strong class="value">${staffText} · 长协 ${number(ta.activeCount || 0)} 份 · 运力今日 ${poolText}</strong></div>
+      ${tradeLine}
+      <div class="site-actions">${button}</div>
+      <div class="subtle">商品行情、对外关系、长期协定与小麦贷款都在外贸房面板里操作。</div></div>`;
+}
+
        function renderOutsideTown(view) {
   const ot = view.outsideTown;
   if (!ot) return `<div class="subtle">外贸数据不可用。</div>`;
@@ -27797,7 +28151,7 @@ function townSwitch(view, selectedId) {
       <button class="secondary" data-wheat-loan-issue="1" data-town="${id}">发放贷款</button></div></div>
     </div>`;
 }
-return { renderOutsideTown };
+return { renderOutsideTownSummary, renderOutsideTown };
 })();
 
 // ===== ui/panel-business.js =====
@@ -28020,14 +28374,21 @@ function items(map, names, units, scale) {
 return { renderAnnualFlows };
 })();
 
-// ===== ui/panel-enterprises.js =====
+// ===== ui/panel-exchange.js =====
 const __mxmod142 = (() => {
 const { escapeHtml, number, moneyUnit, monthlyWageValue, payDayText } = __mxmod121;
+const EXCHANGE_TABS = [
+  { id: "listing", name: "挂牌" },
+  { id: "applications", name: "民营申请" },
+  { id: "companies", name: "公司" },
+  { id: "status", name: "状态" }
+];
+
 function draftValue(view, key, fallback) {
   return escapeHtml(view.numericDrafts?.[key]?.value ?? String(fallback ?? ""));
 }
 
-function stagedInput(view, { key, label, value = 0, integer = false, minimum = 0, maximum = 100000000, positive = false }) {
+       function stagedInput(view, { key, label, value = 0, integer = false, minimum = 0, maximum = 100000000, positive = false }) {
   return `<input type="text" inputmode="${integer ? "numeric" : "decimal"}" enterkeyhint="done" autocomplete="off" spellcheck="false"
     value="${draftValue(view, key, value)}" aria-label="${escapeHtml(label)}" data-draft-key="${escapeHtml(key)}"
     data-draft-kind="stage" data-draft-label="${escapeHtml(label)}" data-draft-minimum="${minimum}"
@@ -28044,16 +28405,41 @@ function itemRowsText(rows, empty = "暂无") {
   return rows.map(row => `${escapeHtml(row.name)} ${number(row.quantity, 2)}${escapeHtml(row.unit)}`).join(" · ");
 }
 
-function renderPrices(view) {
-  const unit = moneyUnit(view);
-  const prices = view.market.intermediatePricesVoucherPerUnit || {};
-  return `<section class="enterprise-section"><h2>价格</h2><div class="cardlet">
-    <div class="row"><span class="label">小麦 / 食盐</span><strong class="value">${number(view.market.pricesVoucherPerUnit?.wheat ?? 1, 3)} / ${number(view.market.pricesVoucherPerUnit?.salt ?? 10, 3)}${escapeHtml(unit)}/斤</strong></div>
-    <div class="row"><span class="label">面粉</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:flour", label: "面粉价格", value: prices.flour ?? 1.8, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="flour">设置</button></div></div>
-    <div class="row"><span class="label">面包</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:bread", label: "面包价格", value: view.market.pricesVoucherPerUnit?.bread ?? 2, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="bread">设置</button></div></div>
-    <div class="row"><span class="label">木材</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:wood", label: "木材价格", value: prices.wood ?? 15, positive: true })}<b>${escapeHtml(unit)}/单位</b><button class="secondary" data-intermediate-price="wood">设置</button></div></div>
-    <div class="subtle">均为批发价，商店零售另加价。</div>
-  </div></section>`;
+// 镇营整栋上市的候选行：镇营产业且尚未成立公司（已挂牌的公司在「公司」里）。
+       function townListingRows(view) {
+  return (view.ipo?.buildings || []).filter(row => row.owner === "town" && !row.companyId);
+}
+
+// 交易所摘要：已上市公司数、待批申请数、可上市建筑数、总市值（现价 × 总股本，粮券）。
+       function exchangeTotals(view) {
+  const companies = view.companies || [];
+  const listed = companies.filter(company => company.listing?.listed);
+  return {
+    companyCount: companies.length,
+    listedCount: listed.length,
+    applicationCount: (view.ipo?.applications || []).length,
+    listableCount: townListingRows(view).filter(row => row.canList).length,
+    marketCapVoucher: listed.reduce((sum, company) => sum + (company.sharePriceVoucher || 0) * (company.totalShares || 0), 0)
+  };
+}
+
+       function exchangeBuildingOf(view) {
+  return (view.buildings || []).find(row => row.typeId === "stock_exchange") || null;
+}
+
+// 公司对应的建筑：公司只绑定一栋（company.buildingId）；建筑上的 companyId 与之一致。
+// 找不到（建筑已不在）时返回 null，界面显示“建筑缺失”。
+       function companyForBuilding(view, building) {
+  const companies = view.companies || [];
+  if (building.companyId) return companies.find(row => row.id === building.companyId) || null;
+  return companies.find(row => row.buildingId === building.id) || null;
+}
+
+function renderCooldownLine(view) {
+  const ipo = view.ipo || {};
+  const cooldowns = (ipo.cooldowns || []).filter(row => row.active);
+  if (!cooldowns.length) return "";
+  return `<div class="subtle">冷却中：${cooldowns.map(row => `${escapeHtml(row.householdName)}约${number(Math.max(0, row.untilSerial - (ipo.serial || 0)))}日后可再申请`).join("；")}。</div>`;
 }
 
 // 整栋上市表单：镇营产业整栋放入新公司挂牌（docs/OWNERSHIP.md 第 2 条）。数值走暂存草稿，按钮提交。
@@ -28061,7 +28447,7 @@ function renderTownListingForm(view, row) {
   const unit = moneyUnit(view);
   const id = escapeHtml(row.buildingId);
   const key = suffix => `ipo:${row.buildingId}:${suffix}`;
-  return `<div class="cardlet"><div class="row"><strong>${escapeHtml(row.name)} · ${id}</strong><span class="badge">镇营${number(row.level)}级</span></div>
+  return `<div class="exchange-form">
     <div class="business-form-grid">
       <label>股票代码（可空）<input type="text" inputmode="numeric" maxlength="3" autocomplete="off" value="" placeholder="自动" data-ipo-ticker="${id}"></label>
       <label>公司名称<input type="text" maxlength="30" autocomplete="off" value="${escapeHtml(`${row.name}公司`)}" data-ipo-name="${id}"></label>
@@ -28069,8 +28455,22 @@ function renderTownListingForm(view, row) {
       <label>卖出比例${stagedInput(view, { key: key("offer"), label: "卖出比例", value: row.suggestedOfferPercent, minimum: 0, maximum: 100 })}<small>%</small></label>
       <label>每股价格${stagedInput(view, { key: key("price"), label: "每股价格", value: row.suggestedPriceVoucherPerShare ?? 1, positive: true })}<small>${escapeHtml(unit)}</small></label>
     </div>
-    ${row.reason ? `<div class="shortage-banner visible">${escapeHtml(row.reason)}</div>` : `<div class="subtle">整栋放入新公司挂牌；镇库保留未卖出的股份，股款归镇库。卖出比例填 0 就是先不卖，之后到交易所自己设出售股数，居民不会自动买走没挂出的股份。</div>`}
+    ${row.reason ? `<div class="shortage-banner visible">${escapeHtml(row.reason)}</div>` : `<div class="subtle">整栋放入新公司挂牌；镇库保留未卖出的股份，股款归镇库。卖出比例填 0 就是先不卖，之后到交易所「公司」里自己设出售股数，居民不会自动买走没挂出的股份。</div>`}
     <button class="primary wide" data-ipo-list="${id}" ${row.canList ? "" : "disabled"}>整栋上市</button>
+  </div>`;
+}
+
+function renderTownListingRow(view, row, expanded) {
+  const unit = moneyUnit(view);
+  const id = escapeHtml(row.buildingId);
+  const gate = view.ipo?.gateReason || null;
+  const reason = row.reason && row.reason !== gate ? row.reason : null;
+  return `<div class="cardlet exchange-row${expanded ? " is-open" : ""}">
+    <div class="row"><strong>${escapeHtml(row.name)} · ${id}</strong><span class="badge">镇营${number(row.level)}级</span></div>
+    <div class="row"><span class="label">估值 / 建议发行价</span><strong class="value">${row.valuationVoucher == null ? "—" : number(row.valuationVoucher, 2)} / ${row.suggestedPriceVoucherPerShare == null ? "—" : number(row.suggestedPriceVoucherPerShare, 2)}${escapeHtml(unit)}</strong></div>
+    ${!expanded && reason ? `<div class="subtle">${escapeHtml(reason)}</div>` : ""}
+    <div class="settings-actions"><button class="${expanded ? "secondary" : "primary"}" data-ipo-expand="${id}" aria-expanded="${expanded ? "true" : "false"}">${expanded ? "收起" : "上市"}</button></div>
+    ${expanded ? renderTownListingForm(view, row) : ""}
   </div>`;
 }
 
@@ -28092,7 +28492,8 @@ function renderIpoApplication(view, row) {
   </div>`;
 }
 
-function renderOperationControls(view, company) {
+// 公司经营控件（工资、用工、售价、注资、清算）：放在公司所在建筑的面板里。
+       function renderCompanyOperations(view, company) {
   const unit = moneyUnit(view);
   const wageKey = `company:${company.id}:wage`;
   const targetKey = `company:${company.id}:target`;
@@ -28110,6 +28511,50 @@ function renderOperationControls(view, company) {
     <div class="business-sticky-actions"><button class="secondary danger" data-company-liquidate="${escapeHtml(company.id)}">全部划回并清算</button></div>`;
 }
 
+// 公司的状态摘要行（建筑面板里显示）。
+       function renderCompanyStatus(view, company) {
+  const unit = moneyUnit(view);
+  const statusNeedsAttention = !["运营中", "生产中", "原料有限", "按订单生产"].includes(company.status || "");
+  return `<div class="row"><span class="label">上市 / 经营状态</span><span><span class="badge">${company.listing?.listed ? `${escapeHtml(company.listing.ticker || "---")} · 已上市` : "未上市"}</span> <span class="badge${statusNeedsAttention ? " red" : ""}">${escapeHtml(company.status || "运营中")}</span></span></div>
+    <div class="row"><span class="label">公司等级 / 在岗 / 目标</span><strong class="value">${number(company.listedLevels)}级 · ${number(company.workers)} / ${number(company.plannedWorkers)}人</strong></div>
+    <div class="row"><span class="label">可支付资金 / 欠薪</span><strong class="value">${number(company.cashVoucher, 2)}粮券 + ${number(company.cashWheatJin || 0, 2)}斤小麦 / ${number(company.arrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>
+    <div class="row"><span class="label">近期日均销量 / 实际利润</span><strong class="value">${company.averageDailySales > 0 ? number(company.averageDailySales, 2) : "暂无销量"} / ${number(company.averageDailyProfitVoucher, 2)}${escapeHtml(unit)}</strong></div>
+    <div class="row"><span class="label">库存</span><strong class="value">${inventoryText(company.inventoryRows)}</strong></div>`;
+}
+
+// 公司账目与年度结算（可折叠）。
+       function renderCompanyAccounts(view, company) {
+  const unit = moneyUnit(view);
+  const annual = company.lastAnnualSettlement || {};
+  const scale = view.currencyUnitsPerVoucher;
+  return `<details class="detail-block" data-detail-key="company-detail:${escapeHtml(company.id)}"><summary>账目与年度结算</summary><div class="detail-body">
+      <div class="row"><span class="label">今日产出 / 售出</span><strong class="value">${itemRowsText(company.producedRowsDay)} / ${itemRowsText(company.soldRowsDay)}</strong></div>
+      <div class="row"><span class="label">今日收入 / 净利润</span><strong class="value">${number(company.revenueDayVoucher, 2)} / ${number(company.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>
+      <div class="row"><span class="label">今日成本</span><strong class="value">已售${number(company.cogsDayVoucher, 2)} · 工资${number(company.wagesDayVoucher, 2)} · 税${number(company.taxCostDayVoucher, 2)} · 损耗${number(company.processingLossDayVoucher, 2)}${escapeHtml(unit)}</strong></div>
+      <div class="row"><span class="label">360日周转金目标</span><strong class="value">${number(company.workingCapitalReserveVoucher, 2)}${escapeHtml(unit)}</strong></div>
+      <div class="row"><span class="label">上年净利润 / 实际分配</span><strong class="value">${number((annual.lastYearNetProfitVoucherUnits || 0) / scale, 2)} / ${number((annual.distributedVoucherUnits || 0) / scale, 2)}${escapeHtml(unit)}</strong></div>
+      <div class="row"><span class="label">未分配利润</span><strong class="value">${number(company.retainedEarningsVoucher, 2)}${escapeHtml(unit)}</strong></div>
+    </div></details>`;
+}
+
+// 公司所在建筑面板的“公司”分组。没有公司却标了公司（或有上市等级）时给出提示，不报错。
+       function renderCompanySection(view, building, { wageRow = "" } = {}) {
+  const company = companyForBuilding(view, building);
+  if (!company) {
+    return building.companyId || building.ownership?.listedLevels > 0
+      ? `<h3>公司</h3><div class="shortage-banner visible">这栋建筑的公司数据暂缺，请到交易所面板核对。</div>`
+      : "";
+  }
+  const listed = Boolean(company.listing?.listed);
+  return `<h3>公司 · ${number(company.listedLevels)}级 · ${listed ? `${escapeHtml(company.listing.ticker || "---")} · 已上市` : "未上市"}</h3>
+    ${renderCompanyStatus(view, company)}
+    ${wageRow}
+    ${renderCompanyOperations(view, company)}
+    ${renderCompanyAccounts(view, company)}
+    <div class="subtle">公司由业主自主经营；上市、售股与回购在交易所面板管理。</div>`;
+}
+
+// 交易所面板的单家公司：上市 / 售股 / 回购的表单与预览（沿用原 data-* 属性，app.js 处理）。
 function renderListing(view, company) {
   const scale = view.currencyUnitsPerVoucher;
   const gate = !view.stockExchange?.available ? "尚未建成交易所" : !view.stockExchange?.reformComplete ? "须先完成货币改革" : null;
@@ -28182,65 +28627,161 @@ function renderListing(view, company) {
     </div></details>`;
 }
 
-function renderCompany(view, company) {
+function renderExchangeSummary(view) {
+  const totals = exchangeTotals(view);
   const unit = moneyUnit(view);
-  const annual = company.lastAnnualSettlement || {};
-  const scale = view.currencyUnitsPerVoucher;
-  const statusNeedsAttention = !["运营中", "生产中", "原料有限", "按订单生产"].includes(company.status || "");
-  return `<div class="company-card cardlet">
-    <div class="row"><strong>${escapeHtml(company.name)}</strong><span><span class="badge">${company.listing?.listed ? `${escapeHtml(company.listing.ticker || "---")} · 已上市` : "未上市"}</span> <span class="badge${statusNeedsAttention ? " red" : ""}">${escapeHtml(company.status || "运营中")}</span></span></div>
-    <div class="row"><span class="label">公司等级 / 在岗 / 目标</span><strong class="value">${number(company.listedLevels)}级 · ${number(company.workers)} / ${number(company.plannedWorkers)}人</strong></div>
-    <div class="row"><span class="label">可支付资金 / 欠薪</span><strong class="value">${number(company.cashVoucher, 2)}粮券 + ${number(company.cashWheatJin || 0, 2)}斤小麦 / ${number(company.arrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>
-    <div class="row"><span class="label">近期日均销量 / 实际利润</span><strong class="value">${company.averageDailySales > 0 ? number(company.averageDailySales, 2) : "暂无销量"} / ${number(company.averageDailyProfitVoucher, 2)}${escapeHtml(unit)}</strong></div>
-    <div class="row"><span class="label">库存</span><strong class="value">${inventoryText(company.inventoryRows)}</strong></div>
-    ${renderOperationControls(view, company)}
-    ${renderListing(view, company)}
-    <details class="detail-block" data-detail-key="company-detail:${escapeHtml(company.id)}"><summary>账目与年度结算</summary><div class="detail-body">
-      <div class="row"><span class="label">今日产出 / 售出</span><strong class="value">${itemRowsText(company.producedRowsDay)} / ${itemRowsText(company.soldRowsDay)}</strong></div>
-      <div class="row"><span class="label">今日收入 / 净利润</span><strong class="value">${number(company.revenueDayVoucher, 2)} / ${number(company.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>
-      <div class="row"><span class="label">今日成本</span><strong class="value">已售${number(company.cogsDayVoucher, 2)} · 工资${number(company.wagesDayVoucher, 2)} · 税${number(company.taxCostDayVoucher, 2)} · 损耗${number(company.processingLossDayVoucher, 2)}${escapeHtml(unit)}</strong></div>
-      <div class="row"><span class="label">360日周转金目标</span><strong class="value">${number(company.workingCapitalReserveVoucher, 2)}${escapeHtml(unit)}</strong></div>
-      <div class="row"><span class="label">上年净利润 / 实际分配</span><strong class="value">${number((annual.lastYearNetProfitVoucherUnits || 0) / scale, 2)} / ${number((annual.distributedVoucherUnits || 0) / scale, 2)}${escapeHtml(unit)}</strong></div>
-      <div class="row"><span class="label">未分配利润</span><strong class="value">${number(company.retainedEarningsVoucher, 2)}${escapeHtml(unit)}</strong></div>
-    </div></details>
+  return `<div class="cardlet exchange-summary">
+    <div class="row"><span class="label">已上市公司</span><strong class="value">${number(totals.listedCount)} / ${number(totals.companyCount)}家</strong></div>
+    <div class="row"><span class="label">待批上市申请</span><strong class="value">${number(totals.applicationCount)}份</strong></div>
+    <div class="row"><span class="label">可上市建筑</span><strong class="value">${number(totals.listableCount)}栋</strong></div>
+    <div class="row"><span class="label">总市值</span><strong class="value">${number(totals.marketCapVoucher, 2)}${escapeHtml(unit)}</strong></div>
   </div>`;
 }
 
-       function renderEnterpriseFinance(view) {
-  const ipo = view.ipo || null;
+function renderListingTab(view) {
+  const rows = townListingRows(view);
+  const expanded = view.ipoExpandedBuildingId || null;
+  const gate = view.ipo?.gateReason ? `<div class="subtle">${escapeHtml(view.ipo.gateReason)}；建成交易所并完成货币改革后可上市。</div>` : "";
+  const list = rows.length
+    ? rows.map(row => renderTownListingRow(view, row, row.buildingId === expanded)).join("")
+    : `<div class="cardlet subtle">暂无镇营产业可整栋上市。</div>`;
+  return `${gate}<div class="subtle">镇营产业整栋放入新公司挂牌。点「上市」展开该栋的表单，一次只展开一栋。</div>${list}${renderCooldownLine(view)}`;
+}
+
+function renderApplicationsTab(view) {
+  const applications = view.ipo?.applications || [];
+  const body = applications.length
+    ? applications.map(row => renderIpoApplication(view, row)).join("")
+    : `<div class="cardlet subtle">暂无待批的民营上市申请。</div>`;
+  return `<div class="subtle">民营业主递交申请后在这里批准或驳回；驳回后业主有冷却期。</div>${body}${renderCooldownLine(view)}`;
+}
+
+function renderCompaniesTab(view) {
   const companies = view.companies || [];
-  const townRows = (ipo?.buildings || []).filter(row => row.owner === "town" && !row.companyId);
-  const applications = ipo?.applications || [];
-  const cooldowns = (ipo?.cooldowns || []).filter(row => row.active);
-  const exchangeState = view.stockExchange?.available
-    ? (view.stockExchange.physical ? "交易所已建成" : "旧档兼容交易所入口")
+  if (!companies.length) return `<div class="cardlet subtle">暂无独立公司。公司由镇营产业整栋上市产生，请在「挂牌」里操作。</div>`;
+  return companies.map(company => {
+    const id = escapeHtml(company.id);
+    const listed = Boolean(company.listing?.listed);
+    const building = (view.buildings || []).find(row => row.id === company.buildingId) || null;
+    return `<details class="detail-block exchange-company" data-detail-key="exchange-company:${id}"><summary>${escapeHtml(company.name)} · ${listed ? `${escapeHtml(company.listing.ticker || "---")} · 已上市 · 现价${number(company.sharePriceVoucher || 0, 2)}粮券` : "未上市"}</summary><div class="detail-body">
+      <div class="row"><span class="label">所在建筑</span><strong class="value">${building ? `${escapeHtml(building.name)} · ${number(company.listedLevels)}级` : "建筑缺失"}</strong></div>
+      ${building ? `<div class="settings-actions"><button class="secondary" data-open-building="${escapeHtml(building.id)}">查看所在建筑</button></div>` : ""}
+      ${renderListing(view, company)}
+    </div></details>`;
+  }).join("");
+}
+
+function renderStatusTab(view) {
+  const exchange = view.stockExchange || {};
+  const exchangeState = exchange.available
+    ? (exchange.physical ? "交易所已建成" : "旧档兼容交易所入口")
     : "尚未建成交易所";
+  return `<div class="cardlet">
+    <div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div>
+    <div class="row"><span class="label">新上市条件</span><strong class="value">${exchange.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div>
+    ${view.ipo?.gateReason ? `<div class="subtle">当前上市门槛：${escapeHtml(view.ipo.gateReason)}</div>` : ""}
+    <div class="subtle">镇营整栋上市在「挂牌」，民营申请在「民营申请」，上市、售股与回购在「公司」。</div>
+  </div>`;
+}
+
+// 交易所的主体：摘要卡 + 标签页。交易所建筑面板与旧档兼容入口共用。
+       function renderExchangeBody(view) {
+  const tab = EXCHANGE_TABS.some(row => row.id === view.exchangeTab) ? view.exchangeTab : "listing";
+  const applicationCount = (view.ipo?.applications || []).length;
+  const tabs = `<div class="settings-actions exchange-tabs" role="tablist">${EXCHANGE_TABS.map(row => {
+    const active = row.id === tab;
+    const label = row.id === "applications" && applicationCount > 0 ? `${row.name}（${number(applicationCount)}）` : row.name;
+    return `<button class="${active ? "primary" : "secondary"}" role="tab" aria-selected="${active ? "true" : "false"}" data-exchange-tab="${row.id}">${escapeHtml(label)}</button>`;
+  }).join("")}</div>`;
+  const content = {
+    listing: renderListingTab,
+    applications: renderApplicationsTab,
+    companies: renderCompaniesTab,
+    status: renderStatusTab
+  }[tab](view);
+  return `${renderExchangeSummary(view)}${tabs}${content}`;
+}
+
+// 经营面板里的整栋上市 / 民营申请 / 交易所入口：一行摘要 + 前往交易所。
+       function renderExchangeEntry(view) {
+  const totals = exchangeTotals(view);
+  const exchange = exchangeBuildingOf(view);
+  const legacy = !exchange && Boolean(view.stockExchange?.legacyAccess);
+  const button = exchange
+    ? `<button class="secondary" data-open-building="${escapeHtml(exchange.id)}">前往交易所</button>`
+    : legacy
+      ? `<button class="secondary" data-site="exchange-compat">前往交易所</button>`
+      : `<button class="secondary" data-go="build">去建设交易所</button>`;
+  const gate = view.ipo?.gateReason ? `<div class="subtle">${escapeHtml(view.ipo.gateReason)}；建成交易所并完成货币改革后可上市。</div>` : "";
+  return `<div class="cardlet">
+    <div class="row"><span class="label">可上市 ${number(totals.listableCount)} 栋 · 挂牌 ${number(totals.listedCount)} 家 · 待批 ${number(totals.applicationCount)} 份</span></div>
+    <div class="settings-actions">${button}</div>
+    ${gate}
+  </div>`;
+}
+return { EXCHANGE_TABS, stagedInput, townListingRows, exchangeTotals, exchangeBuildingOf, companyForBuilding, renderCompanyOperations, renderCompanyStatus, renderCompanyAccounts, renderCompanySection, renderExchangeBody, renderExchangeEntry };
+})();
+
+// ===== ui/panel-enterprises.js =====
+const __mxmod143 = (() => {
+const { escapeHtml, number, moneyUnit } = __mxmod121;
+const { stagedInput, renderExchangeEntry } = __mxmod142;
+function renderPrices(view) {
+  const unit = moneyUnit(view);
+  const prices = view.market.pricesVoucherPerUnit || {};
+  const wholesale = (view.buildings || []).find(building => building.typeId === "wholesale_market") || null;
+  const jump = wholesale
+    ? `<button class="secondary" data-open-building="${escapeHtml(wholesale.id)}">前往批发市场</button>`
+    : `<button class="secondary" disabled>尚未建批发市场</button>`;
+  const priceRow = (label, itemId, unitText) => `<div class="row"><span class="label">${label}</span><strong class="value">${number(prices[itemId] ?? 0, 3)}${escapeHtml(unit)}/${escapeHtml(unitText)}</strong></div>`;
+  return `<section class="enterprise-section"><h2>价格</h2><div class="cardlet">
+    <div class="row"><span class="label">小麦 / 食盐</span><strong class="value">${number(view.market.pricesVoucherPerUnit?.wheat ?? 1, 3)} / ${number(view.market.pricesVoucherPerUnit?.salt ?? 10, 3)}${escapeHtml(unit)}/斤</strong></div>
+    ${priceRow("面粉", "flour", "斤")}
+    ${priceRow("面包", "bread", "斤")}
+    ${priceRow("木材", "wood", "单位")}
+    <div class="site-actions">${jump}</div>
+    <div class="subtle">均为批发价，商店零售另加价。面粉、面包、木材的售价在批发市场面板里设置。</div>
+  </div></section>`;
+}
+
+// 独立公司的列表摘要：点击跳到公司所在建筑（公司的经营控件与账目在那栋建筑的面板里）。
+// 公司只绑定一栋建筑（company.buildingId）；找不到建筑时只显示名称，按钮禁用。
+function renderCompanyDirectory(view) {
+  const companies = view.companies || [];
+  if (!companies.length) return `<div class="cardlet subtle">暂无独立公司。</div>`;
+  const buildings = view.buildings || [];
+  return companies.map(company => {
+    const building = buildings.find(row => row.id === company.buildingId) || null;
+    const listed = Boolean(company.listing?.listed);
+    return `<div class="cardlet">
+      <div class="row"><strong>${escapeHtml(company.name)}</strong><span class="badge">${listed ? `${escapeHtml(company.listing.ticker || "---")} · 已上市` : "未上市"}</span></div>
+      <div class="row"><span class="label">所在建筑 · 公司等级 / 在岗</span><strong class="value">${building ? escapeHtml(building.name) : "建筑缺失"} · ${number(company.listedLevels)}级 · ${number(company.workers)}人</strong></div>
+      <div class="settings-actions">${building
+        ? `<button class="secondary" data-open-building="${escapeHtml(building.id)}">前往公司所在建筑</button>`
+        : `<button class="secondary" disabled>建筑缺失</button>`}</div>
+    </div>`;
+  }).join("");
+}
+
+       function renderEnterpriseFinance(view) {
   return `${renderPrices(view)}
-    <section class="enterprise-section"><h2>整栋上市</h2>
-      ${ipo?.gateReason ? `<div class="subtle">${escapeHtml(ipo.gateReason)}；建成交易所并完成货币改革后可上市。</div>` : ""}
-      ${townRows.length ? townRows.map(row => renderTownListingForm(view, row)).join("") : `<div class="cardlet subtle">暂无镇营产业可整栋上市。</div>`}
-      ${applications.length ? `<h3>民营上市申请</h3>${applications.map(row => renderIpoApplication(view, row)).join("")}` : ""}
-      ${cooldowns.length ? `<div class="subtle">冷却中：${cooldowns.map(row => `${escapeHtml(row.householdName)}约${number(Math.max(0, row.untilSerial - (ipo.serial || 0)))}日后可再申请`).join("；")}。</div>` : ""}
-    </section>
-    <section class="enterprise-section"><h2>独立公司</h2>
-      ${companies.length ? companies.map(company => renderCompany(view, company)).join("") : `<div class="cardlet subtle">暂无独立公司。</div>`}
-    </section>
-    <section class="enterprise-section"><h2>交易所</h2><div class="cardlet"><div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div><div class="row"><span class="label">新上市条件</span><strong class="value">${view.stockExchange?.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div></div></section>`;
+    <section class="enterprise-section"><h2>整栋上市与交易所</h2>${renderExchangeEntry(view)}</section>
+    <section class="enterprise-section"><h2>独立公司</h2>${renderCompanyDirectory(view)}</section>`;
 }
 return { renderEnterpriseFinance };
 })();
 
 // ===== ui/panel-economy.js =====
-const __mxmod143 = (() => {
+const __mxmod144 = (() => {
 const { escapeHtml, number, numberMax, shortageJin } = __mxmod121;
 const { MODS } = __mxmod81;
 const { renderTrade } = __mxmod136;
-const { renderOutsideTown } = __mxmod137;
+const { renderOutsideTownSummary } = __mxmod137;
 const { renderBusiness } = __mxmod138;
 const { renderLedger } = __mxmod139;
 const { renderIndustryAccounts } = __mxmod140;
 const { renderAnnualFlows } = __mxmod141;
-const { renderEnterpriseFinance } = __mxmod142;
+const { renderEnterpriseFinance } = __mxmod143;
 function detail(key, title, body) {
   return `<details class="detail-block panel-detail" data-detail-key="${key}"><summary>${title}</summary><div class="detail-body">${body}</div></details>`;
 }
@@ -28262,7 +28803,7 @@ function renderIndustryProductivity(view) {
       ${view.shortageQeq > 0 ? `<div class="shortage-banner visible">口粮短缺 ${shortageJin(view.shortageQeq, view.qeqUnitsPerJin)}，时光已暂停。</div>` : ""}
       <div class="cardlet"><div class="row"><span class="label">居民可吃</span><strong class="value">${numberMax(view.residentFoodDays, 1)}天</strong></div><div class="row"><span class="label">每日需要</span><strong class="value">${view.dailyNeed.toLocaleString("zh-CN")}斤</strong></div></div></section>
     ${detail("bread-trade", "居民主粮购买", renderTrade(view))}
-    ${detail("outside-town", `外贸 · ${view.outsideTown?.name || "外镇"}`, renderOutsideTown(view))}
+    ${detail("outside-town", `外贸 · ${view.outsideTown?.name || "外镇"}`, renderOutsideTownSummary(view))}
     ${detail("industry-accounts", "林业、盐业与住房", renderIndustryAccounts(view))}
     ${detail("workshop-accounts", "镇营作坊账", renderBusiness(view))}
     ${detail("industry-productivity", "产业熟练度", renderIndustryProductivity(view))}
@@ -28274,7 +28815,7 @@ return { renderEconomy };
 })();
 
 // ===== ui/econ-mini.js =====
-const __mxmod144 = (() => {
+const __mxmod145 = (() => {
 const { escapeHtml, number } = __mxmod121;
 function sparkline(history, key, label, decimals) {
   const values = history.map(row => row[key]).filter(value => Number.isFinite(value));
@@ -28328,7 +28869,7 @@ return { econMiniSummary, renderEconMini };
 })();
 
 // ===== ui/macro-panel.js =====
-const __mxmod145 = (() => {
+const __mxmod146 = (() => {
 const { escapeHtml, number, compact } = __mxmod121;
 const LIQUIDITY_LABEL = { tight: "偏紧", normal: "适中", loose: "宽松" };
 const DASH = "—";
@@ -28385,8 +28926,8 @@ return { macroPanelSummary, renderMacroPanel };
 })();
 
 // ===== ui/panel-policy.js =====
-const __mxmod146 = (() => {
-const { escapeHtml, number, payDayText } = __mxmod121;
+const __mxmod147 = (() => {
+const { escapeHtml, number, numberMax, payDayText } = __mxmod121;
 const { CONTENT } = __mxmod12;
 const { industryTypeIds } = __mxmod1;
 const { renderNumericInput } = __mxmod131;
@@ -28447,6 +28988,15 @@ function marginPolicyCard(view) {
     </div></details>`;
 }
 
+// 银行与国债的利率、准备金率、发行控件都在银行建筑面板；政策页只留一行摘要和跳转按钮。
+function bankPolicyCard(view) {
+  const stats = view.policy?.bankStats || {};
+  const activeBonds = view.policy?.bondStats?.activeCount || 0;
+  return `<div class="cardlet policy-bank"><div class="row"><span class="label">银行</span><strong class="value">存款 ${numberMax(stats.depositRateAnnualPercent ?? 2, 2)}% · 贷款 ${numberMax(stats.loanRateAnnualPercent ?? 6, 2)}% · 国债 ${number(activeBonds)} 笔</strong></div>
+      <div class="subtle">利率、准备金率与国债发行在银行面板。</div>
+      <button class="secondary wide" data-bank-open>前往银行</button></div>`;
+}
+
        function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
   const last = view.policy.lastDay || {};
@@ -28462,19 +29012,22 @@ function marginPolicyCard(view) {
   const relief = view.relief || {};
   const reform = view.monetaryReform;
   const moneyUnit = reform.stage === "wheat" ? "斤小麦" : "粮券";
-  const reformAction = reform.stage === "wheat"
-    ? `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`
-    : reform.hasBankAccess
-      ? `<button class="secondary wide" data-bank-open>进入银行管理</button>`
-      : `<div class="subtle">粮券已是开局制度；印券、以粮换券与国债需先建成银行。</div>`;
-  // 货币改革简化态（0.1.11 补回）：小麦阶段且无银行时只显示一行提示
+  const reformAction = `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`;
+  // 货币改革：小麦阶段（旧档）仍是折叠块带启动按钮；粮券阶段（开局即是）改为默认可见的一行，入口在银行面板。
   const reformCard = (reform.stage === "wheat" && !reform.hasBankAccess)
     ? `<div class="cardlet subtle">货币改革：建成银行后可启动。</div>`
-    : `<details class="detail-block" data-detail-key="policy-reform"><summary>货币改革</summary><div class="detail-body">
+    : reform.stage === "wheat"
+      ? `<details class="detail-block" data-detail-key="policy-reform"><summary>货币改革</summary><div class="detail-body">
       <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
       ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
       ${reformAction}
-    </div></details>`;
+    </div></details>`
+      : `<div class="cardlet policy-reform"><div class="row"><span class="label">货币改革</span><strong class="value">${reform.stageName}</strong></div>
+      ${reform.hasBankAccess
+        ? `<div class="subtle">印券、以粮换券与国债在银行管理。</div><button class="secondary wide" data-bank-open>进入银行管理</button>`
+        : `<div class="subtle">粮券已是开局制度；印券、以粮换券与国债需先建成银行。</div>`}
+      ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
+    </div>`;
   return `${reformCard}
     ${marginPolicyCard(view)}
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
@@ -28508,23 +29061,8 @@ function marginPolicyCard(view) {
       <div class="row"><span class="label">累计房产税 / 欠税</span><strong class="value">${number(view.policy.villaStats?.taxCollectedWheatJin || 0, 1)} / ${number(view.policy.villaStats?.taxArrearsWheatJin || 0, 1)}小麦等值</strong></div>
       
     </div></details>
-    ${reform.hasBankAccess ? `<details class="detail-block" data-detail-key="policy-bank"><summary>银行</summary><div class="detail-body">
-      <div class="row"><span class="label">存款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-deposit-rate", kind: "bank-deposit-rate", target: "bank", value: view.policy.bankStats?.depositRateAnnualPercent ?? 2, label: "银行存款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">贷款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-loan-rate", kind: "bank-loan-rate", target: "bank", value: view.policy.bankStats?.loanRateAnnualPercent ?? 6, label: "银行贷款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">准备金率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-reserve", kind: "bank-reserve", target: "bank", value: view.policy.bankStats?.reserveRequirementPercent ?? 10, label: "银行准备金率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(view.policy.bankStats?.totalDepositsVoucher || 0, 1)} / ${number(view.policy.bankStats?.outstandingLoansVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(view.policy.bankStats?.loanableVoucher || 0, 1)} / ${number(view.policy.bankStats?.badDebtVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(view.policy.bankStats?.interestEarnedVoucher || 0, 1)} / ${number(view.policy.bankStats?.interestPaidVoucher || 0, 1)}券</strong></div>
-      <div class="subtle">按日计息；逾期30天核销坏账。</div>
-    </div></details>` : ""}
+    ${reform.hasBankAccess ? bankPolicyCard(view) : ""}
     ${reform.stage === "voucher" && !reform.hasBankAccess ? `<div class="cardlet subtle">国债：建成银行后可发行。</div>` : ""}
-    ${reform.stage === "voucher" && reform.hasBankAccess ? `<details class="detail-block" data-detail-key="policy-bonds"><summary>国债</summary><div class="detail-body">
-      <div class="row"><span class="label">发行总额</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-total", kind: "bond-issue-total", target: "bonds", value: 100000, label: "国债发行总额", minimum: 1, maximum: 1000000000, className: "setting-editor" })}<b>券</b></div></div>
-      <div class="row"><span class="label">期限</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-years", kind: "bond-issue-years", target: "bonds", value: 3, label: "国债期限", minimum: 1, maximum: 10, className: "setting-editor" })}<b>年</b><button class="secondary" data-bond-issue>发行</button></div></div>
-      <div class="row"><span class="label">票面年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-rate", kind: "bond-issue-rate", target: "bonds", value: 3, label: "国债票面年利率", minimum: 0, maximum: 20, className: "setting-editor" })}<b>%</b></div></div>
-      ${(view.policy.bondStats?.issues || []).map(issue => `<div class="row"><span class="label">${issue.id} · ${issue.statusLabel}</span><strong class="value">${number(issue.totalVoucher)}券 · 票面${number(issue.couponRateAnnualPercent, 2)}% · ${issue.termYears}年</strong></div>`).join("")}
-      <div class="subtle">发行当天居民与银行按闲钱认购，利率高于存款利率才有人买；每年付息，到期还本。</div>
-    </div></details>` : ""}
     <details class="detail-block" data-detail-key="policy-agritax"><summary>农业税</summary><div class="detail-body">
       <div class="row"><span class="label">当前税率</span><div class="setting-input">${renderNumericInput(view, { key: "agriculture-tax", kind: "agriculture-tax", target: "agriculture", value: agriculture.currentPercent, label: "农业税率", minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">预计秋收分粮</span><strong class="value">镇库${number(agriculture.townShareJin)} / 居民${number(agriculture.residentShareJin)}斤</strong></div>
@@ -28545,7 +29083,7 @@ return { WEALTH_TAX_THRESHOLD_KEYS, WEALTH_TAX_RATE_KEYS, renderPolicy };
 })();
 
 // ===== ui/panel-shop-pricing.js =====
-const __mxmod147 = (() => {
+const __mxmod148 = (() => {
 const { escapeHtml, number } = __mxmod121;
 const { renderNumericInput } = __mxmod131;
 function marginText(value) {
@@ -28597,7 +29135,7 @@ return { renderShopPricing };
 })();
 
 // ===== ui/panel-site.js =====
-const __mxmod148 = (() => {
+const __mxmod149 = (() => {
 const { escapeHtml, number, numberMax, moneyUnit, monthlyWageText, monthlyWageValue, payDayText } = __mxmod121;
 const { MODS } = __mxmod81;
 const { wholesaleItemIds } = __mxmod0;
@@ -28605,7 +29143,9 @@ const { CONTENT } = __mxmod12;
 const { isIndustryType } = __mxmod1;
 const { villaCapacityOf } = __mxmod71;
 const { renderNumericInput } = __mxmod131;
-const { renderShopPricing } = __mxmod147;
+const { renderShopPricing } = __mxmod148;
+const { renderOutsideTown } = __mxmod137;
+const { renderExchangeBody, renderCompanySection } = __mxmod142;
 const COMMERCIAL_STREET_SHOP_TYPES = Object.values(CONTENT.rules.shopTypes || {})
   .filter(def => !def.aliasOf && (def.kind === "retail" || def.kind === "service")
     && (!def.hostBuildingTypeId || def.hostBuildingTypeId === "commercial_street"));
@@ -28726,19 +29266,51 @@ function bankManagementMarkup(view, physical = true) {
     <div class="row"><span class="label">操作后镇库粮券</span><strong class="value">${number(preview.afterTownVoucher, 2)}粮券</strong></div>
     <div class="business-sticky-actions"><button class="secondary" data-currency-preview-cancel>取消</button><button class="primary" data-currency-confirm="${preview.type}">确认${preview.type === "issue" ? "印制发行" : "注销"}</button></div>
   </div>` : "";
-  const controls = reform.stage === "wheat"
+  const bank = view.policy?.bankStats || {};
+  const bonds = view.policy?.bondStats || {};
+  const reformWheat = reform.stage === "wheat";
+  const issueControls = reformWheat
     ? `<div class="subtle">启动货币改革后立即改用粮券结算：镇库按小麦存量印制等额粮券，居民可随时以粮换券。</div><button class="secondary wide" data-go="policy">前往政策</button>`
     : `<div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: reform.employmentExchangeMinimumJin, maximum: reform.employmentExchangeMaximumJin, className: "setting-editor" })}<b>斤</b></div></div>
-      <h3>粮券印制与注销</h3>
       <div class="row"><span class="label">镇库 / 居民粮券</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">粮券总量（含镇库）</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">镇库外流通</span><strong class="value">${number(c.outsideTownVoucher, 2)}粮券</strong></div>
       <div class="subtle">总量只在印制、注销时变；居民以粮换券、用券兑粮只是在镇库与民间之间流动。</div>
       <div class="business-form-row"><label>数量${stagedBankInput(view, "currency-amount", "发行或兑付数量", 1000)}</label><div class="settings-actions"><button class="secondary" data-currency-preview="issue">印制粮券</button><button class="secondary" data-currency-preview="redeem">注销粮券</button></div></div>
       ${previewMarkup}`;
+  // 顶部摘要：一屏内看清制度、券池、发行量与存贷款总额。
+  const summary = `<div class="cardlet bank-summary">
+      <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
+      <div class="row"><span class="label">镇库券池</span><strong class="value">${number(c.townVoucher, 2)}粮券</strong></div>
+      <div class="row"><span class="label">发行量</span><strong class="value">${number(c.issuedVoucher, 2)}粮券</strong></div>
+      <div class="row"><span class="label">存款总额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">贷款总额</span><strong class="value">${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">欠镇库</span><strong class="value">${number(bank.debtToTownJin || 0, 1)}券（累计垫付 ${number(bank.totalAdvancedJin || 0, 1)} · 累计还款 ${number(bank.totalRepaidJin || 0, 1)} · 可还 ${number(bank.debtRepayableJin || 0, 1)}）</strong></div>
+      <div class="row"><span class="label">偿还镇库</span><div class="setting-input">${stagedBankInput(view, "bank-repay", "偿还镇库金额", Math.round((bank.debtRepayableJin || 0) * 100) / 100)}<b>券</b><button class="secondary" data-bank-repay ${(bank.debtRepayableJin || 0) > 0 ? "" : "disabled"}>偿还</button></div></div>
+    </div>`;
+  // 三个折叠分组：印券与换券（默认展开，保持第一屏）、利率与存款、国债。
+  const issueGroup = `<details class="detail-block bank-group" data-detail-key="bank-issue" open><summary><span>印券与换券</span><span class="subtle">流通 ${number(c.circulationVoucher, 0)}券</span></summary><div class="detail-body">${issueControls}</div></details>`;
+  const ratesGroup = `<details class="detail-block bank-group" data-detail-key="bank-rates"><summary><span>利率与存款</span><span class="subtle">存款 ${numberMax(bank.depositRateAnnualPercent ?? 2, 2)}% · 贷款 ${numberMax(bank.loanRateAnnualPercent ?? 6, 2)}%</span></summary><div class="detail-body">
+      <div class="row"><span class="label">存款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-deposit-rate", kind: "bank-deposit-rate", target: "bank", value: bank.depositRateAnnualPercent ?? 2, label: "银行存款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">贷款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-loan-rate", kind: "bank-loan-rate", target: "bank", value: bank.loanRateAnnualPercent ?? 6, label: "银行贷款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">准备金率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-reserve", kind: "bank-reserve", target: "bank", value: bank.reserveRequirementPercent ?? 10, label: "银行准备金率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)} / ${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(bank.loanableVoucher || 0, 1)} / ${number(bank.badDebtVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(bank.interestEarnedVoucher || 0, 1)} / ${number(bank.interestPaidVoucher || 0, 1)}券</strong></div>
+      <div class="subtle">按日计息；逾期30天核销坏账。</div>
+    </div></details>`;
+  const bondsGroup = reformWheat
+    ? `<div class="cardlet subtle">国债：启用粮券结算后可发行。</div>`
+    : `<details class="detail-block bank-group" data-detail-key="bank-bonds"><summary><span>国债</span><span class="subtle">在售 ${number(bonds.activeCount || 0)} 笔</span></summary><div class="detail-body">
+      <div class="row"><span class="label">发行总额</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-total", kind: "bond-issue-total", target: "bonds", value: 100000, label: "国债发行总额", minimum: 1, maximum: 1000000000, className: "setting-editor" })}<b>券</b></div></div>
+      <div class="row"><span class="label">期限</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-years", kind: "bond-issue-years", target: "bonds", value: 3, label: "国债期限", minimum: 1, maximum: 10, className: "setting-editor" })}<b>年</b><button class="secondary" data-bond-issue>发行</button></div></div>
+      <div class="row"><span class="label">票面年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-rate", kind: "bond-issue-rate", target: "bonds", value: 3, label: "国债票面年利率", minimum: 0, maximum: 20, className: "setting-editor" })}<b>%</b></div></div>
+      ${(bonds.issues || []).map(issue => `<div class="row"><span class="label">${issue.id} · ${issue.statusLabel}</span><strong class="value">${number(issue.totalVoucher)}券 · 票面${number(issue.couponRateAnnualPercent, 2)}% · ${issue.termYears}年</strong></div>`).join("")}
+      <div class="subtle">发行当天居民与银行按闲钱认购，利率高于存款利率才有人买；每年付息，到期还本。</div>
+    </div></details>`;
   return `<div class="status-strip"><span class="status-light working"></span><strong>${physical ? "银行" : "兼容银行入口"}</strong><span>${reform.stageName}</span></div>
-    <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
-    ${controls}`;
+    ${summary}
+    <div class="bank-groups">${issueGroup}${ratesGroup}${bondsGroup}</div>`;
 }
 
 function reclaimSection(view) {
@@ -28858,6 +29430,8 @@ function timesSquareMarkup(view, building, development) {
   let title = "小镇一隅";
   let body = "";
   let actions = "";
+  // 外贸房等自带多张卡片的页面不再套外层 cardlet。
+  let stacked = false;
 
   if (site === "field") {
     const farmers = view.labor.rows.find(row => row.roleId === "farmers");
@@ -28887,6 +29461,10 @@ function timesSquareMarkup(view, building, development) {
     title = "银行 · 旧存档兼容入口";
     body = bankManagementMarkup(view, false);
     actions = `<button class="secondary" data-go="policy">返回政策</button>`;
+  } else if (site === "exchange-compat" && view.stockExchange?.legacyAccess && !view.stockExchange?.physical) {
+    title = "交易所 · 旧存档兼容入口";
+    body = renderExchangeBody(view);
+    actions = `<button class="secondary" data-go="business">查看经营与粮账</button>`;
   } else if (building?.typeId === "social_security_office") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${socialSecurityMarkup(view)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
@@ -28897,20 +29475,28 @@ function timesSquareMarkup(view, building, development) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${bankManagementMarkup(view, true)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="policy">查看货币改革政策</button>`;
+  } else if (building?.typeId === "foreign_trade_house") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = `${buildingStaffingMarkup(view, building)}${renderOutsideTown(view)}${developmentMarkup(view, building, development)}`;
+    stacked = true;
   } else if (building?.typeId === "wholesale_market") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const market = view.wholesaleMarket || { inventory: {}, pricesVoucherPerUnit: {}, purchasePricesVoucherPerUnit: {}, dailyTownAllocation: {}, cashflow: null };
     const trends = view.wholesaleTrends || {};
     const tradeableIds = wholesaleItemIds(CONTENT);
     const autoBandPercent = CONTENT.rules.priceAdjust?.wholesaleBandPercent ?? 30;
+    // 每种商品一张折叠卡：摘要行给出库存、售价、可售天数；做市控件（收购价、售价、自动调价、收储）展开即用。
     const marketRowsAll = tradeableIds.map(itemId => {
       const name = view.itemNames?.[itemId] || itemId;
       const itemUnit = view.itemUnits?.[itemId] || "斤";
       const moveKey = `wholesale-move:${itemId}`;
+      const stock = market.inventory?.[itemId] || 0;
+      const sellPrice = market.pricesVoucherPerUnit?.[itemId] ?? 1;
       // 自动调价只对批发市场做市的商品存在（见 wholesaleSummary 的 autoPricing 视图）；没有该行则不显示开关。
       const autoRow = market.autoPricing?.[itemId];
       const autoPriceRow = autoRow ? `<div class="row"><span class="label">自动调价</span><div class="setting-input"><button class="secondary" aria-pressed="${autoRow.enabled ? "true" : "false"}" data-wholesale-autoprice="${escapeHtml(itemId)}" data-next="${autoRow.enabled ? "false" : "true"}">${autoRow.enabled ? "自动调价：开" : "自动调价：关"}</button>${autoRow.enabled ? `<span class="subtle">锚定价 ${number(autoRow.anchorVoucherPerUnit, 3)}，浮动 ±${number(autoBandPercent)}%${autoRow.reason ? ` · ${escapeHtml(autoRow.reason)}` : ""}</span>` : ""}</div></div>` : "";
       const moveShown = view.numericDrafts?.[moveKey]?.value ?? "";
+      const allocationDraft = market.dailyTownAllocation?.[itemId] || 0;
       const purchasePrice = market.purchasePricesVoucherPerUnit?.[itemId] ?? 0;
       const purchaseIndex = market.purchasePriceIndex?.[itemId] ?? 1;
       const feedbackText = purchaseIndex >= 0.999 ? "库存低位，收购价满额" : `库存偏高，收购价按反馈系数 ${number(purchaseIndex, 2)} 打折`;
@@ -28926,21 +29512,25 @@ function timesSquareMarkup(view, building, development) {
         const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - (v - min) / (max - min) * (h - 4) - 2).toFixed(1)}`).join(" ");
         return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-label="${escapeHtml(label)}走势"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
       };
-      return `<div class="cardlet"><div class="row"><span class="label">${escapeHtml(name)}库存</span><strong class="value">${number(market.inventory?.[itemId] || 0, 2)}${escapeHtml(itemUnit)} · ${escapeHtml(stockDaysText)}</strong></div>
+      const brief = `库存${number(stock, 2)}${escapeHtml(itemUnit)} · 售${number(sellPrice, 3)}${escapeHtml(unit)}/${escapeHtml(itemUnit)} · ${escapeHtml(trend.stockDays == null ? "无销量" : `可售${number(trend.stockDays, 1)}天`)}`;
+      return `<details class="detail-block wholesale-item" data-wholesale-item="${escapeHtml(itemId)}" data-detail-key="wholesale:${escapeHtml(itemId)}"><summary><span class="wholesale-name">${escapeHtml(name)}</span><span class="wholesale-brief">${brief}</span></summary><div class="detail-body">
+        <div class="row"><span class="label">库存 / 可售</span><strong class="value">${number(stock, 2)}${escapeHtml(itemUnit)} · ${escapeHtml(stockDaysText)}</strong></div>
         <div class="row"><span class="label">7日均售 / 镇库存</span><strong class="value">${number(trend.avgSoldJin || 0, 2)} / ${number(trend.townStockJin || 0, 2)}${escapeHtml(itemUnit)}</strong></div>
         <div class="trend-pair">${trendSpark(trend.inventory, "库存")}${trendSpark(trend.price, "批发价")}</div>
         <div class="row"><span class="label">收购价（向公司/民营）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-buy:${itemId}`, kind: "wholesale-purchase-price", target: itemId, value: market.purchasePriceReferenceVoucherPerUnit?.[itemId] ?? purchasePrice, label: `${name}收购价基准`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
         <div class="row"><span class="label">当前实际收购价</span><strong class="value">${number(purchasePrice, 3)} <span class="subtle">${escapeHtml(feedbackText)}</span></strong></div>
-        <div class="row"><span class="label">售价（卖给综合商店）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-price:${itemId}`, kind: "wholesale-price", target: itemId, value: market.pricesVoucherPerUnit?.[itemId] ?? 1, label: `${name}售价`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
+        <div class="row"><span class="label">售价（卖给综合商店）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-price:${itemId}`, kind: "wholesale-price", target: itemId, value: sellPrice, label: `${name}售价`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
         ${autoPriceRow}
-        <div class="row"><span class="label">镇库每日固定调拨</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-allocation:${itemId}`, kind: "wholesale-allocation", target: itemId, value: market.dailyTownAllocation?.[itemId] || 0, label: `${name}每日调拨量`, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>${escapeHtml(itemUnit)}/日</b></div></div>
-        <div class="business-form-row"><label>单次调运<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(moveShown)}" aria-label="${escapeHtml(name)}单次调运量" data-draft-key="${escapeHtml(moveKey)}" data-draft-kind="stage" data-draft-label="${escapeHtml(name)}单次调运量" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-stockpile="${escapeHtml(itemId)}">收储入镇库</button><button class="secondary" data-wholesale-release="${escapeHtml(itemId)}">镇库投放</button></div></div></div>`;
+        <div class="business-form-row"><label>单次调运<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(moveShown)}" aria-label="${escapeHtml(name)}单次调运量" data-draft-key="${escapeHtml(moveKey)}" data-draft-kind="stage" data-draft-label="${escapeHtml(name)}单次调运量" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-stockpile="${escapeHtml(itemId)}">收储入镇库</button><button class="secondary" data-wholesale-release="${escapeHtml(itemId)}">镇库投放</button></div></div>
+        <details class="detail-block" data-detail-key="wholesale-allocation:${escapeHtml(itemId)}"><summary>镇库每日固定调拨（${number(allocationDraft)}${escapeHtml(itemUnit)}/日）</summary><div class="detail-body"><div class="row"><span class="label">镇库每日固定调拨</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-allocation:${itemId}`, kind: "wholesale-allocation", target: itemId, value: allocationDraft, label: `${name}每日调拨量`, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>${escapeHtml(itemUnit)}/日</b></div></div></div></details>
+      </div></details>`;
     }).join("");
-    const marketRows = marketRowsAll;
     const cumulative = (market.cashflow || {}).cumulative || {};
-    const cashCard = `<div class="cardlet"><div class="row"><span class="label">累计销售 / 累计收购</span><strong class="value">${number(cumulative.salesVoucherUnits || 0, 0)} / ${number(cumulative.purchaseVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
-      <div class="subtle">收付款都走镇库；库存越多收购价自动越低。</div></div>`;
-    body = `<div class="status-strip"><span class="status-light working"></span><strong>镇营批发市场 · 做市商</strong><span>${number(building.level)}级</span></div><div class="subtle">各方产品汇入这里，商店和生产者从这里进货；小麦由镇库直管。</div>${buildingStaffingMarkup(view, building)}${cashCard}${marketRows}${developmentMarkup(view, building, development)}`;
+    // 汇总卡：做市品种数、累计收付款，以及全部商品卡的展开/收起（点击逻辑在 app.js 的 click 处理里）。
+    const cashCard = `<div class="cardlet wholesale-summary"><div class="row"><span class="label">做市商品</span><strong class="value">${number(tradeableIds.length)}种 · 累计销售 / 累计收购 ${number(cumulative.salesVoucherUnits || 0, 0)} / ${number(cumulative.purchaseVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
+      <div class="settings-actions"><button class="secondary" data-wholesale-toggle-all="1">全部展开/收起</button></div>
+      <div class="subtle">收付款都走镇库；库存越多收购价自动越低。展开商品卡可改收购价、售价、自动调价，并在卡内收储或投放。</div></div>`;
+    body = `<div class="status-strip"><span class="status-light working"></span><strong>镇营批发市场 · 做市商</strong><span>${number(building.level)}级</span></div><div class="subtle">各方产品汇入这里，商店和生产者从这里进货；小麦由镇库直管。</div>${buildingStaffingMarkup(view, building)}${cashCard}${marketRowsAll}${developmentMarkup(view, building, development)}`;
   } else if (building?.typeId === "commercial_street" || building?.typeId === "trade_center") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const isTradeCenter = building.typeId === "trade_center";
@@ -28954,7 +29544,11 @@ function timesSquareMarkup(view, building, development) {
     const shopCards = shops.map(shop => {
       if (shop.kind === "trade") return tradeShopCard(view, shop, tradeHouses.find(row => row.id === shop.id) || null, unit);
       const staff = (shop.merchants || 0) + shop.clerks;
-      const staffControls = shop.status === "open"
+      // 镇营综合商店：没有商人，店员由镇里直接设定（data-shop-clerk），收入进镇库。
+      const staffControls = shop.status === "open" && shop.town
+        ? `<div class="site-worker-actions"><button class="step-btn" data-shop-clerk="${escapeHtml(shop.id)}" data-step="-1" aria-label="减少店员" ${shop.clerks <= 0 ? "disabled" : ""}>−</button><strong>店员 ${number(shop.clerks)} / ${number(shop.maxClerks || 50)}人</strong><button class="step-btn" data-shop-clerk="${escapeHtml(shop.id)}" data-step="1" aria-label="增加店员" ${shop.clerks >= (shop.maxClerks || 50) || view.labor.idle <= 0 ? "disabled" : ""}>＋</button></div>
+          <div class="subtle">镇营店：店员由镇里设定，收入与利润归镇库，不交店租与利润税。</div>`
+        : shop.status === "open"
         ? `<div class="site-worker-actions"><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="-1" ${shop.merchants <= 1 ? "disabled" : ""}>−</button><strong>商人 ${number(shop.merchants)} / ${number(shop.maxMerchants || 4)}</strong><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="1" ${shop.merchants >= (shop.maxMerchants || 4) || view.labor.idle <= 0 ? "disabled" : ""}>＋</button></div>
           <div class="row"><span class="label">店员（自动增减）</span><strong class="value">${number(shop.clerks)} / ${number(shop.maxClerks || 20)}人${shop.staffingDiagnosis ? ` · ${escapeHtml(shop.staffingDiagnosis)}` : ""}</strong></div>`
         : "";
@@ -28972,7 +29566,11 @@ function timesSquareMarkup(view, building, development) {
       return `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)} · ${escapeHtml(shop.typeName)}</strong><span class="badge">${escapeHtml(shop.statusReason)}</span></div><div class="row"><span class="label">今日利润</span><strong class="value">${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>${activity}${staffControls}<details class="detail-block" data-detail-key="shop:${escapeHtml(shop.id)}"><summary>经营详情</summary><div class="detail-body"><div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(shop.ownerName || shop.ownerHouseholdId)}</strong></div><div class="row"><span class="label">店员工资</span><strong class="value">${escapeHtml(monthlyWageText(view, shop.clerkWageVoucher, 1))}${shop.wageTarget != null ? ` · 行情${number(shop.wageTarget, 1)}` : ""}${shop.wageDiagnosis ? ` · ${escapeHtml(shop.wageDiagnosis)}` : ""}</strong></div>${stock}${serviceDetail}${shop.kind === "service" ? `<div class="row"><span class="label">未成交：没钱 / 容量不足</span><strong class="value">${number(shop.recentUnaffordableUses, 2)} / ${number(shop.recentCapacityUnmetUses, 2)}次</strong></div><div class="row"><span class="label">增1店员能力</span><strong class="value">+${number(shop.nextClerkServiceCapacity)}次/日</strong></div>` : ""}<div class="row"><span class="label">可支付资金</span><strong class="value">${number(shop.cashVoucher, 2)}粮券 · ${number(shop.cashWheatJin || 0, 2)}斤小麦</strong></div><div class="row"><span class="label">今日收入 / 成本</span><strong class="value">${number(shop.revenueDayVoucher, 2)} / ${number(shop.cogsDayVoucher + shop.wageDayVoucher + shop.rentDayVoucher, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">${shop.payDay != null ? `${escapeHtml(payDayText(shop.payDay))} · ` : ""}待发工资</span><strong class="value">${number(shop.pendingWagesVoucher || 0, 2)}${escapeHtml(unit)}</strong></div><div class="row"><span class="label">欠薪 / 欠租 / 欠税</span><strong class="value">${number(shop.wageArrearsVoucher, 2)} / ${number(shop.rentArrearsVoucher, 2)} / ${number(shop.taxArrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>${action}</div></details>${pricingDetail}</div>`;
     }).join("");
     const tariffCard = isTradeCenter ? tradeTariffMarkup(view, tradeHouseView, unit) : "";
-    const openButtons = occupied.length < capacity ? (isTradeCenter ? `<div class="site-actions"><button class="secondary" data-shop-open="trading_house" data-shop-building="${escapeHtml(building.id)}">开贸易行</button></div>` : `<div class="site-actions">${COMMERCIAL_STREET_SHOP_TYPES.map(def => `<button class="secondary" data-shop-open="${escapeHtml(def.id)}" data-shop-building="${escapeHtml(building.id)}">开${escapeHtml(def.name)}</button>`).join("")}</div>`) : "";
+    // 镇营综合商店：店型别名 town_general（归一为综合商店，带镇营标记），不在上面的私营店按钮列表里。
+    const townShopDef = CONTENT.rules.shopTypes?.town_general;
+    const townFull = shops.filter(shop => shop.town).length >= Math.max(1, Math.floor(Number(CONTENT.rules.townShop?.maxPerStreet ?? 1)));
+    const townButton = townShopDef && !townFull ?`<button class="secondary" data-shop-open="${escapeHtml(townShopDef.id)}" data-shop-building="${escapeHtml(building.id)}">开${escapeHtml(townShopDef.name)}</button>` : "";
+    const openButtons = occupied.length < capacity ? (isTradeCenter ? `<div class="site-actions"><button class="secondary" data-shop-open="trading_house" data-shop-building="${escapeHtml(building.id)}">开贸易行</button></div>` : `<div class="site-actions">${COMMERCIAL_STREET_SHOP_TYPES.map(def => `<button class="secondary" data-shop-open="${escapeHtml(def.id)}" data-shop-building="${escapeHtml(building.id)}">开${escapeHtml(def.name)}</button>`).join("")}${townButton}</div>`) : "";
     body = `<div class="status-strip"><span class="status-light working"></span><strong>${isTradeCenter ? "贸易中心" : "商业街"}</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">占用店铺</span><strong class="value">${number(occupied.length)} / ${number(capacity)}间</strong></div><div class="row"><span class="label">商人 / 店员</span><strong class="value">${number(merchantCount)} / ${number(clerkCount)}人</strong></div>${tariffCard}${openButtons}${shopCards || `<div class="subtle">暂无居民入驻。</div>`}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="policy">查看租税政策</button>`;
   } else if (building?.typeId === "livestock_base") {
@@ -28990,6 +29588,10 @@ function timesSquareMarkup(view, building, development) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const perLevel = CONTENT.buildings.villa_complex.villaCapacity;
     body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">别墅栋数（本座）</span><strong class="value">${number(villaCapacityOf(building, CONTENT))}栋（每级${number(perLevel)}栋）</strong></div><div class="subtle">购房与房产税在政策页统一结算。</div>${developmentMarkup(view, building, development)}`;
+  } else if (building?.typeId === "stock_exchange") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = `${renderExchangeBody(view)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
+    actions = `<button class="secondary" data-go="business">查看经营与粮账</button>`;
   } else if (building) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const payroll = view.payroll?.lastDay?.workers?.find(row => row.buildingId === building.id);
@@ -29011,11 +29613,8 @@ function timesSquareMarkup(view, building, development) {
     const ownerText = townOwned ? "镇里"
       : building.ownership.privateLevels > 0 ? (ownerExtras?.ownerName || "业主")
       : companyRow ? companyRow.ownerName : "公司";
-    const listedWorkers = (building.listedJobs || []).reduce((sum, row) => sum + row.workers, 0);
-    const listedCapacity = (building.listedJobs || []).reduce((sum, row) => sum + row.capacity, 0);
-    const companySection = building.ownership.listedLevels > 0
-      ? `<h3>公司 · ${number(building.ownership.listedLevels)}级</h3><div class="row"><span class="label">状态 / 用工</span><strong class="value">${number(listedWorkers)}/${number(listedCapacity)}人</strong></div><div class="subtle">公司由业主自主经营；工资、产品价与股票在经营与粮账面板管理。</div>${building.wages?.owner === "company" ? wageSplitRow(view, building.wages, unit) : ""}`
-      : "";
+    // 公司经营控件（工资、用工、售价、注资、清算）与账目跟着公司走，放在这栋建筑的面板里；上市与股票在交易所面板。
+    const companySection = renderCompanySection(view, building, { wageRow: building.wages?.owner === "company" ? wageSplitRow(view, building.wages, unit) : "" });
     // 人均产出：等级加成 × 熟练度加成，只对产业建筑显示。
     const productivityRow = building.productivityFactor == null ? "" : `<div class="row"><span class="label">人均产出</span><strong class="value">×${number(building.productivityFactor, 2)}（等级 +${numberMax(building.levelBonusPercent, 0)}% · 熟练 +${numberMax(building.experienceBonusPercent, 1)}%）</strong></div>`;
     const privateOutputText = building.privateOutputToday.map(row => `${escapeHtml(view.itemNames[row.itemId] || row.itemId)} ${number(row.residentUnits / view.inventoryUnitsPerJin)}${escapeHtml(view.itemUnits[row.itemId] || "单位")}`).join(" · ") || "暂无产出";
@@ -29027,11 +29626,11 @@ function timesSquareMarkup(view, building, development) {
       if (row.kind === "input") return `${name} 采购${number(row.priceVoucherPerJin, 2)}${escapeHtml(unit)}/${itemUnit} · 市场有货${number(row.marketStockJin, 0)}${itemUnit}`;
       return `${name} 预期${number(row.priceVoucherPerJin, 2)}${escapeHtml(unit)}/${itemUnit}`;
     }).join(" · ") || "未建批发市场";
-    // 民营/公司的业主与欠薪（欠薪超过宽限天数由镇里整栋收回）；待批上市申请在企业面板处理。
+    // 民营/公司的业主与欠薪（欠薪超过宽限天数由镇里整栋收回）；待批上市申请在交易所面板处理。
     const extras = view.ownershipExtras?.[building.id] || null;
     const takeoverDays = CONTENT.rules.ownershipTakeoverArrearsDays ?? 30;
     const ipoApplication = (view.ipo?.applications || []).find(row => row.buildingId === building.id) || null;
-    const privateOwnerMarkup = `${extras ? `<div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(extras.ownerName)}</strong></div>` : ""}${extras?.arrears ? `<div class="shortage-banner visible">欠薪${number(extras.arrearsVoucher, 2)}${escapeHtml(unit)}，已欠${number(extras.arrearsDays)}天；欠薪超过${number(takeoverDays)}天将被镇里收回</div>` : ""}${ipoApplication ? `<div class="subtle">业主已递交上市申请，待镇长在企业面板批准。</div>` : ""}`;
+    const privateOwnerMarkup = `${extras ? `<div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(extras.ownerName)}</strong></div>` : ""}${extras?.arrears ? `<div class="shortage-banner visible">欠薪${number(extras.arrearsVoucher, 2)}${escapeHtml(unit)}，已欠${number(extras.arrearsDays)}天；欠薪超过${number(takeoverDays)}天将被镇里收回</div>` : ""}${ipoApplication ? `<div class="subtle">业主已递交上市申请，待镇长在交易所面板批准。</div>` : ""}`;
     const privateSection = building.ownership.privateLevels > 0
       ? `<h3>民营 · ${number(building.ownership.privateLevels)}级${extras?.arrears ? ` <span class="badge red">欠薪</span>` : ""}</h3>${privateOwnerMarkup}<div class="row"><span class="label">状态 / 用工</span><strong class="value">${escapeHtml(building.privateReason || privateStatusLabel(building.privateStatus))} · ${number(privateJobs.reduce((sum, row) => sum + row.workers, 0))}/${number(privateJobs.reduce((sum, row) => sum + row.capacity, 0))}人</strong></div>${privateJobs.map(job => `<div class="row"><span class="label">${escapeHtml(job.name)}</span><strong class="value">${escapeHtml(monthlyWageText(view, job.effectiveWagePerWorkerDay, 2))}${job.wageDiagnosis ? ` · ${escapeHtml(job.wageDiagnosis)}` : ""}</strong></div>`).join("")}${building.wages?.owner === "private" ? wageSplitRow(view, building.wages, unit) : ""}<div class="row"><span class="label">今日产出</span><strong class="value">${privateOutputText}</strong></div><details class="detail-block" data-detail-key="private-stock:${escapeHtml(building.id)}"><summary>原料与预期价格</summary><div class="detail-body"><div class="row"><span class="label">批发市场</span><strong class="value">${privateMarketText}</strong></div><div class="subtle">原料从批发市场按采购价购买；产品预期售价为批发市场当前收购价。</div></div></details>` : "";
     const right = building.operatingRight;
@@ -29059,7 +29658,8 @@ function timesSquareMarkup(view, building, development) {
   }
   // mod 给这种建筑追加的卡片（mod.js 的 ui.buildingSections）。
   const modSections = building ? MODS.map(mod => mod.ui?.buildingSections?.[building.typeId]?.(view, building, view.mods?.[mod.id]) || "").join("") : "";
-  return `<button class="site-back" data-back>‹ 返回镇图</button><h2>${escapeHtml(title)}</h2><div class="cardlet">${body}${modSections}${actions ? `<div class="site-actions">${actions}</div>` : ""}</div>`;
+  const page = `${body}${modSections}${actions ? `<div class="site-actions">${actions}</div>` : ""}`;
+  return `<button class="site-back" data-back>‹ 返回镇图</button><h2>${escapeHtml(title)}</h2>${stacked ? `<div class="site-stack">${page}</div>` : `<div class="cardlet">${page}</div>`}`;
 }
 
 // 贸易中心的进出口关税：两个税率输入（交镇库，只对贸易行征收）与本年 / 累计收入。
@@ -29149,7 +29749,7 @@ return { renderSite };
 })();
 
 // ===== ui/panel-settings.js =====
-const __mxmod149 = (() => {
+const __mxmod150 = (() => {
 const { escapeHtml } = __mxmod121;
 const { APP_VERSION, BUILD_ID } = __mxmod19;
 function savedTime(value) {
@@ -29240,7 +29840,7 @@ return { renderSettings };
 })();
 
 // ===== ui/dashboard-view-cache.js =====
-const __mxmod150 = (() => {
+const __mxmod151 = (() => {
 function selectionKey(selection = {}) {
   return [
     selection.panel || "",
@@ -29288,7 +29888,7 @@ return { createDashboardViewCache };
 })();
 
 // ===== ui/freight-note.js =====
-const __mxmod151 = (() => {
+const __mxmod152 = (() => {
 // 手动外贸的运力提示（docs/TRADE.md「运力」）：请求量大于实际成交量，且成交前运力池几乎都被这笔用掉（余量不到0.05斤），
 // 视为受运力限制。交易结果本身不带"哪道上限起作用"，所以这里用成交前的池子余量判断；资金或库存不足时池子还有余量，不提示。
        function freightLimitNote(requestedJin, actualJin, poolBeforeJin) {
@@ -29301,7 +29901,7 @@ return { freightLimitNote };
 })();
 
 // ===== ui/app.js =====
-const __mxmod152 = (() => {
+const __mxmod153 = (() => {
 const { simulation: rawSimulation } = __mxmod110;
 const { loadReportMessage } = __mxmod113;
 const { exportState } = __mxmod114;
@@ -29320,19 +29920,19 @@ const { sound } = __mxmod129;
 const { createToastController } = __mxmod130;
 const { renderBuild, setBuildCategory } = __mxmod132;
 const { renderResidents } = __mxmod135;
-const { renderEconomy } = __mxmod143;
-const { econMiniSummary, renderEconMini } = __mxmod144;
-const { macroPanelSummary, renderMacroPanel } = __mxmod145;
-const { renderPolicy, WEALTH_TAX_RATE_KEYS, WEALTH_TAX_THRESHOLD_KEYS } = __mxmod146;
+const { renderEconomy } = __mxmod144;
+const { econMiniSummary, renderEconMini } = __mxmod145;
+const { macroPanelSummary, renderMacroPanel } = __mxmod146;
+const { renderPolicy, WEALTH_TAX_RATE_KEYS, WEALTH_TAX_THRESHOLD_KEYS } = __mxmod147;
 const { CONTENT } = __mxmod12;
-const { renderSite } = __mxmod148;
-const { renderSettings } = __mxmod149;
+const { renderSite } = __mxmod149;
+const { renderSettings } = __mxmod150;
 const { compact, escapeHtml, number, numberMax, moneyUnit } = __mxmod121;
 const { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumericPanelRender } = __mxmod131;
-const { createDashboardViewCache } = __mxmod150;
+const { createDashboardViewCache } = __mxmod151;
 const { APP_VERSION, BUILD_ID } = __mxmod19;
 const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod7;
-const { freightLimitNote } = __mxmod151;
+const { freightLimitNote } = __mxmod152;
 const ADVANCE_FRAME_BUDGET_MS = 40;
 const ADVANCE_RENDER_INTERVAL_MS = 250;
 // 单日结算累计耗时超过这个值就自动暂停（与原来"单帧超 800ms"同阈值，改为按一天的结算耗时计）。
@@ -29413,8 +30013,19 @@ function guardSimulation(engine, beforeCall) {
   let stockListingPreview = null;
   let sharePreviewCompanyId = null;
   let buybackPreview = null;
+  // 交易所面板：当前标签页（挂牌 / 民营申请 / 公司 / 状态）与“上市”展开的那一栋（同一时间只展开一栋）。
+  let exchangeTab = "listing";
+  let ipoExpandedBuildingId = null;
   let lastBuildPreviewPlotId = null;
   let renderedPanelMarkup = null;
+  // 从面板点进地方详情时记下来源面板的滚动位置；返回时在 renderPanel 里恢复（内容整段替换后 scrollTop 会丢）。
+  let siteOriginScroll = null;
+  let scrollToRestore = null;
+  function openSiteFrom(site) {
+    const origin = navigation.state.activePanel;
+    siteOriginScroll = origin && origin !== "site" ? { panel: origin, top: $("#panel")?.scrollTop || 0 } : null;
+    navigation.openSite(site);
+  }
   const setText = (element, text) => {
     if (element && element.textContent !== text) element.textContent = text;
   };
@@ -29539,6 +30150,8 @@ function guardSimulation(engine, beforeCall) {
       stockListingPreview,
       sharePreviewCompanyId,
       buybackPreview,
+      exchangeTab,
+      ipoExpandedBuildingId,
       ownershipExtras: ownershipExtras(),
     };
   }
@@ -29933,16 +30546,29 @@ function guardSimulation(engine, beforeCall) {
       const openDetails = preserveUiState
         ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key][open]")).map(detail => detail.dataset.detailKey))
         : new Set();
+      const knownDetails = preserveUiState
+        ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key]")).map(detail => detail.dataset.detailKey))
+        : new Set();
       const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
       panel.innerHTML = markup;
       renderedPanelMarkup = markup;
       panel.dataset.renderedPanel = panelName || "";
-      if (openDetails.size) {
+      if (preserveUiState) {
+        // 同面板重绘：沿用玩家上次的展开/收起；标记为默认展开的分组若被玩家收起，不因重绘再打开。
         for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
-          if (openDetails.has(detail.dataset.detailKey)) detail.open = true;
+          const key = detail.dataset.detailKey;
+          if (openDetails.has(key)) detail.open = true;
+          else if (knownDetails.has(key)) detail.open = false;
         }
       }
       if (preserveUiState && panelName !== "build") panel.scrollTop = previousScrollTop;
+    }
+    // 从地方详情返回：恢复进入前的滚动位置（只在回到同一来源面板时生效）。
+    if (scrollToRestore && scrollToRestore.panel === panelName) {
+      panel.scrollTop = scrollToRestore.top;
+      scrollToRestore = null;
+    } else if (scrollToRestore && panelName !== "site") {
+      scrollToRestore = null;
     }
     // 地方详情：用地名做面板标题，正文里不再重复一行大标题。
     const siteTitle = panelName === "site" ? panel.querySelector(":scope > h2") : null;
@@ -30395,6 +31021,8 @@ function guardSimulation(engine, beforeCall) {
       return;
     }
     if (closest(target, "[data-back]")) {
+      scrollToRestore = siteOriginScroll;
+      siteOriginScroll = null;
       navigation.backFromSite();
       upgradePreviewId = null;
       demolitionPreviewId = null;
@@ -30409,7 +31037,7 @@ function guardSimulation(engine, beforeCall) {
     }
     const openBuilding = closest(target, "[data-open-building]");
     if (openBuilding) {
-      navigation.openSite(`building:${openBuilding.dataset.openBuilding}`);
+      openSiteFrom(`building:${openBuilding.dataset.openBuilding}`);
       renderedMapSignature = "";
       latestMapModel = null;
       render();
@@ -30507,7 +31135,7 @@ function guardSimulation(engine, beforeCall) {
     }
     if (closest(target, "[data-bank-open]") && state) {
       const reform = buildView().monetaryReform;
-      navigation.openSite(reform.bankBuildingId ? `building:${reform.bankBuildingId}` : "bank-compat");
+      openSiteFrom(reform.bankBuildingId ? `building:${reform.bankBuildingId}` : "bank-compat");
       render(true);
       return;
     }
@@ -30554,6 +31182,20 @@ function guardSimulation(engine, beforeCall) {
       showToast(`${{ flour: "面粉", bread: "面包", wood: "木材" }[itemId] || itemId}价格已设为${number(result.value, 3)}小麦等值/${itemId === "wood" ? "单位" : "斤"}。`);
       return;
     }
+    // 交易所面板：切换标签页；“上市”展开/收起某一栋的表单（再点同一栋即收起）。
+    const exchangeTabButton = closest(target, "[data-exchange-tab]");
+    if (exchangeTabButton) {
+      exchangeTab = exchangeTabButton.dataset.exchangeTab;
+      render(true);
+      return;
+    }
+    const ipoExpandButton = closest(target, "[data-ipo-expand]");
+    if (ipoExpandButton) {
+      const buildingId = ipoExpandButton.dataset.ipoExpand;
+      ipoExpandedBuildingId = ipoExpandedBuildingId === buildingId ? null : buildingId;
+      render(true);
+      return;
+    }
     // 整栋上市（镇营建筑，镇长直接上市）：表单草稿在 ipo:<建筑>:* 下，留空代码由引擎分配。
     const ipoListButton = closest(target, "[data-ipo-list]");
     if (ipoListButton && state) {
@@ -30564,6 +31206,7 @@ function guardSimulation(engine, beforeCall) {
       const result = simulation.listBuilding(state, buildingId, options);
       if (!result.ok) { showToast(ipoFailureText(result)); render(true); return; }
       for (const suffix of ["total", "offer", "price"]) numericDrafts.delete(`ipo:${buildingId}:${suffix}`);
+      ipoExpandedBuildingId = null;
       changed(true); renderedMapSignature = ""; latestMapModel = null; render(true);
       showToast(result.offeredShares > 0
         ? `${result.ticker} 已整栋上市：挂牌${number(result.offeredShares)}股，镇库保留${number(result.keptShares)}股。`
@@ -30658,7 +31301,8 @@ function guardSimulation(engine, beforeCall) {
       if (value === null) return;
       const result = simulation.configureCompanyWage(state, companyId, value);
       if (!result.ok) { showToast(result.reason); return; }
-      numericDrafts.delete(`company:${companyId}:wage`); changed(true); render(true); return;
+      numericDrafts.delete(`company:${companyId}:wage`); changed(true); render(true);
+      showToast(`公司日薪已设为${number(value, 2)}${moneyUnit(buildView())}/人日。`); return;
     }
     const companyTarget = closest(target, "[data-company-target]");
     if (companyTarget && state) {
@@ -30669,7 +31313,8 @@ function guardSimulation(engine, beforeCall) {
       if (value === null) return;
       const result = simulation.configureCompanyTargetWorkers(state, companyId, value);
       if (!result.ok) { showToast(result.reason); return; }
-      numericDrafts.delete(`company:${companyId}:target`); changed(true); render(true); return;
+      numericDrafts.delete(`company:${companyId}:target`); changed(true); render(true);
+      showToast(`公司目标用工已设为${number(value)}人。`); return;
     }
     const companyPrice = closest(target, "[data-company-price]");
     if (companyPrice && state) {
@@ -30678,7 +31323,8 @@ function guardSimulation(engine, beforeCall) {
       if (value === null) return;
       const result = simulation.configureCompanySalePrice(state, companyId, itemId, value);
       if (!result.ok) { showToast(result.reason); return; }
-      numericDrafts.delete(`company:${companyId}:price:${itemId}`); changed(true); render(true); return;
+      numericDrafts.delete(`company:${companyId}:price:${itemId}`); changed(true); render(true);
+      showToast(`公司售价已设为${number(value, 2)}${moneyUnit(buildView())}/斤。`); return;
     }
     const liquidate = closest(target, "[data-company-liquidate]");
     if (liquidate && state) {
@@ -30717,7 +31363,7 @@ function guardSimulation(engine, beforeCall) {
       const result = simulation.openResidentShop(state, shopOpen.dataset.shopBuilding, shopOpen.dataset.shopOpen);
       if (!result.ok) { showToast(result.reason); return; }
       changed(true); renderedMapSignature = ""; render(true);
-      showToast(`店铺已开业，家庭投入${number(result.startupVoucher, 2)}小麦等值。`);
+      showToast(result.town ? "镇营店已开张，店员由镇里设定。" : `店铺已开业，家庭投入${number(result.startupVoucher, 2)}小麦等值。`);
       return;
     }
     const shopMerchant = closest(target, "[data-shop-merchant][data-step]");
@@ -30906,7 +31552,7 @@ function guardSimulation(engine, beforeCall) {
     const site = closest(target, "[data-site]");
     if (site && state) {
       if (navigation.state.activePanel === "build" && navigation.state.buildType && site.dataset.site === "field") return;
-      navigation.openSite(site.dataset.site);
+      openSiteFrom(site.dataset.site);
       renderedMapSignature = "";
       latestMapModel = null;
       render();
@@ -30928,6 +31574,20 @@ function guardSimulation(engine, beforeCall) {
       render(true);
       showToast(socialTrade.dataset.socialRepay !== undefined ? `社保基金已还款${number(result.repaidJin, 1)}斤。`
         : socialTrade.dataset.socialBuy ? `社保基金买入${number(result.shares)}股。` : `社保基金卖出${number(result.shares)}股。`);
+      return;
+    }
+    if (closest(target, "[data-bank-repay]") && state) {
+      const amount = readStagedNumber("bank-repay", { label: "偿还镇库金额", positive: true });
+      if (amount === null) return;
+      const result = simulation.repayBankDebtToTown(state, amount);
+      if (!result?.ok) {
+        showToast(result?.reason || "偿还未能完成。");
+        return;
+      }
+      numericDrafts.delete("bank-repay");
+      changed(true);
+      render(true);
+      showToast(`已偿还镇库${number(result.repaidJin, 1)}券，尚欠${number(result.debtJin, 1)}券。`);
       return;
     }
     if (closest(target, "[data-wealth-tax-save]") && state) {
@@ -31016,6 +31676,13 @@ function guardSimulation(engine, beforeCall) {
       render(true);
       const itemUnit = itemId === "wood" ? "单位" : "斤";
       showToast(`${isStockpile ? "已从批发市场收储" : "已向批发市场投放"}${number(result.movedJin, 2)}${itemUnit}。`);
+      return;
+    }
+    // 批发市场商品卡全部展开/收起：只切换 DOM 的 open；展开状态靠 data-detail-key 在重绘时保留。
+    if (closest(target, "[data-wholesale-toggle-all]")) {
+      const cards = Array.from($("#panel").querySelectorAll("details[data-wholesale-item]"));
+      const openAll = cards.some(card => !card.open);
+      for (const card of cards) card.open = openAll;
       return;
     }
     // 批发市场逐品自动调价开关：开启时以当前售价为锚定价，失败原因走 toast。
@@ -31480,8 +32147,8 @@ return { mountGame };
 })();
 
 // ===== main.js =====
-const __mxmod153 = (() => {
-const { mountGame } = __mxmod152;
+const __mxmod154 = (() => {
+const { mountGame } = __mxmod153;
 const root = document.getElementById("app");
 if (!root) throw new Error("缺少游戏页面根容器 #app");
 mountGame(root);
@@ -31489,7 +32156,7 @@ return {  };
 })();
 
 // ===== mods/_template/content.js =====
-const __mxmod154 = (() => {
+const __mxmod155 = (() => {
 // mod 模板 · 内容（纯数据，不能 import 系统代码）。复制整个 _template 文件夹改名即可开始。
 // 本模板没有登记，不会进游戏；登记方法见 MODDING.md。
 // 下面以"茶叶"为例：茶园（原料产业）产茶叶，居民买来喝加舒心值，外镇也收。
@@ -31547,7 +32214,7 @@ return { default: __dflt };
 })();
 
 // ===== mods/_template/mod.js =====
-const __mxmod155 = (() => {
+const __mxmod156 = (() => {
 const { defineMod, modState } = __mxmod77;
 const __dflt = defineMod({
   id: "_template",
@@ -31601,7 +32268,7 @@ return { default: __dflt };
 })();
 
 // ===== ui/panel-overview.js =====
-const __mxmod156 = (() => {
+const __mxmod157 = (() => {
 const { escapeHtml, number, numberMax, shortageJin } = __mxmod121;
 function renderOverview(view) {
   const p = view.people;
@@ -31630,7 +32297,7 @@ return { renderOverview };
 })();
 
 // ===== ui/terrain-art.js =====
-const __mxmod157 = (() => {
+const __mxmod158 = (() => {
 /**
  * src/ui/art.js
  * 麦乡 (Maixiang) 地图精细化美术渲染器
