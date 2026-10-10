@@ -30,7 +30,6 @@ function listedCompany(state, buildingId, { levels = 1, capital = 10000, ticker 
   const formed = formCompany(state, buildingId, { name: `${buildingId}公司`, levels, operatingCapitalVoucher: capital, initialMaterialQuantity: 0 });
   assert.equal(formed.ok, true, formed.reason);
   openExchange(state);
-  state.monetaryReform.stage = "voucher";
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker, totalShares: shares, priceVoucherPerShare: price, offeredShares: offer });
   assert.equal(listed.ok, true, listed.reason);
   return state.companies[formed.companyId];
@@ -49,7 +48,7 @@ test("已取消单独成立公司：createCompany / listCompany 只返回原因�
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
 
-test("没有交易所或未完成货币改革时不能上市；完成后代码与整除规则生效", () => {
+test("没有交易所时不能上市；建成交易所后代码与整除规则生效", () => {
   const state = legacyVoucherState();
   const salt = addBuilding(state, "saltworks", "gate-salt", 2);
   assert.equal(simulation.issueGrainVouchers(state, "town", 50000).ok, true);
@@ -58,9 +57,6 @@ test("没有交易所或未完成货币改革时不能上市；完成后代码�
   state.stockExchange = { legacyAccess: false, rotation: 0 };
   assert.match(simulation.listCompanyShares(state, formed.companyId, { ticker: "007", totalShares: 1000, priceVoucherPerShare: 1, offeredShares: 100 }).reason, /交易所/);
   openExchange(state);
-  state.monetaryReform.stage = "transition";
-  assert.match(simulation.listCompanyShares(state, formed.companyId, { ticker: "007", totalShares: 1000, priceVoucherPerShare: 1, offeredShares: 100 }).reason, /货币改革/);
-  state.monetaryReform.stage = "voucher";
   const bad = simulation.listCompanyShares(state, formed.companyId, { ticker: "007", totalShares: 1001, priceVoucherPerShare: 1, offeredShares: 100 });
   assert.equal(bad.ok, false);
   assert.ok(bad.nearby?.every(value => value % 2 === 0));
@@ -158,7 +154,6 @@ test("有上市公司时交易所禁止拆除", () => {
   const exchange = addBuilding(state, "stock_exchange", "exchange-1", 1);
   assert.equal(simulation.issueGrainVouchers(state, "town", 20000).ok, true);
   const formed = formCompany(state, "exchange-company", { levels: 1, operatingCapitalVoucher: 1000, initialMaterialQuantity: 0 });
-  state.monetaryReform.stage = "voucher";
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker: "088", totalShares: 1000, priceVoucherPerShare: 1, offeredShares: 0 });
   assert.equal(listed.ok, true, listed.reason);
   const preview = simulation.selectDemolitionPreview(state, exchange.id);

@@ -40,9 +40,9 @@ test("every building type in content is built at least once, upgradeable ones at
   }
 });
 
-test("the maxed state is in voucher stage with bank and social security office built", () => {
+test("the maxed state has bank and social security office built, with no currency stage field", () => {
   const state = maxed();
-  assert.equal(state.monetaryReform.stage, "voucher");
+  assert.equal("stage" in state.monetaryReform, false);
   assert.ok(state.buildings.some(row => row.typeId === "bank"));
   assert.ok(state.buildings.some(row => row.typeId === "social_security_office"));
 });

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { simulation } from "../src/engine.js";
 import { CONTENT } from "../src/content/index.js";
+import { SAVE_VERSION } from "../src/content/rules.js";
 import { validateState } from "../src/core/validation.js";
 import {
   applyRenames, mergeOntoBase, sanitizeNumbers, emptyLoadReport
@@ -126,16 +127,21 @@ test("NaN in the in-memory save becomes 0 and is listed in the report", () => {
   assert.ok(loaded._loadReport.repaired.includes("policy.villa.taxRatePercent"));
 });
 
-test("version guards: newer saves and pre-17 saves are refused with clear messages", () => {
+test("version guards: 更新版本的存档被拒，18 以下的旧档被拒，当前版本能读", () => {
   const newer = played();
-  newer.version = 18;
-  newer.schemaVersion = 18;
+  newer.version = SAVE_VERSION + 1;
+  newer.schemaVersion = SAVE_VERSION + 1;
   assert.throws(() => migrateSave(newer, simulation.content), /更新版本/);
 
   const older = played();
-  older.version = 16;
-  older.schemaVersion = 16;
+  older.version = SAVE_VERSION - 1;
+  older.schemaVersion = SAVE_VERSION - 1;
   assert.throws(() => migrateSave(older, simulation.content), /旧版存档不兼容/);
+
+  const current = played();
+  current.version = SAVE_VERSION;
+  current.schemaVersion = SAVE_VERSION;
+  assert.doesNotThrow(() => migrateSave(current, simulation.content));
 });
 
 test("applyRenames with the current empty RENAMES list is a no-op", () => {
@@ -178,16 +184,16 @@ test("a subsystem that fails validation but passes the type merge is reset and r
   const originalYear = save.year;
   const originalDay = save.day;
   const originalHouseholds = Object.keys(save.households.byId).length;
-  save.socialSecurity.cashWheatUnits = -5;
+  save.socialSecurity.cashVoucherUnits = -5;
 
   const loaded = migrateSave(save, simulation.content);
   // 只重置出错的那个字段，社保子系统的其余数据保留。
-  assert.deepEqual(loaded._loadReport.reset, ["socialSecurity.cashWheatUnits"]);
-  assert.equal(loaded.socialSecurity.cashWheatUnits, fresh.socialSecurity.cashWheatUnits);
+  assert.deepEqual(loaded._loadReport.reset, ["socialSecurity.cashVoucherUnits"]);
+  assert.equal(loaded.socialSecurity.cashVoucherUnits, fresh.socialSecurity.cashVoucherUnits);
   assert.equal(loaded.year, originalYear);
   assert.equal(loaded.day, originalDay);
   assert.equal(Object.keys(loaded.households.byId).length, originalHouseholds);
-  assert.match(loadReportMessage(loaded), /重置子系统：socialSecurity\.cashWheatUnits/);
+  assert.match(loadReportMessage(loaded), /重置子系统：socialSecurity\.cashVoucherUnits/);
   assertValid(loaded);
 });
 

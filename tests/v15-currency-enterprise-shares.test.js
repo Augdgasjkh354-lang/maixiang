@@ -38,7 +38,6 @@ function listForShareTest(state, buildingId, options, ticker = "001", totalShare
   assert.equal(formed.ok, true, formed.reason);
   state.stockExchange ||= { legacyAccess: true, rotation: 0 };
   state.stockExchange.legacyAccess = true;
-  state.monetaryReform.stage = "voucher";
   const listed = simulation.listCompanyShares(state, formed.companyId, { ticker, totalShares, priceVoucherPerShare: 1, offeredShares: 0 });
   assert.equal(listed.ok, true, listed.reason);
   return formed;
@@ -214,7 +213,6 @@ test("经营面板分开公司成立与交易所上市，并保留安全区固�
   const state = legacyVoucherState();
   addBuilding(state, "saltworks", "ui-listed");
   const html = renderEconomy(blankUiView(state));
-  assert.match(html, /新交易以粮券结算/);
   assert.match(html, /整栋上市/);
   assert.match(html, /交易所/);
   const css = fs.readFileSync(new URL("../src/styles/main.css", import.meta.url), "utf8");

@@ -10,8 +10,7 @@ function voucherTown(seed) {
   const plot = state.plots.find(row => !row.feature);
   state.buildings.push({ id: "bank-b", typeId: "bank", level: 1, ownership: { townLevels: 1, privateLevels: 0, listedLevels: 0 },
     plotId: plot.id, x: plot.x, y: plot.y, materialInvestments: [], completed: { year: 1, day: 1 } });
-  assert.equal(state.monetaryReform.stage, "voucher"); // 开局即粮券阶段
-  return state;
+  return state; // 开局即粮券唯一货币，建成银行即可发债
 }
 
 test("国债按固定利率发行：发行当天认购，利率不随认购变化，粮券守恒", () => {
