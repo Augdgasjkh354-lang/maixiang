@@ -14,6 +14,8 @@
 
 ```bash
 node --test                                          # 跑全部测试（注意：不要写成 node --test tests/）
+node --test --test-concurrency=4                     # 同上但四路并行（4 核机器全量实测约 190 秒；默认是核数减一即 3 路）；各测试文件是独立进程，互不干扰
+node --test --test-skip-pattern='\[slow\]'           # 日常迭代：跳过标题带 [slow] 的慢测（实测约 95 秒，CPU 约减半）；合并前必须跑全量
 node scripts/bundle-single.mjs --out index.html      # 打包成单文件，自带语法检查 + 30 天无界面冒烟
 node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输出每年指标 CSV
 node scripts/health-check.mjs 10                     # 十年经济体检：人口、货币分布、家底、基尼、物价、产业、履约；可加 --wealth-tax 1,3,5 --inheritance 30 --employer-share 100
@@ -120,6 +122,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 ## 验证改动
 
 - 逻辑改动：`node --test` + 跑一个相关场景（`scenarios/` 里有现成的）。
+- 测试提速：同一文件里多个用例共用的昂贵夹具（满级建筑、推进数百天的状态）只构造一次，各用例用 `tests/helpers-fixture.js` 的 `cloneFixture` 深拷贝；别直接 `structuredClone`，它会丢掉 `state.project`（不可枚举访问器）。单用例耗时明显的测试标题加 `[slow] ` 前缀（见上方 `--test-skip-pattern`），不要因此删掉或跳过它。
 - 界面改动：打包后用浏览器（或 Playwright）打开 `index.html`，点"新游戏"实际操作一遍。打包冒烟只跑模拟、不渲染界面，界面报错它查不出来。
 - 验收以"账平"为准（`validateState` 通过、钱粮无凭空增减）。模拟最多跑 3 年，不跑 10 年；数值校准类需求另说。
 - 写测试或脚本时，场景里可以直接给镇库加木材来跳过开局（`state.accounts.town.wood += 数量 * content.precision.inventoryUnitsPerJin`）。

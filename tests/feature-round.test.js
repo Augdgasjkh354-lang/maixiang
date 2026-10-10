@@ -138,7 +138,7 @@ test("wage arrears keep their old amount and pay separately from current wages",
   assert.equal(simulation.validateState(state).valid, true);
 });
 
-test("unemployment benefit is limited to idle workers, can be disabled, and creates no debt", () => {
+test("[slow] unemployment benefit is limited to idle workers, can be disabled, and creates no debt", () => {
   const state = legacyVoucherState();
   assert.equal(state.policy.unemploymentBenefit.enabled, false);
   simulation.setUnemploymentPolicy(state, { enabled: true, dailyPerWorkerJin: 1 });
@@ -287,13 +287,14 @@ test("v2旧存档不再自动迁移", () => {
   old.schemaVersion = 2;
   assert.throws(() => migrateSave(old, CONTENT), /旧版存档不兼容/);
 });
-test("fifteen-year headless run keeps age, job and inventory ledgers consistent", () => {
+test("[slow] three-year headless run keeps age, job and inventory ledgers consistent", () => {
+  // 原为十五年（约占全量测试 CPU 的四分之一）；断言全是年数无关的不变式，缩为三年（AGENTS.md 验收上限）。
   const state = simulation.createInitialState({ seed: 884422 });
-  simulation.advanceDays(state, CONTENT.rules.daysPerYear * 15);
-  assert.equal(state.annualReports.length, 15);
-  assert.equal(state.year, 16);
+  simulation.advanceDays(state, CONTENT.rules.daysPerYear * 3);
+  assert.equal(state.annualReports.length, 3);
+  assert.equal(state.year, 4);
   assert.equal(state.day, 0);
-  assert.equal(state.agriculture.lastHarvestYear, 15);
+  assert.equal(state.agriculture.lastHarvestYear, 3);
   const people = populationStats(state);
   const jobs = selectJobRows(state, CONTENT);
   assert.equal(people.total, people.children + people.workers + people.elders);

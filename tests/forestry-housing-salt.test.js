@@ -83,7 +83,7 @@ test("伐木场与盐场按岗位人数生产；行业工资不混入面包链",
   assert.equal(simulation.validateState(saltState).valid, true);
 });
 
-test("年度盐需求精确；六名盐工连续生产全年的物理产能按工资口径记账", () => {
+test("[slow] 年度盐需求精确；六名盐工连续生产全年的物理产能按工资口径记账", () => {
   const demandState = simulation.createInitialState({ seed: 1501 });
   simulation.advanceDays(demandState, CONTENT.rules.daysPerYear);
   // 人口 1100→3300（8cf03ae）：年盐需求 11000→33000（人均 10/年）。

@@ -24,7 +24,7 @@ function addBuilding(state, typeId, id, level = 1, townLevels = level, privateLe
   return building;
 }
 
-test("农业税0%、50%、80%与年中调税按农事日平均分粮", () => {
+test("[slow] 农业税0%、50%、80%与年中调税按农事日平均分粮", () => {
   // 初始耕地 4000→15000 亩（8cf03ae）：总产 200 万→750 万斤，各税率分粮同比例放大。
   for (const [rate, town, resident] of [[0, 0, 9000000], [50, 4500000, 4500000], [80, 7200000, 1800000]]) {
     const state = simulation.createInitialState();

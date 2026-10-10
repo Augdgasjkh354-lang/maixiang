@@ -89,7 +89,7 @@ test("mobile build picking state is distinct from build preview state", () => {
   assert.equal(isChoosingBuildPlot({ activePanel: "build", buildType: null, previewPlotId: null }), false);
 });
 
-test("fresh-game history starts on day 1 and harvest ledger matches harvest day", () => {
+test("[slow] fresh-game history starts on day 1 and harvest ledger matches harvest day", () => {
   const state = simulation.createInitialState({ seed: 20260925 });
   assert.equal(state.events[0].day, 1, "the first visible day must not be recorded as day 0");
 

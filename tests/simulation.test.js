@@ -37,8 +37,18 @@ test("initial population, jobs and both food accounts match the v1 start", () =>
   assert.equal(simulation.totalQeq(state), 6000000);
 });
 
-test("full crop labor yields 9 million jin at growingDays; town tax reaches town", () => {
+test("[slow] full-year consumption is exact; the annual harvest, report and first-year labor ledger are not duplicated", () => {
+  // 基线清理（合并三个用例，断言一条不少）：
+  // - "full crop labor"（秋收总产、税率分粮）与本用例同种子同一段秋收，合并到收获当日核对；
+  // - "first-year labor ledger"（年内成年/退休/死亡守恒）与本用例同种子（默认 917309）同一整年，合并到年末核对；
+  // 原先各自另跑整年/秋收模拟，合并后省去两段重复推进。
+  // 账本上限 4000→500（本分支瘦身改动）后，一整年的日流水会把年度初的 harvest 行挤出滚动窗口，
+  // 所以"秋收只记一次"改为在收获当日核对，年末只核对报告口径不重复。
   const state = simulation.createInitialState();
+  // 开局人口（原 first-year labor 用例）。
+  assert.equal(populationStats(state).children, 1050);
+  assert.equal(populationStats(state).workers, 1750);
+  assert.equal(populationStats(state).elders, 500);
   const result = simulation.advanceDays(state, CONTENT.rules.growingDays);
   const harvest = result.results.find(function (row) { return row.harvest; }).harvest;
   // 初始耕地 4000→15000 亩（8cf03ae），亩产 600 斤 → 总产 15000×600 = 9,000,000 斤。
@@ -64,21 +74,13 @@ test("full crop labor yields 9 million jin at growingDays; town tax reaches town
   }, {});
   assert.equal(split.town, 2700000);
   assert.equal(split.residents, 6300000);
-});
 
-test("full-year consumption is exact; the annual harvest and report are not duplicated", () => {
-  const state = simulation.createInitialState();
-  // 账本上限 4000→500（本分支瘦身改动）后，一整年的日流水会把年度初的 harvest 行挤出滚动窗口，
-  // 所以"秋收只记一次"改为在收获当日核对，年末只核对报告口径不重复。
-  const harvestState = simulation.createInitialState();
-  simulation.advanceDays(harvestState, CONTENT.rules.growingDays);
-  assert.equal(recordByType(harvestState, "harvest").filter(function (row) {
+  assert.equal(recordByType(state, "harvest").filter(function (row) {
     return row.transactionId === "harvest-y1";
   }).length, 2);
-  simulation.advanceDays(harvestState, CONTENT.rules.daysPerYear - CONTENT.rules.growingDays);
-  assert.equal(harvestState.agriculture.taxHistory.length, 1, "一年只产生一次秋收记录");
+  simulation.advanceDays(state, CONTENT.rules.daysPerYear - CONTENT.rules.growingDays);
+  assert.equal(state.agriculture.taxHistory.length, 1, "一年只产生一次秋收记录");
 
-  simulation.advanceDays(state, CONTENT.rules.daysPerYear);
   assert.equal(state.year, 2);
   assert.equal(state.day, 0);
   assert.equal(state.annualReports[0].consumptionQeq / CONTENT.precision.qeqUnitsPerJin, 3300 * 2 * CONTENT.rules.daysPerYear); // 满额：3300人×2斤×360天（旧2060600是缺粮短缺值）
@@ -88,6 +90,26 @@ test("full-year consumption is exact; the annual harvest and report are not dupl
     return row.transactionId === "harvest-y1";
   }).length <= 2, "harvest-y1 最多是最初的一对分粮行（粮足时流水少，可能尚未滚出500行窗口）");
   assert.equal(simulation.totalQeq(state), 12624000); // 初始600万 + 秋收900万 − 满额消耗237.6万（3300×2×360）− 其他流水
+
+  // 首年劳动力账（原 first-year labor ledger 用例）：年内跨 17 岁与 64 岁的人各只计一次。
+  // 人口 1100→3300（8cf03ae）后年龄结构变化：劳动力 1750 开局，年内成年 58、退休 37、劳动年龄死亡 2。
+  const labor = state.annualReports[0].laborChange;
+  assert.deepEqual(labor, {
+    openingWorkers: 1750,
+    adults: 58,
+    retirees: 37,
+    laborAgeDeaths: 2,
+    closingWorkers: 1769,
+    netChange: 19,
+    balanceDifference: 0
+  });
+  const peoplePanel = renderPeople(simulation.selectDashboard(state));
+  assert.match(peoplePanel, /年初 \/ 年末劳动力/);
+  // 面板对 ≥1000 的数字加千分位（人口 3300 后劳动力首次超过四位数）。
+  assert.match(peoplePanel, /1,750 \/ 1,769人/);
+  assert.match(peoplePanel, /成年 \/ 退休/);
+  assert.match(peoplePanel, /58 \/ 37人/);
+
   simulation.advanceDays(state, CONTENT.rules.growingDays);
   assert.equal(state.year, 2);
   assert.equal(recordByType(state, "harvest").filter(function (row) {
@@ -163,7 +185,7 @@ test("construction consumes worker-days, releases jobs, and rejects duplicate si
   assert.equal(simulation.setEmployment(state, start.instanceId + "::millers", 12).assigned, 12);
 });
 
-test("staffed mill and bakery roles survive construction completion and annual reconciliation", () => {
+test("[slow] staffed mill and bakery roles survive construction completion and annual reconciliation", () => {
   const state = simulation.createInitialState({ seed: 20260924 });
   addInventory(state, "town", "wood", 600, "test stock", "test", CONTENT);
   const mill = simulation.buildAt(state, "mill", "east");
@@ -463,11 +485,12 @@ test("simulation replay is reproducible after saving RNG state and employment", 
   assert.equal(simulation.validateState(left).valid, true);
 });
 
-test("5-year population history reconciles births, deaths, age limits, jobs and stocks", () => {
+test("[slow] 3-year population history reconciles births, deaths, age limits, jobs and stocks", () => {
+  // 原为五年；逐年核对的是年度恒等式，三年即覆盖多次年终结转（缩短以控制全量耗时）。
   const state = simulation.createInitialState({ seed: 660021 });
   const startingPopulation = populationStats(state).total;
-  simulation.advanceDays(state, 5 * CONTENT.rules.daysPerYear);
-  assert.equal(state.annualReports.length, 5);
+  simulation.advanceDays(state, 3 * CONTENT.rules.daysPerYear);
+  assert.equal(state.annualReports.length, 3);
   let previous = startingPopulation;
   for (const report of state.annualReports) {
     assert.equal(report.populationAfterAging, previous + report.births - report.deaths);
@@ -489,27 +512,3 @@ test("5-year population history reconciles births, deaths, age limits, jobs and 
   assert.ok(Object.values(state.accounts.town).every(value => value >= 0));
 });
 
-test("first-year labor ledger counts survivors crossing ages 17 and 64 exactly once", () => {
-  const state = simulation.createInitialState({ seed: 917309 });
-  assert.equal(populationStats(state).children, 1050);
-  assert.equal(populationStats(state).workers, 1750);
-  assert.equal(populationStats(state).elders, 500);
-  simulation.advanceDays(state, CONTENT.rules.daysPerYear);
-  const labor = state.annualReports[0].laborChange;
-  // 人口 1100→3300（8cf03ae）后年龄结构变化：劳动力 1750 开局，年内成年 58、退休 37、劳动年龄死亡 2。
-  assert.deepEqual(labor, {
-    openingWorkers: 1750,
-    adults: 58,
-    retirees: 37,
-    laborAgeDeaths: 2,
-    closingWorkers: 1769,
-    netChange: 19,
-    balanceDifference: 0
-  });
-  const peoplePanel = renderPeople(simulation.selectDashboard(state));
-  assert.match(peoplePanel, /年初 \/ 年末劳动力/);
-  // 面板对 ≥1000 的数字加千分位（人口 3300 后劳动力首次超过四位数）。
-  assert.match(peoplePanel, /1,750 \/ 1,769人/);
-  assert.match(peoplePanel, /成年 \/ 退休/);
-  assert.match(peoplePanel, /58 \/ 37人/);
-});

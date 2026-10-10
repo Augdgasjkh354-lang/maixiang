@@ -27,7 +27,7 @@ function assertValid(state) {
   assert.deepEqual(errors, []);
 }
 
-test("round trip: a current save loads back to the same JSON with no load report", () => {
+test("[slow] round trip: a current save loads back to the same JSON with no load report", () => {
   const original = playedJson();
   const loaded = migrateSave(JSON.parse(original), simulation.content);
   assert.equal(JSON.stringify(loaded), original);

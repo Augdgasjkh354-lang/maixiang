@@ -115,14 +115,15 @@ test("0.1.3 新局只保留 cohort + 家庭年龄段 + 家庭岗位三层聚合�
   assertPopulationAuthority(state);
 });
 
-test("固定种子五年推进中家庭三年龄段始终与 cohort 一致，就业不超过劳动力", () => {
+test("[slow] 固定种子三年推进中家庭三年龄段始终与 cohort 一致，就业不超过劳动力", () => {
+  // 原为五年；每年都做全量一致性核对，三年已覆盖多次年终分家与结转（缩短以控制全量耗时）。
   const state = simulation.createInitialState({ seed: 130102 });
-  for (let year = 0; year < 5; year += 1) {
+  for (let year = 0; year < 3; year += 1) {
     simulation.advanceDays(state, CONTENT.rules.daysPerYear);
     assertPopulationAuthority(state);
     assert.ok(state.lastDemography?.householdAllocation);
   }
-  assert.equal(state.annualReports.length, 5);
+  assert.equal(state.annualReports.length, 3);
 });
 
 test("家庭劳动力减少时稳定释放超额岗位；新增成年劳动力可再次就业", () => {

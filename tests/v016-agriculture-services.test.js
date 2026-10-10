@@ -287,7 +287,7 @@ function serviceIncomeScenario(disposableVoucherPerDay) {
   };
 }
 
-test("同人口同种子下，可支配收入提高会增加服务消费与可持续服务就业，但不会强制吸收全部失业", () => {
+test("[slow] 同人口同种子下，可支配收入提高会增加服务消费与可持续服务就业，但不会强制吸收全部失业", () => {
   const low = serviceIncomeScenario(0.5);
   const high = serviceIncomeScenario(30);
   assert.ok(high.served > low.served * 3 + 10, `高收入服务次数应明显更高：low=${low.served}, high=${high.served}`);

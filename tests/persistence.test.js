@@ -46,7 +46,7 @@ test("unreadable local save stays untouched", () => {
   assert.equal(storage.keys().length, 1);
 });
 
-test("export and import round-trip a resumable paused save and preserve replaced data", () => {
+test("[slow] export and import round-trip a resumable paused save and preserve replaced data", () => {
   const state = simulation.createInitialState({ seed: 2718 });
   simulation.advanceDays(state, 70);
   const storage = memoryStorage();
@@ -69,7 +69,7 @@ test("export and import round-trip a resumable paused save and preserve replaced
     populationStats(nextA).children + populationStats(nextA).workers + populationStats(nextA).elders);
 });
 
-test("auto-save and reload retain each workshop's assigned people through year end", () => {
+test("[slow] auto-save and reload retain each workshop's assigned people through year end", () => {
   const state = simulation.createInitialState({ seed: 80721 });
   addInventory(state, "town", "wood", 600, "test stock", "test", CONTENT);
   addInventory(state, "town", "wood", 500, "test stock", "test", CONTENT);
@@ -101,7 +101,8 @@ test("clock starts paused, pauses without advancing, and equal simulated days ig
 
   slowClock.setSpeed(1);
   fastClock.setSpeed(16);
-  const days = 120;
+  // 原为 120 天；速度无关性只需跨过几次帧推进即可，缩为 30 天（全量耗时）。
+  const days = 30;
   const slowAdvanced = slowClock.advanceFrame(days / CONTENT.rules.dailyDaysPerSecond,
     () => simulation.advanceDay(slowState));
   const fastAdvanced = fastClock.advanceFrame(days / (CONTENT.rules.dailyDaysPerSecond * 16),

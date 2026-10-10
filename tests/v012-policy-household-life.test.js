@@ -31,7 +31,7 @@ function clearFamilyFood(state, household) {
 
 function cloneInitial(seed = 1201) { return legacyVoucherState({ seed }); }
 
-test("0.1.2农业税对照：只改变税率，秋收家庭实物收入与镇库税粮方向相反", () => {
+test("[slow] 0.1.2农业税对照：只改变税率，秋收家庭实物收入与镇库税粮方向相反", () => {
   const low = cloneInitial(1201), high = cloneInitial(1201);
   simulation.setAgricultureTax(low, 20); simulation.setAgricultureTax(high, 70);
   simulation.advanceDays(low, CONTENT.rules.growingDays); simulation.advanceDays(high, CONTENT.rules.growingDays);

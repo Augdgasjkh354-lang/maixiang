@@ -5,6 +5,7 @@ import { addInventory } from "../src/economy/inventory.js";
 import { CONTENT } from "../src/content/index.js";
 import { levelBonus } from "../src/economy/productivity.js";
 import { renderBuildingArt, BUILDING_ART_CATALOG } from "../src/ui/building-art.js";
+import { cloneFixture } from "./helpers-fixture.js";
 
 const MAX_LEVEL = 10;
 
@@ -21,30 +22,42 @@ test("building level cap is 10 and every upgrade definition agrees with it", () 
   }
 });
 
-test("a mill can be upgraded step by step to level 10 and level 11 is refused", () => {
-  const state = simulation.createInitialState();
-  // 镇库加木材跳过开局；镇营产出需要批发市场，先建好。
-  addInventory(state, "town", "wood", 1200, "test market stock", "test", CONTENT);
-  const market = simulation.buildAt(state, "wholesale_market", "village-01");
-  assert.equal(market.ok, true, market.reason);
-  simulation.advanceDays(state, 60);
-  addInventory(state, "town", "wood", 600, "test mill stock", "test", CONTENT);
-  const built = simulation.buildAt(state, "mill", "east");
-  assert.equal(built.ok, true, built.reason);
-  simulation.advanceDays(state, 40);
-  const mill = state.buildings.find(row => row.id === built.instanceId);
-  assert.ok(mill, "mill should be built");
-  assert.equal(mill.level, 1);
+// 镇营磨坊从开局建到满级：每级都校验（只在第一次需要时跑一遍），之后各用例深拷贝同一份满级状态，
+// 避免两个用例各跑一整套 1→10 级升级（基线清理：CPU 耗时大头）。
+let maxedMillCache = null;
+function maxedMill() {
+  if (maxedMillCache === null) {
+    const state = simulation.createInitialState();
+    // 镇库加木材跳过开局；镇营产出需要批发市场，先建好。
+    addInventory(state, "town", "wood", 1200, "test market stock", "test", CONTENT);
+    const market = simulation.buildAt(state, "wholesale_market", "village-01");
+    assert.equal(market.ok, true, market.reason);
+    simulation.advanceDays(state, 60);
+    addInventory(state, "town", "wood", 600, "test mill stock", "test", CONTENT);
+    const built = simulation.buildAt(state, "mill", "east");
+    assert.equal(built.ok, true, built.reason);
+    simulation.advanceDays(state, 40);
+    const mill = state.buildings.find(row => row.id === built.instanceId);
+    assert.ok(mill, "mill should be built");
+    assert.equal(mill.level, 1);
 
-  for (let level = 1; level < MAX_LEVEL; level += 1) {
-    addInventory(state, "town", "wood", 600, `test upgrade to ${level + 1}`, "test", CONTENT);
-    const result = simulation.upgradeBuilding(state, mill.id);
-    assert.equal(result.ok, true, `upgrade from ${level} failed: ${result.reason}`);
-    advanceUntilIdle(state);
-    assert.equal(mill.level, level + 1);
-    assert.equal(simulation.validateState(state).valid, true, `state valid at level ${level + 1}`);
+    for (let level = 1; level < MAX_LEVEL; level += 1) {
+      addInventory(state, "town", "wood", 600, `test upgrade to ${level + 1}`, "test", CONTENT);
+      const result = simulation.upgradeBuilding(state, mill.id);
+      assert.equal(result.ok, true, `upgrade from ${level} failed: ${result.reason}`);
+      advanceUntilIdle(state);
+      assert.equal(mill.level, level + 1);
+      assert.equal(simulation.validateState(state).valid, true, `state valid at level ${level + 1}`);
+    }
+    assert.equal(mill.level, MAX_LEVEL);
+    maxedMillCache = cloneFixture({ state, millId: mill.id });
   }
+  const copy = cloneFixture(maxedMillCache);
+  return { state: copy.state, mill: copy.state.buildings.find(row => row.id === copy.millId) };
+}
 
+test("[slow] a mill can be upgraded step by step to level 10 and level 11 is refused", () => {
+  const { state, mill } = maxedMill();
   assert.equal(mill.level, MAX_LEVEL);
   addInventory(state, "town", "wood", 600, "test over-cap stock", "test", CONTENT);
   const refused = simulation.upgradeBuilding(state, mill.id);
@@ -55,21 +68,8 @@ test("a mill can be upgraded step by step to level 10 and level 11 is refused", 
 });
 
 test("job capacity and productivity scale with level up to 10", () => {
-  const state = simulation.createInitialState();
-  addInventory(state, "town", "wood", 1200, "test market stock", "test", CONTENT);
-  assert.equal(simulation.buildAt(state, "wholesale_market", "village-01").ok, true);
-  simulation.advanceDays(state, 60);
-  addInventory(state, "town", "wood", 600, "test mill stock", "test", CONTENT);
-  const built = simulation.buildAt(state, "mill", "east");
-  simulation.advanceDays(state, 40);
-  const mill = state.buildings.find(row => row.id === built.instanceId);
+  const { state, mill } = maxedMill();
   const slots = CONTENT.buildings.mill.jobs.find(job => job.id === "millers").slots;
-
-  for (let level = 1; level < MAX_LEVEL; level += 1) {
-    addInventory(state, "town", "wood", 600, `test upgrade to ${level + 1}`, "test", CONTENT);
-    assert.equal(simulation.upgradeBuilding(state, mill.id).ok, true);
-    advanceUntilIdle(state);
-  }
 
   const row = simulation.selectJobRows(state).rows.find(item => item.key === `${mill.id}::millers`);
   assert.equal(row.capacity, slots * MAX_LEVEL, "capacity at level 10 is 10x slots");

@@ -10,7 +10,7 @@ import { renderSite } from "../src/ui/panel-site.js";
 const SCALE = CONTENT.precision.inventoryUnitsPerJin;
 const itemTotal = (state, item) => (state.accounts.town[item] || 0) + (state.accounts.residents[item] || 0);
 
-test("upgrade keeps the instance, plot, existing roster and production; new capacity starts vacant", () => {
+test("[slow] upgrade keeps the instance, plot, existing roster and production; new capacity starts vacant", () => {
   const state = simulation.createInitialState();
   // 基线清理：0.1.10-r08 起镇营生产的原料必须经过批发市场
   // （production.js 走 procureTownInputFromWholesale，没有市场就 status=no_materials），
