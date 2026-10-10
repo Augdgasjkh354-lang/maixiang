@@ -81,7 +81,7 @@ test("民营待批上市申请在地方详情给出提示", () => {
   const owner = householdList(state)[0];
   addBuilding(state, "saltworks", "salt-p", { owner: "household", ownerId: owner.id });
   state.ipoApplications = { "salt-p": { householdId: owner.id, filedSerial: 1, offerPercent: 49, priceVoucherPerShare: 1 } };
-  assert.match(siteHtml(state, "salt-p"), /待镇长在企业面板批准/);
+  assert.match(siteHtml(state, "salt-p"), /待镇长在交易所面板批准/);
 });
 
 test("公司或民营建筑用业主自主升级说明代替镇里升级按钮", () => {
@@ -95,20 +95,26 @@ test("公司或民营建筑用业主自主升级说明代替镇里升级按钮",
   assert.doesNotMatch(townHtml, /业主自主升级/);
 });
 
-test("企业面板：镇营产业整栋上市表单、民营申请批准/驳回按钮，且没有公司等级按钮或成立公司入口", () => {
+test("交易所面板：镇营产业整栋上市表单（展开时）、民营申请批准/驳回按钮，且没有公司等级按钮或成立公司入口", () => {
   const state = baseState();
   addBuilding(state, "mill", "mill-t");
+  addBuilding(state, "stock_exchange", "exchange-t");
   const owner = householdList(state)[0];
   addBuilding(state, "saltworks", "salt-p", { owner: "household", ownerId: owner.id });
   state.ipoApplications = { "salt-p": { householdId: owner.id, filedSerial: 1, offerPercent: 49, priceVoucherPerShare: 1 } };
-  const html = renderEconomy(simulation.selectDashboard(state, { panel: "all", paused: true, speed: 1 }));
-  assert.match(html, /整栋上市/);
-  assert.match(html, /data-ipo-list="mill-t"/);
-  assert.match(html, /data-ipo-approve="salt-p"/);
-  assert.match(html, /data-ipo-reject="salt-p"/);
-  assert.doesNotMatch(html, /预览成立公司/);
-  assert.doesNotMatch(html, /data-company-level-preview/);
-  assert.doesNotMatch(html, /data-company-preview/);
+  const exchangeView = simulation.selectDashboard(state, { panel: "site", site: "building:exchange-t", paused: true, speed: 1 });
+  const listing = renderSite({ ...exchangeView, numericDrafts: {}, exchangeTab: "listing", ipoExpandedBuildingId: "mill-t" });
+  assert.match(listing, /整栋上市/);
+  assert.match(listing, /data-ipo-list="mill-t"/);
+  const applications = renderSite({ ...exchangeView, numericDrafts: {}, exchangeTab: "applications" });
+  assert.match(applications, /data-ipo-approve="salt-p"/);
+  assert.match(applications, /data-ipo-reject="salt-p"/);
+  assert.doesNotMatch(listing, /预览成立公司/);
+  assert.doesNotMatch(listing, /data-company-level-preview/);
+  assert.doesNotMatch(listing, /data-company-preview/);
+  const economy = renderEconomy(simulation.selectDashboard(state, { panel: "all", paused: true, speed: 1 }));
+  assert.doesNotMatch(economy, /data-ipo-list=/);
+  assert.doesNotMatch(economy, /data-ipo-approve=/);
 });
 
 test("民营建筑地方详情没有镇营排班、镇营工资和镇库产量，只显示业主用工", () => {
