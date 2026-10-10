@@ -9,8 +9,9 @@ import { settleTradingHouses, localAvgSoldJin } from "../src/systems/trading-hou
 import { ensureOutsideTowns } from "../src/systems/outside-town.js";
 import { selectTradeHouseView } from "../src/selectors/trade-houses.js";
 import { migrateSave } from "../src/persistence/migrations.js";
-import { prepareShopsForDay } from "../src/systems/shops.js";
+import { prepareShopsForDay, shopClerkCount, shopMerchantCount } from "../src/systems/shops.js";
 import { pendingWages } from "../src/systems/employer.js";
+import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } from "../src/economy/payment.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -40,7 +41,7 @@ function addBuilding(state, id, typeId) {
 }
 
 // 外贸房（在岗，提供基础运力 300 斤/日，贸易行分到 rules.tradeHouseCapacityShare）、批发市场、贸易中心（1 级，2 个铺位）。
-// 镇库印制粮券，镇里有钱付批发货款。盐的批发售价压到 10（外镇收购价约 12.25，够 10% 利润）。
+// 镇库印制粮券，镇里有钱付批发货款。盐的批发售价压到 10（外镇收购价约 14.7，够 10% 利润）。
 function tradeFixture(seed, { clerks = 10, pool = 300, houses = 1 } = {}) {
   const state = simulation.createInitialState({ seed });
   addBuilding(state, "ftrade", "foreign_trade_house");
@@ -104,6 +105,8 @@ test("贸易中心：只能开在贸易中心，每级 2 个铺位；商业街�
 
 test("出口：批发存货有余量、利润率够 10% 时卖给外镇，运费付镇库，外镇库存与小麦变化同手动外贸", () => {
   const { state, shop } = tradeFixture(9102);
+  // 本例只测民镇一镇：两镇都能做时预算按配额分给两镇（见"两镇分配"用例）。
+  ensureOutsideTowns(state, CONTENT).wangzhen.tradeClosed = true;
   const town = ensureOutsideTowns(state, CONTENT).minzhen;
   const beforeStock = town.stocks.salt;
   const beforeWheat = town.wheatStockJin;
@@ -171,9 +174,9 @@ test("本镇销量扣掉贸易行自己的出口进货：保本线按本镇真�
   assert.equal(localAvgSoldJin(state, CONTENT, "salt"), 0);
 });
 
-test("利润率不到 10% 不做：外镇收购价 12.25，批发售价 12 时不出口", () => {
+test("利润率不到 10% 不做：外镇收购价 14.73，批发售价 14.2 时利润约 3%，不出口", () => {
   const { state, shop } = tradeFixture(9106);
-  assert.equal(simulation.configureWholesalePrice(state, "salt", 12).ok, true);
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 14.2).ok, true);
   settleTradingHouses(state, CONTENT);
   assert.equal(lastRow(shop).trades, 0);
   assert.equal(lastRow(shop).usedJin, 0);
@@ -183,7 +186,8 @@ test("利润率不到 10% 不做：外镇收购价 12.25，批发售价 12 时�
 test("进口：店里有小麦、批发收购价够高时，向外镇买面粉，按收购价卖回批发市场", () => {
   const { state, shop } = tradeFixture(9107);
   // 只测进口：盐不做出口（否则同一天外镇付的小麦会混进来）。面粉：外镇售价约 2.0 斤/斤，批发收购价 2.6 → 利润够 10%。
-  assert.equal(simulation.configureWholesalePrice(state, "salt", 12).ok, true);
+  // 盐的外镇收购价约 14.7，批发售价 15 时利润为负，不出口（只测进口）。
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
   shop.cashWheatUnits = 1000 * I;
   const town = ensureOutsideTowns(state, CONTENT).minzhen;
@@ -217,8 +221,8 @@ test("进口没有小麦就不做", () => {
 
 test("进口量封顶：市场存量不超过 30 天销量", () => {
   const { state, shop } = tradeFixture(9109);
-  // 盐的批发售价抬到 12，不让盐出口抢走运力池（出口排序优先，会先用光运力）。
-  assert.equal(simulation.configureWholesalePrice(state, "salt", 12).ok, true);
+  // 盐的批发售价抬到 15（外镇收购价约 14.7，利润为负），不让盐出口抢走运力池（出口排序优先，会先用光运力）。
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
   shop.cashWheatUnits = 1000 * I;
   setMarketSales(state, "flour", 10); // 日销 10 斤 → 封顶 300 斤，减去现存 0
@@ -330,4 +334,128 @@ test("贸易行清算：日结推进，未满 30 天仍清算中，满 30 天仍
   assert.equal(debt(), 0);
   assert.equal(shop.inventory.salt || 0, 0, "店内货物已返还业主");
   valid(state, "贸易行核销关门后");
+});
+
+test("无买卖：未满 30 天不减员；满 30 天且亏损 → 暂停（岗位释放、业主保留、不清算），暂停期间不计工资与店租", () => {
+  const { state, shop } = tradeFixture(9401, { clerks: 3 });
+  const ownerId = shop.ownerHouseholdId;
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true, "盐利润为负，不做买卖");
+  simulation.advanceDays(state, 29);
+  assert.equal(shop.status, "open");
+  assert.equal(shopClerkCount(state, shop), 3, "没有买卖的头 30 天不逐月减员");
+  simulation.advanceDays(state, 1);
+  assert.equal(shop.status, "paused", shop.statusReason);
+  assert.equal(shopClerkCount(state, shop), 0, "暂停遣散店员");
+  assert.equal(shopMerchantCount(state, shop), 0, "非营业店铺不保留商人岗位");
+  assert.equal(shop.ownerHouseholdId, ownerId, "业主保留");
+  assert.equal(shop.tradePause.clerksBefore, 3);
+  assert.equal(shop.tradePause.merchantsBefore, 1);
+  valid(state, "暂停当日");
+
+  // 暂停 40 天：不累计工资与店租、不进入清算、不累计坏日子。
+  const wageBefore = shop.accounts.cumulative.wageExpenseVoucherUnits || 0;
+  const rentBefore = shop.accounts.cumulative.rentExpenseVoucherUnits || 0;
+  const debtBefore = (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + pendingWages(shop.liabilities);
+  simulation.advanceDays(state, 40);
+  assert.equal(shop.status, "paused", "暂停期间不清算");
+  assert.equal(shop.badDays || 0, 0);
+  assert.equal(shop.accounts.cumulative.wageExpenseVoucherUnits || 0, wageBefore, "暂停期间不发新工资");
+  assert.equal(shop.accounts.cumulative.rentExpenseVoucherUnits || 0, rentBefore, "暂停期间不计店租");
+  const debtAfter = (shop.liabilities.wageVoucherUnits || 0) + (shop.liabilities.rentVoucherUnits || 0) + pendingWages(shop.liabilities);
+  assert.ok(debtAfter <= debtBefore, `暂停期间不产生新的欠薪（${debtBefore} → ${debtAfter}）`);
+  valid(state, "暂停 40 天后");
+});
+
+test("暂停中的贸易行：每 10 天检查一次，有可做的买卖才恢复营业，并补足暂停前的店员", () => {
+  const { state, shop } = tradeFixture(9402, { clerks: 3 });
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
+  simulation.advanceDays(state, 30);
+  assert.equal(shop.status, "paused");
+  // 暂停后 20 天仍无可做的买卖（盐利润为负）：检查了两次都不恢复。
+  simulation.advanceDays(state, 20);
+  assert.equal(shop.status, "paused", "无可做的买卖，不恢复");
+  // 盐售价降到 10：利润够门槛，下一个检查日（暂停后第 30 天）恢复营业。
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 10).ok, true);
+  let days = 0;
+  while (shop.status === "paused" && days < 25) {
+    simulation.advanceDay(state);
+    days += 1;
+  }
+  assert.equal(shop.status, "open", `应当恢复营业：${shop.statusReason}`);
+  assert.equal(days % 10, 0, `恢复只在检查日进行，实际第 ${days} 天`);
+  assert.equal(shop.tradePause, undefined, "暂停标记已清除");
+  assert.equal(shopClerkCount(state, shop), 3, "补足暂停前的店员");
+  assert.equal(shopMerchantCount(state, shop), 1, "业主回到商人岗位");
+  valid(state, "恢复营业");
+  simulation.advanceDay(state);
+  assert.ok(lastRow(shop).trades > 0, "恢复后当天就有买卖");
+  valid(state, "恢复后");
+});
+
+// 零资金的暂停店铺：店里的现金与小麦全部抽走（暂停期间没有新收入）。
+function drainTradeHouseCash(state, shop, content) {
+  if (shop.cashVoucherUnits > 0) {
+    assert.equal(transferVouchers(state, `shop:${shop.id}`, "town", shop.cashVoucherUnits, content, "test_drain", "测试抽干店里现金").ok, true);
+  }
+  shop.cashWheatUnits = 0;
+  assert.equal(maximumPayableValueUnits(state, `shop:${shop.id}`, content), 0, "店里一分钱都没有");
+}
+
+test("零资金暂停的贸易行：业主有钱 → 下一个检查日补资并恢复营业，恢复不要求店里原来有钱", () => {
+  const { state, shop } = tradeFixture(9404, { clerks: 3 });
+  const owner = state.households.byId[shop.ownerHouseholdId];
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
+  simulation.advanceDays(state, 30);
+  assert.equal(shop.status, "paused", "无买卖且亏损，先暂停");
+  drainTradeHouseCash(state, shop, CONTENT);
+  assert.equal(grantResidentVouchers(state, 50000, CONTENT, owner.id).ok, true, "业主有钱");
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 10).ok, true, "出现可做的买卖");
+  let days = 0;
+  while (shop.status === "paused" && days < 25) {
+    simulation.advanceDay(state);
+    days += 1;
+  }
+  assert.equal(shop.status, "open", `应当恢复营业：${shop.statusReason}`);
+  assert.equal(days % 10, 0, `只在检查日恢复，实际第 ${days} 天`);
+  assert.ok(maximumPayableValueUnits(state, `shop:${shop.id}`, CONTENT) > 0, "业主补足了营运资金");
+  assert.ok(state.events.some(event => event.text.includes("业主补资")), "事件写明业主补资");
+  valid(state, "零资金恢复后");
+});
+
+test("零资金暂停的贸易行：业主也没钱 → 保持暂停、不清算、不欠薪增长", () => {
+  const { state, shop } = tradeFixture(9405, { clerks: 3 });
+  const owner = state.households.byId[shop.ownerHouseholdId];
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
+  simulation.advanceDays(state, 30);
+  assert.equal(shop.status, "paused");
+  drainTradeHouseCash(state, shop, CONTENT);
+  // 业主身无分文：粮券全部交给镇库，口粮小麦清空（测试夹具）。
+  const ownerKey = `household:${owner.id}`;
+  // 把业主能付的全部付给镇库（含存款取回与以粮换券，账走正规支付流程）。
+  owner.inventory.wheat = 0;
+  const ownerPayable = maximumPayableValueUnits(state, ownerKey, CONTENT);
+  if (ownerPayable > 0) {
+    settleMonetaryPayment(state, ownerKey, "town", currentPaymentComposition(state, ownerPayable), CONTENT, "test_drain", "测试业主身无分文", { requireFull: false });
+  }
+  assert.equal(maximumPayableValueUnits(state, ownerKey, CONTENT), 0, "业主付不起任何补资");
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 10).ok, true, "有可做的买卖，但没钱补资");
+  const wageBefore = shop.accounts.cumulative.wageExpenseVoucherUnits || 0;
+  simulation.advanceDays(state, 40);
+  assert.equal(shop.status, "paused", "业主付不起，保持暂停");
+  assert.notEqual(shop.status, "liquidating", "不进入清算");
+  assert.equal(shop.badDays || 0, 0);
+  assert.equal(shop.accounts.cumulative.wageExpenseVoucherUnits || 0, wageBefore, "暂停期间不发工资");
+  assert.equal(shop.ownerHouseholdId, owner.id, "业主保留");
+  valid(state, "业主没钱保持暂停");
+});
+
+test("两镇分配：两镇都能做时，当日预算按配额分给两镇，两镇都有成交，合计仍用满预算", () => {
+  const { state, shop } = tradeFixture(9120);
+  const towns = ensureOutsideTowns(state, CONTENT);
+  settleTradingHouses(state, CONTENT);
+  assert.ok(towns.minzhen.stats.trades > 0, "民镇有成交");
+  assert.ok(towns.wangzhen.stats.trades > 0, "王镇有成交（不被利润率高的一镇独占）");
+  const sold = lastRow(shop).exportJin.salt;
+  assert.ok(Math.abs(sold - SHARE_JIN) < 0.02, `两镇合计仍用满运力份额 ${sold}`);
+  valid(state, "两镇分配后");
 });

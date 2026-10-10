@@ -111,7 +111,8 @@ test("进口关税 10%：关税 = 付给外镇的货款 × 10%（容许 1 单位
   // 对照组与实验组：面粉批发收购 3.0，盐不出口（售价 12）。镇库多收的券 = 关税（进口的镇库要付市场货款，相减后剩下关税）。
   const run = rate => {
     const { state, shop } = tradeFixture(9203);
-    assert.equal(simulation.configureWholesalePrice(state, "salt", 12).ok, true);
+    // 盐售价 15（外镇收购约 14.7），不出口。
+    assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
     assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 3.0).ok, true);
     if (rate) assert.equal(simulation.setTradeTariff(state, { importPercent: rate }).ok, true);
     shop.cashWheatUnits = 1000 * I;
@@ -177,16 +178,16 @@ test("同等利润率时先出口：出口与进口都达标时，运力先给�
 test("进口利润 15%（>10%、<25%）不做；同样 15% 的出口则照做", () => {
   // 进口：面粉 2.0×(1+运费) 成本 ≈ 2.06，批发收购 2.37 → 利润 15%，低于进口门槛 25%。
   const imp = tradeFixture(9207);
-  assert.equal(simulation.configureWholesalePrice(imp.state, "salt", 12).ok, true);
+  assert.equal(simulation.configureWholesalePrice(imp.state, "salt", 15).ok, true);
   assert.equal(simulation.configureWholesalePurchasePrice(imp.state, "flour", 2.37).ok, true);
   imp.shop.cashWheatUnits = 1000 * I;
   settleTradingHouses(imp.state, CONTENT);
   assert.equal(lastRow(imp.shop).importJin.flour, undefined, "15% 利润的进口不做");
   assert.equal(lastRow(imp.shop).trades, 0);
 
-  // 出口：盐外镇收购约 12.25，批发售价 10.6 → 成本 10.66，利润约 15%，过出口门槛 10%，照做。
+  // 出口：盐外镇收购约 14.73，批发售价 12.7 → 成本 12.76，利润约 15%，过出口门槛 10%，照做。
   const exp = tradeFixture(9207);
-  assert.equal(simulation.configureWholesalePrice(exp.state, "salt", 10.6).ok, true);
+  assert.equal(simulation.configureWholesalePrice(exp.state, "salt", 12.7).ok, true);
   settleTradingHouses(exp.state, CONTENT);
   assert.ok(lastRow(exp.shop).exportJin.salt > 0, "同样 15% 利润的出口照做");
   valid(exp.state, "15% 利润");
@@ -249,15 +250,20 @@ test("自动减员：亏损的贸易行减一人", () => {
   assert.equal(shop.plan.staffingDiagnosis, "亏损，减人");
 });
 
-test("没生意但有现金：连续 40 天不关门（不累计坏日子）", () => {
+test("没生意：连续 30 天无买卖且亏损 → 暂停营业（店员遣散、不清算、不累计坏日子），不再逐月减员", () => {
   const { state, shop } = tradeFixture(9211);
-  // 不出口、不进口：盐售价 12（利润不够 10%），不配进口收购价。
-  assert.equal(simulation.configureWholesalePrice(state, "salt", 12).ok, true);
-  simulation.advanceDays(state, 40);
-  assert.equal(shop.status, "open", `店铺状态 ${shop.status}：${shop.statusReason}`);
-  assert.equal(shop.badDays || 0, 0, "没有累计坏日子");
-  assert.ok(maxTraded(shop) === 0, "这 40 天里没有成交，确认测试前提");
-  assert.ok(simulation.validateState(state).valid);
+  // 不出口、不进口：盐售价 15（外镇收购约 14.7，利润为负）。
+  assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
+  simulation.advanceDays(state, 29);
+  assert.equal(shop.status, "open", `未满 30 天仍营业：${shop.statusReason}`);
+  simulation.advanceDays(state, 1);
+  assert.equal(maxTraded(shop), 0, "这 30 天里没有成交，确认测试前提");
+  assert.equal(shop.status, "paused", `满 30 天无买卖且亏损应暂停：${shop.statusReason}`);
+  assert.ok(shop.tradePause, "记下暂停标记");
+  assert.equal(shopClerkCount(state, shop), 0, "暂停遣散店员");
+  assert.equal(shop.badDays || 0, 0, "不累计坏日子");
+  assert.notEqual(shop.status, "liquidating");
+  valid(state, "暂停后");
 });
 
 function maxTraded(shop) {

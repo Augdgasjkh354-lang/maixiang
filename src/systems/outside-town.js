@@ -2,6 +2,7 @@ import { nextRandom } from "../core/random.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { addInventory, changeInventory, quantityToUnits, unitsToQuantity } from "../economy/inventory.js";
 import { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } from "../content/outside-towns.js";
+import { RULES } from "../content/rules.js";
 import { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } from "./wholesale-market.js";
 import { jobCount } from "./households.js";
 import { freightCapacityUnits, freightPoolJin, takeFreightCapacity } from "./logistics.js";
@@ -9,11 +10,16 @@ import { freightCapacityUnits, freightPoolJin, takeFreightCapacity } from "./log
 // 外镇：所有外镇共用这一套"库存驱动"算法，每个镇的差别只在 content/outside-towns.js 的档案里。
 //
 // 每天：每样商品按人口自产、消耗；吃口粮小麦。供应满足率滚动平均 → 繁荣度慢慢靠拢。
-// 价格：只看外镇自己的库存。库存低于目标就涨，高于目标就跌：
-//   中间价 = 基准价 × clamp((目标库存 / 库存)^0.7, 0.35, 3) × 繁荣度系数
-//   外镇收购价（我们卖）= 中间价 × (1 − 价差/2)；外镇出售价（我们买）= 中间价 × (1 + 价差/2)
+// 价格：外镇对我方出口品（盐、木材、酒、布）：
+//   中间价 = 基准价 × priceFactor × 库存斜率，下限 minBuyPriceFactor × 基准价。
+//   priceFactor = 繁荣度紧迫系数 × 库存因子（存货不到 3 年用量不变，超出才压价）的平滑值，
+//   每天向目标值靠拢，单日变动不超过 outsideTrade.priceEasePerDay（相对值）；town.priceStock 是定价参照库存，
+//   也平滑追随实际库存（同样的单日上限）。库存斜率 = 库存因子(当前库存) / 库存因子(参照库存)：
+//   同日内的买卖立刻反映库存变化，大单仍逐段计价，同日连续成交不会重新回到原价。
+// 外镇收购价（我们卖）= 中间价 × (1 − 价差/2)；外镇出售价（我们买）= 中间价 × (1 + 价差/2)
 //   我们卖给它，它库存涨、价格跌；向它买，库存跌、价格涨。买进再卖回只会亏掉价差，没有套利。
 //   大单按 20 段逐段计价，越卖越便宜。
+// 外镇自产外卖的东西（面粉、面包）：中间价仍按库存比目标即时计算（不平滑）。
 // 结算：一律实物小麦。外镇只动用口粮储备以上的小麦付款。
 // 每年：秋收入库；元旦抽天气与年事件、按繁荣度和口粮增减人口、开垦新耕地。
 
@@ -54,7 +60,7 @@ function createTown(profile) {
     stocks[itemId] = good.stock;
     supply[itemId] = 1;
   }
-  return {
+  const town = {
     id: profile.id,
     population: profile.population,
     landMu: profile.landMu,
@@ -63,6 +69,9 @@ function createTown(profile) {
     relations: profile.relations,
     stocks,
     supply,
+    // 进口品（外镇对我方出口的商品）的价格因子与定价时的库存，见文件头注释。
+    priceFactor: {},
+    priceStock: {},
     weather: 1,
     harvestFactor: 1,
     lastHarvestYear: 0,
@@ -73,6 +82,21 @@ function createTown(profile) {
     loans: [],
     loanStats: { totalIssuedJin: 0, totalRepaidJin: 0, totalInterestJin: 0, activeLoans: 0 }
   };
+  ensurePriceFactors(town, profile);
+  return town;
+}
+
+// 补齐进口品的价格因子：新镇取目标值；旧档没有这两个字段时，按当前库存与繁荣度取目标值，之后照常逐日靠拢。
+function ensurePriceFactors(town, profile) {
+  town.priceFactor ||= {};
+  town.priceStock ||= {};
+  for (const [itemId, base] of Object.entries(profile.goods)) {
+    if (base.sellsToUs) continue;
+    const good = { ...base, id: itemId };
+    const stock = town.stocks[itemId] ?? base.stock;
+    if (town.priceStock[itemId] === undefined) town.priceStock[itemId] = stock;
+    if (town.priceFactor[itemId] === undefined) town.priceFactor[itemId] = Math.max(priceFactorFloor(), importTargetFactor(town, good, stock));
+  }
 }
 
 export function createOutsideTowns(content) {
@@ -83,7 +107,10 @@ export function createOutsideTowns(content) {
 
 export function ensureOutsideTowns(state, content) {
   state.outsideTowns ||= createOutsideTowns(content);
-  for (const profile of Object.values(profiles(content))) state.outsideTowns[profile.id] ||= createTown(profile);
+  for (const profile of Object.values(profiles(content))) {
+    const town = state.outsideTowns[profile.id] ||= createTown(profile);
+    ensurePriceFactors(town, profile);
+  }
   return state.outsideTowns;
 }
 
@@ -129,11 +156,51 @@ function importUrgency(town) {
   return 1 + (1 - Math.max(0, Math.min(100, town.prosperity)) / 100) * 0.8;
 }
 
+// 进口品库存因子：不到 3 年用量为 1，超出后每多 1 年降 0.2（下限 0.4）。
+function glutFactor(town, good, stock) {
+  const years = stockYears(town, good, stock);
+  return years <= IMPORT_DISCOUNT_AFTER_YEARS ? 1 : Math.max(0.4, 1 - 0.2 * (years - IMPORT_DISCOUNT_AFTER_YEARS));
+}
+
+// 进口品价格因子的目标值（平滑前）：繁荣度紧迫系数 × 库存因子。
+function importTargetFactor(town, good, stock) {
+  return importUrgency(town) * glutFactor(town, good, stock);
+}
+
+function priceFactorFloor() {
+  return RULES.outsideTrade?.minBuyPriceFactor ?? 0.9;
+}
+
+// 每天一步：定价参照库存（priceStock）朝实际库存靠拢；价格因子朝 紧迫系数 × 参照库存的库存因子 靠拢。
+// 两者单日相对变动都不超过 priceEasePerDay，价格因子不低于下限。
+// 同日的买卖按参照库存计库存斜率，所以大单与同日连续成交仍逐段降价；库存的即时冲击不被平滑（同日即时反映），之后随参照库存慢慢收敛。
+function stepPriceFactors(town, profile) {
+  const ease = RULES.outsideTrade?.priceEasePerDay ?? 0.01;
+  town.priceFactor ||= {};
+  town.priceStock ||= {};
+  for (const [itemId, base] of Object.entries(profile.goods)) {
+    if (base.sellsToUs) continue;
+    const good = { ...base, id: itemId };
+    const now = town.stocks[itemId] || 0;
+    const ref = town.priceStock[itemId] ?? now;
+    const refStep = ease * Math.max(ref, 1);
+    const nextRef = ref + Math.max(-refStep, Math.min(refStep, now - ref));
+    const target = importTargetFactor(town, good, nextRef);
+    const current = town.priceFactor[itemId] ?? target;
+    const step = ease * current;
+    const next = current + Math.max(-step, Math.min(step, target - current));
+    town.priceFactor[itemId] = Math.max(priceFactorFloor(), Math.round(next * 1e6) / 1e6);
+    town.priceStock[itemId] = nextRef;
+  }
+}
+
 function midPrice(town, good, stock) {
   if (!good.sellsToUs) {
-    const years = stockYears(town, good, stock);
-    const glut = years <= IMPORT_DISCOUNT_AFTER_YEARS ? 1 : Math.max(0.4, 1 - 0.2 * (years - IMPORT_DISCOUNT_AFTER_YEARS));
-    return good.basePrice * glut * importUrgency(town);
+    // 进口品：平滑的价格因子 × 库存斜率（相对上次定价时的库存），同日买卖立刻反映库存，下限 minBuyPriceFactor。
+    const ref = town.priceStock?.[good.id] ?? town.stocks[good.id] ?? stock;
+    const factor = town.priceFactor?.[good.id] ?? importTargetFactor(town, good, ref);
+    const slope = glutFactor(town, good, stock) / glutFactor(town, good, ref);
+    return good.basePrice * Math.max(priceFactorFloor(), factor * slope);
   }
   const target = targetStock(town, good);
   const scarcity = target > 0 ? (target / Math.max(stock, target * 0.05)) ** 0.7 : 1;
@@ -268,6 +335,7 @@ export function advanceOutsideTownDay(state, content) {
     // 繁荣度向"供应满足率 × 100"靠拢（约百日走完一半）：样样不缺是 100，只有口粮没有盐木只有 45 左右。
     const target = 100 * score;
     town.prosperity = round2(town.prosperity + (target - town.prosperity) * 0.01);
+    stepPriceFactors(town, profile);
     changeRelations(town, staffed ? RELATIONS_GAIN_PER_DAY : -RELATIONS_LOSS_PER_DAY);
     // 秋收：与本镇同日入库。
     if (state.day === content.rules.growingDays && town.lastHarvestYear !== state.year) {
@@ -305,8 +373,7 @@ export function settleOutsideTownYear(state, content) {
         event = "丰收"; town.harvestFactor = 1.15;
         recordEvent(state, `${profile.name}风调雨顺，今秋有望丰收。`, content, { day: 1 });
       } else if (pick < 0.8) {
-        event = "商路中断"; town.tradeClosed = true;
-        recordEvent(state, `山匪截断商路，今年无法与${profile.name}贸易。`, content, { day: 1 });
+        // 原有的随机"商路中断"已取消（外贸稳定性）：这一档保持平年，外镇的其他事件概率不变。
       } else if (town.stocks.salt !== undefined) {
         event = "盐荒"; town.stocks.salt = round2(town.stocks.salt * 0.5);
         recordEvent(state, `${profile.name}盐仓受潮，存盐折半，对盐出价走高。`, content, { day: 1 });
@@ -339,7 +406,7 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   const profile = outsideTownProfile(content, townId);
   const town = outsideTown(state, content, townId);
   if (!profile || !town) return { ok: false, reason: "没有这个外镇" };
-  if (town.tradeClosed) return { ok: false, reason: `商路中断，今年无法与${profile.name}贸易` };
+  if (town.tradeClosed) return { ok: false, reason: `商路断绝，今年无法与${profile.name}贸易` };
   if (!buildingOperational(state, "foreign_trade_house")) return { ok: false, reason: "外贸房无人值守，无法开展贸易" };
   if (direction !== "sell" && direction !== "buy") return { ok: false, reason: "贸易方向无效" };
   const good = goodOf(profile, itemId);
