@@ -26,7 +26,7 @@ function town(seed, { square = true } = {}) {
   const base = add("livestock_base");
   const plaza = square ? add("times_square") : null;
   simulation.setEmployment(state, `${market}::${CONTENT.buildings.wholesale_market.jobs[0].id}`, 3);
-  assert.equal(simulation.startCurrencyReform(state).ok, true);
+  assert.equal(state.monetaryReform.stage, "voucher"); // 开局即粮券阶段
   grantResidentVouchers(state, 300000);
   const store = simulation.openResidentShop(state, street, "general");
   assert.equal(store.ok, true, store.reason);

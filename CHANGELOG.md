@@ -1,3 +1,13 @@
+## 未发布 · 开局即粮券
+
+- 新开局直接处于粮券阶段，不再需要建银行后启动货币改革。开局一次发行 1000 万斤粮券：居民每人 1000 斤（按户人口，3300 人共 330 万斤），镇库券池 670 万斤（`rules.INITIAL.openingVoucherPerResidentJin` / `openingVoucherTownPoolJin`，发放在 `core/state.js` 的 `issueOpeningVouchers`）。开局发行不经银行闸门；之后印券、以粮换券仍需银行。居民与镇库的小麦库存不动，小麦仍是口粮与价值尺度。
+- 国债需已建成银行（此前只看货币阶段）；股票挂出发行池需已建成交易所（认购、上市、交易原本已有此门槛）。
+- 政策页：粮券阶段不再显示货币改革切换按钮；没有银行时提示"印券、以粮换券与国债需先建成银行"，国债区块只在有银行时显示。
+- 读档：旧档沿用存档自带的货币阶段（小麦阶段的旧档读回后仍是小麦阶段），`migrations.js` 先把底板的阶段换成存档的，没有该字段的更老存档按小麦阶段读。`SAVE_VERSION` 不变。
+- 模拟脚本：`startCurrencyReform` / `forceVoucherStage` 在粮券阶段视为已完成，不再中断场景；`maxed-state.mjs` 跳过已是粮券的切换。
+- 测试：删除 `monetary-reform-switch.test.js`（小麦→粮券切换流程已不存在）；依赖小麦阶段的测试改为粮券开局，或显式用 `wheatEraState`。新增 `opening-voucher.test.js`。
+- 第一步只改开局；`startMonetaryReform` 与小麦支付代码保留，第二步删除。
+
 ## 未发布 · 社保农民补贴
 
 - 社保基金新增支出"农民补贴"：政策页"每农民每日补贴"（`socialSecurity.farmerSubsidyPerFarmerJin`，默认 0，即不改变旧行为），按各户在岗务农人数每日发到家庭；与养老金同一套付款规则，基金不足时镇库垫付并计为基金负债。累计支出见"累计收支"（`totalSubsidyUnits`）。代码在 `systems/social-security.js` 的 `payFarmerSubsidies`，日结步骤 `farmerSubsidy` 紧随养老金。

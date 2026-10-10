@@ -5,6 +5,7 @@ import { changeInventory, addInventory } from "../src/economy/inventory.js";
 import { SimulationClock } from "../src/ui/simulation-clock.js";
 import { populationStats } from "../src/selectors/labor.js";
 import { isChoosingBuildPlot } from "../src/ui/navigation-state.js";
+import { clearAllHouseholdVouchers } from "./helpers-monetary.js";
 
 test("clock stops within the same frame when a simulation step pauses it", () => {
   const clock = new SimulationClock(CONTENT);
@@ -32,6 +33,8 @@ test("a shortage on the final day of a year survives year-end rollover", () => {
     state, "residents", "wheat", -state.accounts.residents.wheat,
     "test empty resident grain", "test_adjustment", CONTENT
   );
+  // 开局即粮券：居民没粮也有券时会去镇库买粮，断粮要同时没钱。
+  clearAllHouseholdVouchers(state);
 
   const result = simulation.advanceDay(state);
   assert.equal(state.year, 2);
@@ -58,6 +61,7 @@ test("events emitted before the daily increment use the visible calendar day", (
     shortage, "residents", "wheat", -shortage.accounts.residents.wheat,
     "test empty resident grain", "test_adjustment", CONTENT
   );
+  clearAllHouseholdVouchers(shortage);
   simulation.advanceDay(shortage);
   const shortageEvent = shortage.events.find(event => event.text.includes("居民口粮短缺"));
   assert.equal(shortageEvent?.day, 3,

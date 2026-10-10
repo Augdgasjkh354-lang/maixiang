@@ -316,5 +316,8 @@ export const INITIAL = Object.freeze({
     town: Object.freeze({ wheat: 3000000 })
   }),
   roleCounts: Object.freeze({ farmers: 1500, builders: 0 }),
-  satisfaction: 75
+  satisfaction: 75,
+  // 开局即粮券阶段（core/state.js 的 issueOpeningVouchers）：居民每人 1000 斤粮券（按户人口），镇库券池 670 万斤，合计 1000 万斤。
+  openingVoucherPerResidentJin: 1000,
+  openingVoucherTownPoolJin: 6700000
 });

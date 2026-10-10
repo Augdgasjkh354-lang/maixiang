@@ -1,6 +1,7 @@
 import { CONTENT } from "../content/index.js";
 import { emptyFinancialFlowPeriod } from "../economy/financial-flows.js";
-import { createInitialHouseholds } from "../systems/households.js";
+import { createInitialHouseholds, householdList, householdPopulation, syncResidentAggregates } from "../systems/households.js";
+import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { createOutsideTowns } from "../systems/outside-town.js";
 
 // 建造工程：state.projects 是权威数组，支持多工程并行。
@@ -171,6 +172,27 @@ export function emptyFiscalState() {
   return { day: emptyRentPeriod(), year: emptyRentPeriod(), cumulative: emptyRentPeriod() };
 }
 
+// 开局即粮券阶段：一次性发行开局粮券，不经银行闸门（印券闸门只管之后的增发）。
+// 居民按户人口各得 openingVoucherPerResidentJin 斤粮券，镇库券池得 openingVoucherTownPoolJin 斤；发行总量 = 两者之和。
+// 1 斤 ≈ 1 券，换算走 voucherUnitsForWheatUnits（与以粮换券同一口径）。居民与镇库的小麦库存不动。
+function issueOpeningVouchers(state, content) {
+  const perJin = (jin) => voucherUnitsForWheatUnits(jin * content.precision.inventoryUnitsPerJin, content, "floor");
+  const perResidentJin = content.initial.openingVoucherPerResidentJin ?? 1000;
+  let residentUnits = 0;
+  for (const household of householdList(state)) {
+    const units = perJin(householdPopulation(household) * perResidentJin);
+    household.voucherUnits = units;
+    residentUnits += units;
+  }
+  const townUnits = perJin(content.initial.openingVoucherTownPoolJin ?? 6700000);
+  const currency = state.currency;
+  currency.balances.town = townUnits;
+  currency.issuedUnits = residentUnits + townUnits;
+  currency.issuedCumulativeUnits = currency.issuedUnits;
+  currency.guidancePending = false;
+  syncResidentAggregates(state, content);
+}
+
 export function createInitialState(options) {
   const settings = options || {};
   const content = settings.content || CONTENT;
@@ -274,7 +296,8 @@ export function createInitialState(options) {
       guidancePending: true,
       ledger: []
     },
-    monetaryReform: { stage: "wheat", legacyBankAccess: false, started: null, completed: null },
+    // 新开局即粮券阶段（时点为开局第 1 天）；旧档读档时以存档自带的阶段为准，见 persistence/migrations.js。
+    monetaryReform: { stage: "voucher", legacyBankAccess: false, started: { year: 1, day: 1 }, completed: { year: 1, day: 1 } },
     companies: {},
     nextCompanyNumber: 1,
     // 民营业主上市申请（按建筑 id）与驳回后的冷却（按建筑 id，记业主家庭与解禁日序）。
@@ -346,10 +369,11 @@ export function createInitialState(options) {
     transactionSequence: 0,
     events: [{
       year: 1, day: 1,
-      text: "新任镇长上任。镇库与居民各存小麦七十三万斤，今日镇务暂歇。"
+      text: "新任镇长上任。居民每人领得一千斤粮券，镇库另存券池六百七十万斤；小麦仍是口粮与价值尺度，今日镇务暂歇。"
     }]
   };
   createInitialHouseholds(state, content);
+  issueOpeningVouchers(state, content);
   ensureProjectAccessor(state);
   return state;
 }

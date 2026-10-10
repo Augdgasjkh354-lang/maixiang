@@ -129,8 +129,11 @@ const ACTIONS = {
     },
   },
   startCurrencyReform: {
-    desc: "启动货币改革 {}",
-    run: (sim, state) => sim.startCurrencyReform(state),
+    desc: "启动货币改革 {}（开局即粮券阶段，已是粮券时视为已完成）",
+    run: (sim, state) => {
+      if (state.monetaryReform?.stage === "voucher") return { ok: true, alreadyDone: true, stage: "voucher" };
+      return sim.startCurrencyReform(state);
+    },
   },
   setShopRent: {
     desc: "商铺日租金 {voucher}（每间营业店铺每日，粮券单位）",
@@ -262,13 +265,14 @@ const ACTIONS = {
   // 批发市场销售回款只在粮券经济下才完整运转；这条不是游戏内政策命令，
   // 不建银行也能直接进入粮券阶段（不印钞），供只关心粮券阶段的场景使用。
   forceVoucherStage: {
-    desc: "直接进入粮券阶段 {}（仅模拟用）",
+    desc: "直接进入粮券阶段 {}（仅模拟用；开局已是粮券阶段时只补兼容银行入口）",
     run: (sim, state) => {
+      const alreadyDone = state.monetaryReform?.stage === "voucher";
       state.monetaryReform ||= {};
       state.monetaryReform.stage = "voucher";
       state.monetaryReform.legacyBankAccess = true;
       state.monetaryReform.completed ||= { year: state.year, day: Math.max(1, state.day + 1), simulated: true };
-      return { ok: true, stage: state.monetaryReform.stage };
+      return { ok: true, stage: state.monetaryReform.stage, alreadyDone };
     },
   },
   // 场景辅助（仅模拟用）：开一家综合商店（需要商业街已建成、有合格业主家庭）。

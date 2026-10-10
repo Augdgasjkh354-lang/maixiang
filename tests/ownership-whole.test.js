@@ -15,7 +15,7 @@ import { spendableVoucherUnits, paymentWheatBalanceUnits } from "../src/economy/
 import { voucherBalance } from "../src/economy/currency.js";
 import { refreshOperatingPlan } from "../src/economy/operating-plan.js";
 import { grantResidentVouchers, richestHousehold } from "./helpers-v16.js";
-import { legacyVoucherState } from "./helpers-monetary.js";
+import { legacyVoucherState, setHouseholdVoucherUnits } from "./helpers-monetary.js";
 import { formCompany } from "./helpers-ipo.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
@@ -72,8 +72,8 @@ test("整栋出售：买家是付得起整栋价的家底最多的一户，钱�
   addBuilding(state, "wholesale_market", "wm-richest");
   const salt = addBuilding(state, "saltworks", "salt-richest", { level: 2 });
   const [poor, rich] = householdList(state).filter(isActiveHousehold).slice(0, 2);
-  poor.voucherUnits = 0;
-  rich.voucherUnits = 0;
+  setHouseholdVoucherUnits(state, poor, 0);
+  setHouseholdVoucherUnits(state, rich, 0);
   assert.equal(grantResidentVouchers(state, 500, CONTENT, poor.id).ok, true);
   assert.equal(grantResidentVouchers(state, 80000, CONTENT, rich.id).ok, true);
   const townBefore = state.currency.balances.town;
@@ -110,7 +110,7 @@ test("民营欠薪连续超过30天：整栋收回镇营；存货先抵欠薪，
   addBuilding(state, "wholesale_market", "wm-take");
   const owner = householdList(state).filter(isActiveHousehold)[0];
   const mill = addBuilding(state, "mill", "mill-take", { owner: "household", ownerId: owner.id, level: 1 });
-  owner.voucherUnits = 0;
+  setHouseholdVoucherUnits(state, owner, 0);
   owner.inventory.flour = 50 * I;
   const flourPrice = wholesalePurchasePrice(state, "flour", CONTENT);
   // 欠薪 40 券：存货 50 斤面粉按收购价约 80 券，抵掉 40 券需 25 斤。
@@ -141,7 +141,7 @@ test("存货不够抵欠薪时余额由镇库偿付给工人，记事件", () =>
   addBuilding(state, "wholesale_market", "wm-advance");
   const owner = householdList(state).filter(isActiveHousehold)[1];
   const mill = addBuilding(state, "mill", "mill-advance", { owner: "household", ownerId: owner.id, level: 1 });
-  owner.voucherUnits = 0;
+  setHouseholdVoucherUnits(state, owner, 0);
   owner.inventory.flour = 0;
   const arrears = 30 * V;
   const workerHouse = householdList(state).filter(isActiveHousehold)[2];
@@ -238,7 +238,6 @@ test("业主自主升级的条件不满足时不动钱：在岗不足、利润�
   state.year = 1;
   lumber.privateProfitHistory = [{ serial: 0, profitVoucherUnits: 500, workers: 1 }];
   assert.equal(grantResidentVouchers(state, 50000, CONTENT, owner.id).ok, true);
-  const before = state.currency.balances.town;
   const understaffed = settleOwnerUpgrades(state, CONTENT).find(row => row.buildingId === lumber.id);
   assert.equal(understaffed.status, "skipped");
   assert.match(understaffed.reason, /在岗/);
@@ -247,10 +246,11 @@ test("业主自主升级的条件不满足时不动钱：在岗不足、利润�
   const unprofitable = settleOwnerUpgrades(state, CONTENT).find(row => row.buildingId === lumber.id);
   assert.match(unprofitable.reason, /利润/);
   lumber.privateProfitHistory = [{ serial: 0, profitVoucherUnits: 500, workers: 20 }];
-  owner.voucherUnits = 0;
+  setHouseholdVoucherUnits(state, owner, 0);
+  const townBeforePoor = state.currency.balances.town;
   const poor = settleOwnerUpgrades(state, CONTENT).find(row => row.buildingId === lumber.id);
   assert.equal(poor.status, "skipped");
-  assert.equal(state.currency.balances.town, before, "没有成交就不收钱");
+  assert.equal(state.currency.balances.town, townBeforePoor, "没有成交就不收钱");
   assertValid(state, "未升级");
 });
 
@@ -304,7 +304,7 @@ test("民营招工受业主可用资金限制：日工资总额不超过可用�
   addBuilding(state, "wholesale_market", "wm-hire");
   const owner = householdList(state).filter(isActiveHousehold)[0];
   const mill = addBuilding(state, "mill", "mill-hire", { owner: "household", ownerId: owner.id, level: 1 });
-  owner.voucherUnits = 0;
+  setHouseholdVoucherUnits(state, owner, 0);
   owner.inventory.wheat = 0;
   refreshOperatingPlan(state, CONTENT);
   arrangePrivateWorkers(state, CONTENT);
@@ -331,6 +331,7 @@ test("欠薪只作为旁路标记，不覆盖真实生产状态", () => {
     claimsVoucherUnits: { [owner.id]: 9 * V }, claimsPayment: {}
   };
   owner.inventory.wheat = 0;
+  setHouseholdVoucherUnits(state, owner, 0);
   const row = processPrivateBuilding(state, mill, CONTENT);
   assert.equal(row.arrears, true, "欠薪以旁路标记给出");
   assert.notEqual(row.status, "wage_arrears", "欠薪不再覆盖生产状态");

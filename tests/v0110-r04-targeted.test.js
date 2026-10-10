@@ -87,11 +87,12 @@ test("r04 服务收入只来自真实居民消费；无支付能力时记录未�
   const buyer = buyers[1];
   setServiceBudget(buyer, 100);
   state.services.demandByHousehold[buyer.id] = { tea: 1000, haircut: 0, repair: 0 };
-  const beforeCash = shop.cashWheatUnits;
+  // 开局即粮券：服务付的是粮券，进店铺的粮券现金。
+  const beforeCash = shop.cashVoucherUnits;
   const paidResult = processServiceDemand(state, CONTENT);
   assert.equal(paidResult.servedUses.tea || 0, 1);
   assert.equal(shop.accounts.day.revenueVoucherUnits - revenueBefore, 3 * V);
-  assert.equal(shop.cashWheatUnits - beforeCash, 3 * I);
+  assert.equal(shop.cashVoucherUnits - beforeCash, 3 * V);
 });
 
 test("r04 兑付储备为0仍可直接换券；小麦进入镇库且自动换券与直接换券使用同一汇率", () => {

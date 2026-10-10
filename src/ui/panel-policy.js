@@ -64,7 +64,9 @@ export function renderPolicy(view) {
   const moneyUnit = reform.stage === "wheat" ? "斤小麦" : "粮券";
   const reformAction = reform.stage === "wheat"
     ? `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`
-    : `<button class="secondary wide" data-bank-open>进入银行管理</button>`;
+    : reform.hasBankAccess
+      ? `<button class="secondary wide" data-bank-open>进入银行管理</button>`
+      : `<div class="subtle">粮券已是开局制度；印券、以粮换券与国债需先建成银行。</div>`;
   // 货币改革简化态（0.1.11 补回）：小麦阶段且无银行时只显示一行提示
   const reformCard = (reform.stage === "wheat" && !reform.hasBankAccess)
     ? `<div class="cardlet subtle">货币改革：建成银行后可启动。</div>`
@@ -114,7 +116,8 @@ export function renderPolicy(view) {
       <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(view.policy.bankStats?.interestEarnedVoucher || 0, 1)} / ${number(view.policy.bankStats?.interestPaidVoucher || 0, 1)}券</strong></div>
       <div class="subtle">按日计息；逾期30天核销坏账。</div>
     </div></details>` : ""}
-    ${reform.stage === "voucher" ? `<details class="detail-block" data-detail-key="policy-bonds"><summary>国债</summary><div class="detail-body">
+    ${reform.stage === "voucher" && !reform.hasBankAccess ? `<div class="cardlet subtle">国债：建成银行后可发行。</div>` : ""}
+    ${reform.stage === "voucher" && reform.hasBankAccess ? `<details class="detail-block" data-detail-key="policy-bonds"><summary>国债</summary><div class="detail-body">
       <div class="row"><span class="label">发行总额</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-total", kind: "bond-issue-total", target: "bonds", value: 100000, label: "国债发行总额", minimum: 1, maximum: 1000000000, className: "setting-editor" })}<b>券</b></div></div>
       <div class="row"><span class="label">期限</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-years", kind: "bond-issue-years", target: "bonds", value: 3, label: "国债期限", minimum: 1, maximum: 10, className: "setting-editor" })}<b>年</b><button class="secondary" data-bond-issue>发行</button></div></div>
       <div class="row"><span class="label">票面年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-rate", kind: "bond-issue-rate", target: "bonds", value: 3, label: "国债票面年利率", minimum: 0, maximum: 20, className: "setting-editor" })}<b>%</b></div></div>

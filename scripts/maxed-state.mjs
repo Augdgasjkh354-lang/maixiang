@@ -142,8 +142,8 @@ export function createMaxedState(options = {}) {
 
   fillJobs(state, simulation);
 
-  // 银行已建成（chains 里的 bank），切到粮券阶段；镇库小麦按存量印券。
-  assertOk(simulation.startCurrencyReform(state), "货币改革到粮券");
+  // 新开局即粮券阶段（开局已发行）；只有旧制度的小麦阶段才需要切换（切换要求银行已建成，chains 里有 bank）。
+  if (state.monetaryReform?.stage !== "voucher") assertOk(simulation.startCurrencyReform(state), "货币改革到粮券");
   assertOk(simulation.issueGrainVouchers(state, "town", 500000), "镇库加印粮券");
   if (options.socialSecurity) assertOk(simulation.setSocialSecurityPolicy(state, { enabled: true }), "开启社保");
 

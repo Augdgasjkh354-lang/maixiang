@@ -14,6 +14,7 @@ import { jobKeyForBuilding, listedJobKeyForBuilding } from "../src/selectors/lab
 import { grantResidentVouchers, richestHousehold } from "./helpers-v16.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
 import { formCompany } from "./helpers-ipo.js";
+import { setHouseholdVoucherUnits } from "./helpers-monetary.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -73,9 +74,9 @@ function outputItemOf(typeId) {
 
 function brokeHousehold(state, index = 0) {
   const household = householdList(state).filter(isActiveHousehold)[index];
-  household.voucherUnits = 0;
+  setHouseholdVoucherUnits(state, household, 0);
   household.inventory.wheat = 0;
-  syncResidentAggregates(state, CONTENT); // 直接改户余额后按约定同步居民汇总（docs 与 accounts.js 约定）
+  syncResidentAggregates(state, CONTENT);
   return household;
 }
 

@@ -40,6 +40,10 @@ export function migrateSave(raw, content) {
   // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
   const saved = applyRenames(cloneJson(raw), report, definitions.modSave?.renames || []);
   const base = createInitialState({ content: definitions });
+  // 货币制度以存档为准：新开局是粮券阶段，旧档可能是小麦阶段（没有该字段的更老存档当年也是小麦结算）。
+  // 底板只补存档没有的键，这里先把底板的阶段与时点换成存档的，避免新开局的粮券阶段盖掉旧档的小麦阶段。
+  const savedReform = saved.monetaryReform && typeof saved.monetaryReform === "object" && !Array.isArray(saved.monetaryReform) ? saved.monetaryReform : {};
+  base.monetaryReform = { stage: "wheat", legacyBankAccess: false, started: null, completed: null, ...savedReform };
   const entityMaps = new Set([...ENTITY_MAPS, ...(definitions.modSave?.entityMaps || [])]);
   const state = mergeOntoBase(cloneJson(base), saved, "", report, entityMaps);
   state.version = current;

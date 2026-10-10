@@ -422,6 +422,7 @@ export function setShareOffer(state, companyId, offeredShares, priceVoucherPerSh
   if (!company) return { ok: false, reason: "企业不存在" };
   if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
   if (state.monetaryReform?.stage !== "voucher") return { ok: false, reason: "股票交易须在货币改革完成后使用粮券" };
+  if (!(state.buildings || []).some(row => row.typeId === "stock_exchange") && !state.stockExchange?.legacyAccess) return { ok: false, reason: "尚未建成交易所" };
   if (!offerSeller(state, company)) return { ok: false, reason: "发行池卖方不明，无法挂牌出售" };
   const shares = Math.floor(Number(offeredShares) || 0);
   const priceInput = Number(priceVoucherPerShare);

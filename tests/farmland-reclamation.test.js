@@ -6,7 +6,7 @@ import { agricultureEmploymentTarget, refillAgricultureToTarget } from "../src/s
 import { jobCount, householdList } from "../src/systems/households.js";
 import { selectJobRows } from "../src/selectors/labor.js";
 import { createMapModel, MAP_PRESENTATION } from "../src/ui/map-model.js";
-import { issueTownVouchers } from "../src/economy/currency.js";
+import { issueTownVouchers, voucherBalance } from "../src/economy/currency.js";
 
 const A = CONTENT.agriculture;
 const I = CONTENT.precision.inventoryUnitsPerJin;
@@ -43,7 +43,8 @@ test("开荒成本：工日按亩数换算，工资由镇库承担并留下明�
   const wage = state.employment.wageRates.builders;
   assert.ok(wage > 0);
   const townWheatBefore = state.accounts.town.wheat;
-  const householdFoodBefore = householdList(state).reduce((sum, h) => sum + (h.inventory.wheat || 0), 0);
+  const townVoucherBefore = voucherBalance(state, "town");
+  const householdVoucherBefore = householdList(state).reduce((sum, h) => sum + (h.voucherUnits || 0), 0);
 
   const result = simulation.reclaimFarmland(state, 200, 40);
   assert.equal(result.ok, true, result.reason);
@@ -54,11 +55,11 @@ test("开荒成本：工日按亩数换算，工资由镇库承担并留下明�
   assert.equal(result.dueVoucherUnits, Math.round(200 * wage * V));
   assert.equal(result.paidVoucherUnits, result.dueVoucherUnits);
 
-  // 镇库确实出钱：按当前货币制度，小麦档直接以小麦支付开荒工人家庭
-  const townWheatSpent = townWheatBefore - state.accounts.town.wheat;
-  assert.equal(townWheatSpent, Math.round(result.paidVoucherUnits * I / V));
-  const householdFoodAfter = householdList(state).reduce((sum, h) => sum + (h.inventory.wheat || 0), 0);
-  assert.equal(householdFoodAfter - householdFoodBefore, townWheatSpent);
+  // 镇库确实出钱：开局即粮券，镇库券池付给开荒工人家庭；小麦库存不动
+  assert.equal(townVoucherBefore - voucherBalance(state, "town"), result.paidVoucherUnits);
+  const householdVoucherAfter = householdList(state).reduce((sum, h) => sum + (h.voucherUnits || 0), 0);
+  assert.equal(householdVoucherAfter - householdVoucherBefore, result.paidVoucherUnits);
+  assert.equal(state.accounts.town.wheat, townWheatBefore);
 
   // 明确的扣款记录：开荒工资支出账目 + 逐户工资记录
   const expense = state.ledger.find(row => row.type === "reclaim_wage_expense");

@@ -47,7 +47,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 小麦（斤） | 价值尺度，所有价格以小麦斤计 |
 | 粮券 | 货币，1 券 ≈ 1 斤；内部整数单位，换算见 `content.precision` |
 | 镇库 | 镇财政：收税、发工资与救济、存战略小麦 |
-| 货币阶段 | `wheat`（实物）→ `voucher`（粮券）。建银行后在政策页一键切换，镇库按小麦存量印制等额粮券；没有过渡期 |
+| 货币阶段 | 新开局即 `voucher`（粮券）：开局一次发行 1000 万斤粮券，居民每人 1000 斤（按户人口）、镇库券池 670 万斤（`rules.INITIAL.openingVoucher*`，`core/state.js` 的 `issueOpeningVouchers`，不经银行闸门）。小麦仍是口粮与价值尺度。印券、以粮换券需先建成银行。`wheat`（实物）只见于旧档，读档沿用存档自带的阶段，没有切换入口 |
 | 批发市场 | 镇营做市商：对面粉/面包/木材/盐挂收购价与售价、管库存；镇营产品统购入库。**没有自己的钱**，收付款都走镇库；小麦一直在镇库 |
 | 综合商店 | 居民买面粉/面包/盐和日用品的主渠道；目标利润率加价 × 库存系数（见下一行"调价"）；肉直接向养殖场进货 |
 | 调价（物价会动） | 规则在 `economy/price-adjust.js`（`nextPriceFactor`，阈值见 `content/rules.js` 的 `priceAdjust`）。综合商店每 7 天按库存够卖天数、日均销量、断货记录给每个商品定系数（积压降价、紧缺涨价、正常回归 1），售价 = 基准价 × 系数，清库存才可降到进货价 × 0.7，在 `systems/shop-pricing.js`；批发市场自动调价默认关闭，玩家逐品开启后以开启时售价为锚定、±30% 内浮动，在 `systems/wholesale-market.js` 的 `reviewWholesaleAutoPricing`（日结 `pricing` 步） |
@@ -55,7 +55,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 家庭 | 居民以户为单位，有库存、粮券、岗位、舒心值。开局约 5 人一户（`rules.initialHouseholdSize`，3300 人 ≈ 660 户）；每年年终人口超过 8 人的户分家（`systems/household-split.js`，`householdSplitMaxPeople`）：新户拿约一半人口，钱粮按人口比例分，股票/建筑/店铺/经营权/别墅/欠薪债权留原户，岗位放不下的随人走。读旧存档时大户一次分完。户数随人口增长，日结耗时约与户数成正比 |
 | 日历 / 月薪 / 正式员工 | 一年 12 月 × 30 天（`rules.daysPerYear` 360、`monthDays` 30）。工资按天计入 `employer.js` 的 `pendingByMonth`，到发薪日（`systems/paydays.js`：5/10/15/20/25 号，按人均利润排，镇营 5 号）才到期支付上个月的；到期没付的才是欠薪（`wageArrears`）。用工审核与辞退在 `systems/employment-contracts.js`：每月 1 号审核、一次 +1，开张期 30 天每天招够；入职满 30 天（`household.jobSince`）才能辞退，付一个月工资补偿，付得起才辞 |
 | 救济 | 政策页一个开关：口粮不足 7 天的家庭补到 14 天（家庭先用自己的粮券兑粮）。口粮由镇库实物拨付；社保基金开启时由基金按价值结算，付不起记债。没有手动拨粮和邻里互助 |
-| 国债 | 粮券阶段可发，玩家定总额/期限/固定利率；发行当天住户和银行按闲钱认购 |
+| 国债 | 需已建成银行（粮券阶段，开局即是）；玩家定总额/期限/固定利率；发行当天住户和银行按闲钱认购 |
 | 外镇 | 档案在 `content/outside-towns.js`，算法共用 `systems/outside-town.js`（状态 `state.outsideTowns[id]`）。每天按人口自产/消耗各商品、吃口粮；进口品（盐、木材、酒、布）存货不足 3 年用量都按正常价收，超过 3 年才压价，繁荣度越低越肯出高价；自产外卖品（面粉、面包）按库存比目标定价；买卖价差随关系分收窄，大单逐段计价，没有套利。繁荣度跟随供应满足率；人口只增不减（每年 0.5%—3%，随繁荣度），口粮不足的年份停止增长、每年开垦新耕地，秋收入库。只用口粮储备以上的小麦付款。外贸房在岗才能交易、签长协。关税只对贸易行征收（`trading-houses.js` 的 `tradeTariffRate`，见 `docs/TRADE.md`），镇里自己的外贸与长协不收。加新外镇 = 加一份档案 |
 | 运力 / 贸易行 | `systems/logistics.js` 管运力池（外贸房基础 + 物流中心 + 码头），所有对外镇的货都要 `takeFreightCapacity`；镇里自己的货不付运费。贸易中心的贸易行是 kind `trade` 的店铺（`systems/trading-houses.js`），自己做进出口（偏向出口，进口利润门槛更高）、付运费和关税给镇库，像商业街店铺一样自己增减店员。河岸地块只建码头和外贸房。详见 `docs/TRADE.md` |
 | 再分配 | `systems/redistribution.js`：富人税（人均家底三档超额累进，每 30 天）、遗产税（年终按去世成年人份额）、整户无人家产归镇库；基尼与逐年曲线在 `selectors/inequality.js`。社保由雇主替员工交（`socialSecurity.employerSharePercent`，岗位 → 雇主映射在 `social-security.js`）。服务可设 `minAffluence`（戏园只有宽裕人家去）。详见 `docs/REDISTRIBUTION.md` |
@@ -101,7 +101,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 **流通口径**
 - 小麦归镇库直管：磨坊直接用镇库小麦，公司/民营经批发市场按售价从镇库存量买小麦。做市清单 `WHOLESALE_MONOPOLY_ITEM_IDS` 由物品的 `wholesale` 标记推导。
 - 带 `storeOnly` 标记的商品（面粉/面包/盐/酒/布）只能经综合商店卖给居民；测试 fixture 要先建商店。
-- 小麦阶段居民直接从镇库买主粮、不经过市场和商店；测批发/商店要先推进到粮券阶段。
+- 新开局即粮券阶段；只有旧档才可能是小麦阶段（小麦阶段居民直接从镇库买主粮、不经过市场和商店）。测小麦行为用 `tests/helpers-monetary.js` 的 `wheatEraState`，测粮券行为用 `legacyVoucherState` 或直接用新开局。
 - 主食按户算：口粮默认吃自家小麦，宽裕人家换一部分面粉面包（面包买不到改面粉，再不够买小麦）；需求弹性只在综合商店是卖家时生效。
 - 居民实际能花多少还受每日就业换券额度限制（政策 `employmentExchangeJin`），家底多但粮券少时这是最常见的瓶颈。
 - 付款顺序：手头粮券 → 银行存款自动取回 → 以粮换券（镇库券池封顶）。判断"付不付得起"一律用 `spendableVoucherUnits`（含存款），别只看 `voucherUnits`。

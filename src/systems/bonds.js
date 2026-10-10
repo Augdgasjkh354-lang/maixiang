@@ -2,7 +2,7 @@ import { currencyScale, ensureCurrencyState, voucherBalance } from "../economy/c
 import { recordEvent } from "../economy/ledger.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
 import { wholesalePrice } from "./wealth-stats.js";
-import { bankLoanableVoucherUnits, bankPolicy, ensureBankState } from "./bank.js";
+import { bankAvailable, bankLoanableVoucherUnits, bankPolicy, ensureBankState } from "./bank.js";
 import { liquidityInvestRatio } from "./liquidity.js";
 
 // 国债：镇库按玩家定的固定票面利率发行，发行当天由住户（存款后剩余闲钱）与银行（闲置可贷额度）
@@ -19,8 +19,9 @@ export function ensureBondState(state) {
   return bonds;
 }
 
+// 国债须已建成银行（银行负责承销与付息口径），且处于粮券阶段。开局即粮券，所以门槛主要是银行。
 export function bondAvailable(state) {
-  return state.monetaryReform?.stage === "voucher";
+  return bankAvailable(state);
 }
 
 function townCashUnits(state) {
@@ -67,7 +68,9 @@ export function bondOutstandingVoucherUnits(state) {
 }
 
 export function issueGovernmentBond(state, options, content) {
-  if (!bondAvailable(state)) return { ok: false, reason: "需完成货币改革（粮券阶段）才能发行国债" };
+  if (!bondAvailable(state)) {
+    return { ok: false, reason: state.monetaryReform?.stage === "voucher" ? "需先建成银行才能发行国债" : "需完成货币改革（粮券阶段）才能发行国债" };
+  }
   const scale = currencyScale(content);
   const totalVoucher = Number(options?.totalVoucher);
   const totalUnits = Math.round(totalVoucher * scale);

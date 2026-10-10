@@ -11,6 +11,7 @@ import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js"
 import { exportState, parseSaveFile } from "../src/persistence/storage.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { advancePopulation } from "../src/systems/population.js";
+import { setHouseholdVoucherUnits } from "./helpers-monetary.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -34,14 +35,15 @@ function idleHouseholds(state, count = 2) {
 
 // 服务预算 = 家底 / wealthSpendDays × serviceShare（household-budget）。这里把"每日可花"设成 voucherPerDay：
 // 家底 = voucherPerDay × wealthSpendDays，全放在粮券里，小麦清零以免多出来的存粮也算进家底。
-function setBudget(household, voucherPerDay, state = null) {
+function setBudget(household, voucherPerDay, state) {
   ensureHouseholdLife(household, CONTENT).day = {};
   const rules = CONTENT.rules.householdBudget;
   const keepDays = rules.wealthFoodReserveDays; // 家底只扣 30 天口粮（与 householdWealthUnits 一致）
   const keepJin = householdPopulation(household) * CONTENT.rules.foodPerPersonDay * keepDays;
-  household.voucherUnits = 0;
+  // 开局即粮券：超出口粮储备的家底全部放在粮券里（服务按粮券付款）；小麦只留 30 天口粮。
+  setHouseholdVoucherUnits(state, household, Math.round(voucherPerDay * rules.wealthSpendDays * CONTENT.precision.currencyUnitsPerVoucher));
   for (const itemId of ["flour", "bread"]) household.inventory[itemId] = 0;
-  household.inventory.wheat = Math.round((keepJin + voucherPerDay * rules.wealthSpendDays) * CONTENT.precision.inventoryUnitsPerJin);
+  household.inventory.wheat = Math.round(keepJin * CONTENT.precision.inventoryUnitsPerJin);
   budgetDirty = true;
 }
 let budgetDirty = false;

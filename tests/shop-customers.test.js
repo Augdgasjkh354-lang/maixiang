@@ -23,7 +23,7 @@ function town(seed) {
   const market = add("wholesale_market");
   const street = add("commercial_street");
   simulation.setEmployment(state, `${market}::${CONTENT.buildings.wholesale_market.jobs[0].id}`, 3);
-  assert.equal(simulation.startCurrencyReform(state).ok, true);
+  assert.equal(state.monetaryReform.stage, "voucher"); // 开局即粮券阶段
   grantResidentVouchers(state, 300000);
   const store = simulation.openResidentShop(state, street, "general");
   assert.equal(store.ok, true, store.reason);
