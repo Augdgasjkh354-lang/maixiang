@@ -1,7 +1,7 @@
 import { currencyScale, transferVouchers, voucherBalance } from "../economy/currency.js";
 import { recordEvent } from "../economy/ledger.js";
-import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
-import { withdrawFromBank } from "../economy/deposits.js";
+import { noteBankDebtGrowth, voucherText, withdrawFromBank } from "../economy/deposits.js";
+import { bookAdd } from "../economy/books.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
 import { recordHouseholdBudgetIncome } from "./household-life.js";
 import { wholesalePrice } from "./wholesale-price.js";
@@ -10,13 +10,15 @@ import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSE
 
 // 银行系统（金融扩展第二期）：镇营银行。
 // - 只存粮券不存粮食；存款按日计息；可向上市公司放贷
-// - 存款利息由镇库付现金（付款类型 bank_deposit_interest）：每笔计息都有等额粮券进入银行现金；
-//   镇库现金不够时只计实付部分，绝不透支记账
-// - 准备金率限制可贷额度；存贷利差等银行利润记入 bank.retainedVoucherUnits 留存，不自动上缴镇库
+// - 存款利息由银行自付（计入存款、费用记在留存利润上）：当日应付利息 = 银行费用，留存利润同额减少，
+//   并记为银行应付利息（bank.interestPayableUnits）；付息前银行现金须能覆盖付息额，不够时镇库托底垫付
+//   （bank_town_advance，计入欠镇库）；镇库也付不起的部分顺延为应付，下日补付，不丢。
+//   付息的现金经住户当即并入存款，净额为零：现金只因镇库垫付增加，付息本身不减少银行现金（双分录下的唯一自洽写法）。
+// - 准备金率限制可贷额度；存贷利差等银行利润记入 bank.retainedVoucherUnits 留存，不自动上缴镇库；留存利润可为负
 // - 镇库托底：住户取回存款时银行现金不够，缺口由镇库垫付，记为银行欠镇库的债（bank.debtToTownUnits）。
 //   现金超出 准备金 + 安全垫 的部分每日自动还给镇库（bank_town_repay），玩家也可手动还（repayBankDebtToTown）。
 // - 粮券恒等式：银行现金计入 totalVoucherBalances（currency.js）。存款台账的守恒关系是
-//   存款 + 欠镇库 = 银行现金 + 在贷余额 + 持有国债 − 留存利润（bankLedgerInvariant，validateState 校验）。
+//   存款 + 欠镇库 + 应付利息 = 银行现金 + 在贷余额 + 持有国债 − 留存利润（bankLedgerInvariant，validateState 校验）。
 export const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
 export const DEFAULT_LOAN_RATE_ANNUAL_PERCENT = 6;
 export const DEFAULT_RESERVE_REQUIREMENT_PERCENT = 10;
@@ -77,8 +79,14 @@ export function ensureBankState(state) {
   bank.debtToTownUnits ??= 0;
   bank.totalAdvancedUnits ??= 0;
   bank.totalRepaidUnits ??= 0;
+  // 存款利息应付：镇库也付不起的部分顺延到下日补付（留存利润的反推口径要减去它）。
+  bank.interestPayableUnits ??= 0;
   if (!Number.isSafeInteger(bank.retainedVoucherUnits)) bank.retainedVoucherUnits = bankRetainedVoucherUnits(state);
   return bank;
+}
+
+function bankInterestPayableVoucherUnits(state) {
+  return Math.max(0, state.bank?.interestPayableUnits || 0);
 }
 
 // 银行资产：现金 + 在贷余额（含应计利息）+ 持有的国债本金。只读。
@@ -104,20 +112,23 @@ function bankDebtToTownVoucherUnits(state) {
 }
 
 // 银行留存利润（可为负）：贷款利息应计 − 坏账核销 + 国债利息收入 − 国债违约损失。
-// 旧存档没有这个字段：此时按"资产 − 存款 − 欠镇库"反推。旧版存款利息只记台账不付现金，
-// 反推出的负数正是这部分无现金支撑的利息，存款人余额保持不变。
-// 镇库托底的垫付与还款同时改动现金和欠镇库，不改变留存利润。
+// 旧存档没有这个字段：此时按"资产 − 存款 − 欠镇库 − 应付利息"反推（应付利息旧档为 0）。
+// 旧版存款利息由镇库付现金，反推值就是旧档的实际留存；新版的付息费用在日结里即时减少留存利润。
+// 镇库托底的垫付与还款同时改动现金和欠镇库，不改变留存利润；付息顺延只把应付从"留存"转到"应付"，也不改留存。
 export function bankRetainedVoucherUnits(state) {
   const bank = state.bank || {};
   if (Number.isSafeInteger(bank.retainedVoucherUnits)) return bank.retainedVoucherUnits;
-  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state) - bankDebtToTownVoucherUnits(state);
+  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state) - bankDebtToTownVoucherUnits(state)
+    - bankInterestPayableVoucherUnits(state);
 }
 
-// 存款台账守恒（只读）：存款 + 欠镇库 = 现金 + 在贷余额 + 国债本金 − 留存利润。
+// 存款台账守恒（只读）：存款 + 欠镇库 + 应付利息 = 现金 + 在贷余额 + 国债本金 − 留存利润；应付利息不得为负。
+// 留存利润可为负（付息费用超过收入时），这是银行权益为负、靠镇库托底兜底的状态，不违反守恒。
 export function bankLedgerInvariant(state) {
   const bank = state.bank || {};
   const deposits = bankDepositTotalVoucherUnits(state);
   const debtToTown = bankDebtToTownVoucherUnits(state);
+  const interestPayable = Number(bank.interestPayableUnits || 0);
   const cash = bank.cashVoucherUnits || 0;
   let loans = 0;
   for (const loan of bank.loans || []) if (loan.status === "active") loans += loan.outstandingVoucherUnits || 0;
@@ -126,8 +137,8 @@ export function bankLedgerInvariant(state) {
     for (const holding of issue.holdings || []) if (holding.holderKey === "bank:bank") bonds += holding.principalVoucherUnits || 0;
   }
   const retained = bankRetainedVoucherUnits(state);
-  return { deposits, debtToTown, cash, loans, bonds, retained,
-    valid: deposits + debtToTown === cash + loans + bonds - retained };
+  return { deposits, debtToTown, interestPayable, cash, loans, bonds, retained,
+    valid: interestPayable >= 0 && deposits + debtToTown + interestPayable === cash + loans + bonds - retained };
 }
 
 // 还债用的安全垫比例：优先读规则 rules.bankDebtRepayBufferShare，缺省用模块默认值。
@@ -146,7 +157,7 @@ export function bankDebtRepayableUnits(state, content) {
   const deposits = bankDepositTotalVoucherUnits(state);
   const reserve = Math.floor(deposits * (reservePercent / 100));
   const buffer = Math.floor(deposits * bankDebtRepayBufferShare(content));
-  const excess = (state.bank.cashVoucherUnits || 0) - reserve - buffer;
+  const excess = (state.bank.cashVoucherUnits || 0) - reserve - buffer - bankInterestPayableVoucherUnits(state);
   return Math.max(0, Math.min(debt, excess));
 }
 
@@ -204,13 +215,14 @@ export function bankTotals(state) {
   };
 }
 
-// 可贷额度 = 银行现金 - 法定准备金（存款×准备金率）- 欠镇库（镇库托底垫付的债要先还，不能把镇库的钱再借出去）。
+// 可贷额度 = 银行现金 - 法定准备金（存款×准备金率）- 欠镇库（镇库托底垫付的债要先还，不能把镇库的钱再借出去）
+//   - 应付利息（欠存款人的利息，下日要付，同样不能借出）。
 // 放贷（issueBankLoan / settleBankAutoLoans）与国债认购（bonds.js）共用这一口径。
 export function bankLoanableVoucherUnits(state) {
   const policy = bankPolicy(state);
   const totals = bankTotals(state);
   const required = Math.floor(totals.totalDepositsVoucherUnits * (policy.reserveRequirementPercent / 100));
-  return Math.max(0, totals.cashVoucherUnits - required - bankDebtToTownVoucherUnits(state));
+  return Math.max(0, totals.cashVoucherUnits - required - bankDebtToTownVoucherUnits(state) - bankInterestPayableVoucherUnits(state));
 }
 
 export function depositToBank(state, householdId, voucherUnits, content = null) {
@@ -327,45 +339,87 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
   }
 }
 
-// 存款利息：镇库付现金给银行，银行同时计入存款台账（一笔计息对应一笔等额现金）。
-// 镇库现金不够时按比例少计，台账只记实际到账的部分，绝不透支。
+// 按权重整数分摊 amount（amount 不超过权重总和）：份额 = floor(amount × 权重 ÷ 总权重)，用 BigInt 保证精确；
+// 余数逐户补 1 券（只补有权重的户），总额精确等于 amount。返回 [[住户id, 份额], ...]。
+function splitByWeight(amount, pairs) {
+  const total = pairs.reduce((sum, [, weight]) => sum + weight, 0);
+  if (!(amount > 0) || !(total > 0)) return [];
+  const out = pairs.map(([id, weight]) => [id, Number(BigInt(amount) * BigInt(weight) / BigInt(total))]);
+  let left = amount - out.reduce((sum, [, part]) => sum + part, 0);
+  for (let i = 0; left > 0; i = (i + 1) % out.length) {
+    if (pairs[i][1] > 0) { out[i][1] += 1; left -= 1; }
+  }
+  return out;
+}
+
+// 存款利息由银行自付（台账规则见文件头）。日结里分四步：
+// 1. 计费：各活跃户存款 × 日利率取整，合计为银行费用：留存利润同额减少，计入应付利息（bank.interestPayableUnits）。
+// 2. 付息能力：银行现金 + 镇库粮券。现金不够付的部分由镇库垫付（bank_town_advance，计入欠镇库，类似取款托底）。
+// 3. 入账：可付额先付当日利息（按各户计息额），再付顺延的旧欠（按各户存款分摊）；并入住户存款，
+//    计入居民预算收入与利息统计。付息现金经住户当即并入存款，净额为零，所以银行现金不因付息减少。
+// 4. 顺延：镇库也付不起的部分留在应付利息，下日补付（不丢），留存利润已先减，台账仍守恒。
 function settleDepositInterestDay(state, content, bank, dailyDepositRate) {
-  if (!(dailyDepositRate > 0)) return;
-  const rows = [];
-  let due = 0;
+  const scale = currencyScale(content);
+  const holders = [];
+  let accrued = 0;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
     const deposited = bank.deposits[household.id] || 0;
     if (deposited <= 0) continue;
-    const interest = Math.floor(deposited * dailyDepositRate);
-    if (interest > 0) { rows.push({ householdId: household.id, interest }); due += interest; }
+    const interest = dailyDepositRate > 0 ? Math.floor(deposited * dailyDepositRate) : 0;
+    holders.push({ householdId: household.id, deposited, interest });
+    accrued += interest;
   }
-  if (due <= 0) return;
-  const paidCap = Math.min(due, Math.max(0, voucherBalance(state, "town")));
-  let credited = 0;
-  const credits = [];
-  for (const row of rows) {
-    const credit = paidCap >= due ? row.interest : Math.floor(row.interest * paidCap / due);
-    if (credit > 0) { credits.push({ householdId: row.householdId, credit }); credited += credit; }
+  if (accrued > 0) {
+    bank.retainedVoucherUnits -= accrued;
+    bank.interestPayableUnits += accrued;
+    bookAdd(bank, "depositInterestExpense", accrued);
   }
-  if (credited > 0) {
-    const payment = settleMonetaryPayment(state, "town", "bank", currentPaymentComposition(state, credited), content,
-      "bank_deposit_interest", "银行存款利息（镇库付现）", { requireFull: false });
-    if (!payment.ok || payment.paidValueUnits !== credited) throw new Error("存款利息付款预检后失败");
-    for (const { householdId, credit } of credits) {
-      bank.deposits[householdId] = (bank.deposits[householdId] || 0) + credit;
-      recordHouseholdBudgetIncome(state, householdId, credit, content);
-      bank.stats.interestPaidVoucherUnits += credit;
-    }
+  if (bank.interestPayableUnits <= 0) return;
+
+  const cash = Math.max(0, bank.cashVoucherUnits || 0);
+  const payNow = Math.min(bank.interestPayableUnits, cash + Math.max(0, voucherBalance(state, "town")));
+  const shortfall = Math.max(0, payNow - cash);
+  if (shortfall > 0) {
+    const advance = transferVouchers(state, "town", "bank", shortfall, content, "bank_town_advance",
+      "镇库垫付银行存款利息缺口，计入银行负债");
+    if (!advance.ok) throw new Error("存款利息垫付预检后失败：" + advance.reason);
+    bank.debtToTownUnits = (bank.debtToTownUnits || 0) + shortfall;
+    bank.totalAdvancedUnits = (bank.totalAdvancedUnits || 0) + shortfall;
+    noteBankDebtGrowth(state, content, shortfall, "支付存款利息时银行现金不足");
   }
-  if (credited < due) {
-    recordEvent(state, "镇库现金不足，存款利息未能足额计入。", content, {
-      mergeKey: "bank_interest_shortfall",
+
+  // 先付当日利息，再付顺延的旧欠（不超过各户存款之和）。
+  const dueToday = holders.reduce((sum, row) => sum + row.interest, 0);
+  const todayPaid = Math.min(payNow, dueToday);
+  const carryPaid = Math.min(payNow - todayPaid, holders.reduce((sum, row) => sum + row.deposited, 0));
+  const credits = new Map();
+  const addCredit = (householdId, units) => { if (units > 0) credits.set(householdId, (credits.get(householdId) || 0) + units); };
+  for (const [householdId, units] of splitByWeight(todayPaid, holders.map(row => [row.householdId, row.interest]))) addCredit(householdId, units);
+  for (const [householdId, units] of splitByWeight(carryPaid, holders.map(row => [row.householdId, row.deposited]))) addCredit(householdId, units);
+  let paid = 0;
+  for (const [householdId, credit] of credits) {
+    bank.deposits[householdId] = (bank.deposits[householdId] || 0) + credit;
+    recordHouseholdBudgetIncome(state, householdId, credit, content);
+    bank.stats.interestPaidVoucherUnits += credit;
+    paid += credit;
+  }
+  bank.interestPayableUnits -= paid;
+
+  if (bank.interestPayableUnits > 0) {
+    recordEvent(state, `银行现金与镇库粮券都不足，存款利息${voucherText(bank.interestPayableUnits, scale)}券顺延为应付，下日补付。`, content, {
+      mergeKey: "bank_interest_deferred",
       mergeWindowDays: 7,
-      amount: due - credited,
-      mergedText: count => `镇库现金连续${count}天不足，存款利息未能足额计入。`
+      amount: bank.interestPayableUnits,
+      mergedText: (count, amount) => `银行现金与镇库粮券连续${count}天不足，存款利息顺延为应付（本轮累计${voucherText(amount, scale)}券），下日补付。`
     });
   }
+}
+
+// 银行费用三段记账（日 / 年 / 累计）：日、年周期跨界时清空对应段。
+function rollBankBooks(state, bank) {
+  bank.day = {};
+  if (bank.booksYear !== state.year) { bank.year = {}; bank.booksYear = state.year; }
 }
 
 function settleBankDepositsDay(state, content, bank, policy, daysPerYear) {
@@ -425,6 +479,7 @@ export function settleBankDay(state, content) {
   const policy = bankPolicy(state);
   const daysPerYear = content.rules.daysPerYear || 360;
   const dayIndex = (state.year - 1) * daysPerYear + state.day;
+  rollBankBooks(state, bank);
   settleBankDepositsDay(state, content, bank, policy, daysPerYear);
   settleBankLoansDay(state, content, bank, policy, dayIndex);
   // 先还镇库托底的债，再放新贷款：超出准备金与安全垫的现金优先还债，不把垫付的钱又借给公司。
@@ -447,6 +502,7 @@ export function settleBankDay(state, content) {
     outstandingLoansVoucherUnits: totals.outstandingLoansVoucherUnits,
     loanableVoucherUnits: bankLoanableVoucherUnits(state),
     badDebtVoucherUnits: bank.stats.badDebtVoucherUnits,
-    debtToTownVoucherUnits: bank.debtToTownUnits
+    debtToTownVoucherUnits: bank.debtToTownUnits,
+    interestPayableVoucherUnits: bank.interestPayableUnits
   };
 }
