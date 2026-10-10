@@ -4,7 +4,7 @@ import { currentPaymentComposition, settleMonetaryPayment } from "../economy/pay
 import { withdrawFromBank } from "../economy/deposits.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
 import { recordHouseholdBudgetIncome } from "./household-life.js";
-import { wholesalePrice } from "./wealth-stats.js";
+import { wholesalePrice } from "./wholesale-price.js";
 import { companyWorkingCapitalReserve } from "./companies.js";
 import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEHOLD_RESERVE_DAYS } from "./investment-preference.js";
 

@@ -1,7 +1,7 @@
 import { currencyScale, ensureCurrencyState, voucherBalance } from "../economy/currency.js";
 import { recordEvent } from "../economy/ledger.js";
 import { householdList, householdPopulation, isActiveHousehold, syncResidentAggregates } from "./households.js";
-import { wholesalePrice } from "./wealth-stats.js";
+import { wholesalePrice } from "./wholesale-price.js";
 import { bankAvailable, bankLoanableVoucherUnits, bankPolicy, ensureBankState } from "./bank.js";
 import { liquidityInvestRatio } from "./liquidity.js";
 import { recordHouseholdBudgetIncome } from "./household-life.js";

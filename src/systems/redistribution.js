@@ -20,7 +20,7 @@ import { bookAdd, ensureBook } from "../economy/books.js";
 import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, syncResidentAggregates, withDeferredHouseholdSync } from "./households.js";
 import { daysUntilHarvest, householdWealthUnits } from "./household-budget.js";
-import { wholesalePrice } from "./wealth-stats.js";
+import { wholesalePrice } from "./wholesale-price.js";
 import { householdBondPrincipalMap } from "./bonds.js";
 import { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
 import { transferWageClaimsToTown, wageBook } from "./employer.js";

@@ -1,6 +1,6 @@
 import { currencyScale, voucherBalance } from "../economy/currency.js";
 import { householdList, householdPopulation, isActiveHousehold } from "./households.js";
-import { wholesalePrice } from "./wealth-stats.js";
+import { wholesalePrice } from "./wholesale-price.js";
 
 // 流动性系统（金融扩展五期）：投资比例算法自动调整，无需手调。
 // - 安全线 = 每户 1 年生存 + 消费开支；超过安全线的部分按投资比例成为可投资金

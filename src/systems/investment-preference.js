@@ -1,6 +1,6 @@
 import { currencyScale } from "../economy/currency.js";
 import { householdList, householdPopulation, isActiveHousehold } from "./households.js";
-import { wholesalePrice } from "./wealth-stats.js";
+import { wholesalePrice } from "./wholesale-price.js";
 import { liquidityInvestRatio } from "./liquidity.js";
 import { nextRandom } from "../core/random.js";
 

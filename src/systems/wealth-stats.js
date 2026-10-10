@@ -12,18 +12,9 @@ import { shopWage } from "./labor-market.js";
 import { computeLaborMarket } from "./labor-market.js";
 import { totalQeqUnits } from "../economy/inventory.js";
 import { giniCoefficient, topWealthSharePercent, wealthDistributionRows } from "./redistribution.js";
+import { wholesalePrice } from "./wholesale-price.js";
 
-// 批发价（用户原 W0）：批发市场价 → 遗留市场价 → 食盐规则价 → 规则默认值。
-export function wholesalePrice(state, itemId, content) {
-  const market = state.wholesaleMarket?.pricesVoucherPerUnit || {};
-  if (Number.isFinite(market[itemId]) && market[itemId] > 0) return Number(market[itemId]);
-  const legacy = state.market?.pricesVoucherPerUnit || {};
-  if (Number.isFinite(legacy[itemId]) && legacy[itemId] > 0) return Number(legacy[itemId]);
-  if (itemId === "salt" && Number.isFinite(content.rules.saltPriceWheatPerJin)) {
-    return Number(content.rules.saltPriceWheatPerJin);
-  }
-  return Number(content.rules.marketPricesVoucherPerUnit?.[itemId] ?? 0);
-}
+export { wholesalePrice };
 
 function priceMap(state, content) {
   const map = {};
