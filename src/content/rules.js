@@ -257,8 +257,11 @@ export const RULES = Object.freeze({
   newBusinessTrialDays: 6,
   shopClerkUtilizationHireThreshold: 0.85,
   shopClerkUtilizationReleaseThreshold: 0.45,
+  // 镇营综合商店（systems/shops.js）：supplyShareMax = 每日每种商品最多进批发市场可售量的比例（余下留给私营店）；
+  // maxPerStreet = 每条商业街最多几家镇营综合商店。
+  townShop: Object.freeze({ supplyShareMax: 0.5, maxPerStreet: 1 }),
   shopTypes: Object.freeze({
-    general: Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
+    general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
@@ -282,7 +285,9 @@ export const RULES = Object.freeze({
     // 兼容旧调用；新开店会统一归一为综合商店。
     grain: Object.freeze({ id: "grain", name: "粮店", kind: "legacy_retail", itemId: "wheat", aliasOf: "general" }),
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),
-    salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" })
+    salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" }),
+    // 镇营综合商店：镇里持有的综合商店（systems/shops.js 的 openTownShop）。别名归一为综合商店，town 标记镇营。
+    town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true })
   }),
 
   marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),

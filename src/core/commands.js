@@ -15,7 +15,7 @@ import { listCompanyOnExchange, configureListedShareOffer, executeTownBuyback } 
 import { listBuilding as listBuildingSystem, approveIpoApplication as approveIpoApplicationSystem, rejectIpoApplication as rejectIpoApplicationSystem } from "../systems/ipo.js";
 import { setCurrentUnitPrice, applyRecommendedIndustryPrices, keepExistingIndustryPrices } from "../economy/prices.js";
 import { setPublicProcurementIntent as setPublicProcurementIntentSystem, clearPublicProcurementIntent as clearPublicProcurementIntentSystem } from "../systems/public-procurement.js";
-import { openShop, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } from "../systems/shops.js";
+import { openShop, openTownShop as openTownShopSystem, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } from "../systems/shops.js";
 import { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, setWholesaleAutoPricing, stockpileWholesale as stockpileWholesaleSystem, releaseWholesale as releaseWholesaleSystem } from "../systems/wholesale-market.js";
 import { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice, isDynamicPricingShop } from "../systems/shop-pricing.js";
 import { MARGIN_POLICY_MAX_PERCENT, pinGlideBeforeChange, policyShopMarginPercent, policyTradeMarginPercent, shopOverrideMarginPercent } from "../economy/margin-policy.js";
@@ -402,6 +402,11 @@ export function setMarginPolicy(state, patch, content) {
 
 export function openResidentShop(state, buildingId, typeId, householdId, content) {
   return openShop(state, buildingId, typeId, content, householdId || null);
+}
+
+// 镇里在商业街开一家镇营综合商店：镇库持有，店员由镇里设定，收入进镇库（systems/shops.js）。
+export function openTownShop(state, buildingId, content) {
+  return openTownShopSystem(state, buildingId, content);
 }
 
 export function configureShopMerchants(state, shopId, count, content) {

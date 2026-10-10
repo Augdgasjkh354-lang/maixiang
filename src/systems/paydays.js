@@ -24,7 +24,8 @@ function recentProfit(rows) {
 function employerRows(state, content) {
   const rows = [];
   for (const shop of Object.values(state.shops || {})) {
-    if (shop.status !== "open") continue;
+    // 镇营综合商店的发薪日固定为镇库的 5 号，不参与排名。
+    if (shop.status !== "open" || shop.town) continue;
     const staff = Math.max(1, jobCount(state, `shop:${shop.id}:clerk`) + jobCount(state, `shop:${shop.id}:merchant`));
     rows.push({ key: `shop:${shop.id}`, score: recentProfit(shop.history) / staff });
   }

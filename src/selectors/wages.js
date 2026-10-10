@@ -53,5 +53,5 @@ export function companyWageTotals(state, content, company) {
 }
 
 export function shopPayTotals(state, content, shop) {
-  return { pendingWagesVoucher: voucherOf(pendingWages(shop?.liabilities || {}), content), payDay: payDayFor(state, `shop:${shop.id}`) };
+  return { pendingWagesVoucher: voucherOf(pendingWages(shop?.liabilities || {}), content), payDay: payDayFor(state, shop?.town ? "town" : `shop:${shop.id}`) };
 }
