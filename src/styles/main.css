@@ -609,3 +609,10 @@ button.wide { width: 100%; }
 
 /* 贫富面板：基尼系数逐年曲线 */
 .gini-sparkline { display: block; width: 100%; height: 56px; margin: 6px 0; }
+
+/* 银行建筑面板：摘要卡 + 三个折叠分组；数额整体不换行，「粮券」不会被拆到下一行 */
+.bank-summary .value, .bank-groups .value { white-space: nowrap; }
+.bank-groups .detail-block > summary .subtle { font-weight: 500; white-space: nowrap; }
+/* 面板标题与关闭按钮之间留出距离，长标题省略而不是顶到按钮 */
+.panel-heading { gap: 12px; }
+.panel-kicker { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

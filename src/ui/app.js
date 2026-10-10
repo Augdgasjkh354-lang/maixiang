@@ -113,6 +113,14 @@ export function mountGame(root) {
   let buybackPreview = null;
   let lastBuildPreviewPlotId = null;
   let renderedPanelMarkup = null;
+  // 从面板点进地方详情时记下来源面板的滚动位置；返回时在 renderPanel 里恢复（内容整段替换后 scrollTop 会丢）。
+  let siteOriginScroll = null;
+  let scrollToRestore = null;
+  function openSiteFrom(site) {
+    const origin = navigation.state.activePanel;
+    siteOriginScroll = origin && origin !== "site" ? { panel: origin, top: $("#panel")?.scrollTop || 0 } : null;
+    navigation.openSite(site);
+  }
   const setText = (element, text) => {
     if (element && element.textContent !== text) element.textContent = text;
   };
@@ -631,16 +639,29 @@ export function mountGame(root) {
       const openDetails = preserveUiState
         ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key][open]")).map(detail => detail.dataset.detailKey))
         : new Set();
+      const knownDetails = preserveUiState
+        ? new Set(Array.from(panel.querySelectorAll("details[data-detail-key]")).map(detail => detail.dataset.detailKey))
+        : new Set();
       const previousScrollTop = preserveUiState ? panel.scrollTop : 0;
       panel.innerHTML = markup;
       renderedPanelMarkup = markup;
       panel.dataset.renderedPanel = panelName || "";
-      if (openDetails.size) {
+      if (preserveUiState) {
+        // 同面板重绘：沿用玩家上次的展开/收起；标记为默认展开的分组若被玩家收起，不因重绘再打开。
         for (const detail of panel.querySelectorAll("details[data-detail-key]")) {
-          if (openDetails.has(detail.dataset.detailKey)) detail.open = true;
+          const key = detail.dataset.detailKey;
+          if (openDetails.has(key)) detail.open = true;
+          else if (knownDetails.has(key)) detail.open = false;
         }
       }
       if (preserveUiState && panelName !== "build") panel.scrollTop = previousScrollTop;
+    }
+    // 从地方详情返回：恢复进入前的滚动位置（只在回到同一来源面板时生效）。
+    if (scrollToRestore && scrollToRestore.panel === panelName) {
+      panel.scrollTop = scrollToRestore.top;
+      scrollToRestore = null;
+    } else if (scrollToRestore && panelName !== "site") {
+      scrollToRestore = null;
     }
     // 地方详情：用地名做面板标题，正文里不再重复一行大标题。
     const siteTitle = panelName === "site" ? panel.querySelector(":scope > h2") : null;
@@ -1093,6 +1114,8 @@ export function mountGame(root) {
       return;
     }
     if (closest(target, "[data-back]")) {
+      scrollToRestore = siteOriginScroll;
+      siteOriginScroll = null;
       navigation.backFromSite();
       upgradePreviewId = null;
       demolitionPreviewId = null;
@@ -1107,7 +1130,7 @@ export function mountGame(root) {
     }
     const openBuilding = closest(target, "[data-open-building]");
     if (openBuilding) {
-      navigation.openSite(`building:${openBuilding.dataset.openBuilding}`);
+      openSiteFrom(`building:${openBuilding.dataset.openBuilding}`);
       renderedMapSignature = "";
       latestMapModel = null;
       render();
@@ -1205,7 +1228,7 @@ export function mountGame(root) {
     }
     if (closest(target, "[data-bank-open]") && state) {
       const reform = buildView().monetaryReform;
-      navigation.openSite(reform.bankBuildingId ? `building:${reform.bankBuildingId}` : "bank-compat");
+      openSiteFrom(reform.bankBuildingId ? `building:${reform.bankBuildingId}` : "bank-compat");
       render(true);
       return;
     }
@@ -1604,7 +1627,7 @@ export function mountGame(root) {
     const site = closest(target, "[data-site]");
     if (site && state) {
       if (navigation.state.activePanel === "build" && navigation.state.buildType && site.dataset.site === "field") return;
-      navigation.openSite(site.dataset.site);
+      openSiteFrom(site.dataset.site);
       renderedMapSignature = "";
       latestMapModel = null;
       render();

@@ -1,4 +1,4 @@
-import { escapeHtml, number, payDayText } from "./format.js";
+import { escapeHtml, number, numberMax, payDayText } from "./format.js";
 import { CONTENT } from "../content/index.js";
 import { industryTypeIds } from "../content/buildings.js";
 import { renderNumericInput } from "./numeric-drafts.js";
@@ -62,6 +62,15 @@ function marginPolicyCard(view) {
     </div></details>`;
 }
 
+// 银行与国债的利率、准备金率、发行控件都在银行建筑面板；政策页只留一行摘要和跳转按钮。
+function bankPolicyCard(view) {
+  const stats = view.policy?.bankStats || {};
+  const activeBonds = view.policy?.bondStats?.activeCount || 0;
+  return `<div class="cardlet policy-bank"><div class="row"><span class="label">银行</span><strong class="value">存款 ${numberMax(stats.depositRateAnnualPercent ?? 2, 2)}% · 贷款 ${numberMax(stats.loanRateAnnualPercent ?? 6, 2)}% · 国债 ${number(activeBonds)} 笔</strong></div>
+      <div class="subtle">利率、准备金率与国债发行在银行面板。</div>
+      <button class="secondary wide" data-bank-open>前往银行</button></div>`;
+}
+
 export function renderPolicy(view) {
   const policy = view.policy.unemploymentBenefit;
   const last = view.policy.lastDay || {};
@@ -77,19 +86,22 @@ export function renderPolicy(view) {
   const relief = view.relief || {};
   const reform = view.monetaryReform;
   const moneyUnit = reform.stage === "wheat" ? "斤小麦" : "粮券";
-  const reformAction = reform.stage === "wheat"
-    ? `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`
-    : reform.hasBankAccess
-      ? `<button class="secondary wide" data-bank-open>进入银行管理</button>`
-      : `<div class="subtle">粮券已是开局制度；印券、以粮换券与国债需先建成银行。</div>`;
-  // 货币改革简化态（0.1.11 补回）：小麦阶段且无银行时只显示一行提示
+  const reformAction = `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`;
+  // 货币改革：小麦阶段（旧档）仍是折叠块带启动按钮；粮券阶段（开局即是）改为默认可见的一行，入口在银行面板。
   const reformCard = (reform.stage === "wheat" && !reform.hasBankAccess)
     ? `<div class="cardlet subtle">货币改革：建成银行后可启动。</div>`
-    : `<details class="detail-block" data-detail-key="policy-reform"><summary>货币改革</summary><div class="detail-body">
+    : reform.stage === "wheat"
+      ? `<details class="detail-block" data-detail-key="policy-reform"><summary>货币改革</summary><div class="detail-body">
       <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
       ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
       ${reformAction}
-    </div></details>`;
+    </div></details>`
+      : `<div class="cardlet policy-reform"><div class="row"><span class="label">货币改革</span><strong class="value">${reform.stageName}</strong></div>
+      ${reform.hasBankAccess
+        ? `<div class="subtle">印券、以粮换券与国债在银行管理。</div><button class="secondary wide" data-bank-open>进入银行管理</button>`
+        : `<div class="subtle">粮券已是开局制度；印券、以粮换券与国债需先建成银行。</div>`}
+      ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
+    </div>`;
   return `${reformCard}
     ${marginPolicyCard(view)}
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
@@ -123,23 +135,8 @@ export function renderPolicy(view) {
       <div class="row"><span class="label">累计房产税 / 欠税</span><strong class="value">${number(view.policy.villaStats?.taxCollectedWheatJin || 0, 1)} / ${number(view.policy.villaStats?.taxArrearsWheatJin || 0, 1)}小麦等值</strong></div>
       
     </div></details>
-    ${reform.hasBankAccess ? `<details class="detail-block" data-detail-key="policy-bank"><summary>银行</summary><div class="detail-body">
-      <div class="row"><span class="label">存款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-deposit-rate", kind: "bank-deposit-rate", target: "bank", value: view.policy.bankStats?.depositRateAnnualPercent ?? 2, label: "银行存款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">贷款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-loan-rate", kind: "bank-loan-rate", target: "bank", value: view.policy.bankStats?.loanRateAnnualPercent ?? 6, label: "银行贷款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">准备金率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-reserve", kind: "bank-reserve", target: "bank", value: view.policy.bankStats?.reserveRequirementPercent ?? 10, label: "银行准备金率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(view.policy.bankStats?.totalDepositsVoucher || 0, 1)} / ${number(view.policy.bankStats?.outstandingLoansVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(view.policy.bankStats?.loanableVoucher || 0, 1)} / ${number(view.policy.bankStats?.badDebtVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(view.policy.bankStats?.interestEarnedVoucher || 0, 1)} / ${number(view.policy.bankStats?.interestPaidVoucher || 0, 1)}券</strong></div>
-      <div class="subtle">按日计息；逾期30天核销坏账。</div>
-    </div></details>` : ""}
+    ${reform.hasBankAccess ? bankPolicyCard(view) : ""}
     ${reform.stage === "voucher" && !reform.hasBankAccess ? `<div class="cardlet subtle">国债：建成银行后可发行。</div>` : ""}
-    ${reform.stage === "voucher" && reform.hasBankAccess ? `<details class="detail-block" data-detail-key="policy-bonds"><summary>国债</summary><div class="detail-body">
-      <div class="row"><span class="label">发行总额</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-total", kind: "bond-issue-total", target: "bonds", value: 100000, label: "国债发行总额", minimum: 1, maximum: 1000000000, className: "setting-editor" })}<b>券</b></div></div>
-      <div class="row"><span class="label">期限</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-years", kind: "bond-issue-years", target: "bonds", value: 3, label: "国债期限", minimum: 1, maximum: 10, className: "setting-editor" })}<b>年</b><button class="secondary" data-bond-issue>发行</button></div></div>
-      <div class="row"><span class="label">票面年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-rate", kind: "bond-issue-rate", target: "bonds", value: 3, label: "国债票面年利率", minimum: 0, maximum: 20, className: "setting-editor" })}<b>%</b></div></div>
-      ${(view.policy.bondStats?.issues || []).map(issue => `<div class="row"><span class="label">${issue.id} · ${issue.statusLabel}</span><strong class="value">${number(issue.totalVoucher)}券 · 票面${number(issue.couponRateAnnualPercent, 2)}% · ${issue.termYears}年</strong></div>`).join("")}
-      <div class="subtle">发行当天居民与银行按闲钱认购，利率高于存款利率才有人买；每年付息，到期还本。</div>
-    </div></details>` : ""}
     <details class="detail-block" data-detail-key="policy-agritax"><summary>农业税</summary><div class="detail-body">
       <div class="row"><span class="label">当前税率</span><div class="setting-input">${renderNumericInput(view, { key: "agriculture-tax", kind: "agriculture-tax", target: "agriculture", value: agriculture.currentPercent, label: "农业税率", minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">预计秋收分粮</span><strong class="value">镇库${number(agriculture.townShareJin)} / 居民${number(agriculture.residentShareJin)}斤</strong></div>

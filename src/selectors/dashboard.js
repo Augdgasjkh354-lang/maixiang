@@ -599,7 +599,8 @@ export function selectDashboard(state, content, selection) {
     // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
     wageControl: { civil: state.policy?.wageControl?.civil ?? 1, industry: state.policy?.wageControl?.industry ?? 1, civilRoleIds: WAGE_CONTROL_CIVIL_ROLE_IDS },
     socialSecurity: (needSite || needPolicy) ? selectSocialSecurityStats(state, content) : null,
-    policy: needPolicy ? {
+    // 银行建筑面板也读 bankStats / bondStats（利率、准备金率、国债），所以站点面板同样需要这一块。
+    policy: (needPolicy || needSite) ? {
       ...(state.policy || { unemploymentBenefit: { enabled: false, dailyPerWorkerJin: 1 } }),
       unemployed: labor.idle,
       dailyExpectedWheatJin: labor.idle * (state.policy?.unemploymentBenefit?.dailyPerWorkerJin || 0),
@@ -638,6 +639,7 @@ export function selectDashboard(state, content, selection) {
         const daysPerYear = content.rules.daysPerYear || 360;
         const statusLabel = { active: "存续中", matured: "已兑付", failed: "未发行", defaulted: "已违约" };
         return {
+          activeCount: (bonds.issues || []).filter(issue => issue.status === "active").length,
           issues: (bonds.issues || []).slice(-5).reverse().map(issue => ({
             id: issue.id,
             status: issue.status,
