@@ -1512,11 +1512,22 @@ function recentlyLosing(shop) {
 // 贸易行店员目标（与商业街店铺一样自己增减人）：看近 7 天成交额度用了多少。
 // 额度用满（≥85%）、额度卡在人手上（没到运力份额）、多一人的成交利润高于日薪且付得起 3 天工资 → 加人（每周期最多 +2）；
 // 用不到 40% 或亏损 → 减一人；7 天一笔买卖都没有则不减员（由暂停机制处理）。
+// 贸易行店员规则（docs/TRADE.md）：
+//   人手是否卡住成交，看"当日可做上限 capJin"（成交 + 收市后仍能做的买卖，人手不限）与人手预算 budgetJin 的关系：
+//   - 上限 > 预算 且 预算已用满（≥85%）→ 人手卡住：增员（每次最多 2 人，月初审核一次只加一人）。
+//     若预算已到运力份额（预算 ≥ 份额）→ 运力份额满，加人无用；若预算没用满 → 配额或运力卡住，不加人。
+//   - 上限 ≤ 预算 → 货源/配额/运力已用完，不因成交利用率低而减员（货源不足不是人手的错）。
+//   - 亏损且高于店员下限 → 减一人。
+//   - 店员下限 = min(2, 开店时的初始配置)：只防止减员过度，不因此强制加人。
+// 旧日志没有 capJin 的，上限回落为成交量（即只看不卡人手，不会加人）。
 function tradeHouseTargetClerks(state, shop, content) {
   const observation = Math.max(1, content.rules.operatingObservationDays || 7);
   const rows = (shop.tradeLog || []).slice(-observation);
   const current = shopClerkCount(state, shop);
   shop.plan ||= {};
+  // 开店时的店员配置记为初始配置（只记一次）。
+  shop.plan.initialClerks ??= current;
+  const floor = Math.min(current, 2, shop.plan.initialClerks);
   if (rows.length < observation) {
     shop.plan.staffingDiagnosis = "观察中";
     return current;
@@ -1525,34 +1536,40 @@ function tradeHouseTargetClerks(state, shop, content) {
   const used = avg("usedJin");
   const budget = avg("budgetJin");
   const share = avg("shareJin");
+  const cap = rows.reduce((sum, row) => {
+    const usedRow = Math.max(0, Number(row.usedJin) || 0);
+    return sum + Math.max(usedRow, Number(row.capJin ?? usedRow) || 0);
+  }, 0) / rows.length;
   const profitVoucher = rows.reduce((sum, row) => sum + (Number(row.profitVoucherUnits) || 0), 0) / rows.length / currencyScale(content);
   const perClerk = content.rules.tradeHouseJinPerClerk ?? 300;
   const wage = shopWage(state, shop, content);
-  const utilization = budget > 0 ? used / budget : 0;
-  const staffBound = budget + 1e-6 < share;
+  const budgetUse = budget > 0 ? used / budget : 0;
   const marginalProfit = used > 0 ? profitVoucher / used * perClerk : 0;
   // 可动用资金含店里的支付小麦（贸易行出口收的是小麦）。
   const fundsVoucher = maximumPayableValueUnits(state, `shop:${shop.id}`, content) / currencyScale(content);
+  const add = Math.min(2, content.rules.operatingWorkerAdjustMaxPerCycle || 2);
   let target = current;
   let diagnosis = "生意与人手匹配";
   if (used <= 0) {
     // 没有买卖时不减员：连续 tradeHousePauseDays 天无买卖且亏损由 trading-houses.js 暂停营业（暂停即遣散店员，不再逐月减到清算）。
     diagnosis = "暂无可做的买卖，待满暂停期限";
-  } else if (profitVoucher < 0 && current > 0) {
+  } else if (profitVoucher < 0 && current > floor) {
     target = current - 1;
     diagnosis = "亏损，减人";
-  } else if (utilization >= 0.85 && staffBound && marginalProfit > wage) {
-    const add = Math.min(2, content.rules.operatingWorkerAdjustMaxPerCycle || 2);
-    if (fundsVoucher >= (current + add) * wage * 3) {
+  } else if (cap > budget + 1e-6) {
+    // 可做的买卖比人手预算多：看是不是人手卡住。
+    if (budget + 1e-6 >= share) diagnosis = "运力份额已满，加人无用";
+    else if (budgetUse < 0.85) diagnosis = "配额或运力卡住，人手不是瓶颈";
+    else if (marginalProfit <= wage) diagnosis = "生意做不完，但增员不盈利";
+    else if (fundsVoucher < (current + add) * wage * 3) diagnosis = "生意做不完，资金不足暂不加人";
+    else {
       target = current + add;
       diagnosis = "生意做不完，加人";
-    } else diagnosis = "生意做不完，资金不足暂不加人";
-  } else if (utilization >= 0.85 && !staffBound) {
-    diagnosis = "运力份额已满，加人无用";
-  } else if (utilization < 0.4 && current > 0) {
-    target = current - 1;
-    diagnosis = "生意清淡，减人";
+    }
+  } else {
+    diagnosis = "货源或配额已用完，人手不减";
   }
+  target = Math.max(floor, target);
   shop.plan.staffingDiagnosis = diagnosis;
   shop.plan.expectedDailyTradeJin = used;
   return target;

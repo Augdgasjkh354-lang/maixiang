@@ -1,3 +1,12 @@
+## 未发布 · 贸易行店员、财富统计、进出口门槛与逐商品统计
+
+- 修复：贸易行店员一年内减到 0。旧规则把"近 7 日成交 ÷ 人手预算 < 40%"当作生意清淡减人，但成交受批发超保本线余量、配额、运力限制，与人手无关。新规则（`shops.js` 的 `tradeHouseTargetClerks`）：每天记当日可做上限 `capJin`（成交 + 收市后仍能做的买卖，人手不限，`trading-houses.js` 的 `tradeHouseOpportunityJin`）；上限大于人手预算且预算用满才加人，上限不超过预算时不因利用率低减员；只有亏损才减员，下限 min(2, 开店时的初始配置)。开店配置记在 `shop.plan.initialClerks`。旧日志没有 `capJin` 时回落为成交量（只看不加人）。
+- 3 年夹具（`tests/trading-houses.test.js` 的 `tradeFixture({ chain: true })`，盐场产业链）：贸易行 10 人起步时，改动前第 12 月减到 0，改动后全程 10 人；3 人起步时改动前第 5 月减到 0，改动后全程 3 人。两版 3 年出口斤数完全一致（64930 斤，变化 0%），validateState 与货币守恒每 30 天通过。
+- 统计：`computeWealthStats`（年报、看板）的家底、基尼、最富 10% 占比改用 `redistribution.js` 的 `wealthDistributionRows` / `giniCoefficient` / `topWealthSharePercent`，与界面基尼、富人税同一口径（含存款、股票、民营楼、国债本金）；年报字段名不变，新增 `gini`。注意：旧口径计入的非小麦存货（面粉、面包、盐等）不再计入家底，与征税口径一致。
+- 进出口门槛：`setMarginPolicy` 不允许进口门槛低于出口，同一次同时改进口低于出口时返回 `ok:false`（"进口利润率不得低于出口"）；只调高出口超过当前进口时，进口联动抬到同值，返回值 `linked` / `note` 说明。政策页提示一行同步说明。
+- 逐商品统计：外镇 `stats.byItem[itemId]` 记 `exportJin` / `importJin`（累计斤）、`exportValueJin` / `importValueJin`（累计货款，小麦斤）、`yearExportJin` / `yearImportJin`（年度斤，年终重置）。贸易行、长期协定、镇长手动外贸的成交都写入（手动外贸不在任务清单里，但它也是出口，不写的话逐商品合计对不上镇级 `stats.exportJin`）；`selectOutsideTownView` 返回的 `stats.byItem` 是副本。
+- 测试：`tests/trade-tariff-staffing.test.js`（增减员规则，旧"40% 减员"用例删除）、`tests/trading-houses.test.js`（capJin、货源受限、3 年产业链 `[slow]`、逐镇逐商品对账）、`tests/margin-policy.test.js`（进口不低于出口）、`tests/redistribution.test.js`（家底统计同口径）、`tests/outside-town.test.js`（逐商品累加与年终重置）。
+
 ## 未发布 · 银行镇库托底
 
 - 修复：银行只给公司放贷、利息照付，现金远小于居民存款（实测现金 8.8 万券、存款 87.8 万券），大户用存款交富人税、付款、取钱时被"银行现金不足"挡住。

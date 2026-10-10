@@ -1,8 +1,8 @@
 // 经济统计（移植自用户 0.1.11 优化）：贫富分布、经济历史曲线。
 //
-// - computeWealthStats：按人口排的家底/收入分布。家底 = 粮券 + 存粮存货按批发价折粮券；
-//   收入 = 粮券收入 + 秋收分粮等实物收入。输出穷10%/中位/富10%人均家底、
-//   穷10%/中位/富10%人均年收入、最富10%占全镇家底比。
+// - computeWealthStats：按人口排的家底/收入分布。家底 = 全口径（与界面基尼、富人税同一口径，见 redistribution.js 的 wealthDistributionRows）：
+//   粮券 + 存款 + 超额小麦 + 股票 + 民营楼 + 国债本金；收入 = 粮券收入 + 秋收分粮等实物收入。
+//   输出穷10%/中位/富10%人均家底、穷10%/中位/富10%人均年收入、最富10%占全镇家底比、基尼。
 // - recordEconomyHistory：每日记录失业率、店员均薪、小麦批发价、镇库小麦、
 //   居民口粮天数，供地图上的"经济"迷你面板画走势。
 
@@ -11,6 +11,7 @@ import { wholesaleUnitPrice } from "./wholesale-market.js";
 import { shopWage } from "./labor-market.js";
 import { computeLaborMarket } from "./labor-market.js";
 import { totalQeqUnits } from "../economy/inventory.js";
+import { giniCoefficient, topWealthSharePercent, wealthDistributionRows } from "./redistribution.js";
 
 // 批发价（用户原 W0）：批发市场价 → 遗留市场价 → 食盐规则价 → 规则默认值。
 export function wholesalePrice(state, itemId, content) {
@@ -65,34 +66,29 @@ function decileAverage(sorted, fromFrac, toFrac, field, totalPeople) {
 const round1 = value => Math.round(value * 10) / 10;
 
 // 贫富分布（用户原 a$）。返回 null 表示无有效人口。
+// 家底口径与界面基尼、富人税一致：复用 redistribution.js 的 wealthDistributionRows（全口径：粮券 + 存款 + 超额小麦 + 股票 + 民营楼 + 国债本金），
+// 基尼与最富占比也复用 giniCoefficient / topWealthSharePercent，不另写公式。换算成粮券（人均家底单位）。
 export function computeWealthStats(state, content) {
-  const prices = priceMap(state, content);
   const scale = content.precision.currencyUnitsPerVoucher || content.precision.inventoryUnitsPerJin;
-  const wheatPrice = prices.wheat ?? 1;
-  const rows = [];
+  const wheatPrice = wholesalePrice(state, "wheat", content) ?? 1;
+  const incomeById = new Map();
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
-    const people = householdPopulation(household);
     const life = household.life || {};
-    const income = (life.year?.incomeVoucherUnits || 0) / scale
-      + (life.year?.inKindIncomeQeqUnits || 0) / content.precision.qeqUnitsPerJin * wheatPrice;
-    rows.push({ people, wealth: householdWealth(state, household, content, prices), income });
+    incomeById.set(household.id, (life.year?.incomeVoucherUnits || 0) / scale
+      + (life.year?.inKindIncomeQeqUnits || 0) / content.precision.qeqUnitsPerJin * wheatPrice);
   }
+  const rows = wealthDistributionRows(state, content).map(row => ({
+    people: row.people,
+    wealth: row.wealth / scale,
+    income: incomeById.get(row.householdId) || 0
+  }));
   const totalPeople = rows.reduce((sum, row) => sum + row.people, 0);
   if (totalPeople <= 0) return null;
   const totalWealth = rows.reduce((sum, row) => sum + row.wealth, 0);
   const byWealth = rows.slice().sort((a, b) => a.wealth / a.people - b.wealth / b.people);
   const byIncome = rows.slice().sort((a, b) => a.income / a.people - b.income / b.people);
-  // 最富10%占全镇家底：按人均家底排序，取最富一成人口的家底之和占比。
-  let cursor = 0;
-  let richWealth = 0;
-  const cutoff = totalPeople * 0.9;
-  for (const row of byWealth) {
-    const start = Math.max(cursor, cutoff);
-    const end = cursor + row.people;
-    if (end > start) richWealth += row.wealth * (end - start) / row.people;
-    cursor = end;
-  }
+  const gini = giniCoefficient(rows);
   return {
     households: rows.length,
     people: totalPeople,
@@ -100,7 +96,8 @@ export function computeWealthStats(state, content) {
     poorWealthPerCapita: round1(decileAverage(byWealth, 0, 0.1, "wealth", totalPeople)),
     medianWealthPerCapita: round1(decileAverage(byWealth, 0.45, 0.55, "wealth", totalPeople)),
     richWealthPerCapita: round1(decileAverage(byWealth, 0.9, 1, "wealth", totalPeople)),
-    richWealthSharePercent: totalWealth > 0 ? round1(richWealth / totalWealth * 100) : 0,
+    richWealthSharePercent: round1(topWealthSharePercent(rows, 0.1)),
+    gini: gini === null ? null : Math.round(gini * 10000) / 10000,
     poorIncomePerCapita: round1(decileAverage(byIncome, 0, 0.1, "income", totalPeople)),
     medianIncomePerCapita: round1(decileAverage(byIncome, 0.45, 0.55, "income", totalPeople)),
     richIncomePerCapita: round1(decileAverage(byIncome, 0.9, 1, "income", totalPeople))

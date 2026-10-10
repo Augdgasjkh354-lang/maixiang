@@ -199,10 +199,10 @@ test("进口利润 15%（>10%、<25%）不做；同样 15% 的出口则照做", 
   valid(exp.state, "15% 利润");
 });
 
-// 贸易行 7 天日志（用于增减店员的诊断）：每天的额度、用量、利润都由调用方给定。
-function fakeLog({ used, budget, share, profitVoucher, days = 7 }) {
+// 贸易行 7 天日志（用于增减店员的诊断）：每天的额度、用量、利润、可做上限都由调用方给定（cap 缺省 = 成交量，即货源已用完）。
+function fakeLog({ used, budget, share, profitVoucher, cap = used, days = 7 }) {
   return Array.from({ length: days }, (_, i) => ({
-    serial: i + 1, staff: 0, shareJin: share, budgetJin: budget, usedJin: used, trades: used > 0 ? 1 : 0,
+    serial: i + 1, staff: 0, shareJin: share, budgetJin: budget, usedJin: used, capJin: cap, trades: used > 0 ? 1 : 0,
     exportJin: used > 0 ? { salt: used } : {}, importJin: {}, revenueVoucherUnits: 0, cogsVoucherUnits: 0,
     freightVoucherUnits: 0, tariffVoucherUnits: 0, profitVoucherUnits: profitVoucher * V
   }));
@@ -223,37 +223,69 @@ test("自动增员：近 7 天额度用满、卡在人手上、多一人有利�
   const current = shopClerkCount(state, shop);
   assert.equal(current, 1);
   state.day += (CONTENT.rules.monthDays - (state.day % CONTENT.rules.monthDays)) % CONTENT.rules.monthDays;
-  shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30 });
+  // 当日可做上限 900 斤 > 人手预算 600 斤：生意做不完，是人手卡住。
+  shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30, cap: 900 });
   prepareShopsForDay(state, CONTENT);
   assert.equal(shopClerkCount(state, shop), current + 1, `月初审核一次只加一人，诊断：${shop.plan.staffingDiagnosis}`);
   state.day += CONTENT.rules.monthDays;
-  shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30 });
+  shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30, cap: 900 });
   prepareShopsForDay(state, CONTENT);
   assert.equal(shopClerkCount(state, shop), current + 2, `应加 2 人，诊断：${shop.plan.staffingDiagnosis}`);
   assert.equal(shop.plan.staffingDiagnosis, "生意做不完，加人");
   valid(state, "增员后");
 });
 
-test("自动减员：近 7 天用不到 40% 额度 → 减一人（店员满 30 天才能解雇）", () => {
+test("货源受限：可做上限只有成交量（货源/配额用完）时，店员数保持，不因成交利用率低而减员", () => {
+  // 人手预算 900 斤只用了 100 斤，但批发存货已经卖完：减员不会多做一斤，也不该减。
   const { state, shop } = bigCapacityFixture(9209, 2);
   const current = shopClerkCount(state, shop);
   assert.equal(current, 2);
-  // 店员都雇满 30 天以上。
   shop.staffing.clerkHiredSerials = [-1000, -1000];
   shop.tradeLog = fakeLog({ used: 100, budget: 900, share: 720, profitVoucher: 5 });
   prepareShopsForDay(state, CONTENT);
-  assert.equal(shopClerkCount(state, shop), current - 1, `应减 1 人，诊断：${shop.plan.staffingDiagnosis}`);
-  valid(state, "减员后");
+  assert.equal(shopClerkCount(state, shop), current, `货源已用完，店员保持，诊断：${shop.plan.staffingDiagnosis}`);
+  assert.equal(shop.plan.staffingDiagnosis, "货源或配额已用完，人手不减");
+  valid(state, "货源受限");
 });
 
-test("自动减员：亏损的贸易行减一人", () => {
-  const { state, shop } = bigCapacityFixture(9210, 2);
+test("配额或运力卡住（可做上限超过人手预算，但预算没用满）：不加人，人手不是瓶颈", () => {
+  const { state, shop } = bigCapacityFixture(9213, 2);
   const current = shopClerkCount(state, shop);
-  shop.staffing.clerkHiredSerials = [-1000, -1000];
+  shop.tradeLog = fakeLog({ used: 300, budget: 600, share: 720, profitVoucher: 30, cap: 900 });
+  prepareShopsForDay(state, CONTENT);
+  assert.equal(shopClerkCount(state, shop), current);
+  assert.equal(shop.plan.staffingDiagnosis, "配额或运力卡住，人手不是瓶颈");
+});
+
+test("运力份额已满（预算等于份额、可做上限更大）：加人无用，不加", () => {
+  const { state, shop } = bigCapacityFixture(9214, 2);
+  const current = shopClerkCount(state, shop);
+  shop.tradeLog = fakeLog({ used: 720, budget: 720, share: 720, profitVoucher: 30, cap: 900 });
+  prepareShopsForDay(state, CONTENT);
+  assert.equal(shopClerkCount(state, shop), current);
+  assert.equal(shop.plan.staffingDiagnosis, "运力份额已满，加人无用");
+});
+
+test("亏损减员：店员满 30 天才能解雇；只减到下限 min(2, 初始配置)，不减到 0", () => {
+  const { state, shop } = bigCapacityFixture(9210, 3);
+  assert.equal(shopClerkCount(state, shop), 3);
+  // 月初审核（开张期外每月 1 号审核一次）。
+  state.day += (CONTENT.rules.monthDays - (state.day % CONTENT.rules.monthDays)) % CONTENT.rules.monthDays;
+  shop.staffing.clerkHiredSerials = [-1000, -1000, -1000];
   shop.tradeLog = fakeLog({ used: 600, budget: 900, share: 720, profitVoucher: -20 });
   prepareShopsForDay(state, CONTENT);
-  assert.equal(shopClerkCount(state, shop), current - 1);
+  assert.equal(shopClerkCount(state, shop), 2, "亏损减一人");
   assert.equal(shop.plan.staffingDiagnosis, "亏损，减人");
+  assert.equal(shop.plan.initialClerks, 3, "初始配置记下");
+  // 再亏两个月：已到下限 2，不再减。
+  for (let month = 0; month < 2; month++) {
+    state.day += CONTENT.rules.monthDays;
+    shop.staffing.clerkHiredSerials = [-1000, -1000];
+    shop.tradeLog = fakeLog({ used: 600, budget: 900, share: 720, profitVoucher: -20 });
+    prepareShopsForDay(state, CONTENT);
+  }
+  assert.equal(shopClerkCount(state, shop), 2, "下限 min(2, 初始 3) = 2，亏损也不减到 0");
+  valid(state, "亏损减员后");
 });
 
 test("没生意：连续 30 天无买卖且亏损 → 暂停营业（店员遣散、不清算、不累计坏日子），不再逐月减员", () => {

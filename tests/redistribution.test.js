@@ -8,7 +8,7 @@ import { grantResidentVouchers, richestHousehold } from "./helpers-v16.js";
 import { formCompany } from "./helpers-ipo.js";
 import { SAVE_KEY, exportState, importState } from "../src/persistence/storage.js";
 import { settleWealthTax, wealthTaxPerCapitaPerYear, snapshotEstates, settleYearEstates, settleEscheat, giniCoefficient, recordYearGini, householdTaxableWealthUnits, wealthDistributionRows, resetRedistributionYear, topWealthSharePercent } from "../src/systems/redistribution.js";
-import { householdWealth } from "../src/systems/wealth-stats.js";
+import { householdWealth, computeWealthStats } from "../src/systems/wealth-stats.js";
 import { householdWealthUnits } from "../src/systems/household-budget.js";
 import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, syncResidentAggregates } from "../src/systems/households.js";
 import { transferBuildingOwnership, buildingOwner } from "../src/systems/ownership.js";
@@ -521,6 +521,31 @@ test("全口径统计：存款与国债进入基尼/最富占比，旧口径（�
   assert.equal(richRow.wealth - householdWealthUnits(state, rich, CONTENT), 1000 * SCALE, "国债本金计入");
   assert.equal(householdWealthUnits(state, rich, CONTENT), rich.voucherUnits + 900 * SCALE, "粮券 + 存款");
   assert.equal(Math.round(giniCoefficient(wealthDistributionRows(state, CONTENT)) * 10000) / 10000, after.gini, "选择器基尼与统计行同口径");
+});
+
+test("家底统计（年报/看板）与界面基尼、最富占比同口径：复用 wealthDistributionRows，含存款与国债", () => {
+  const { state, rich } = richBankBondState(6203);
+  for (const other of householdList(state)) {
+    if (other.id === rich.id) continue;
+    other.voucherUnits = 10 * SCALE;
+    other.inventory.wheat = 0;
+  }
+  syncResidentAggregates(state, CONTENT);
+  const stats = computeWealthStats(state, CONTENT);
+  const rows = wealthDistributionRows(state, CONTENT);
+  const after = selectInequality(state, CONTENT);
+  assert.equal(stats.gini, Math.round(giniCoefficient(rows) * 10000) / 10000, "基尼与界面同口径");
+  assert.equal(stats.gini, after.gini, "与选择器基尼一致");
+  assert.equal(stats.richWealthSharePercent, Math.round(topWealthSharePercent(rows, 0.1) * 10) / 10, "最富10%占比复用同一函数");
+  const totalPeople = rows.reduce((sum, row) => sum + row.people, 0);
+  const totalWealth = rows.reduce((sum, row) => sum + row.wealth, 0);
+  assert.equal(stats.wealthPerCapita, Math.round(totalWealth / SCALE / totalPeople * 10) / 10, "人均家底按全口径、粮券计");
+  // 富户的存款 900 + 国债本金 1000 券计入人均：旧口径（粮券 + 存粮）算不到这两项。
+  const oldPerCapita = householdList(state).filter(isActiveHousehold)
+    .reduce((sum, h) => sum + householdWealth(state, h, CONTENT), 0) / totalPeople;
+  const extraPerCapita = (900 + 1000) / totalPeople;
+  assert.ok(Math.abs(stats.wealthPerCapita - (oldPerCapita + extraPerCapita)) < 0.15,
+    `全口径人均 ${stats.wealthPerCapita} 应为旧口径 ${oldPerCapita} + 存款与国债 ${extraPerCapita}`);
 });
 
 test("国债本金计入富人税与遗产税税基：持有户应纳随国债增加，不能直接付税则免征", () => {

@@ -58,7 +58,7 @@ function marginPolicyCard(view) {
       <div class="row"><span class="label">综合商店默认目标利润率</span><div class="setting-input">${renderNumericInput(view, { key: "shop-margin-default", kind: "shop-margin-default", target: "policy", value: shopDefault, label: "综合商店默认目标利润率", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">贸易行出口利润门槛</span><div class="setting-input">${renderNumericInput(view, { key: "trade-margin-export", kind: "trade-margin-export", target: "policy", value: tradeExport, label: "贸易行出口利润门槛", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">贸易行进口利润门槛</span><div class="setting-input">${renderNumericInput(view, { key: "trade-margin-import", kind: "trade-margin-import", target: "policy", value: tradeImport, label: "贸易行进口利润门槛", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="subtle">综合商店：未单独设置的店铺跟随默认值，改动后按7天复核平滑过渡（每次价格最多±10%），单店可在店铺详情里覆盖。贸易行：卖价（或买价）相对成本加运费的利润率达到门槛才成交；门槛越高成交越少。</div>
+      <div class="subtle">综合商店：未单独设置的店铺跟随默认值，改动后按7天复核平滑过渡（每次价格最多±10%），单店可在店铺详情里覆盖。贸易行：卖价（或买价）相对成本加运费的利润率达到门槛才成交；门槛越高成交越少。进口门槛不得低于出口：只调高出口时进口门槛会被联动抬到相同，调低进口低于出口则拒绝。</div>
     </div></details>`;
 }
 

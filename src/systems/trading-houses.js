@@ -57,9 +57,36 @@ export function tradeHouseStaff(state, shop) {
 // 每天的日志行（只读展示与 7 日汇总用）。
 function blankTradeRow(serial, staff, shareJin, budgetJin) {
   return {
-    serial, staff, shareJin: round2(shareJin), budgetJin: round2(budgetJin), usedJin: 0, trades: 0,
+    serial, staff, shareJin: round2(shareJin), budgetJin: round2(budgetJin), usedJin: 0, capJin: 0, trades: 0,
     exportJin: {}, importJin: {}, revenueVoucherUnits: 0, cogsVoucherUnits: 0, freightVoucherUnits: 0, tariffVoucherUnits: 0, profitVoucherUnits: 0
   };
+}
+
+// 当日可做上限（斤，只读）：收市后仍能做的买卖，按"人手不限"计，只受货源、资金、运力池限制。
+// 同一种货的出口不超过批发超保本线的余量，同一种货的进口不超过市场容量（多镇同货不重复计）。
+// capJin = 成交量 + 这里的剩余可做量。人手是否卡住成交，用它与人手预算比较（见 tradeHouseTargetClerks）。
+function tradeHouseOpportunityJin(state, content, shop, ranked) {
+  if (freightPoolJin(state) < MIN_JIN) return 0;
+  const run = { shop, remainingJin: dailyCapacityJin(state, content), row: null };
+  const scale = content.precision.inventoryUnitsPerJin;
+  const groups = {};
+  for (const { cand } of ranked) {
+    const plan = cand.direction === "export" ? planExport(state, content, run, cand) : planImport(state, content, run, cand);
+    if (!plan) continue;
+    const key = `${cand.direction}|${cand.itemId}`;
+    groups[key] = (groups[key] || 0) + plan.qJin;
+  }
+  let total = 0;
+  for (const [key, jin] of Object.entries(groups)) {
+    const [direction, itemId] = key.split("|");
+    const market = ensureWholesaleMarket(state, content);
+    const stockJin = nonNegative(market.inventory?.[itemId]) / scale;
+    const pool = direction === "export"
+      ? exportSurplusJin(state, content, itemId)
+      : Math.max(0, Math.max(IMPORT_STOCK_FLOOR_JIN, IMPORT_STOCK_CAP_DAYS * localAvgSoldJin(state, content, itemId)) - stockJin);
+    total += Math.min(jin, pool);
+  }
+  return round2(total);
 }
 
 function serialOf(state, content) {
@@ -272,7 +299,7 @@ function executeExport(state, content, run, cand, plan) {
   addBookValue(shop, "freightVoucherUnits", paidFreight);
   addBookMap(shop, "soldUnits", itemId, taken.units);
   applyProfit(shop, revenue - taken.costUnits - paidFreight - tariff);
-  recordTradeStats(town, "sell", valueJin);
+  recordTradeStats(town, "sell", valueJin, itemId, taken.units / scale);
   recordLedger(state, {
     type: "trade_house_export", transactionId: makeTransactionId(state), source: owner(shop), destination: "outside_town",
     itemId, quantityUnits: taken.units, qeqUnits: 0,
@@ -312,7 +339,7 @@ function executeImport(state, content, run, cand, plan) {
   takeFreightCapacity(state, qJin, content);
   town.stocks[itemId] = round2(town.stocks[itemId] - qJin);
   town.wheatStockJin = round2(town.wheatStockJin + valueJin);
-  recordTradeStats(town, "buy", valueJin);
+  recordTradeStats(town, "buy", valueJin, itemId, qJin);
   // ④ 货入店（成本 = 付出的小麦折粮券）。
   const costUnits = voucherUnitsForWheatUnits(payUnits, content, "floor");
   putStock(shop, itemId, plan.units, costUnits);
@@ -445,8 +472,9 @@ export function settleTradingHouses(state, content) {
     const budgetJin = operational ? Math.min(staff * (content.rules.tradeHouseJinPerClerk ?? 100), shareJin) : 0;
     return { shop, remainingJin: budgetJin, row: blankTradeRow(serial, staff, shareJin, budgetJin) };
   });
+  let ranked = [];
   if (runs.some(run => run.remainingJin >= MIN_JIN) && freightPoolJin(state) >= MIN_JIN) {
-    const ranked = rankCandidates(state, content);
+    ranked = rankCandidates(state, content);
     // 两遍分配（防止利润率最高的镇独占预算与批发存货，另一镇整月为 0）：
     // 第一遍：每家贸易行把当日预算平分给当日有可做买卖的各镇，各镇只在自己的配额内成交；
     // 第二遍：配额没用完的预算再按利润排序分给所有能做的买卖。单笔的利润门槛、定价与逐段计价不变。
@@ -492,6 +520,10 @@ export function settleTradingHouses(state, content) {
         }
       }
     }
+  }
+  // 收市后算当日可做上限（人手不限）：没有候选买卖时上限就是成交量。
+  for (const run of runs) {
+    run.row.capJin = round2(run.row.usedJin + (ranked.length ? tradeHouseOpportunityJin(state, content, run.shop, ranked) : 0));
   }
   return runs.map(run => {
     run.shop.tradeLog = [...(Array.isArray(run.shop.tradeLog) ? run.shop.tradeLog : []), run.row].slice(-HISTORY_LIMIT);

@@ -176,3 +176,41 @@ test("贸易行利润门槛随政策变化：出口默认 20%（乘数 1.2），
   assert.equal(selectTradeHouseView(state, CONTENT).importMarginPercent, 40);
   valid(state);
 });
+
+test("进口门槛不得低于出口：单独把进口调到出口以下拒绝且不写入；只调高出口则联动抬高进口并在返回值说明", () => {
+  const state = simulation.createInitialState({ seed: 4109 });
+  // 开局：出口 20、进口 25。
+  const low = simulation.setMarginPolicy(state, { tradeImportMarginPercent: 15 });
+  assert.equal(low.ok, false);
+  assert.equal(low.reason, "进口利润率不得低于出口");
+  assert.equal(state.policy.tradeImportMarginPercent, 25, "拒绝时不写入");
+
+  // 出口超过当前进口（25）：进口联动抬到 40，返回值说明。
+  const raised = simulation.setMarginPolicy(state, { tradeMarginPercent: 40 });
+  assert.equal(raised.ok, true);
+  assert.deepEqual(raised.linked, { fromPercent: 25, toPercent: 40 });
+  assert.match(raised.note, /进口门槛已从25%联动抬高到40%/);
+  assert.equal(raised.value.tradeMarginPercent, 40);
+  assert.equal(raised.value.tradeImportMarginPercent, 40);
+  assert.equal(state.policy.tradeImportMarginPercent, 40);
+  valid(state, "联动后");
+
+  // 同一次同时改：进口低于出口拒绝；进口不低于出口则照写、不联动。
+  assert.equal(simulation.setMarginPolicy(state, { tradeMarginPercent: 30, tradeImportMarginPercent: 20 }).ok, false);
+  assert.equal(state.policy.tradeMarginPercent, 40, "拒绝时出口也不写入");
+  const both = simulation.setMarginPolicy(state, { tradeMarginPercent: 30, tradeImportMarginPercent: 35 });
+  assert.equal(both.ok, true);
+  assert.equal(both.linked, null);
+  assert.equal(both.note, null);
+  assert.equal(state.policy.tradeImportMarginPercent, 35);
+
+  // 只调低出口：不动进口。
+  const lower = simulation.setMarginPolicy(state, { tradeMarginPercent: 10 });
+  assert.equal(lower.ok, true);
+  assert.equal(lower.linked, null);
+  assert.equal(state.policy.tradeImportMarginPercent, 35);
+
+  // 进口与出口相等：允许。
+  assert.equal(simulation.setMarginPolicy(state, { tradeMarginPercent: 35, tradeImportMarginPercent: 35 }).ok, true);
+  valid(state, "进出口相等");
+});

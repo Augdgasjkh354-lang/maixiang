@@ -386,6 +386,16 @@ export function setMarginPolicy(state, patch, content) {
     if (!Number.isFinite(value) || value < 0 || value > MARGIN_POLICY_MAX_PERCENT) return { ok: false, reason: "利润率须为0—200%之间的有限数" };
     next[key] = Math.round(value * 10) / 10;
   }
+  // 进口门槛不得低于出口（贸易行偏向出口）：按改后的有效值判断。
+  // 同时改了进口且低于出口 → 拒绝；只改出口且超过当前进口 → 联动把进口抬到与出口相同（返回值 linked 与 note 说明）。
+  const exportAfter = next.tradeMarginPercent ?? policyTradeMarginPercent(state, content, "export");
+  const importAfter = next.tradeImportMarginPercent ?? policyTradeMarginPercent(state, content, "import");
+  let linked = null;
+  if (importAfter < exportAfter) {
+    if (next.tradeImportMarginPercent !== undefined) return { ok: false, reason: "进口利润率不得低于出口" };
+    linked = { fromPercent: importAfter, toPercent: exportAfter };
+    next.tradeImportMarginPercent = exportAfter;
+  }
   if (next.shopMarginPercent !== undefined && next.shopMarginPercent !== policyShopMarginPercent(state, content)) {
     for (const shop of Object.values(state.shops || {})) {
       if (!isDynamicPricingShop(shop, content) || shopOverrideMarginPercent(shop) !== null) continue;
@@ -397,7 +407,10 @@ export function setMarginPolicy(state, patch, content) {
   for (const key of keys) {
     if (next[key] !== undefined) state.policy[key] = next[key];
   }
-  return { ok: true, value: {
+  const note = linked
+    ? `进口利润率不得低于出口，进口门槛已从${linked.fromPercent}%联动抬高到${linked.toPercent}%。`
+    : null;
+  return { ok: true, linked, note, value: {
     shopMarginPercent: policyShopMarginPercent(state, content),
     tradeMarginPercent: policyTradeMarginPercent(state, content, "export"),
     tradeImportMarginPercent: policyTradeMarginPercent(state, content, "import")

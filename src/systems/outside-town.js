@@ -78,7 +78,8 @@ function createTown(profile) {
     event: null,
     tradeClosed: false,
     lastYear: { harvestJin: 0, foodJin: 0, populationChange: 0, landAddedMu: 0 },
-    stats: { exportJin: 0, importJin: 0, trades: 0, yearExportJin: 0, yearImportJin: 0 },
+    // byItem：逐商品的成交斤数与货款（exportJin/importJin 累计斤，yearExportJin/yearImportJin 年度斤，货款为小麦斤）；年终只重置年度字段。
+    stats: { exportJin: 0, importJin: 0, trades: 0, yearExportJin: 0, yearImportJin: 0, byItem: {} },
     loans: [],
     loanStats: { totalIssuedJin: 0, totalRepaidJin: 0, totalInterestJin: 0, activeLoans: 0 }
   };
@@ -284,7 +285,9 @@ export function deliverToOutsideTown(town, itemId, quantity) {
   if (quantity > 0 && town.stocks[itemId] !== undefined) town.stocks[itemId] = round2(town.stocks[itemId] + quantity);
 }
 
-function recordTradeStats(town, direction, valueJin) {
+// 成交统计。valueJin 是货款（小麦斤）；itemId + qtyJin 是这笔成交的商品与斤数，写入逐商品统计 stats.byItem。
+// direction "sell" = 我方出口（外镇买），"buy" = 我方进口（外镇卖）。
+function recordTradeStats(town, direction, valueJin, itemId = null, qtyJin = 0) {
   if (direction === "sell") {
     town.stats.exportJin = round2(town.stats.exportJin + valueJin);
     town.stats.yearExportJin = round2(town.stats.yearExportJin + valueJin);
@@ -293,7 +296,24 @@ function recordTradeStats(town, direction, valueJin) {
     town.stats.yearImportJin = round2(town.stats.yearImportJin + valueJin);
   }
   town.stats.trades += 1;
+  if (itemId) recordItemTradeStats(town, direction, itemId, valueJin, qtyJin);
   changeRelations(town, Math.min(1, valueJin / RELATIONS_PER_TRADE_JIN));
+}
+
+function recordItemTradeStats(town, direction, itemId, valueJin, qtyJin) {
+  town.stats.byItem ||= {};
+  const row = town.stats.byItem[itemId] ||= { exportJin: 0, importJin: 0, exportValueJin: 0, importValueJin: 0, yearExportJin: 0, yearImportJin: 0 };
+  const jin = Math.max(0, Number(qtyJin) || 0);
+  const value = Math.max(0, Number(valueJin) || 0);
+  if (direction === "sell") {
+    row.exportJin = round2(row.exportJin + jin);
+    row.exportValueJin = round2(row.exportValueJin + value);
+    row.yearExportJin = round2(row.yearExportJin + jin);
+  } else {
+    row.importJin = round2(row.importJin + jin);
+    row.importValueJin = round2(row.importValueJin + value);
+    row.yearImportJin = round2(row.yearImportJin + jin);
+  }
 }
 
 export { recordTradeStats };
@@ -394,7 +414,11 @@ export function settleOutsideTownYear(state, content) {
     town.lastYear.foodJin = Math.round(before * profile.foodPerPersonDayJin * (content.rules.daysPerYear || 365));
     town.stats.yearExportJin = 0;
     town.stats.yearImportJin = 0;
-    rows[town.id] = { weather: town.weather, event, population: town.population, landMu: town.landMu };
+    for (const row of Object.values(town.stats.byItem || {})) {
+      row.yearExportJin = 0;
+      row.yearImportJin = 0;
+    }
+    rows[town.id] ={ weather: town.weather, event, population: town.population, landMu: town.landMu };
   }
   return rows;
 }
@@ -446,7 +470,7 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
     town.wheatStockJin = round2(Math.max(0, town.wheatStockJin - valueJin));
     deliverToOutsideTown(town, itemId, actualJin);
     addInventory(state, "town", "wheat", valueJin, `对${profile.name}出口${item.name}所得`, "trade_export", content);
-    recordTradeStats(town, "sell", valueJin);
+    recordTradeStats(town, "sell", valueJin, itemId, actualJin);
     return { ok: true, direction, itemId, quantityJin: actualJin, valueJin, priceWheatPerUnit: round2(valueJin / actualJin) };
   }
 
@@ -461,7 +485,7 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   town.wheatStockJin = round2(town.wheatStockJin + valueJin);
   town.stocks[itemId] = round2(town.stocks[itemId] - qty);
   addInventory(state, "town", itemId, qty, `从${profile.name}进口${item.name}`, "trade_import", content);
-  recordTradeStats(town, "buy", valueJin);
+  recordTradeStats(town, "buy", valueJin, itemId, qty);
   return { ok: true, direction, itemId, quantityJin: qty, valueJin, priceWheatPerUnit: round2(valueJin / qty) };
 }
 
@@ -601,7 +625,7 @@ export function selectOutsideTownView(state, content, townId = DEFAULT_OUTSIDE_T
     event: town.event,
     tradeClosed: town.tradeClosed,
     lastYear: { ...town.lastYear },
-    stats: { ...town.stats },
+    stats: { ...town.stats, byItem: Object.fromEntries(Object.entries(town.stats.byItem || {}).map(([id, row]) => [id, { ...row }])) },
     goods,
     townWheatJin: round2((state.accounts?.town?.wheat || 0) / scale),
     loans: town.loans.map(row => ({ ...row })),

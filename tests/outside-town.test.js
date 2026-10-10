@@ -4,8 +4,41 @@ import { CONTENT } from "../src/content/index.js";
 import { simulation } from "../src/engine.js";
 import { setJobCount } from "../src/systems/households.js";
 import {
-  advanceOutsideTownDay, currentPrice, payableWheatJin, settleOutsideTownYear, targetStock
+  advanceOutsideTownDay, currentPrice, ensureOutsideTowns, payableWheatJin, recordTradeStats, settleOutsideTownYear, targetStock
 } from "../src/systems/outside-town.js";
+
+test("逐商品统计：两镇不同商品分别累加（斤与货款），年终只重置年度斤数，累计保留，状态合法", () => {
+  const state = simulation.createInitialState({ seed: 4421 });
+  const towns = ensureOutsideTowns(state, CONTENT);
+  const minzhen = towns.minzhen;
+  const wangzhen = towns.wangzhen;
+  // 民镇：卖两笔盐（40 斤、20 斤，货款 100、50 小麦斤）、买 25 斤面粉（货款 30）；王镇卖 35 斤木材（货款 70）。
+  recordTradeStats(minzhen, "sell", 100, "salt", 40);
+  recordTradeStats(minzhen, "sell", 50, "salt", 20);
+  recordTradeStats(minzhen, "buy", 30, "flour", 25);
+  recordTradeStats(wangzhen, "sell", 70, "wood", 35);
+  assert.deepEqual(minzhen.stats.byItem.salt, { exportJin: 60, importJin: 0, exportValueJin: 150, importValueJin: 0, yearExportJin: 60, yearImportJin: 0 });
+  assert.deepEqual(minzhen.stats.byItem.flour, { exportJin: 0, importJin: 25, exportValueJin: 0, importValueJin: 30, yearExportJin: 0, yearImportJin: 25 });
+  assert.equal(wangzhen.stats.byItem.wood.exportJin, 35);
+  assert.equal(wangzhen.stats.byItem.salt, undefined, "王镇没卖过盐");
+  // 与镇级总统计对账：逐商品货款合计 = 镇级出口/进口货款。
+  const sumValue = (town, key) => Object.values(town.stats.byItem).reduce((sum, row) => sum + row[key], 0);
+  assert.equal(sumValue(minzhen, "exportValueJin"), minzhen.stats.exportJin);
+  assert.equal(sumValue(minzhen, "importValueJin"), minzhen.stats.importJin);
+  assert.equal(minzhen.stats.trades, 3, "镇级成交笔数不变");
+
+  // 开局第一年不过年（settleOutsideTownYear 直接返回）：推到第 2 年再过年。
+  state.year = 2;
+  settleOutsideTownYear(state, CONTENT);
+  assert.equal(minzhen.stats.byItem.salt.yearExportJin, 0, "年度斤数年终重置");
+  assert.equal(minzhen.stats.byItem.flour.yearImportJin, 0);
+  assert.equal(minzhen.stats.byItem.salt.exportJin, 60, "累计斤数保留");
+  assert.equal(minzhen.stats.byItem.salt.exportValueJin, 150, "累计货款保留");
+  assert.equal(minzhen.stats.byItem.flour.importJin, 25);
+  assert.equal(wangzhen.stats.byItem.wood.exportJin, 35);
+  assert.equal(wangzhen.stats.byItem.wood.yearExportJin, 0);
+  assert.equal(simulation.validateState(state).valid, true, "校验通过");
+});
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const PROFILE = CONTENT.outsideTowns.minzhen;

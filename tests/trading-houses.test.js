@@ -42,13 +42,26 @@ function addBuilding(state, id, typeId) {
 
 // 外贸房（在岗，提供基础运力 300 斤/日，贸易行分到 rules.tradeHouseCapacityShare）、批发市场、贸易中心（1 级，2 个铺位）。
 // 镇库印制粮券，镇里有钱付批发货款。盐的批发售价压到 10（外镇收购价约 14.7，够 10% 利润）。
-function tradeFixture(seed, { clerks = 10, pool = 300, houses = 1 } = {}) {
+// 产业链（chain: true）：南部盐矿资源点上的盐场（10 名盐工，每人每日产 5 斤盐），盐统购入批发市场，贸易行有持续货源。
+function addSaltChain(state) {
+  const used = new Set(state.buildings.map(row => row.plotId));
+  const plot = state.plots.find(row => row.feature === "salt_mine" && !used.has(row.id));
+  assert.ok(plot, "需要盐矿资源点");
+  state.buildings.push({
+    id: "sw1", typeId: "saltworks", level: 1, ownership: { townLevels: 1, privateLevels: 0, listedLevels: 0 },
+    plotId: plot.id, x: plot.x, y: plot.y, materialInvestments: [], completed: { year: 1, day: 1 }
+  });
+  simulation.setEmployment(state, "sw1::salt_workers", 10);
+}
+
+function tradeFixture(seed, { clerks = 10, pool = 300, houses = 1, chain = false } = {}) {
   const state = simulation.createInitialState({ seed });
   addBuilding(state, "ftrade", "foreign_trade_house");
   addBuilding(state, "wm1", "wholesale_market");
   addBuilding(state, "tc1", "trade_center");
   simulation.setEmployment(state, "ftrade::trade_staff", 8);
   simulation.setEmployment(state, "wm1::wholesale_workers", 3);
+  if (chain) addSaltChain(state);
   grantResidentVouchers(state, 300000);
   issueTownVouchers(state, 50000 * V, CONTENT, "测试：镇库付货款");
   assert.equal(simulation.configureWholesalePrice(state, "salt", 10).ok, true);
@@ -458,4 +471,64 @@ test("两镇分配：两镇都能做时，当日预算按配额分给两镇，�
   const sold = lastRow(shop).exportJin.salt;
   assert.ok(Math.abs(sold - SHARE_JIN) < 0.02, `两镇合计仍用满运力份额 ${sold}`);
   valid(state, "两镇分配后");
+});
+
+test("逐镇逐商品统计：贸易行出口的盐按镇记入 byItem，两镇合计等于本店出口斤数", () => {
+  const { state, shop } = tradeFixture(9125);
+  const towns = ensureOutsideTowns(state, CONTENT);
+  settleTradingHouses(state, CONTENT);
+  const row = lastRow(shop);
+  assert.ok(row.exportJin.salt > 0, "出口了盐");
+  const saltJin = ["minzhen", "wangzhen"].reduce((sum, id) => sum + (towns[id].stats.byItem?.salt?.exportJin || 0), 0);
+  assert.ok(Math.abs(saltJin - row.exportJin.salt) < 0.02, `两镇盐出口斤数 ${saltJin} = 店内出口 ${row.exportJin.salt}`);
+  const minzhenRow = towns.minzhen.stats.byItem?.salt;
+  assert.ok(minzhenRow && minzhenRow.exportJin > 0, "民镇有盐出口记录");
+  assert.equal(minzhenRow.yearExportJin, minzhenRow.exportJin, "首年内年度与累计相同");
+  assert.equal(minzhenRow.importJin, 0, "没有进口");
+  valid(state, "逐商品统计后");
+});
+
+test("当日可做上限 capJin：人手预算卡住时大于成交量；货源用完时等于成交量", () => {
+  // 0 名店员（只有店主商人 300 斤）、运力池 1000：人手预算卡住，收市后仍有可做的出口。
+  const staffBound = tradeFixture(9121, { clerks: 0, pool: 1000 });
+  settleTradingHouses(staffBound.state, CONTENT);
+  const bound = lastRow(staffBound.shop);
+  assert.ok(Math.abs(bound.usedJin - bound.budgetJin) < 0.02, `人手预算用满：成交 ${bound.usedJin} = 预算 ${bound.budgetJin}`);
+  assert.ok(bound.capJin > bound.usedJin + 100, `可做上限应明显大于成交量：${bound.capJin} > ${bound.usedJin}`);
+
+  // 批发存货只超出保本线 50 斤：货源用完，上限就是成交量。
+  const goodsBound = tradeFixture(9122);
+  goodsBound.state.wholesaleMarket.inventory.salt = 250 * I;
+  settleTradingHouses(goodsBound.state, CONTENT);
+  const goods = lastRow(goodsBound.shop);
+  assert.ok(goods.usedJin > 0, "应出超出保本线的 50 斤");
+  assert.ok(Math.abs(goods.capJin - goods.usedJin) < 1, `货源用完：上限 ${goods.capJin} ≈ 成交 ${goods.usedJin}`);
+  valid(goodsBound.state, "上限记录后");
+});
+
+test("货源受限但人手充足（批发存货用完）：店员数保持，不因利用率低而减员", () => {
+  // 10 名店员，批发存货只超出保本线 50 斤：每天只成交 50 斤，人手预算远没用完，但货源已用完，店员不减。
+  const { state, shop } = tradeFixture(9123, { clerks: 10 });
+  state.wholesaleMarket.inventory.salt = 250 * I;
+  for (let day = 0; day < 40; day++) {
+    // 每天补回 50 斤超出保本线的货（模拟批发入库），确保每天都是"货源刚好够卖"。
+    state.wholesaleMarket.inventory.salt = 250 * I;
+    simulation.advanceDays(state, 1);
+  }
+  assert.equal(shopClerkCount(state, shop), 10, `货源受限，店员保持，诊断：${shop.plan.staffingDiagnosis}`);
+  assert.ok(lastRow(shop).usedJin < RULES.tradeHouseJinPerClerk * 10 * 0.5, "成交远低于人手预算");
+  valid(state, "货源受限店员保持");
+});
+
+test("[slow] 3 年产业链夹具（盐场供盐）：店员数不跌到 0（不低于 min(2, 初始配置)），每 30 天账平", () => {
+  const { state, shop } = tradeFixture(9124, { clerks: 10, chain: true });
+  let minClerks = Infinity;
+  for (let day = 1; day <= 3 * (RULES.daysPerYear || 360); day++) {
+    simulation.advanceDays(state, 1);
+    minClerks = Math.min(minClerks, shopClerkCount(state, shop));
+    if (day % 30 === 0) valid(state, `第 ${day} 天`);
+  }
+  assert.equal(shop.plan.initialClerks, 10, "初始配置记为开店时的 10 人");
+  assert.ok(minClerks >= 2, `店员数不跌破下限 min(2, 10) = 2，最低 ${minClerks}`);
+  assert.ok(shop.tradeLog.some(row => row.usedJin > 0), "仍在做买卖");
 });

@@ -185,7 +185,7 @@ export function settleTradeAgreementsMonth(state, content) {
       town.wheatStockJin = round2(town.wheatStockJin - orderJin);
       addInventory(state, "town", "wheat", orderJin, `对${profile.name}长期协定交付${itemName}所得`, "trade_export", content);
       deliverToOutsideTown(town, agreement.itemId, actualJin);
-      recordTradeStats(town, "sell", orderJin);
+      recordTradeStats(town, "sell", orderJin, agreement.itemId, actualJin);
       takeFreightCapacity(state, actualJin, content);
       agreement.totalDeliveredJin = round2((agreement.totalDeliveredJin || 0) + actualJin);
       result.delivered += 1;
