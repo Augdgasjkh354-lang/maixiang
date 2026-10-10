@@ -23,7 +23,7 @@ import { setBuildingOutputTarget } from "../systems/production.js";
 import { setServiceUnitPrice } from "../systems/services.js";
 import { reclaimFarmland as reclaimFarmlandSystem } from "../systems/agriculture.js";
 import { setVillaPolicy as setVillaPolicySystem } from "../systems/villas.js";
-import { setBankPolicy as setBankPolicySystem } from "../systems/bank.js";
+import { setBankPolicy as setBankPolicySystem, repayBankDebtToTown as repayBankDebtToTownSystem } from "../systems/bank.js";
 import { issueGovernmentBond as issueGovernmentBondSystem } from "../systems/bonds.js";
 import { setWageControlPolicy as setWageControlPolicySystem } from "../systems/payroll.js";
 import { setSocialSecurityPolicy as setSocialSecurityPolicySystem, injectSocialSecurity as injectSocialSecuritySystem, repaySocialSecurityDebt as repaySocialSecurityDebtSystem, fundBuyShares, fundSellShares, setEmployerSocialSharePercent as setEmployerSocialSharePercentSystem } from "../systems/social-security.js";
@@ -107,6 +107,10 @@ export function signTradeAgreement(state, options, content) {
 
 export function terminateTradeAgreement(state, id, content) {
   return terminateTradeAgreementSystem(state, id, content);
+}
+
+export function repayBankDebtToTown(state, amountJin, content) {
+  return repayBankDebtToTownSystem(state, amountJin, content);
 }
 
 export function injectSocialSecurity(state, amountJin, content) {

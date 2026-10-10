@@ -157,7 +157,7 @@ test("富人税：存款可以被取回付税；存款不足时取到现金为�
   assert.equal(state.currency.balances.town - townBefore, result.dueUnits);
 });
 
-test("富人税：银行现金不足时存款只取到现金为止，其余免征", () => {
+test("富人税：银行现金不足时镇库垫付，存款全额取回付税，缺口记为银行欠镇库", () => {
   const state = voucherState();
   simulation.setWealthTax(state, { ratesPercent: [20, 20, 20] });
   const household = richestHousehold(state);
@@ -171,9 +171,10 @@ test("富人税：银行现金不足时存款只取到现金为止，其余免�
   state.currency.balances.town -= 100 * SCALE;
   const result = settleWealthTax(state, CONTENT);
   assert.ok(result.dueUnits > 100 * SCALE, "应纳超过银行现金");
-  assert.equal(result.collectedUnits, 100 * SCALE, "只能取到银行现金的 100 券");
-  assert.equal(state.bank.deposits[household.id], 49900 * SCALE);
-  assert.ok(state.redistribution.year.wealthTaxWaivedUnits > 0);
+  assert.equal(result.collectedUnits, result.dueUnits, "镇库垫付后全额收到（银行现金不再是上限）");
+  assert.equal(state.bank.deposits[household.id], 50000 * SCALE - result.dueUnits, "存款只减去已付税额");
+  assert.equal(state.bank.debtToTownUnits, result.dueUnits - 100 * SCALE, "垫付 = 应纳 − 银行原有现金");
+  assert.equal(state.redistribution.year.wealthTaxWaivedUnits || 0, 0);
 });
 
 test("富人税：口粮储备不动，小麦最多付到储备以外的部分，付不完的免征", () => {
@@ -312,17 +313,19 @@ test("整户失效：粮券、存款、库存、股票、民营建筑全部归�
   assert.equal(validateCurrencyInvariant(state, CONTENT).valid, true, "粮券总账守恒");
 });
 
-test("整户失效的存款：银行现金不够时留在台账，之后每日再取", () => {
+test("整户失效的存款：银行现金与镇库都不够时留在台账，之后每日再取", () => {
   const state = voucherState();
   const household = richestHousehold(state);
   ensureBankState(state);
   state.bank.deposits[household.id] = 200 * SCALE;
   state.bank.cashVoucherUnits = 0;
+  // 镇库没有粮券（legacy 夹具镇库为 0）：取不回，存款暂留。
+  assert.equal(state.currency.balances.town, 0);
   household.ageBands = { children: 0, workers: 0, elders: 0 };
   settleEscheat(state, CONTENT);
-  assert.equal(state.bank.deposits[household.id], 200 * SCALE, "现金不够，存款暂留");
-  state.bank.cashVoucherUnits = 200 * SCALE;
-  state.currency.balances.town -= 200 * SCALE;
+  assert.equal(state.bank.deposits[household.id], 200 * SCALE, "现金与镇库都不够，存款暂留");
+  // 镇库拿到 200 券后（镇库垫付），整户家产归镇库。
+  state.currency.balances.town += 200 * SCALE;
   settleEscheat(state, CONTENT);
   assert.equal(state.bank.deposits[household.id], 0);
   assert.equal(settleEscheat(state, CONTENT), null, "没有剩余家产时不再处理");

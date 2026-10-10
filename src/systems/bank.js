@@ -1,4 +1,4 @@
-import { currencyScale, voucherBalance } from "../economy/currency.js";
+import { currencyScale, transferVouchers, voucherBalance } from "../economy/currency.js";
 import { recordEvent } from "../economy/ledger.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { withdrawFromBank } from "../economy/deposits.js";
@@ -13,11 +13,15 @@ import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSE
 // - 存款利息由镇库付现金（付款类型 bank_deposit_interest）：每笔计息都有等额粮券进入银行现金；
 //   镇库现金不够时只计实付部分，绝不透支记账
 // - 准备金率限制可贷额度；存贷利差等银行利润记入 bank.retainedVoucherUnits 留存，不自动上缴镇库
+// - 镇库托底：住户取回存款时银行现金不够，缺口由镇库垫付，记为银行欠镇库的债（bank.debtToTownUnits）。
+//   现金超出 准备金 + 安全垫 的部分每日自动还给镇库（bank_town_repay），玩家也可手动还（repayBankDebtToTown）。
 // - 粮券恒等式：银行现金计入 totalVoucherBalances（currency.js）。存款台账的守恒关系是
-//   存款 = 银行现金 + 在贷余额 + 持有国债 − 留存利润（bankLedgerInvariant，validateState 校验）。
+//   存款 + 欠镇库 = 银行现金 + 在贷余额 + 持有国债 − 留存利润（bankLedgerInvariant，validateState 校验）。
 export const DEFAULT_DEPOSIT_RATE_ANNUAL_PERCENT = 2;
 export const DEFAULT_LOAN_RATE_ANNUAL_PERCENT = 6;
 export const DEFAULT_RESERVE_REQUIREMENT_PERCENT = 10;
+// 还债时银行必须保留的安全垫（占存款比例），规则键 rules.bankDebtRepayBufferShare。
+export const DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE = 0.05;
 // 投资比例改由流动性算法按日自动调整（五期），见 liquidity.js。
 // 生活储备天数与 investment-preference.js 共用同一常量，避免分流口径漂移。
 export const BANK_HOUSEHOLD_RESERVE_DAYS = HOUSEHOLD_RESERVE_DAYS;
@@ -69,6 +73,10 @@ export function ensureBankState(state) {
   stats.loansIssuedVoucherUnits ||= 0;
   stats.loansRepaidVoucherUnits ||= 0;
   stats.badDebtVoucherUnits ||= 0;
+  // 镇库托底：必须先于留存利润补齐（留存利润的反推口径要减去欠镇库的债）。
+  bank.debtToTownUnits ??= 0;
+  bank.totalAdvancedUnits ??= 0;
+  bank.totalRepaidUnits ??= 0;
   if (!Number.isSafeInteger(bank.retainedVoucherUnits)) bank.retainedVoucherUnits = bankRetainedVoucherUnits(state);
   return bank;
 }
@@ -90,19 +98,26 @@ function bankDepositTotalVoucherUnits(state) {
   return total;
 }
 
+// 银行欠镇库的债（镇库托底累计，只减不增于还债之外的任何口径）。
+function bankDebtToTownVoucherUnits(state) {
+  return Math.max(0, state.bank?.debtToTownUnits || 0);
+}
+
 // 银行留存利润（可为负）：贷款利息应计 − 坏账核销 + 国债利息收入 − 国债违约损失。
-// 旧存档没有这个字段：此时按"资产 − 存款"反推。旧版存款利息只记台账不付现金，
+// 旧存档没有这个字段：此时按"资产 − 存款 − 欠镇库"反推。旧版存款利息只记台账不付现金，
 // 反推出的负数正是这部分无现金支撑的利息，存款人余额保持不变。
+// 镇库托底的垫付与还款同时改动现金和欠镇库，不改变留存利润。
 export function bankRetainedVoucherUnits(state) {
   const bank = state.bank || {};
   if (Number.isSafeInteger(bank.retainedVoucherUnits)) return bank.retainedVoucherUnits;
-  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state);
+  return bankAssetVoucherUnits(state) - bankDepositTotalVoucherUnits(state) - bankDebtToTownVoucherUnits(state);
 }
 
-// 存款台账守恒（只读）：存款 = 现金 + 在贷余额 + 国债本金 − 留存利润。
+// 存款台账守恒（只读）：存款 + 欠镇库 = 现金 + 在贷余额 + 国债本金 − 留存利润。
 export function bankLedgerInvariant(state) {
   const bank = state.bank || {};
   const deposits = bankDepositTotalVoucherUnits(state);
+  const debtToTown = bankDebtToTownVoucherUnits(state);
   const cash = bank.cashVoucherUnits || 0;
   let loans = 0;
   for (const loan of bank.loans || []) if (loan.status === "active") loans += loan.outstandingVoucherUnits || 0;
@@ -111,7 +126,61 @@ export function bankLedgerInvariant(state) {
     for (const holding of issue.holdings || []) if (holding.holderKey === "bank:bank") bonds += holding.principalVoucherUnits || 0;
   }
   const retained = bankRetainedVoucherUnits(state);
-  return { deposits, cash, loans, bonds, retained, valid: deposits === cash + loans + bonds - retained };
+  return { deposits, debtToTown, cash, loans, bonds, retained,
+    valid: deposits + debtToTown === cash + loans + bonds - retained };
+}
+
+// 还债用的安全垫比例：优先读规则 rules.bankDebtRepayBufferShare，缺省用模块默认值。
+export function bankDebtRepayBufferShare(content) {
+  const value = Number(content?.rules?.bankDebtRepayBufferShare);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE;
+}
+
+// 本日（或本次命令）可还给镇库的现金：银行现金超出 法定准备金（存款 × 准备金率）+ 安全垫（存款 × 安全垫比例）的部分，
+// 且不超过欠镇库余额。只读。
+export function bankDebtRepayableUnits(state, content) {
+  const debt = bankDebtToTownVoucherUnits(state);
+  if (debt <= 0 || !state.bank) return 0;
+  // 只读：不用 bankPolicy()（它会写入默认值），缺省时取模块默认准备金率。
+  const reservePercent = state.policy?.bank?.reserveRequirementPercent ?? DEFAULT_RESERVE_REQUIREMENT_PERCENT;
+  const deposits = bankDepositTotalVoucherUnits(state);
+  const reserve = Math.floor(deposits * (reservePercent / 100));
+  const buffer = Math.floor(deposits * bankDebtRepayBufferShare(content));
+  const excess = (state.bank.cashVoucherUnits || 0) - reserve - buffer;
+  return Math.max(0, Math.min(debt, excess));
+}
+
+// 还款：银行现金 → 镇库（统一转账，类型 bank_town_repay），欠镇库余额同步减少。
+function repayBankDebtVoucherUnits(state, content, amount) {
+  const bank = state.bank;
+  const result = transferVouchers(state, "bank", "town", amount, content, "bank_town_repay",
+    "银行向镇库还债（现金超出准备金与安全垫的部分）");
+  if (!result.ok) return { ok: false, reason: result.reason };
+  bank.debtToTownUnits = Math.max(0, (bank.debtToTownUnits || 0) - amount);
+  bank.totalRepaidUnits = (bank.totalRepaidUnits || 0) + amount;
+  return { ok: true, repaidValueUnits: amount };
+}
+
+// 每日还债步骤：把可还额一次还清（没有可还额时什么也不做）。返回本日还债额。
+export function settleBankDebtRepay(state, content) {
+  const amount = bankDebtRepayableUnits(state, content);
+  if (amount <= 0) return 0;
+  const result = repayBankDebtVoucherUnits(state, content, amount);
+  return result.ok ? amount : 0;
+}
+
+// 玩家命令：从银行现金还债给镇库，金额最多为可还额（超出准备金与安全垫的现金，且不超过欠款）。
+export function repayBankDebtToTown(state, amountJin, content) {
+  if (!state.bank || (state.bank.debtToTownUnits || 0) <= 0) return { ok: false, reason: "银行没有欠镇库的钱" };
+  const scale = currencyScale(content);
+  const requested = Math.round(Math.max(0, Number(amountJin) || 0) * scale);
+  if (!Number.isSafeInteger(requested) || requested <= 0) return { ok: false, reason: "还款金额必须大于0" };
+  const amount = Math.min(requested, bankDebtRepayableUnits(state, content));
+  if (amount <= 0) return { ok: false, reason: "银行现金需先超出准备金与安全垫，暂不能还债" };
+  const result = repayBankDebtVoucherUnits(state, content, amount);
+  if (!result.ok) return result;
+  return { ok: true, repaidValueUnits: amount, repaidJin: amount / scale,
+    debtJin: state.bank.debtToTownUnits / scale };
 }
 
 export function bankAvailable(state) {
@@ -357,6 +426,8 @@ export function settleBankDay(state, content) {
   const dayIndex = (state.year - 1) * daysPerYear + state.day;
   settleBankDepositsDay(state, content, bank, policy, daysPerYear);
   settleBankLoansDay(state, content, bank, policy, dayIndex);
+  // 先还镇库托底的债，再放新贷款：超出准备金与安全垫的现金优先还债，不把垫付的钱又借给公司。
+  settleBankDebtRepay(state, content);
   settleBankAutoLoans(state, content, bank);
   if ((bank.cashVoucherUnits || 0) < 0) {
     // 银行现金持续为负时逐日告警会刷屏；用事件合并机制折叠成一条聚合事件。
@@ -374,6 +445,7 @@ export function settleBankDay(state, content) {
     totalDepositsVoucherUnits: totals.totalDepositsVoucherUnits,
     outstandingLoansVoucherUnits: totals.outstandingLoansVoucherUnits,
     loanableVoucherUnits: bankLoanableVoucherUnits(state),
-    badDebtVoucherUnits: bank.stats.badDebtVoucherUnits
+    badDebtVoucherUnits: bank.stats.badDebtVoucherUnits,
+    debtToTownVoucherUnits: bank.debtToTownUnits
   };
 }

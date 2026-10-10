@@ -1,3 +1,12 @@
+## 未发布 · 银行镇库托底
+
+- 修复：银行只给公司放贷、利息照付，现金远小于居民存款（实测现金 8.8 万券、存款 87.8 万券），大户用存款交富人税、付款、取钱时被"银行现金不足"挡住。
+- 取款时银行现金不够，缺口由镇库垫付（`bank_town_advance`，计为银行欠镇库的债 `bank.debtToTownUnits`）；镇库粮券也不够则整笔拒绝。报价的可取回额 = min(银行现金 + 镇库粮券, 存款)，换券池扣掉垫付额，报价与结算一致。
+- 还债：现金超出准备金 + 安全垫（`rules` 参数 `bankDebtRepayBufferShare`，默认 0.05，代码内缺省）的部分每日先还镇库（`bank_town_repay`），先于新贷款；玩家命令 `repayBankDebtToTown(amountJin)` 同样受此上限。留存利润口径不变。
+- 台账守恒式改为：存款 + 欠镇库 = 现金 + 在贷 + 国债 − 留存利润；`validateState` 校验三个账目为非负安全整数。新字段读旧档补零，不迁移。
+- 选择器 `dashboard.policy.bankStats` 新增 `debtToTownJin`、`totalAdvancedJin`、`totalRepaidJin`、`debtRepayableJin`（只读）。界面与引擎门面 `engine.js` 的命令导出待接。
+- 测试：`tests/bank-town-advance.test.js`。
+
 ## 未发布 · 利润率政策
 
 - 综合商店目标利润率可调：政策页「商店与贸易利润率」新增全局默认 `policy.shopMarginPercent`（0—200，一位小数，开局 20）。未单独设置的店跟随全局；店铺面板可单店覆盖，或改回跟随。命令 `setMarginPolicy`（政策）与 `configureShopTargetMargin`（单店，传 `null` 取消覆盖）。

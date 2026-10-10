@@ -284,6 +284,13 @@ export function validateState(state, content) {
   if (!currencyCheck.valid) errors.push("粮券总账不守恒：账户余额与未注销发行量不一致");
   // 存款台账 = 银行现金 + 在贷余额 + 国债本金 − 留存利润：存款利息必须有现金支撑。
   if (!bankLedgerInvariant(state).valid) errors.push("银行存款台账与现金、贷款、国债不守恒");
+  // 镇库托底（银行欠镇库的债）：账目都是非负安全整数。
+  if (state?.bank) {
+    for (const key of ["debtToTownUnits", "totalAdvancedUnits", "totalRepaidUnits"]) {
+      const value = state.bank[key] ?? 0;
+      if (!Number.isSafeInteger(value) || value < 0) errors.push("银行镇库托底账无效：" + key);
+    }
+  }
   if (!state.stockExchange || typeof state.stockExchange !== "object" || Array.isArray(state.stockExchange) || typeof state.stockExchange.legacyAccess !== "boolean") {
     errors.push("交易所状态无效");
   }

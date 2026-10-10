@@ -38,6 +38,7 @@ import { householdRecentTotalsReadonly, householdFoodDays } from "../systems/hou
 import { createDashboardRuntime, employmentExchangeRemainingUnits } from "./dashboard-runtime.js";
 import { selectVillaStats } from "../systems/villas.js";
 import { selectSocialSecurityStats } from "../systems/social-security.js";
+import { bankDebtRepayableUnits } from "../systems/bank.js";
 import { decorateTownLaborRows, townBuildingWageTotals, privateBuildingWageTotals, companyWageTotals, shopPayTotals } from "./wages.js";
 
 // 日历：一年 12 个月 × 30 天。春 1—3 月，夏 4—6 月，秋 7—9 月，冬 10—12 月（10 月 1 日秋收）。
@@ -634,7 +635,12 @@ export function selectDashboard(state, content, selection) {
           loanableVoucher: Math.max(0, (bank.cashVoucherUnits || 0) - Math.floor(totalDeposits * reservePct / 100)) / voucherScale,
           badDebtVoucher: (bank.stats?.badDebtVoucherUnits || 0) / voucherScale,
           interestEarnedVoucher: (bank.stats?.interestEarnedVoucherUnits || 0) / voucherScale,
-          interestPaidVoucher: (bank.stats?.interestPaidVoucherUnits || 0) / voucherScale
+          interestPaidVoucher: (bank.stats?.interestPaidVoucherUnits || 0) / voucherScale,
+          // 镇库托底（银行欠镇库的债）：只读，单位斤（与 social 口径一致，粮券按 currencyScale 折算）。
+          debtToTownJin: (bank.debtToTownUnits || 0) / voucherScale,
+          totalAdvancedJin: (bank.totalAdvancedUnits || 0) / voucherScale,
+          totalRepaidJin: (bank.totalRepaidUnits || 0) / voucherScale,
+          debtRepayableJin: bankDebtRepayableUnits(state, content) / voucherScale
         };
       })(),
       // 国债统计（金融扩展三期）：只读

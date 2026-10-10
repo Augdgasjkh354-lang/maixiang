@@ -58,6 +58,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 日历 / 月薪 / 正式员工 | 一年 12 月 × 30 天（`rules.daysPerYear` 360、`monthDays` 30）。工资按天计入 `employer.js` 的 `pendingByMonth`，到发薪日（`systems/paydays.js`：5/10/15/20/25 号，按人均利润排，镇营 5 号）才到期支付上个月的；到期没付的才是欠薪（`wageArrears`）。用工审核与辞退在 `systems/employment-contracts.js`：每月 1 号审核、一次 +1，开张期 30 天每天招够；入职满 30 天（`household.jobSince`）才能辞退，付一个月工资补偿，付得起才辞 |
 | 救济 | 政策页一个开关：口粮不足 7 天的家庭补到 14 天（家庭先用自己的粮券兑粮）。口粮由镇库实物拨付；社保基金开启时由基金按价值结算，付不起记债。没有手动拨粮和邻里互助 |
 | 国债 | 需已建成银行（粮券阶段，开局即是）；玩家定总额/期限/固定利率；发行当天住户和银行按闲钱认购 |
+| 银行负债（镇库托底） | 住户取回存款时银行现金不够，镇库粮券垫付缺口（`bank_town_advance`），记为 `bank.debtToTownUnits`（累计垫付 `totalAdvancedUnits`、累计还款 `totalRepaidUnits`）。台账守恒式：存款 + 欠镇库 = 现金 + 在贷 + 国债 − 留存利润。现金超出准备金 + 安全垫（存款 × `bankDebtRepayBufferShare`，默认 5%）的部分每日先还镇库（`bank_town_repay`，先于新贷款），玩家可用 `repayBankDebtToTown`。代码：`economy/deposits.js` 的 `withdrawFromBank`、`systems/bank.js`。民间贷款实现时，银行对外放贷前应先扣掉欠镇库的部分 |
 | 外镇 | 档案在 `content/outside-towns.js`，算法共用 `systems/outside-town.js`（状态 `state.outsideTowns[id]`）。现有民镇、王镇（各 6000 人、耕地 3 万亩，每年开垦 500 亩）；我方出口品（盐、木材、酒、布）的基准价 = 本镇中间价 × 1.2（`exportPrice`），王镇的酒、布再 × 1.2。每天按人口自产/消耗各商品、吃口粮；进口品（盐、木材、酒、布）存货不足 3 年用量都按正常价收，超过 3 年才压价，繁荣度越低越肯出高价；自产外卖品（面粉、面包）按库存比目标定价；买卖价差随关系分收窄，大单逐段计价，没有套利。繁荣度跟随供应满足率；人口只增不减（每年 0.5%—3%，随繁荣度），口粮不足的年份停止增长、每年开垦新耕地，秋收入库。只用口粮储备以上的小麦付款。外贸房在岗才能交易、签长协。关税只对贸易行征收（`trading-houses.js` 的 `tradeTariffRate`，见 `docs/TRADE.md`），镇里自己的外贸与长协不收。加新外镇 = 加一份档案 |
 | 运力 / 贸易行 | `systems/logistics.js` 管运力池（外贸房基础 + 物流中心 + 码头），所有对外镇的货都要 `takeFreightCapacity`；镇里自己的货不付运费。贸易中心的贸易行是 kind `trade` 的店铺（`systems/trading-houses.js`），自己做进出口（偏向出口，进口利润门槛更高：出口门槛 `policy.tradeMarginPercent` 开局 20%，进口门槛 `policy.tradeImportMarginPercent` 开局 25%，政策页可调 0—200%）、付运费和关税给镇库，像商业街店铺一样自己增减店员（近 7 日平均利用率 = 成交 ÷ 预算（人手 × 300 斤与运力份额取小者）低于 40% 每月减 1 人，`shops.js` 的 `tradeHouseTargetClerks`；连续 30 天无成交且亏损则暂停营业、店员遣散，每 10 天检查一次，有可做的买卖才由业主补资恢复）。日结时当日预算先在有可做买卖的两镇之间平分（配额），剩下的再按利润排序分配。河岸地块只建码头和外贸房。详见 `docs/TRADE.md` |
 | 再分配 | `systems/redistribution.js`：富人税（人均家底三档超额累进，每 30 天）、遗产税（年终按去世成年人份额）、整户无人家产归镇库；基尼与逐年曲线在 `selectors/inequality.js`，统计口径为全口径家底（含存款、股票、房产、国债本金，与富人税同口径，`wealthDistributionRows`）。社保由雇主替员工交（`socialSecurity.employerSharePercent`，岗位 → 雇主映射在 `social-security.js`）。服务可设 `minAffluence`（戏园只有宽裕人家去）。详见 `docs/REDISTRIBUTION.md` |
@@ -106,7 +107,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 - 新开局即粮券阶段；只有旧档才可能是小麦阶段（小麦阶段居民直接从镇库买主粮、不经过市场和商店）。测小麦行为用 `tests/helpers-monetary.js` 的 `wheatEraState`，测粮券行为用 `legacyVoucherState` 或直接用新开局。
 - 主食按户算：口粮默认吃自家小麦，宽裕人家换一部分面粉面包（面包买不到改面粉，再不够买小麦）；需求弹性只在综合商店是卖家时生效。
 - 居民实际能花多少还受每日就业换券额度限制（政策 `employmentExchangeJin`），家底多但粮券少时这是最常见的瓶颈。
-- 付款顺序：手头粮券 → 银行存款自动取回 → 以粮换券（镇库券池封顶）。判断"付不付得起"一律用 `spendableVoucherUnits`（含存款），别只看 `voucherUnits`。
+- 付款顺序：手头粮券 → 银行存款自动取回 → 以粮换券（镇库券池封顶）。取回存款时银行现金不够，镇库托底垫付缺口（记为银行欠镇库的债 `bank.debtToTownUnits`，见「国债」一行后的银行负债）；报价的可取回额 = min(银行现金 + 镇库粮券, 存款)，换券池扣掉垫付额。判断"付不付得起"一律用 `spendableVoucherUnits`（含存款），别只看 `voucherUnits`。
 - 新增镇营产出时想清楚有没有需求闸门：没有闸门的产品会无限堆进批发市场（0.2.3 出过 4000 万斤面包）。
 - 店员和商人都算接待能力；店主兼商人拿利润，不领固定工资。
 
