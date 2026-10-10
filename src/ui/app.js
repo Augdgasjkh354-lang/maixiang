@@ -1716,6 +1716,13 @@ export function mountGame(root) {
       showToast(`${isStockpile ? "已从批发市场收储" : "已向批发市场投放"}${number(result.movedJin, 2)}${itemUnit}。`);
       return;
     }
+    // 批发市场商品卡全部展开/收起：只切换 DOM 的 open；展开状态靠 data-detail-key 在重绘时保留。
+    if (closest(target, "[data-wholesale-toggle-all]")) {
+      const cards = Array.from($("#panel").querySelectorAll("details[data-wholesale-item]"));
+      const openAll = cards.some(card => !card.open);
+      for (const card of cards) card.open = openAll;
+      return;
+    }
     // 批发市场逐品自动调价开关：开启时以当前售价为锚定价，失败原因走 toast。
     const autoPriceButton = closest(target, "[data-wholesale-autoprice]");
     if (autoPriceButton && state) {

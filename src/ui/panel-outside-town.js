@@ -90,6 +90,27 @@ function townSwitch(view, selectedId) {
   }).join("")}</div>`;
 }
 
+// 经营面板的外贸摘要（外贸操作搬到外贸房面板）：一行概况 + 前往外贸房；运力池（全镇池）与贸易行合计各一行。
+export function renderOutsideTownSummary(view) {
+  const ot = view.outsideTown;
+  const house = (view.buildings || []).find(building => building.typeId === "foreign_trade_house") || null;
+  const ta = view.tradeAgreements || { activeCount: 0 };
+  const staffText = !house ? "尚未建外贸房" : ot?.foreignTradeOperational ? `在岗 ${number(ot.foreignTradeStaff || 0)} 人` : "无人值守";
+  const poolText = view.logistics ? `${number(view.logistics.poolJin, 0)} 斤` : "—";
+  const th = view.tradeHouses;
+  const tradeLine = th && th.houseCount
+    ? `<div class="row freight-row trade-house-summary"><span class="label">贸易行</span><strong class="value">${number(th.houseCount)}家 · 在岗${number(th.staff)}人 · 今日出口 ${number(th.todayTotals.exportTotalJin, 1)} / 进口 ${number(th.todayTotals.importTotalJin, 1)}斤 · 利润 ${number(th.todayTotals.profitVoucher, 2)}${escapeHtml(moneyUnit(view))}</strong></div>`
+    : "";
+  const button = house
+    ? `<button class="secondary" data-open-building="${escapeHtml(house.id)}">前往外贸房</button>`
+    : `<button class="secondary" disabled>前往外贸房</button>`;
+  return `<div class="cardlet">${freightRow(view.logistics)}
+      <div class="row"><span class="label">外贸${ot ? `（${escapeHtml(ot.name)}）` : ""}</span><strong class="value">${staffText} · 长协 ${number(ta.activeCount || 0)} 份 · 运力今日 ${poolText}</strong></div>
+      ${tradeLine}
+      <div class="site-actions">${button}</div>
+      <div class="subtle">商品行情、对外关系、长期协定与小麦贷款都在外贸房面板里操作。</div></div>`;
+}
+
 export function renderOutsideTown(view) {
   const ot = view.outsideTown;
   if (!ot) return `<div class="subtle">外贸数据不可用。</div>`;

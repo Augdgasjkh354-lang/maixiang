@@ -21,15 +21,22 @@ function itemRowsText(rows, empty = "暂无") {
   return rows.map(row => `${escapeHtml(row.name)} ${number(row.quantity, 2)}${escapeHtml(row.unit)}`).join(" · ");
 }
 
+// 价格区只读：面粉/面包/木材的售价在批发市场面板统一设置（同一价格键，写入路径不变），这里只显示并跳转。
 function renderPrices(view) {
   const unit = moneyUnit(view);
-  const prices = view.market.intermediatePricesVoucherPerUnit || {};
+  const prices = view.market.pricesVoucherPerUnit || {};
+  const wholesale = (view.buildings || []).find(building => building.typeId === "wholesale_market") || null;
+  const jump = wholesale
+    ? `<button class="secondary" data-open-building="${escapeHtml(wholesale.id)}">前往批发市场</button>`
+    : `<button class="secondary" disabled>尚未建批发市场</button>`;
+  const priceRow = (label, itemId, unitText) => `<div class="row"><span class="label">${label}</span><strong class="value">${number(prices[itemId] ?? 0, 3)}${escapeHtml(unit)}/${escapeHtml(unitText)}</strong></div>`;
   return `<section class="enterprise-section"><h2>价格</h2><div class="cardlet">
     <div class="row"><span class="label">小麦 / 食盐</span><strong class="value">${number(view.market.pricesVoucherPerUnit?.wheat ?? 1, 3)} / ${number(view.market.pricesVoucherPerUnit?.salt ?? 10, 3)}${escapeHtml(unit)}/斤</strong></div>
-    <div class="row"><span class="label">面粉</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:flour", label: "面粉价格", value: prices.flour ?? 1.8, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="flour">设置</button></div></div>
-    <div class="row"><span class="label">面包</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:bread", label: "面包价格", value: view.market.pricesVoucherPerUnit?.bread ?? 2, positive: true })}<b>${escapeHtml(unit)}/斤</b><button class="secondary" data-intermediate-price="bread">设置</button></div></div>
-    <div class="row"><span class="label">木材</span><div class="business-inline-input">${stagedInput(view, { key: "intermediate:wood", label: "木材价格", value: prices.wood ?? 15, positive: true })}<b>${escapeHtml(unit)}/单位</b><button class="secondary" data-intermediate-price="wood">设置</button></div></div>
-    <div class="subtle">均为批发价，商店零售另加价。</div>
+    ${priceRow("面粉", "flour", "斤")}
+    ${priceRow("面包", "bread", "斤")}
+    ${priceRow("木材", "wood", "单位")}
+    <div class="site-actions">${jump}</div>
+    <div class="subtle">均为批发价，商店零售另加价。面粉、面包、木材的售价在批发市场面板里设置。</div>
   </div></section>`;
 }
 

@@ -6,6 +6,7 @@ import { isIndustryType } from "../content/buildings.js";
 import { villaCapacityOf } from "../systems/villas.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 import { renderShopPricing } from "./panel-shop-pricing.js";
+import { renderOutsideTown } from "./panel-outside-town.js";
 
 // 商业街能开的店：综合商店与服务类（无宿主建筑，或宿主为商业街），排除旧别名。新增服务店自动出现在按钮里。
 const COMMERCIAL_STREET_SHOP_TYPES = Object.values(CONTENT.rules.shopTypes || {})
@@ -260,6 +261,8 @@ export function renderSite(view) {
   let title = "小镇一隅";
   let body = "";
   let actions = "";
+  // 外贸房等自带多张卡片的页面不再套外层 cardlet。
+  let stacked = false;
 
   if (site === "field") {
     const farmers = view.labor.rows.find(row => row.roleId === "farmers");
@@ -299,20 +302,28 @@ export function renderSite(view) {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     body = `${bankManagementMarkup(view, true)}${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="policy">查看货币改革政策</button>`;
+  } else if (building?.typeId === "foreign_trade_house") {
+    title = `${building.name} · ${humanizePlotLabel(view, building)}`;
+    body = `${buildingStaffingMarkup(view, building)}${renderOutsideTown(view)}${developmentMarkup(view, building, development)}`;
+    stacked = true;
   } else if (building?.typeId === "wholesale_market") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const market = view.wholesaleMarket || { inventory: {}, pricesVoucherPerUnit: {}, purchasePricesVoucherPerUnit: {}, dailyTownAllocation: {}, cashflow: null };
     const trends = view.wholesaleTrends || {};
     const tradeableIds = wholesaleItemIds(CONTENT);
     const autoBandPercent = CONTENT.rules.priceAdjust?.wholesaleBandPercent ?? 30;
+    // 每种商品一张折叠卡：摘要行给出库存、售价、可售天数；做市控件（收购价、售价、自动调价、收储）展开即用。
     const marketRowsAll = tradeableIds.map(itemId => {
       const name = view.itemNames?.[itemId] || itemId;
       const itemUnit = view.itemUnits?.[itemId] || "斤";
       const moveKey = `wholesale-move:${itemId}`;
+      const stock = market.inventory?.[itemId] || 0;
+      const sellPrice = market.pricesVoucherPerUnit?.[itemId] ?? 1;
       // 自动调价只对批发市场做市的商品存在（见 wholesaleSummary 的 autoPricing 视图）；没有该行则不显示开关。
       const autoRow = market.autoPricing?.[itemId];
       const autoPriceRow = autoRow ? `<div class="row"><span class="label">自动调价</span><div class="setting-input"><button class="secondary" aria-pressed="${autoRow.enabled ? "true" : "false"}" data-wholesale-autoprice="${escapeHtml(itemId)}" data-next="${autoRow.enabled ? "false" : "true"}">${autoRow.enabled ? "自动调价：开" : "自动调价：关"}</button>${autoRow.enabled ? `<span class="subtle">锚定价 ${number(autoRow.anchorVoucherPerUnit, 3)}，浮动 ±${number(autoBandPercent)}%${autoRow.reason ? ` · ${escapeHtml(autoRow.reason)}` : ""}</span>` : ""}</div></div>` : "";
       const moveShown = view.numericDrafts?.[moveKey]?.value ?? "";
+      const allocationDraft = market.dailyTownAllocation?.[itemId] || 0;
       const purchasePrice = market.purchasePricesVoucherPerUnit?.[itemId] ?? 0;
       const purchaseIndex = market.purchasePriceIndex?.[itemId] ?? 1;
       const feedbackText = purchaseIndex >= 0.999 ? "库存低位，收购价满额" : `库存偏高，收购价按反馈系数 ${number(purchaseIndex, 2)} 打折`;
@@ -328,21 +339,25 @@ export function renderSite(view) {
         const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - (v - min) / (max - min) * (h - 4) - 2).toFixed(1)}`).join(" ");
         return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-label="${escapeHtml(label)}走势"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
       };
-      return `<div class="cardlet"><div class="row"><span class="label">${escapeHtml(name)}库存</span><strong class="value">${number(market.inventory?.[itemId] || 0, 2)}${escapeHtml(itemUnit)} · ${escapeHtml(stockDaysText)}</strong></div>
+      const brief = `库存${number(stock, 2)}${escapeHtml(itemUnit)} · 售${number(sellPrice, 3)}${escapeHtml(unit)}/${escapeHtml(itemUnit)} · ${escapeHtml(trend.stockDays == null ? "无销量" : `可售${number(trend.stockDays, 1)}天`)}`;
+      return `<details class="detail-block wholesale-item" data-wholesale-item="${escapeHtml(itemId)}" data-detail-key="wholesale:${escapeHtml(itemId)}"><summary><span class="wholesale-name">${escapeHtml(name)}</span><span class="wholesale-brief">${brief}</span></summary><div class="detail-body">
+        <div class="row"><span class="label">库存 / 可售</span><strong class="value">${number(stock, 2)}${escapeHtml(itemUnit)} · ${escapeHtml(stockDaysText)}</strong></div>
         <div class="row"><span class="label">7日均售 / 镇库存</span><strong class="value">${number(trend.avgSoldJin || 0, 2)} / ${number(trend.townStockJin || 0, 2)}${escapeHtml(itemUnit)}</strong></div>
         <div class="trend-pair">${trendSpark(trend.inventory, "库存")}${trendSpark(trend.price, "批发价")}</div>
         <div class="row"><span class="label">收购价（向公司/民营）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-buy:${itemId}`, kind: "wholesale-purchase-price", target: itemId, value: market.purchasePriceReferenceVoucherPerUnit?.[itemId] ?? purchasePrice, label: `${name}收购价基准`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
         <div class="row"><span class="label">当前实际收购价</span><strong class="value">${number(purchasePrice, 3)} <span class="subtle">${escapeHtml(feedbackText)}</span></strong></div>
-        <div class="row"><span class="label">售价（卖给综合商店）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-price:${itemId}`, kind: "wholesale-price", target: itemId, value: market.pricesVoucherPerUnit?.[itemId] ?? 1, label: `${name}售价`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
+        <div class="row"><span class="label">售价（卖给综合商店）</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-price:${itemId}`, kind: "wholesale-price", target: itemId, value: sellPrice, label: `${name}售价`, minimum: 0.001, maximum: 1000000, positive: true, className: "setting-editor" })}<b>${escapeHtml(unit)}/${escapeHtml(itemUnit)}</b></div></div>
         ${autoPriceRow}
-        <div class="row"><span class="label">镇库每日固定调拨</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-allocation:${itemId}`, kind: "wholesale-allocation", target: itemId, value: market.dailyTownAllocation?.[itemId] || 0, label: `${name}每日调拨量`, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>${escapeHtml(itemUnit)}/日</b></div></div>
-        <div class="business-form-row"><label>单次调运<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(moveShown)}" aria-label="${escapeHtml(name)}单次调运量" data-draft-key="${escapeHtml(moveKey)}" data-draft-kind="stage" data-draft-label="${escapeHtml(name)}单次调运量" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-stockpile="${escapeHtml(itemId)}">收储入镇库</button><button class="secondary" data-wholesale-release="${escapeHtml(itemId)}">镇库投放</button></div></div></div>`;
+        <div class="business-form-row"><label>单次调运<input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" value="${escapeHtml(moveShown)}" aria-label="${escapeHtml(name)}单次调运量" data-draft-key="${escapeHtml(moveKey)}" data-draft-kind="stage" data-draft-label="${escapeHtml(name)}单次调运量" data-draft-minimum="0" data-draft-maximum="1000000000" data-draft-integer="false" data-draft-positive="true"></label><div class="settings-actions"><button class="secondary" data-wholesale-stockpile="${escapeHtml(itemId)}">收储入镇库</button><button class="secondary" data-wholesale-release="${escapeHtml(itemId)}">镇库投放</button></div></div>
+        <details class="detail-block" data-detail-key="wholesale-allocation:${escapeHtml(itemId)}"><summary>镇库每日固定调拨（${number(allocationDraft)}${escapeHtml(itemUnit)}/日）</summary><div class="detail-body"><div class="row"><span class="label">镇库每日固定调拨</span><div class="setting-input">${renderNumericInput(view, { key: `wholesale-allocation:${itemId}`, kind: "wholesale-allocation", target: itemId, value: allocationDraft, label: `${name}每日调拨量`, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>${escapeHtml(itemUnit)}/日</b></div></div></div></details>
+      </div></details>`;
     }).join("");
-    const marketRows = marketRowsAll;
     const cumulative = (market.cashflow || {}).cumulative || {};
-    const cashCard = `<div class="cardlet"><div class="row"><span class="label">累计销售 / 累计收购</span><strong class="value">${number(cumulative.salesVoucherUnits || 0, 0)} / ${number(cumulative.purchaseVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
-      <div class="subtle">收付款都走镇库；库存越多收购价自动越低。</div></div>`;
-    body = `<div class="status-strip"><span class="status-light working"></span><strong>镇营批发市场 · 做市商</strong><span>${number(building.level)}级</span></div><div class="subtle">各方产品汇入这里，商店和生产者从这里进货；小麦由镇库直管。</div>${buildingStaffingMarkup(view, building)}${cashCard}${marketRows}${developmentMarkup(view, building, development)}`;
+    // 汇总卡：做市品种数、累计收付款，以及全部商品卡的展开/收起（点击逻辑在 app.js 的 click 处理里）。
+    const cashCard = `<div class="cardlet wholesale-summary"><div class="row"><span class="label">做市商品</span><strong class="value">${number(tradeableIds.length)}种 · 累计销售 / 累计收购 ${number(cumulative.salesVoucherUnits || 0, 0)} / ${number(cumulative.purchaseVoucherUnits || 0, 0)}${escapeHtml(unit)}</strong></div>
+      <div class="settings-actions"><button class="secondary" data-wholesale-toggle-all="1">全部展开/收起</button></div>
+      <div class="subtle">收付款都走镇库；库存越多收购价自动越低。展开商品卡可改收购价、售价、自动调价，并在卡内收储或投放。</div></div>`;
+    body = `<div class="status-strip"><span class="status-light working"></span><strong>镇营批发市场 · 做市商</strong><span>${number(building.level)}级</span></div><div class="subtle">各方产品汇入这里，商店和生产者从这里进货；小麦由镇库直管。</div>${buildingStaffingMarkup(view, building)}${cashCard}${marketRowsAll}${developmentMarkup(view, building, development)}`;
   } else if (building?.typeId === "commercial_street" || building?.typeId === "trade_center") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
     const isTradeCenter = building.typeId === "trade_center";
@@ -461,7 +476,8 @@ export function renderSite(view) {
   }
   // mod 给这种建筑追加的卡片（mod.js 的 ui.buildingSections）。
   const modSections = building ? MODS.map(mod => mod.ui?.buildingSections?.[building.typeId]?.(view, building, view.mods?.[mod.id]) || "").join("") : "";
-  return `<button class="site-back" data-back>‹ 返回镇图</button><h2>${escapeHtml(title)}</h2><div class="cardlet">${body}${modSections}${actions ? `<div class="site-actions">${actions}</div>` : ""}</div>`;
+  const page = `${body}${modSections}${actions ? `<div class="site-actions">${actions}</div>` : ""}`;
+  return `<button class="site-back" data-back>‹ 返回镇图</button><h2>${escapeHtml(title)}</h2>${stacked ? `<div class="site-stack">${page}</div>` : `<div class="cardlet">${page}</div>`}`;
 }
 
 // 贸易中心的进出口关税：两个税率输入（交镇库，只对贸易行征收）与本年 / 累计收入。

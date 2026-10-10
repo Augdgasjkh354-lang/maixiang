@@ -252,7 +252,10 @@ export function selectDashboard(state, content, selection) {
   // 外镇选择：界面传入 selection.outsideTownId；未知或缺省时用默认外镇。
   const outsideTownIds = Object.keys(content.outsideTowns || {});
   const outsideTownId = outsideTownIds.includes(selection?.outsideTownId) ? selection.outsideTownId : DEFAULT_OUTSIDE_TOWN_ID;
-  const outsideTownViews = needBusiness ? outsideTownIds.map(id => selectOutsideTownView(state, content, id)).filter(Boolean) : [];
+  // 外贸数据：经营面板，或选中了外贸房的地方详情（外贸功能搬进了外贸房面板，docs/TRADE.md）。
+  const selectedForeignHouse = needSite && (state.buildings || []).some(building => building.typeId === "foreign_trade_house" && selection?.site === `building:${building.id}`);
+  const needOutsideTrade = needBusiness || selectedForeignHouse;
+  const outsideTownViews = needOutsideTrade ? outsideTownIds.map(id => selectOutsideTownView(state, content, id)).filter(Boolean) : [];
   const buildings = state.buildings.map(function (building) {
     const definition = content.buildings[building.typeId];
     const ownership = building.ownership || { townLevels: building.level || 1, privateLevels: 0, listedLevels: 0 };
@@ -589,11 +592,11 @@ export function selectDashboard(state, content, selection) {
     // 各 mod 的只读视图（mod.js 的 select）。
     mods: selectModViews(state, content, MODS),
     // 外镇：outsideTowns 是全部外镇的视图（界面切换用）；outsideTown / tradeAgreements 是当前选中的那一个。
-    outsideTowns: needBusiness ? outsideTownViews : null,
+    outsideTowns: needOutsideTrade ? outsideTownViews : null,
     outsideTownId: outsideTownId,
-    outsideTown: needBusiness ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
-    tradeAgreements: needBusiness ? selectTradeAgreementView(state, content, outsideTownId) : null,
-    logistics: needBusiness ? selectLogisticsView(state, content) : null,
+    outsideTown: needOutsideTrade ? outsideTownViews.find(row => row.id === outsideTownId) || null : null,
+    tradeAgreements: needOutsideTrade ? selectTradeAgreementView(state, content, outsideTownId) : null,
+    logistics: needOutsideTrade ? selectLogisticsView(state, content) : null,
     // 贸易行（只读）：每家贸易行今日与近 7 日的买卖、利润、运费、小麦与运力份额。
     tradeHouses: needBusiness || needSite ? selectTradeHouseView(state, content) : null,
     // 镇营岗位实际日薪 = 岗位基础日薪 × 所属类别系数；界面只读展示，调节入口在政策页。
