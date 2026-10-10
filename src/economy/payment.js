@@ -1,5 +1,5 @@
 import { issueVouchersFromWheat, transferVouchers, voucherBalance } from "./currency.js";
-import { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot } from "./accounts.js";
+import { householdIdOf, isHouseholdOwner, parseOwner } from "./accounts.js";
 import { makeTransactionId } from "./ledger.js";
 import { voucherUnitsForWheatUnits } from "./money-units.js";
 import { householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdList, hasHouseholds, isActiveHousehold, withDeferredHouseholdSync } from "../systems/households.js";
@@ -69,10 +69,6 @@ function autoExchangeForPayment(state, owner, voucherNeedUnits, content, options
   if (exact.wheatUnits <= 0) return exact;
   const issued = issueVouchersFromWheat(state, owner, exact.wheatUnits, content, "按银行开放规则为支付自动换券");
   return issued.ok ? { wheatUnits: issued.wheatUnits, voucherUnits: issued.voucherUnits } : { wheatUnits: 0, voucherUnits: 0 };
-}
-
-export function paymentWheatBalanceUnits(state, owner) {
-  return readSlot(paymentWheatSlot(state, owner));
 }
 
 // 银行取款的镇库托底（银行负债，见 economy/deposits.js）：银行现金不够时，镇库粮券可以垫付缺口。

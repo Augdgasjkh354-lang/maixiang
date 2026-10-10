@@ -22,26 +22,7 @@ export function clearOpeningVouchers(state) {
  */
 export function legacyVoucherState(options = {}) {
   const state = clearOpeningVouchers(simulation.createInitialState(options));
-  state.monetaryReform = {
-    stage: "voucher",
-    targetVoucherBps: 10000,
-    residentExchangeEnabled: true,
-    legacyBankAccess: true,
-    started: null,
-    completed: { legacy: true },
-    paymentHistory: [],
-    voucherShortfallByKey: {}
-  };
-  return state;
-}
-
-/**
- * 旧制度（小麦结算）的开局：没有开局粮券，货币阶段为 wheat。
- * 只给要保留"小麦阶段行为"覆盖的测试用（例如旧档换算里的小麦补偿）。
- */
-export function wheatEraState(options = {}) {
-  const state = clearOpeningVouchers(simulation.createInitialState(options));
-  state.monetaryReform = { stage: "wheat", legacyBankAccess: false, started: null, completed: null };
+  state.monetaryReform = { legacyBankAccess: true };
   return state;
 }
 
