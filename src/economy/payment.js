@@ -90,23 +90,40 @@ export function paymentWheatBalanceUnits(state, owner) {
   return readSlot(paymentWheatSlot(state, owner));
 }
 
-// 存款可随时取回付款：住户存款与银行现金的较小者（银行现金不够时只能取到现金为止）。
+// 银行取款的镇库托底（银行负债，见 economy/deposits.js）：银行现金不够时，镇库粮券可以垫付缺口。
+// 镇库无存款、不参与换券以外的付款，所以它的可垫付额就是镇库粮券余额，与 maximumPayableValueUnits(state, "town") 同口径。
+function townAdvanceCapacityUnits(state) {
+  return Math.max(0, voucherBalance(state, "town"));
+}
+
+// 存款可随时取回付款：住户存款与“银行现金 + 镇库可垫付额”的较小者。
+// 银行现金不够时由镇库垫付（记为银行欠镇库的债），所以只有镇库也没钱时才取不出来。
 // 只有家庭（以及居民汇总，即全体家庭之和）有存款；其他经济主体返回 0。O(户数)。
 export function depositWithdrawableUnits(state, owner) {
   const bank = state.bank;
-  const cash = Math.max(0, bank?.cashVoucherUnits || 0);
-  if (!bank || cash <= 0) return 0;
+  if (!bank) return 0;
+  const liquidity = Math.max(0, bank.cashVoucherUnits || 0) + townAdvanceCapacityUnits(state);
+  if (liquidity <= 0) return 0;
   const kind = parseOwner(owner).kind;
-  if (kind === "household") return Math.min(cash, Math.max(0, bank.deposits?.[householdIdOf(owner)] || 0));
+  if (kind === "household") return Math.min(liquidity, Math.max(0, bank.deposits?.[householdIdOf(owner)] || 0));
   if (owner === "residents" && hasHouseholds(state)) {
     let deposits = 0;
     for (const [householdId, units] of Object.entries(bank.deposits || {})) {
       const household = state.households?.byId?.[householdId];
       if (household && isActiveHousehold(household)) deposits += Math.max(0, units || 0);
     }
-    return Math.min(cash, deposits);
+    return Math.min(liquidity, deposits);
   }
   return 0;
+}
+
+// 换券用的镇库粮券池。镇库粮券同时是存款取回的垫付来源；付款顺序是
+// 手头粮券 → 存款取回（含镇库垫付）→ 换券，所以换券只发生在存款全部取回之后，此时垫付额 = 可取回额 − 银行现金。
+// withdrawableUnits 必须是 depositWithdrawableUnits 的结果，保证报价与结算用同一口径。
+function exchangeVoucherPoolUnits(state, owner, withdrawableUnits) {
+  if (owner === "town") return 0;
+  const advance = Math.max(0, withdrawableUnits - Math.max(0, state.bank?.cashVoucherUnits || 0));
+  return Math.max(0, townAdvanceCapacityUnits(state) - advance);
 }
 
 // 付款可动用的粮券 = 手头粮券 + 可取回的存款。所有"能不能付、最多付多少"的判断都用它。
@@ -115,7 +132,8 @@ export function spendableVoucherUnits(state, owner) {
 }
 
 // 现金不够时先从存款取回（住户存款在银行台账里，取回后粮券回到住户手里再付款）。
-// 调用顺序：手头粮券 → 存款取回 → 换券（小麦）。居民汇总从存款最多的家庭开始取。
+// 调用顺序：手头粮券 → 存款取回（银行现金不足部分由镇库垫付）→ 换券（小麦）。居民汇总从存款最多的家庭开始取。
+// 取款总额不超过 depositWithdrawableUnits，所以镇库垫付一定够；垫付总额 = 取款总额 − 银行原有现金。
 function withdrawDepositsForPayment(state, owner, needUnits, content) {
   let left = Math.min(Math.max(0, needUnits), depositWithdrawableUnits(state, owner));
   if (left <= 0) return;
@@ -133,7 +151,7 @@ function withdrawDepositsForPayment(state, owner, needUnits, content) {
       .sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     for (const [householdId, units] of rows) {
       if (left <= 0) break;
-      const take = Math.min(left, units, state.bank.cashVoucherUnits || 0);
+      const take = Math.min(left, units);
       if (take <= 0) continue;
       const result = withdrawFromBank(state, householdId, take, content);
       if (!result.ok) throw new Error("存款取款预检后失败：" + result.reason);
@@ -226,14 +244,15 @@ export function createPaymentCapabilityContext(state, owner, content, options = 
   const actualWheatUnits = paymentWheatBalanceUnits(state, owner);
   const wheatLimitUnits = Math.min(actualWheatUnits,
     Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheatUnits);
+  const withdrawable = depositWithdrawableUnits(state, owner);
   return {
     content,
     stage: reform.stage,
-    voucherUnits: spendableVoucherUnits(state, owner),
+    voucherUnits: Math.max(0, voucherBalance(state, owner)) + withdrawable,
     actualWheatUnits,
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, owner, content, options),
-    exchangeVoucherPoolUnits: owner === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
+    exchangeVoucherPoolUnits: exchangeVoucherPoolUnits(state, owner, withdrawable)
   };
 }
 
@@ -356,12 +375,13 @@ export function quoteMonetaryPayment(state, from, dueInput, content, options = {
   const actualWheatUnits = paymentWheatBalanceUnits(state, from);
   const wheatLimitUnits = Math.min(actualWheatUnits,
     Number.isSafeInteger(options.maxWheatUnits) ? Math.max(0, options.maxWheatUnits) : actualWheatUnits);
+  const withdrawable = depositWithdrawableUnits(state, from);
   return quoteMonetaryPaymentFromCapability(due, {
     stage: reform.stage,
-    voucherUnits: spendableVoucherUnits(state, from),
+    voucherUnits: Math.max(0, voucherBalance(state, from)) + withdrawable,
     wheatLimitUnits,
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, from, content, options),
-    exchangeVoucherPoolUnits: from === "town" ? 0 : Math.max(0, voucherBalance(state, "town"))
+    exchangeVoucherPoolUnits: exchangeVoucherPoolUnits(state, from, withdrawable)
   }, content);
 }
 

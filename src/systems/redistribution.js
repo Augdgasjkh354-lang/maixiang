@@ -7,12 +7,12 @@
 //   付款顺序由支付层决定：粮券 → 存款 → 小麦；小麦不动口粮储备；付不起的当月免征，不卖股、不卖楼。
 // - 遗产税：年终人口结算时，有成年人去世的家庭按去世份额征收，超过第一档门槛 × 去世人数的部分按税率计。
 // - 家产归公：家庭人口归零（整户失效）时，粮券、存款、库存、股票、民营建筑全部归镇库 / 镇营，不受税率影响。
-//   存款要银行现金够才能取回，取不回的部分留在存款台账，由每日 escheat 步骤再试。
+//   存款取回 = 银行现金不够时镇库垫付（银行欠镇库），取不回的部分留在存款台账，由每日 escheat 步骤再试。
 //
 // 富人税与遗产税的付款都经 settleMonetaryPayment，镇库是收款方；家产归公走 transferVouchers / 镇库库存直接入账。
 
 import { currencyScale, transferVouchers } from "../economy/currency.js";
-import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
+import { currentPaymentComposition, depositWithdrawableUnits, settleMonetaryPayment } from "../economy/payment.js";
 import { withdrawFromBank } from "../economy/deposits.js";
 import { addTownCostBasis, quoteTownCostRemoval } from "../economy/business.js";
 import { recordEvent, recordLedger, makeTransactionId } from "../economy/ledger.js";
@@ -279,9 +279,9 @@ function escheatHousehold(state, household, content) {
   const reason = `${household.name}整户失效，家产归镇库`;
   const totals = { voucherUnits: 0, inventoryValueUnits: 0, shareCount: 0, buildingCount: 0, villaCount: 0 };
 
-  // 1. 存款：银行现金够才能取回，取不回的留在存款台账，之后每日再试。
+  // 1. 存款：银行现金不够时镇库可垫付（记为银行欠镇库），两者都不够才取不回；取不回的留在存款台账，之后每日再试。
   const deposit = Math.max(0, state.bank?.deposits?.[id] || 0);
-  const takeable = Math.min(deposit, Math.max(0, state.bank?.cashVoucherUnits || 0));
+  const takeable = Math.min(deposit, depositWithdrawableUnits(state, owner));
   // 只剩取不回的存款：这一次什么也动不了，不记事件，等银行有现金再办。
   const movable = takeable > 0 || (household.voucherUnits || 0) > 0 || ownedPrivateBuildings(state, id).length > 0
     || Object.values(household.inventory || {}).some(units => units > 0)
