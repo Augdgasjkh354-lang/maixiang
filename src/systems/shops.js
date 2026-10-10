@@ -69,7 +69,7 @@ function ensureShopBooks(shop, content = null) {
   shop.settlement ||= { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 };
   shop.retainedEarningsVoucherUnits ??= 0;
   shop.cashVoucherUnits ??= 0;
-  shop.cashWheatUnits ??= 0;
+  delete shop.cashWheatUnits;
   shop.history ||= [];
   shop.plan ||= { lastAdjustedSerial: -1 };
   shop.staffing ||= { clerkHiredSerials: [] };
@@ -519,7 +519,6 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
     serviceId: definition.kind === "service" ? definition.serviceId : null,
     ownerHouseholdId: household.id,
     cashVoucherUnits: 0,
-    cashWheatUnits: 0,
     inventory: emptyShopInventory(content),
     inventoryCostVoucherUnits: {},
     status: "open",
@@ -531,7 +530,7 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
     liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 },
     settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
     retainedEarningsVoucherUnits: 0,
-    initialCapital: { valueUnits: startupUnits, voucherValueUnits: 0, wheatValueUnits: 0 }
+    initialCapital: { valueUnits: startupUnits, voucherValueUnits: 0 }
   };
   state.shops[shopId] = shop;
   const payment = settleMonetaryPayment(state, `household:${household.id}`, `shop:${shopId}`, currentPaymentComposition(state, startupUnits), content,
@@ -539,19 +538,17 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
     { requireFull: true, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30) });
   if (!payment.ok) { delete state.shops[shopId]; return payment; }
   shop.initialCapital.voucherValueUnits = payment.voucherPaidValueUnits || 0;
-  shop.initialCapital.wheatValueUnits = payment.wheatPaidValueUnits || 0;
   const assignment = setHouseholdJobCount(state, household.id, `shop:${shopId}:merchant`, 1, content);
   if (!assignment.ok) {
     const refund = settleMonetaryPayment(state, `shop:${shopId}`, `household:${household.id}`, {
-      valueUnits: startupUnits, voucherValueUnits: payment.voucherPaidValueUnits || 0, wheatValueUnits: payment.wheatPaidValueUnits || 0
+      valueUnits: startupUnits, voucherValueUnits: payment.voucherPaidValueUnits || 0
     }, content, "shop_capital_refund", "开店失败退回资金", { requireFull: true });
     // 退款失败：镇库先行垫付给家庭。店铺即将删除，其负债记录会一并消失，
     // 故不在店上记账，直接由镇库承担并记为家庭对镇库的应收（持久化，不随店删除）。
     if (!refund.ok) {
       const due = {
         valueUnits: startupUnits,
-        voucherValueUnits: payment.voucherPaidValueUnits || 0,
-        wheatValueUnits: payment.wheatPaidValueUnits || 0
+        voucherValueUnits: payment.voucherPaidValueUnits || 0
       };
       const advance = settleMonetaryPayment(state, "town", `household:${household.id}`, due, content,
         "shop_capital_refund_advance", `${shop.name}开店失败镇库垫付启动资金`,
@@ -600,7 +597,6 @@ function openTownShopRecord(state, building, typeId, definition, content) {
     serviceId: null,
     ownerHouseholdId: null,
     cashVoucherUnits: 0,
-    cashWheatUnits: 0,
     inventory: emptyShopInventory(content),
     inventoryCostVoucherUnits: {},
     status: "open",
@@ -612,7 +608,7 @@ function openTownShopRecord(state, building, typeId, definition, content) {
     liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 },
     settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
     retainedEarningsVoucherUnits: 0,
-    initialCapital: { valueUnits: 0, voucherValueUnits: 0, wheatValueUnits: 0 }
+    initialCapital: { valueUnits: 0, voucherValueUnits: 0 }
   };
   state.shops[shopId] = shop;
   ensureShopBooks(shop, content);
@@ -1353,13 +1349,13 @@ export function openCollectiveShop(state, building, typeId, content) {
   const shop = {
     id: shopId, name: `${building.name || content.buildings[building.typeId]?.name || ""}集市`, buildingId: building.id, typeId,
     collective: true, primaryItemId: null, itemId: null, itemIds: [], serviceId: null, ownerHouseholdId: null,
-    cashVoucherUnits: 0, cashWheatUnits: 0, inventory: emptyShopInventory(content), inventoryCostVoucherUnits: {},
+    cashVoucherUnits: 0, inventory: emptyShopInventory(content), inventoryCostVoucherUnits: {},
     status: "open", statusReason: "准备营业", openedYear: state.year, openedDay: state.day + 1, badDays: 0,
     accounts: { day: blankShopPeriod(), year: blankShopPeriod(), cumulative: blankShopPeriod() },
     liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 },
     settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
     retainedEarningsVoucherUnits: 0, townAdvanceVoucherUnits: 0,
-    initialCapital: { valueUnits: 0, voucherValueUnits: 0, wheatValueUnits: 0 }
+    initialCapital: { valueUnits: 0, voucherValueUnits: 0 }
   };
   state.shops[shopId] = shop;
   ensureShopBooks(shop, content);
@@ -1731,11 +1727,10 @@ function finalizeShopLiquidation(state, shop, content) {
     shop.inventory[itemId] = 0;
     shop.inventoryCostVoucherUnits[itemId] = 0;
   }
-  const wheatValue = voucherUnitsForWheatUnits(shop.cashWheatUnits || 0, content, "floor");
   const voucherValue = shop.cashVoucherUnits || 0;
-  if (wheatValue + voucherValue > 0) {
+  if (voucherValue > 0) {
     const returned = settleMonetaryPayment(state, `shop:${shop.id}`, `household:${owner.id}`,
-      { valueUnits: wheatValue + voucherValue, wheatValueUnits: wheatValue, voucherValueUnits: voucherValue }, content,
+      currentPaymentComposition(state, voucherValue), content,
       "shop_close_distribution", `${shop.name}清算完成后返还剩余资金`,
       { requireFull: true });
     if (!returned.ok) return false;
@@ -1866,7 +1861,6 @@ function normalizeShopForSummary(shop, content) {
     settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0, ...(shop.settlement || {}) },
     retainedEarningsVoucherUnits: shop.retainedEarningsVoucherUnits || 0,
     cashVoucherUnits: shop.cashVoucherUnits || 0,
-    cashWheatUnits: shop.cashWheatUnits || 0,
     history: shop.history || [],
     plan: shop.plan || { lastAdjustedSerial: -1 }
   };
@@ -1928,7 +1922,7 @@ export function shopSummaries(state, content) {
       ownerHouseholdId: shop.ownerHouseholdId, ownerName: shop.town ? "镇库" : (state.households?.byId?.[shop.ownerHouseholdId]?.name || shop.ownerHouseholdId), merchantHouseholdId: shop.ownerHouseholdId, merchantOnDuty: shopMerchantOnDuty(state, shop),
       merchants: shopMerchantCount(state, shop), maxMerchants: shopMaxMerchants(shop, content),
       clerks: shopClerkCount(state, shop), maxClerks: shopClerkLimit(shop, content), occupiesStreet: shopOccupiesStreet(shop),
-      cashVoucher: shop.cashVoucherUnits / scale, cashWheatJin: (shop.cashWheatUnits || 0) / invScale,
+      cashVoucher: shop.cashVoucherUnits / scale,
       // 镇营店没有自己的钱（收入在镇库），可支付资金记 0。
       cashValue: shop.town ? 0 : maximumPayableValueUnits(state, `shop:${shop.id}`, content) / scale, inventory: stockUnits / invScale,
       capacityJin: shopSalesCapacityUnits(state, shop, content) / invScale,

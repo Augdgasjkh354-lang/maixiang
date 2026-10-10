@@ -1,11 +1,5 @@
 import { currencyLedgerBatch, makeTransactionId, recordLedger } from "./ledger.js";
-import { householdIdOf, isHouseholdOwner, parseOwner, paymentWheatSlot, readSlot, voucherSlot } from "./accounts.js";
-
-// 公司与店铺持有独立的现金小麦，可在银行与粮券互换。
-function holdsCashWheat(owner) {
-  const kind = parseOwner(owner).kind;
-  return kind === "company" || kind === "shop";
-}
+import { householdIdOf, isHouseholdOwner, parseOwner, readSlot, voucherSlot } from "./accounts.js";
 import { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } from "./business.js";
 import {
   hasHouseholds, householdList, residentVoucherUnits, syncResidentAggregates, applyResidentAggregateDelta,
@@ -144,9 +138,7 @@ function takeHouseholdWheatForExchange(state, household, wheatUnits, content, re
 
 function currencyAccessCheck(state, owner) {
   void owner;
-  const reform = state.monetaryReform || { stage: "wheat", legacyBankAccess: false };
-  const bank = Boolean(reform.legacyBankAccess || (state.buildings || []).some(row => row.typeId === "bank"));
-  if (reform.stage === "wheat") return { ok: false, reason: "货币改革尚未启动" };
+  const bank = Boolean(state.monetaryReform?.legacyBankAccess || (state.buildings || []).some(row => row.typeId === "bank"));
   if (!bank) return { ok: false, reason: "需要银行才能发行或换券" };
   return { ok: true };
 }
@@ -155,6 +147,12 @@ export function issueTownVouchers(state, voucherUnits, content, reason = "镇库
   if (!Number.isSafeInteger(voucherUnits) || voucherUnits <= 0) return { ok: false, reason: "发行数量必须大于0" };
   const access = currencyAccessCheck(state, "town");
   if (!access.ok) return access;
+  return mintTownVouchers(state, voucherUnits, content, reason);
+}
+
+// 不经银行闸门的发行：只用于“已有等值小麦入库”的内部结算（外贸收来的小麦由镇库券池买下，池子不够时补发缺口）。
+export function mintTownVouchers(state, voucherUnits, content, reason = "镇库印制粮券") {
+  if (!Number.isSafeInteger(voucherUnits) || voucherUnits <= 0) return { ok: false, reason: "发行数量必须大于0" };
   const currency = ensureCurrencyState(state);
   const nextTown = voucherBalance(state, "town") + voucherUnits;
   const nextIssued = currency.issuedUnits + voucherUnits;
@@ -218,11 +216,6 @@ export function issueVouchersFromWheat(state, owner, wheatUnits, content, reason
     household.voucherUnits = (household.voucherUnits || 0) + voucherUnits;
     householdRows = [{ householdId: household.id, wheatUnits, units: voucherUnits }];
     syncResidentAggregates(state, content);
-  } else if (holdsCashWheat(owner)) {
-    const slot = paymentWheatSlot(state, owner);
-    if (readSlot(slot) < wheatUnits) return { ok: false, reason: "可用小麦不足" };
-    slot.holder[slot.key] -= wheatUnits;
-    setVoucherBalance(state, owner, voucherBalance(state, owner) + voucherUnits, content);
   } else {
     return { ok: false, reason: "该账户不能通过银行换券" };
   }
@@ -248,7 +241,7 @@ export function issueVouchersFromWheat(state, owner, wheatUnits, content, reason
 // 只有镇库自己兑（owner === "town"）才是注销，发行量减少。
 export function redeemVouchersForWheat(state, owner, voucherUnits, content, reason = "粮券兑回小麦") {
   if (!Number.isSafeInteger(voucherUnits) || voucherUnits <= 0) return { ok: false, reason: "兑换数量必须大于0" };
-  const supportedOwner = ["town", "residents", "household"].includes(parseOwner(owner).kind) || holdsCashWheat(owner);
+  const supportedOwner = ["town", "residents", "household"].includes(parseOwner(owner).kind);
   if (!supportedOwner) return { ok: false, reason: "该账户不能直接兑回小麦" };
   const currency = ensureCurrencyState(state);
   const wheatUnits = wheatUnitsForVoucherUnits(voucherUnits, content, "floor");
@@ -274,10 +267,6 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
     applyResidentAggregateDelta(state, content, -voucherUnits, "wheat", wheatUnits);
   } else if (owner === "town") {
     setVoucherBalance(state, owner, voucherBalance(state, owner) - voucherUnits, content);
-  } else if (holdsCashWheat(owner)) {
-    setVoucherBalance(state, owner, voucherBalance(state, owner) - voucherUnits, content);
-    const slot = paymentWheatSlot(state, owner);
-    slot.holder[slot.key] = readSlot(slot) + wheatUnits;
   }
   // 扣券成功后才扣镇库小麦（之前先扣麦，若扣券失败麦会凭空消失）。
   if (owner !== "town") {

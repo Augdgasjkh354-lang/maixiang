@@ -3,7 +3,7 @@ import { currentPaymentComposition, maximumPayableValueUnits, normalizePaymentOb
 import { makeTransactionId, recordLedger } from "../economy/ledger.js";
 import { syncResidentAggregates, householdList, isActiveHousehold, householdConvertibleWheatUnits } from "./households.js";
 
-// 社保基金：独立钱包（支付账户 "social"），粮券存 cashVoucherUnits、实物小麦存 cashWheatUnits。
+// 社保基金：独立钱包（支付账户 "social"），粮券存 cashVoucherUnits。
 // - 收缴：每人每天按人头缴费；雇主承担 employerSharePercent%（默认全额），其余由员工家庭自付（见 collectSocialContributions）。
 // - 发放：养老金、失业金、农民补贴（基金开启时）由基金支付；基金不足时镇库垫付，垫付额记入基金对国库的负债。
 // - 镇库注资同样记为负债；基金可主动还款给镇库。
@@ -24,7 +24,7 @@ export function ensureSocialSecurity(state) {
   ss.pensionPerElderJin ??= DEFAULT_SS_PENSION_JIN;
   ss.farmerSubsidyPerFarmerJin ??= DEFAULT_SS_FARMER_SUBSIDY_JIN;
   ss.cashVoucherUnits ??= 0;
-  ss.cashWheatUnits ??= 0;
+  delete ss.cashWheatUnits;
   ss.debtToTownUnits ??= 0;
   ss.totalInjectedUnits ??= 0;
   ss.totalAdvancedUnits ??= 0;
@@ -515,7 +515,6 @@ export function recordFundDividend(state, units) {
 export function selectSocialSecurityStats(state, content) {
   const ss = state.socialSecurity || {};
   const scale = currencyScale(content);
-  const wheatScale = content.precision.inventoryUnitsPerJin;
   const jin = value => (value || 0) / scale;
   const holdings = Object.values(state.companies || {})
     .filter(company => company.listing?.listed)
@@ -543,9 +542,8 @@ export function selectSocialSecurityStats(state, content) {
     dailyPerWorkerJin: ss.dailyPerWorkerJin ?? DEFAULT_SS_DAILY_JIN,
     pensionPerElderJin: ss.pensionPerElderJin ?? DEFAULT_SS_PENSION_JIN,
     farmerSubsidyPerFarmerJin: ss.farmerSubsidyPerFarmerJin ?? DEFAULT_SS_FARMER_SUBSIDY_JIN,
-    cashJin: jin(ss.cashVoucherUnits) + (ss.cashWheatUnits || 0) / wheatScale,
+    cashJin: jin(ss.cashVoucherUnits),
     voucherJin: jin(ss.cashVoucherUnits),
-    wheatJin: (ss.cashWheatUnits || 0) / wheatScale,
     debtJin: jin(ss.debtToTownUnits),
     stockValueJin: holdings.reduce((sum, row) => sum + row.valueJin, 0),
     holdings,

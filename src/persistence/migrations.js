@@ -9,6 +9,7 @@ import { createInitialState, ensureProjectAccessor } from "../core/state.js";
 import { syncShopEmployment } from "../systems/shops.js";
 import { syncResidentAggregates } from "../systems/households.js";
 import { convertSplitOwnership } from "../systems/ownership-migrate.js";
+import { convertResidualWheatCash } from "./wheat-cash-migrate.js";
 import {
   ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers
 } from "./save-compat.js";
@@ -36,18 +37,22 @@ export function migrateSave(raw, content) {
   if (stored > current) throw new Error("该存档来自更新版本，当前版本无法读取。");
   if (stored < MIN_SAVE_VERSION) throw new Error("旧版存档不兼容，请开始新游戏。");
 
+  // 小麦阶段（实物当货币）的旧档不再支持：粮券阶段的存档才读得进来。新版存档的 monetaryReform 只有 legacyBankAccess。
+  if (!raw.monetaryReform || typeof raw.monetaryReform !== "object" || raw.monetaryReform.stage === "wheat") {
+    throw new Error("该存档仍是小麦结算的旧版本，已不再支持，请开始新游戏。");
+  }
+
   const report = emptyLoadReport();
   // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
   const saved = applyRenames(cloneJson(raw), report, definitions.modSave?.renames || []);
   const base = createInitialState({ content: definitions });
-  // 货币制度以存档为准：新开局是粮券阶段，旧档可能是小麦阶段（没有该字段的更老存档当年也是小麦结算）。
-  // 底板只补存档没有的键，这里先把底板的阶段与时点换成存档的，避免新开局的粮券阶段盖掉旧档的小麦阶段。
-  const savedReform = saved.monetaryReform && typeof saved.monetaryReform === "object" && !Array.isArray(saved.monetaryReform) ? saved.monetaryReform : {};
-  base.monetaryReform = { stage: "wheat", legacyBankAccess: false, started: null, completed: null, ...savedReform };
   const entityMaps = new Set([...ENTITY_MAPS, ...(definitions.modSave?.entityMaps || [])]);
   const state = mergeOntoBase(cloneJson(base), saved, "", report, entityMaps);
   state.version = current;
   state.schemaVersion = current;
+  // 货币阶段已删除：旧的粮券阶段存档里的 stage/started/completed 丢掉，只留银行入口标记。
+  state.monetaryReform = { legacyBankAccess: Boolean(saved.monetaryReform?.legacyBankAccess) };
+  convertResidualWheatCash(state, definitions, report);
   sanitizeNumbers(state, report);
   rehydrate(state, definitions);
   // 旧存档里按等级拆开的建筑整栋换主人（docs/OWNERSHIP.md 旧存档换算）；必须在校验之前，整栋已是空操作。

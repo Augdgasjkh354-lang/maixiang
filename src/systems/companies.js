@@ -9,7 +9,7 @@ import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { recordFundDividend } from "./social-security.js";
 import { currencyScale, roundToShareTick, voucherBalance } from "../economy/currency.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
-import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, paymentWheatBalanceUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
+import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { addTownCostBasis, removeTownInventoryWithCost } from "../economy/business.js";
@@ -59,7 +59,7 @@ function ensureCompanyBooks(company) {
   company.householdShares ||= {};
   company.retainedEarningsVoucherUnits ||= 0;
   company.cashVoucherUnits ||= 0;
-  company.cashWheatUnits ||= 0;
+  delete company.cashWheatUnits;
   company.operatingDays ||= 0;
   company.lastDividendYear ||= 0;
   company.history ||= [];
@@ -180,9 +180,9 @@ export function createIndependentCompany(state, buildingId, options, content) {
   const company = ensureCompanyBooks({
     id, name, buildingId, typeId: building.typeId, listedLevels: levels,
     totalShares: 0, townShares: 0, residentShares: 0, householdShares: {},
-    cashVoucherUnits: 0, cashWheatUnits: 0, inventory, inventoryCostVoucherUnits,
+    cashVoucherUnits: 0, inventory, inventoryCostVoucherUnits,
     created: { year: state.year, day: Math.min(content.rules.daysPerYear, state.day + 1) },
-    initialInvestment: { cashVoucherUnits: cashUnits, cashValueUnits: cashUnits, cashVoucherPaidUnits: 0, cashWheatValueUnits: 0, materials: [] },
+    initialInvestment: { cashVoucherUnits: cashUnits, cashValueUnits: cashUnits, cashVoucherPaidUnits: 0, materials: [] },
     retainedEarningsVoucherUnits: 0, operatingDays: 0, lastDividendYear: 0, status: "待开工",
     listing: { listed: false, ticker: null, listedAt: null },
     settings: { wagePerWorkerDay: defaultWage, targetWorkers: Math.min(levels * (definition.jobs?.[0]?.slots || 0), levels * (definition.jobs?.[0]?.slots || 0)), salePricesVoucherPerUnit: {} }
@@ -194,7 +194,6 @@ export function createIndependentCompany(state, buildingId, options, content) {
       "enterprise_capital_injection", `镇库向${company.name}投入营运资金`, { requireFull: true });
     if (!transfer.ok) throw new Error("企业营运资金预检后转账失败：" + (transfer.reason || "未知错误"));
     company.initialInvestment.cashVoucherPaidUnits = transfer.voucherPaidValueUnits || 0;
-    company.initialInvestment.cashWheatValueUnits = transfer.wheatPaidValueUnits || 0;
   }
   for (const row of materialRows) {
     const transferredCostBasis = removeTownInventoryWithCost(state, row.itemId, row.units, content).costWheatUnits;
@@ -421,7 +420,6 @@ export function setShareOffer(state, companyId, offeredShares, priceVoucherPerSh
   const company = state.companies?.[companyId];
   if (!company) return { ok: false, reason: "企业不存在" };
   if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
-  if (state.monetaryReform?.stage !== "voucher") return { ok: false, reason: "股票交易须在货币改革完成后使用粮券" };
   if (!(state.buildings || []).some(row => row.typeId === "stock_exchange") && !state.stockExchange?.legacyAccess) return { ok: false, reason: "尚未建成交易所" };
   if (!offerSeller(state, company)) return { ok: false, reason: "发行池卖方不明，无法挂牌出售" };
   const shares = Math.floor(Number(offeredShares) || 0);
@@ -468,7 +466,6 @@ export function previewShareSubscription(state, companyId, content) {
   const company = state.companies?.[companyId];
   if (!company) return { available: false, reason: "企业不存在" };
   if (!company.listing?.listed) return { available: false, reason: "公司尚未上市" };
-  if (state.monetaryReform?.stage !== "voucher") return { available: false, reason: "股票认购须在货币改革完成后使用粮券" };
   if (!(state.buildings || []).some(row => row.typeId === "stock_exchange") && !state.stockExchange?.legacyAccess) return { available: false, reason: "尚未建成交易所" };
   const scale = currencyScale(content);
   const shareSale = company.shareSale || {};
@@ -605,7 +602,6 @@ export function injectCompanyCapital(state, companyId, amountVoucher, content) {
   company.initialInvestment.cashVoucherUnits = (company.initialInvestment.cashVoucherUnits || 0) + units;
   company.initialInvestment.cashValueUnits = (company.initialInvestment.cashValueUnits || 0) + units;
   company.initialInvestment.cashVoucherPaidUnits = (company.initialInvestment.cashVoucherPaidUnits || 0) + (transfer.voucherPaidValueUnits || 0);
-  company.initialInvestment.cashWheatValueUnits = (company.initialInvestment.cashWheatValueUnits || 0) + (transfer.wheatPaidValueUnits || 0);
   return { ok: true, voucherUnits: units, payment: transfer };
 }
 
@@ -1012,7 +1008,6 @@ export function companySummary(state, company, content) {
     workers,
     capacity: job ? job.slots * company.listedLevels : 0,
     cashVoucher: (company.cashVoucherUnits || 0) / scale,
-    cashWheatJin: (company.cashWheatUnits || 0) / content.precision.inventoryUnitsPerJin,
     cashValue: maximumPayableValueUnits(state, "company:" + company.id, content) / scale,
     arrearsVoucher: (company.payroll?.arrearsVoucherUnits || 0) / scale,
     retainedEarningsVoucher: (company.retainedEarningsVoucherUnits || 0) / scale,

@@ -4,9 +4,9 @@
 //   town             currency.balances.town         accounts.town.wheat            accounts.town
 //   residents        （有家庭时为各户汇总，只读）     accounts.residents.wheat       accounts.residents
 //   household:<id>   household.voucherUnits         household.inventory.wheat      household.inventory
-//   company:<id>     company.cashVoucherUnits       company.cashWheatUnits         company.inventory
-//   shop:<id>        shop.cashVoucherUnits          shop.cashWheatUnits            shop.inventory
-//   social           socialSecurity.cashVoucherUnits socialSecurity.cashWheatUnits  （无）
+//   company:<id>     company.cashVoucherUnits       （无：企业不持有付款用小麦）       company.inventory
+//   shop:<id>        shop.cashVoucherUnits          （无：店铺不持有付款用小麦）       shop.inventory
+//   social           socialSecurity.cashVoucherUnits （无）                           （无）
 //   bank             bank.cashVoucherUnits           （无）                           （无）
 //
 //（存款不是银行的付款账户：住户存款在 bank.deposits 台账里，取款时由支付层先转回住户粮券。）
@@ -85,15 +85,13 @@ export function voucherSlot(state, owner) {
   return { holder: entity, key: kind === "household" ? "voucherUnits" : "cashVoucherUnits" };
 }
 
-// 付款用小麦存放位置 { holder, key }：镇库、居民、家庭用库存里的小麦；公司、店铺、社保基金用单独的现金小麦。
+// 付款用小麦存放位置 { holder, key }：只有镇库、居民、家庭有（库存里的小麦，用于以粮换券）；公司、店铺、社保基金、银行没有。
 export function paymentWheatSlot(state, owner) {
   const { kind, id } = parseOwner(owner);
   if (kind === "town" || kind === "residents") return state.accounts?.[kind] ? { holder: state.accounts[kind], key: "wheat" } : null;
-  if (kind === "bank") return null;
+  if (kind !== "household") return null;
   const entity = entityOf(state, kind, id);
-  if (!entity) return null;
-  if (kind === "household") return entity.inventory ? { holder: entity.inventory, key: "wheat" } : null;
-  return { holder: entity, key: "cashWheatUnits" };
+  return entity?.inventory ? { holder: entity.inventory, key: "wheat" } : null;
 }
 
 export function readSlot(slot) {

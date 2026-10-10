@@ -21,7 +21,8 @@ import { policyTradeMarginPercent } from "../economy/margin-policy.js";
 import { currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { putStock, takeStock, valueOf } from "../economy/trade.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
-import { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits } from "../economy/money-units.js";
+import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
+import { townBuysOutsideWheat, townSellableWheatUnits, townSellsWheatToOutside } from "../economy/foreign-wheat.js";
 import {
   addBookMap, addBookValue, applyProfit, ensureShops, releaseShopStaffing, reopenTradeHouse, shopClerkCount, shopDefinition,
   shopMerchantCount, shopMinimumCapitalUnits, topUpShopCapital
@@ -256,12 +257,16 @@ function planImport(state, content, run, cand) {
   if (roomJin < MIN_JIN) return null;
   // 镇库要付得起货款（粮券）。
   const townCashJin = maximumPayableValueUnits(state, "town", content) / (currency * price);
-  const wheatHeld = nonNegative(run.shop.cashWheatUnits);
   const buyAvg = x => quoteValue(town, good, "buy", x) / x;
   const payUnitsOf = x => Math.round(quoteValue(town, good, "buy", x) * scale);
-  // 小麦：货款小麦 + 运费、关税折算的小麦都要在店里（运费、关税可能只用小麦付）。
+  // 付给外镇的小麦由贸易行用粮券向镇库买（1 斤 = 1 券，镇库小麦要留够口粮储备线）；运费、关税也是粮券。
+  // 所以粮券要够付：买小麦的钱 + 运费 + 关税；小麦要在镇库可卖额度内。
   const tariffRate = tradeTariffRate(state, "import");
-  const wheatOk = x => payUnitsOf(x) + wheatUnitsForVoucherUnits(freightUnitsOf(x, freight, content) + tariffUnitsOf(quoteValue(town, good, "buy", x), tariffRate, content), content, "ceil") <= wheatHeld;
+  const townWheatRoom = townSellableWheatUnits(state, content);
+  const shopCashUnits = maximumPayableValueUnits(state, owner(run.shop), content);
+  const wheatOk = x => payUnitsOf(x) <= townWheatRoom
+    && voucherUnitsForWheatUnits(payUnitsOf(x), content, "floor") + freightUnitsOf(x, freight, content)
+      + tariffUnitsOf(quoteValue(town, good, "buy", x), tariffRate, content) <= shopCashUnits;
   let q = Math.min(roomJin, sellableStock(town, good), run.remainingJin, freightPoolJin(state), townCashJin);
   q = largestWhere(q, x => buyAvg(x) * duty + freight <= maxCost);
   q = largestWhere(q, wheatOk);
@@ -296,8 +301,10 @@ function executeExport(state, content, run, cand, plan) {
   const taken = takeStock(shop, itemId, units);
   deliverToOutsideTown(town, itemId, qJin);
   town.wheatStockJin = round2(Math.max(0, town.wheatStockJin - valueJin));
-  shop.cashWheatUnits = nonNegative(shop.cashWheatUnits) + valueWheatUnits;
-  const revenue = voucherUnitsForWheatUnits(valueWheatUnits, content, "floor");
+  // 外镇付的小麦进镇库，镇库按 1 斤 = 1 券付粮券给贸易行（economy/foreign-wheat.js）。
+  const sold = townBuysOutsideWheat(state, content, owner(shop), valueWheatUnits, `${shop.name}向${profile.name}出口${label}`);
+  if (!sold.ok) throw new Error("出口收款失败：" + (sold.reason || "未知原因"));
+  const revenue = sold.voucherUnits;
   const paidFreight = freight.paidValueUnits || 0;
   const tariff = payTariff(state, shop, tariffUnitsOf(valueJin, tradeTariffRate(state, "export"), content), `向${profile.name}出口${label}`, content);
   addBookValue(shop, "revenueVoucherUnits", revenue);
@@ -326,17 +333,20 @@ function executeImport(state, content, run, cand, plan) {
   const payUnits = Math.round(valueJin * scale);
   const freightUnits = plan.freightUnits;
   const sellValue = valueOf(plan.units, price, content);
-  // 预检（不动钱）：镇库付得起收购款；店里的小麦付得起货款加运费。
+  // 预检（不动钱）：镇库付得起收购款；贸易行的粮券付得起买小麦的钱 + 运费 + 关税，镇库有可卖的小麦。
   if (!quoteMonetaryPayment(state, "town", currentPaymentComposition(state, sellValue), content).full) return null;
   const tariffUnits = tariffUnitsOf(valueJin, tradeTariffRate(state, "import"), content);
-  if (payUnits + wheatUnitsForVoucherUnits(freightUnits + tariffUnits, content, "ceil") > nonNegative(shop.cashWheatUnits)) return null;
-  // ① 小麦付给外镇（实物，外镇没有账户）。
-  shop.cashWheatUnits = nonNegative(shop.cashWheatUnits) - payUnits;
-  // ② 运费付镇库；失败则把小麦退回（没有任何东西丢失）。
+  const wheatCostUnits = voucherUnitsForWheatUnits(payUnits, content, "floor");
+  if (payUnits > townSellableWheatUnits(state, content)) return null;
+  if (!quoteMonetaryPayment(state, owner(shop), currentPaymentComposition(state, wheatCostUnits + freightUnits + tariffUnits), content).full) return null;
+  // ① 贸易行用粮券向镇库买小麦，小麦付给外镇（实物，外镇没有账户）。
+  const bought = townSellsWheatToOutside(state, content, owner(shop), payUnits, `${shop.name}自${profile.name}进口${label}`);
+  if (!bought.ok) return null;
+  // ② 运费付镇库；失败则整笔作废（小麦已出镇库，原样买回，没有任何东西丢失）。
   const freight = settleMonetaryPayment(state, owner(shop), "town", currentPaymentComposition(state, freightUnits), content,
     "freight", `${shop.name}运${label}自${profile.name}的运费`, { requireFull: true });
   if (!freight.ok) {
-    shop.cashWheatUnits += payUnits;
+    townBuysOutsideWheat(state, content, owner(shop), payUnits, `${shop.name}进口${label}的运费付不起，退回已买的小麦`);
     return null;
   }
   // ②' 进口关税交镇库（付不起的记欠税）。

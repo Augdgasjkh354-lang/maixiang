@@ -9,7 +9,7 @@
 //    每一波（一个游戏日）所有能开工的工程并行推进。
 // 3. 时间快进：一个工程的施工天数（workRequired）动辄上千天，这里把每个在建工程的 workDone 直接设到“差一天完工”，
 //    再推进一天让引擎自己的完工逻辑落成。完工、建筑升级、岗位回收都是引擎原路径，只是跳过了等待天数。
-// 4. 全部完工后按岗位容量填满工人（setEmployment，人口不够则按人口分）；银行建成后 startCurrencyReform 切到粮券阶段。
+// 4. 全部完工后按岗位容量填满工人（setEmployment，人口不够则按人口分）。
 // 5. 再推进 3 天日结并校验。
 //
 // 未覆盖：每种建筑只建一栋（maxInstances 可达 12 的建筑不会全部建满）；商业街/贸易中心/养殖基地/时代广场的店铺不开；
@@ -142,8 +142,6 @@ export function createMaxedState(options = {}) {
 
   fillJobs(state, simulation);
 
-  // 新开局即粮券阶段（开局已发行）；只有旧制度的小麦阶段才需要切换（切换要求银行已建成，chains 里有 bank）。
-  if (state.monetaryReform?.stage !== "voucher") assertOk(simulation.startCurrencyReform(state), "货币改革到粮券");
   assertOk(simulation.issueGrainVouchers(state, "town", 500000), "镇库加印粮券");
   if (options.socialSecurity) assertOk(simulation.setSocialSecurityPolicy(state, { enabled: true }), "开启社保");
 

@@ -129,13 +129,6 @@ const ACTIONS = {
       return { ok: true, enabled: state.autoRelief };
     },
   },
-  startCurrencyReform: {
-    desc: "启动货币改革 {}（开局即粮券阶段，已是粮券时视为已完成）",
-    run: (sim, state) => {
-      if (state.monetaryReform?.stage === "voucher") return { ok: true, alreadyDone: true, stage: "voucher" };
-      return sim.startCurrencyReform(state);
-    },
-  },
   setShopRent: {
     desc: "商铺日租金 {voucher}（每间营业店铺每日，粮券单位）",
     run: (sim, state, a) => sim.setShopRent(state, a.voucher),
@@ -262,18 +255,13 @@ const ACTIONS = {
     desc: "镇库印券 {amountVoucher}",
     run: (sim, state, a) => sim.issueGrainVouchers(state, "town", Number(a.amountVoucher)),
   },
-  // 场景辅助（仅模拟用）：直接把货币制度推进到粮券阶段。商业街零售、商店动态加价与
-  // 批发市场销售回款只在粮券经济下才完整运转；这条不是游戏内政策命令，
-  // 不建银行也能直接进入粮券阶段（不印钞），供只关心粮券阶段的场景使用。
+  // 兼容旧场景：粮券已是唯一货币，仅补兼容银行入口（不建银行也能印券）。
   forceVoucherStage: {
-    desc: "直接进入粮券阶段 {}（仅模拟用；开局已是粮券阶段时只补兼容银行入口）",
+    desc: "补兼容银行入口 {}（仅模拟用）",
     run: (sim, state) => {
-      const alreadyDone = state.monetaryReform?.stage === "voucher";
       state.monetaryReform ||= {};
-      state.monetaryReform.stage = "voucher";
       state.monetaryReform.legacyBankAccess = true;
-      state.monetaryReform.completed ||= { year: state.year, day: Math.max(1, state.day + 1), simulated: true };
-      return { ok: true, stage: state.monetaryReform.stage, alreadyDone };
+      return { ok: true };
     },
   },
   // 场景辅助（仅模拟用）：开一家综合商店（需要商业街已建成、有合格业主家庭）。
@@ -419,6 +407,10 @@ const METRICS = [
   { key: "town_balance_jin", compute: (ctx) => round2(ctx.sim.accountQeq(ctx.state, "town")) },
   { key: "residents_balance_jin", compute: (ctx) => round2(ctx.sim.accountQeq(ctx.state, "residents")) },
   {
+    key: "monetary_stage",
+    compute: () => "voucher",
+  },
+  {
     key: "unemployment_rate",
     compute: (ctx) => {
       const employed = ctx.jobRows.reduce((a, r) => a + (r.count || 0), 0);
@@ -519,7 +511,7 @@ const METRICS = [
   // 社保基金
   {
     key: "social_fund_jin",
-    compute: (ctx) => round2(((ctx.state.socialSecurity?.cashVoucherUnits || 0) + (ctx.state.socialSecurity?.cashWheatUnits || 0)) / CONTENT.precision.currencyUnitsPerVoucher),
+    compute: (ctx) => round2(((ctx.state.socialSecurity?.cashVoucherUnits || 0)) / CONTENT.precision.currencyUnitsPerVoucher),
   },
   {
     key: "social_collected_jin",
@@ -563,10 +555,6 @@ const METRICS = [
     compute: (ctx) => ctx.state.outsideTowns?.minzhen?.stats?.trades || 0,
   },
   // ---- 0.2.3 流通改革：批发市场做市商 ----
-  {
-    key: "monetary_stage",
-    compute: (ctx) => ctx.state.monetaryReform?.stage || "wheat",
-  },
   {
     key: "wholesale_purchase_flour",
     compute: (ctx) => {

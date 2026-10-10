@@ -1223,14 +1223,6 @@ export function mountGame(root) {
       showToast(`已开荒${number(result.acres)}亩，投入${number(result.workers)}人、${number(result.workDays)}工日；镇库支付${number(result.paidVoucher, 2)}${moneyUnit(view)}工资。`, 4200);
       return;
     }
-    if (closest(target, "[data-reform-start]") && state) {
-      const result = simulation.startCurrencyReform(state);
-      if (!result.ok) { showToast(result.reason); return; }
-      changed(true);
-      render(true);
-      showToast(`货币改革完成，已改用粮券结算；镇库印制${number((result.printedVoucherUnits || 0) / simulation.content.precision.currencyUnitsPerVoucher, 0)}粮券。`, 4200);
-      return;
-    }
     if (closest(target, "[data-bank-open]") && state) {
       const reform = buildView().monetaryReform;
       openSiteFrom(reform.bankBuildingId ? `building:${reform.bankBuildingId}` : "bank-compat");

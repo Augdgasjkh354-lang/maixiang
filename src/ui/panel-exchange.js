@@ -147,7 +147,7 @@ export function renderCompanyStatus(view, company) {
   const statusNeedsAttention = !["运营中", "生产中", "原料有限", "按订单生产"].includes(company.status || "");
   return `<div class="row"><span class="label">上市 / 经营状态</span><span><span class="badge">${company.listing?.listed ? `${escapeHtml(company.listing.ticker || "---")} · 已上市` : "未上市"}</span> <span class="badge${statusNeedsAttention ? " red" : ""}">${escapeHtml(company.status || "运营中")}</span></span></div>
     <div class="row"><span class="label">公司等级 / 在岗 / 目标</span><strong class="value">${number(company.listedLevels)}级 · ${number(company.workers)} / ${number(company.plannedWorkers)}人</strong></div>
-    <div class="row"><span class="label">可支付资金 / 欠薪</span><strong class="value">${number(company.cashVoucher, 2)}粮券 + ${number(company.cashWheatJin || 0, 2)}斤小麦 / ${number(company.arrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>
+    <div class="row"><span class="label">可支付资金 / 欠薪</span><strong class="value">${number(company.cashVoucher, 2)}粮券 / ${number(company.arrearsVoucher, 2)}${escapeHtml(unit)}</strong></div>
     <div class="row"><span class="label">近期日均销量 / 实际利润</span><strong class="value">${company.averageDailySales > 0 ? number(company.averageDailySales, 2) : "暂无销量"} / ${number(company.averageDailyProfitVoucher, 2)}${escapeHtml(unit)}</strong></div>
     <div class="row"><span class="label">库存</span><strong class="value">${inventoryText(company.inventoryRows)}</strong></div>`;
 }
@@ -187,7 +187,7 @@ export function renderCompanySection(view, building, { wageRow = "" } = {}) {
 // 交易所面板的单家公司：上市 / 售股 / 回购的表单与预览（沿用原 data-* 属性，app.js 处理）。
 function renderListing(view, company) {
   const scale = view.currencyUnitsPerVoucher;
-  const gate = !view.stockExchange?.available ? "尚未建成交易所" : !view.stockExchange?.reformComplete ? "须先完成货币改革" : null;
+  const gate = !view.stockExchange?.available ? "尚未建成交易所" : null;
   if (!company.listing?.listed) {
     const preview = view.stockListingPreview?.companyId === company.id ? view.stockListingPreview : null;
     const sharesKey = `stock-list:${company.id}:total`;
@@ -308,7 +308,6 @@ function renderStatusTab(view) {
     : "尚未建成交易所";
   return `<div class="cardlet">
     <div class="row"><span class="label">状态</span><strong class="value">${escapeHtml(exchangeState)}</strong></div>
-    <div class="row"><span class="label">新上市条件</span><strong class="value">${exchange.reformComplete ? "货币改革已完成" : "须完成货币改革"}</strong></div>
     ${view.ipo?.gateReason ? `<div class="subtle">当前上市门槛：${escapeHtml(view.ipo.gateReason)}</div>` : ""}
     <div class="subtle">镇营整栋上市在「挂牌」，民营申请在「民营申请」，上市、售股与回购在「公司」。</div>
   </div>`;

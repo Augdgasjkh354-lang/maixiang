@@ -300,8 +300,8 @@ export function createInitialState(options) {
       guidancePending: true,
       ledger: []
     },
-    // 新开局即粮券阶段（时点为开局第 1 天）；旧档读档时以存档自带的阶段为准，见 persistence/migrations.js。
-    monetaryReform: { stage: "voucher", legacyBankAccess: false, started: { year: 1, day: 1 }, completed: { year: 1, day: 1 } },
+    // 只有粮券一种货币。monetaryReform 只剩 legacyBankAccess：没有银行建筑的测试/场景用它开放印券与换券入口。
+    monetaryReform: { legacyBankAccess: false },
     companies: {},
     nextCompanyNumber: 1,
     // 民营业主上市申请（按建筑 id）与驳回后的冷却（按建筑 id，记业主家庭与解禁日序）。
@@ -339,7 +339,7 @@ export function createInitialState(options) {
     fiscal: emptyFiscalState(),
     housing: { villageCapacity: content.rules.housingCapacity, repairWoodCarry: 0 },
     villas: { sold: [], taxArrearsValueUnits: {}, stats: { soldTotal: 0, revenueValueUnits: 0, taxCollectedValueUnits: 0, taxArrearsValueUnits: 0 } },
-    socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, farmerSubsidyPerFarmerJin: 0, totalSubsidyUnits: 0, cashVoucherUnits: 0, cashWheatUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
+    socialSecurity: { enabled: false, dailyPerWorkerJin: 1, pensionPerElderJin: 2, farmerSubsidyPerFarmerJin: 0, totalSubsidyUnits: 0, cashVoucherUnits: 0, debtToTownUnits: 0, totalInjectedUnits: 0, totalAdvancedUnits: 0, totalRepaidUnits: 0, totalCollectedUnits: 0, totalPaidUnits: 0, totalDividendUnits: 0 },
     // 再分配账（富人税、遗产税、家产归公）：day/year/cumulative 三段，见 systems/redistribution.js；giniHistory 逐年基尼。
     redistribution: { day: {}, year: {}, cumulative: {}, lastRun: null, giniHistory: [] },
     outsideTowns: createOutsideTowns(content),

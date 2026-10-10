@@ -91,7 +91,7 @@ export function householdBondPrincipalMap(state) {
 
 export function issueGovernmentBond(state, options, content) {
   if (!bondAvailable(state)) {
-    return { ok: false, reason: state.monetaryReform?.stage === "voucher" ? "需先建成银行才能发行国债" : "需完成货币改革（粮券阶段）才能发行国债" };
+    return { ok: false, reason: "需先建成银行才能发行国债" };
   }
   const scale = currencyScale(content);
   const totalVoucher = Number(options?.totalVoucher);

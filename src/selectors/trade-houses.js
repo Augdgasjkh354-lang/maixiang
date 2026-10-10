@@ -104,7 +104,6 @@ export function selectTradeHouseView(state, content) {
         // 今日（最近一个日结日）的预算与运力份额；没有日志时为 null。
         budgetJin: today ? round2(today.budgetJin) : null,
         shareJin: today ? round2(today.shareJin) : null,
-        wheatJin: round2((shop.cashWheatUnits || 0) / scale),
         cashVoucher: round2(maximumPayableValueUnits(state, `shop:${shop.id}`, content) / voucherScale),
         today: summarize(today ? [today] : [], content),
         week: summarize(week, content)

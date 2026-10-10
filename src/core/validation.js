@@ -14,7 +14,7 @@ export function validateState(state, content) {
   errors.push(...contentCheck.errors);
   const ss = state?.socialSecurity;
   if (ss) {
-    for (const key of ["cashVoucherUnits", "cashWheatUnits", "debtToTownUnits"]) {
+    for (const key of ["cashVoucherUnits", "debtToTownUnits"]) {
       if (!Number.isSafeInteger(ss[key] || 0) || (ss[key] || 0) < 0) errors.push("社保基金账户无效：" + key);
     }
     if (ss.farmerSubsidyPerFarmerJin !== undefined && (!Number.isFinite(ss.farmerSubsidyPerFarmerJin) || ss.farmerSubsidyPerFarmerJin < 0)) {
@@ -277,8 +277,8 @@ export function validateState(state, content) {
     }
   }
   const reform = state.monetaryReform;
-  if (!reform || !["wheat", "voucher"].includes(reform.stage) || typeof reform.legacyBankAccess !== "boolean") {
-    errors.push("货币改革状态无效");
+  if (!reform || typeof reform.legacyBankAccess !== "boolean") {
+    errors.push("银行入口状态无效");
   }
   const currencyCheck = validateCurrencyInvariant(state, content);
   if (!currencyCheck.valid) errors.push("粮券总账不守恒：账户余额与未注销发行量不一致");
@@ -327,7 +327,6 @@ export function validateState(state, content) {
         if ((company.totalShares || 0) !== 0 || (company.townShares || 0) !== 0 || (company.residentShares || 0) !== 0 || (company.fundShares || 0) !== 0 || Object.values(company.householdShares || {}).some(value => value)) errors.push("未上市公司不应存在股票：" + companyId);
       }
       if (!Number.isSafeInteger(company.cashVoucherUnits) || company.cashVoucherUnits < 0) errors.push("企业粮券余额无效：" + companyId);
-      if (!Number.isSafeInteger(company.cashWheatUnits || 0) || (company.cashWheatUnits || 0) < 0) errors.push("企业支付小麦余额无效：" + companyId);
       for (const itemId of Object.keys(content.items)) {
         if (!Number.isSafeInteger(company.inventory?.[itemId]) || company.inventory[itemId] < 0) errors.push("企业库存无效：" + companyId + "/" + itemId);
         if (!Number.isSafeInteger(company.inventoryCostVoucherUnits?.[itemId]) || company.inventoryCostVoucherUnits[itemId] < 0) errors.push("企业库存成本无效：" + companyId + "/" + itemId);
@@ -381,7 +380,6 @@ export function validateState(state, content) {
       if (!owner && !shop.collective && !shop.town) errors.push("店铺缺少家庭所有者：" + shop.id);
       if (!content.rules.shopTypes?.[shop.typeId]) errors.push("店铺类型无效：" + shop.id);
       if (!Number.isSafeInteger(shop.cashVoucherUnits) || shop.cashVoucherUnits < 0) errors.push("店铺粮券余额无效：" + shop.id);
-      if (!Number.isSafeInteger(shop.cashWheatUnits || 0) || (shop.cashWheatUnits || 0) < 0) errors.push("店铺支付小麦余额无效：" + shop.id);
       if (!Number.isSafeInteger(shop.retainedEarningsVoucherUnits)) errors.push("店铺未分配利润无效：" + shop.id);
       if (!["open", "paused", "liquidating", "closed"].includes(shop.status)) errors.push("店铺状态无效：" + shop.id);
       for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(shop.inventory?.[itemId] || 0) || (shop.inventory?.[itemId] || 0) < 0) errors.push("店铺库存无效：" + shop.id + "/" + itemId);

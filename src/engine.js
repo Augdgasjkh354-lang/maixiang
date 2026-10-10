@@ -22,7 +22,6 @@ import {
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
   setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
   configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
-  startCurrencyReform,
   reclaimFarmland
 } from "./core/commands.js";
 import { selectDemolitionPreview, selectUpgradePreview } from "./systems/building-development.js";
@@ -177,7 +176,6 @@ export function createSimulation(content) {
     adoptRecommendedIndustryPrices: function (state) { return adoptRecommendedIndustryPrices(state, definitions); },
     retainExistingIndustryPrices: function (state) { return retainExistingIndustryPrices(state, definitions); },
     setEmploymentExchangeQuota: function (state, value) { return setEmploymentExchangeQuota(state, value, definitions); },
-    startCurrencyReform: function (state) { return startCurrencyReform(state, definitions); },
     setShopRent: function (state, value) { return setShopRent(state, value); },
     setStallRent: function (state, value) { return setStallRent(state, value); },
     setStallKeeperLimit: function (state, value) { return setStallKeeperLimit(state, value); },

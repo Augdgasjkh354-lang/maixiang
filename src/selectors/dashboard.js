@@ -712,11 +712,8 @@ export function selectDashboard(state, content, selection) {
       trade: saltPeriod.market || null
     } : needResidents ? { historyCoverage: saltCoverage.coverage, grace: saltCoverage.grace, daysObserved: saltCoverage.daysObserved } : {},
     monetaryReform: needMoney ? (function () {
-      const stage = state.monetaryReform?.stage === "voucher" ? "voucher" : "wheat";
       const bankBuilding = runtime.firstBuildingByType.get("bank") || null;
       return {
-        stage,
-        stageName: stage === "wheat" ? "粮食结算" : "粮券结算",
         hasBankAccess: hasBankAccess(state),
         hasPhysicalBank: Boolean(bankBuilding),
         bankBuildingId: bankBuilding?.id || null,
@@ -742,8 +739,7 @@ export function selectDashboard(state, content, selection) {
     stockExchange: (needBusiness || needSite) ? {
       available: hasStockExchange(state),
       physical: runtime.buildingTypeCounts.has("stock_exchange"),
-      legacyAccess: Boolean(state.stockExchange?.legacyAccess),
-      reformComplete: state.monetaryReform?.stage === "voucher"
+      legacyAccess: Boolean(state.stockExchange?.legacyAccess)
     } : null,
     listableBuildings: needBusiness ? buildings.filter(building => isIndustryType(content, building.typeId) && building.ownership.townLevels > 0 && !building.companyId) : [],
     shareConfig: needBusiness ? {

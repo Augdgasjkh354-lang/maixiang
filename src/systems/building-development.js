@@ -231,8 +231,8 @@ export function selectDemolitionPreview(state, buildingId, content) {
   }
   if ((building.ownership?.listedLevels || 0) > 0) return { available: false, reason: "建筑归公司所有，须先完成公司清算" };
   if ((building.ownership?.privateLevels || 0) > 0) return { available: false, reason: "建筑归民营业主所有，须先按估值收回" };
-  if (building.typeId === "bank" && (state.monetaryReform?.stage || "wheat") !== "wheat") {
-    return { available: false, reason: "货币改革进行中或已完成，银行承担粮券印制与换券，不能拆除" };
+  if (building.typeId === "bank") {
+    return { available: false, reason: "银行承担粮券印制与换券，不能拆除" };
   }
   if (building.typeId === "stock_exchange" && Object.values(state.companies || {}).some(company => company.listing?.listed)) {
     return { available: false, reason: "仍有上市公司，交易所承担挂牌与股权记录，不能拆除" };

@@ -56,7 +56,6 @@ export function nearbyDivisibleShareCounts(levels, requested) {
 
 export function listingGate(state) {
   if (!hasStockExchange(state)) return "尚未建成交易所";
-  if (state.monetaryReform?.stage !== "voucher") return "须先完成货币改革，上市与股票交易只使用粮券";
   return null;
 }
 

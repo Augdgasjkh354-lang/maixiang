@@ -55,7 +55,6 @@ function buildTown(seed) {
   staff(add("winery"), 6); staff(add("cotton_field"), 8); staff(add("weaving_mill"), 6);
   const base = add("livestock_base", 1);
   add("times_square", 1);
-  simulation.startCurrencyReform(state);
   grantResidentVouchers(state, 200000);
   const store = simulation.openResidentShop(state, street, "general");
   issueTownVouchers(state, 8000 * V, CONTENT, "探针");

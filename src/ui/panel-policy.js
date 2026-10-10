@@ -85,22 +85,13 @@ export function renderPolicy(view) {
   const shopTax = (view.shops || []).reduce((sum, row) => sum + (row.lastTaxVoucher || 0), 0);
   const relief = view.relief || {};
   const reform = view.monetaryReform;
-  const moneyUnit = reform.stage === "wheat" ? "斤小麦" : "粮券";
-  const reformAction = `<button class="primary wide" data-reform-start ${reform.hasBankAccess ? "" : "disabled"}>启动货币改革</button><div class="subtle">${reform.hasBankAccess ? "启动后立即改用粮券：镇库按小麦存量印制等额粮券。" : "需先建成银行后才能启动。"}</div>`;
-  // 货币改革：小麦阶段（旧档）仍是折叠块带启动按钮；粮券阶段（开局即是）改为默认可见的一行，入口在银行面板。
-  const reformCard = (reform.stage === "wheat" && !reform.hasBankAccess)
-    ? `<div class="cardlet subtle">货币改革：建成银行后可启动。</div>`
-    : reform.stage === "wheat"
-      ? `<details class="detail-block" data-detail-key="policy-reform"><summary>货币改革</summary><div class="detail-body">
-      <div class="row"><span class="label">当前制度</span><strong class="value">${reform.stageName}</strong></div>
-      ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
-      ${reformAction}
-    </div></details>`
-      : `<div class="cardlet policy-reform"><div class="row"><span class="label">货币改革</span><strong class="value">${reform.stageName}</strong></div>
+  const moneyUnit = "粮券";
+  // 货币：只有粮券。印券、以粮换券与国债的入口在银行面板。
+  const reformCard = `<div class="cardlet policy-reform"><div class="row"><span class="label">货币</span><strong class="value">粮券</strong></div>
       ${reform.hasBankAccess
         ? `<div class="subtle">印券、以粮换券与国债在银行管理。</div><button class="secondary wide" data-bank-open>进入银行管理</button>`
-        : `<div class="subtle">粮券已是开局制度；印券、以粮换券与国债需先建成银行。</div>`}
-      ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">旧存档兼容银行入口已启用，不占用地图地块。</div>` : ""}
+        : `<div class="subtle">印券、以粮换券与国债需先建成银行。</div>`}
+      ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">兼容银行入口已启用，不占用地图地块。</div>` : ""}
     </div>`;
   return `${reformCard}
     ${marginPolicyCard(view)}
@@ -136,7 +127,7 @@ export function renderPolicy(view) {
       
     </div></details>
     ${reform.hasBankAccess ? bankPolicyCard(view) : ""}
-    ${reform.stage === "voucher" && !reform.hasBankAccess ? `<div class="cardlet subtle">国债：建成银行后可发行。</div>` : ""}
+    ${!reform.hasBankAccess ? `<div class="cardlet subtle">国债：建成银行后可发行。</div>` : ""}
     <details class="detail-block" data-detail-key="policy-agritax"><summary>农业税</summary><div class="detail-body">
       <div class="row"><span class="label">当前税率</span><div class="setting-input">${renderNumericInput(view, { key: "agriculture-tax", kind: "agriculture-tax", target: "agriculture", value: agriculture.currentPercent, label: "农业税率", minimum: 0, maximum: 80, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">预计秋收分粮</span><strong class="value">镇库${number(agriculture.townShareJin)} / 居民${number(agriculture.residentShareJin)}斤</strong></div>

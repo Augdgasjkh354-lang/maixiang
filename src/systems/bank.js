@@ -184,9 +184,7 @@ export function repayBankDebtToTown(state, amountJin, content) {
 }
 
 export function bankAvailable(state) {
-  const reform = state.monetaryReform || {};
-  const hasBank = Boolean(reform.legacyBankAccess) || (state.buildings || []).some(row => row.typeId === "bank");
-  return hasBank && reform.stage === "voucher";
+  return Boolean(state.monetaryReform?.legacyBankAccess) || (state.buildings || []).some(row => row.typeId === "bank");
 }
 
 export function bankTotals(state) {

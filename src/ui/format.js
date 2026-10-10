@@ -56,16 +56,12 @@ export function accountLines(account) {
     }).join(" · ") || "暂无库存";
 }
 
-export function moneyUnit(view) {
-  const stage = view?.monetaryReform?.stage || "voucher";
-  return stage === "wheat" ? "斤小麦" : stage === "voucher" ? "粮券" : "小麦等值";
+export function moneyUnit() {
+  return "粮券";
 }
 
-export function moneyMixHint(view) {
-  const reform = view?.monetaryReform;
-  if (!reform || reform.stage === "wheat") return "新交易以小麦结算";
-  if (reform.stage === "voucher") return "新交易以粮券结算";
-  return `新交易目标${number(reform.targetPercent, 2)}%粮券，其余小麦；缺券部分可由付款人自有小麦补付`;
+export function moneyMixHint() {
+  return "交易以粮券结算";
 }
 
 // 镇营岗位实际日薪（基础日薪 × 公务员类/产业类系数）。
