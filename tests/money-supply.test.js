@@ -59,6 +59,16 @@ test("换券仍只能动用镇库已有粮券：镇库余额为 0 时换券被�
   assert.equal(validateCurrencyInvariant(state).valid, true);
 });
 
+// 模拟银行亏损把现金见底：现金经真实转账付给一户（粮券守恒），留存利润同额减少，台账仍守恒。
+function drainBankCash(state) {
+  const cash = state.bank.cashVoucherUnits;
+  if (cash <= 0) return;
+  const [household] = householdList(state);
+  const moved = transferVouchers(state, "bank", `household:${household.id}`, cash, CONTENT, "test_bank_loss", "测试：银行亏损");
+  assert.equal(moved.ok, true, moved.reason);
+  state.bank.retainedVoucherUnits -= cash;
+}
+
 function depositorFixture(seed, depositorCount = 8) {
   const state = legacyVoucherState({ seed });
   const depositors = householdList(state).slice(0, depositorCount);
@@ -70,9 +80,9 @@ function depositorFixture(seed, depositorCount = 8) {
   return { state, depositors };
 }
 
-test("存款利息由镇库付现金：每日计息都有等额粮券进入银行现金，存款台账守恒", () => {
+test("存款利息由银行自付：银行现金充足时镇库不动，利息并入存款、计为银行费用（留存利润减少），台账守恒", () => {
   const { state } = depositorFixture(9201);
-  issueTownVouchers(state, 200000 * V, CONTENT, "测试：镇库印券付息");
+  issueTownVouchers(state, 200000 * V, CONTENT, "测试：镇库印券");
   const townBefore = voucherBalance(state, "town");
   assert.equal(bankLedgerInvariant(state).valid, true);
 
@@ -83,27 +93,45 @@ test("存款利息由镇库付现金：每日计息都有等额粮券进入银�
   }
   const paid = state.bank.stats.interestPaidVoucherUnits;
   assert.ok(paid > 0, "存款应当计息");
-  assert.equal(townBefore - voucherBalance(state, "town"), paid, "镇库付出的粮券正好等于计入存款的利息");
-  assert.equal(state.bank.retainedVoucherUnits, 0, "没有贷款与国债时银行没有留存利润");
+  assert.equal(voucherBalance(state, "town"), townBefore, "银行现金够付息，镇库不动");
+  assert.equal(state.bank.debtToTownUnits || 0, 0, "没有垫付就没有欠镇库");
+  assert.equal(state.bank.interestPayableUnits, 0, "当日付清，没有顺延");
+  assert.equal(state.bank.cumulative.depositInterestExpense, paid, "银行费用 = 计入存款的利息");
+  assert.equal(state.bank.retainedVoucherUnits, -paid, "没有贷款与国债时，留存利润 = −存款利息费用");
   assert.equal(simulation.validateState(state).valid, true);
 });
 
-test("镇库现金不足时存款利息只计实付部分，不透支，台账仍守恒", () => {
+test("银行现金不够付息时镇库托底垫付（记为欠镇库），镇库也不够的部分顺延为应付、下日补付，不透支，台账仍守恒", () => {
   const { state } = depositorFixture(9202);
-  const drained = voucherBalance(state, "town");
-  assert.equal(drained, 0);
-  const depositsBefore = depositsTotal(state);
-  for (let day = 0; day < 5; day += 1) settleBankDay(state, CONTENT);
-  assert.equal(state.bank.stats.interestPaidVoucherUnits, 0, "镇库没有粮券时不计息");
-  assert.equal(voucherBalance(state, "town"), 0, "镇库不透支");
-  assert.ok(depositsTotal(state) >= depositsBefore - 5 * 1000 * V, "存款只受投资与取款影响，没有凭空增加");
+  // 模拟银行亏损：现金见底，留存利润同额减少（台账仍守恒）；镇库没有粮券。
+  drainBankCash(state);
+  assert.equal(voucherBalance(state, "town"), 0);
   assert.equal(bankLedgerInvariant(state).valid, true);
-  assert.ok(state.events.some(event => event.text.includes("存款利息未能足额计入")), "镇库无力付息要留下事件");
+  const depositsBefore = depositsTotal(state);
 
-  // 镇库只有少量粮券：计入的利息不能超过实付量。
+  settleBankDay(state, CONTENT);
+  assert.equal(state.bank.stats.interestPaidVoucherUnits, 0, "银行与镇库都没有现金时不计入存款");
+  assert.ok(state.bank.interestPayableUnits > 0, "应付利息顺延，不丢");
+  assert.equal(state.bank.debtToTownUnits || 0, 0, "镇库没有粮券，不垫付");
+  assert.equal(voucherBalance(state, "town"), 0, "镇库不透支");
+  assert.ok(depositsTotal(state) >= depositsBefore, "没有利息入账时存款不减少");
+  assert.equal(bankLedgerInvariant(state).valid, true);
+  assert.ok(state.events.some(event => event.text.includes("顺延为应付")), "顺延要留下事件");
+
+  // 镇库有少量粮券：先垫付再付息；应付 = 原应付 + 本日费用 − 本日实付（逐笔对账）。
+  const payableBefore = state.bank.interestPayableUnits;
+  const expenseBefore = state.bank.cumulative.depositInterestExpense;
+  const paidBefore = state.bank.stats.interestPaidVoucherUnits;
+  // 第一日的存款流入已进入银行现金，第二日先把现金清零（模拟银行仍无现金）。
+  drainBankCash(state);
   issueTownVouchers(state, 3 * V, CONTENT, "测试：镇库少量粮券");
   settleBankDay(state, CONTENT);
-  assert.ok(state.bank.stats.interestPaidVoucherUnits <= 3 * V, "计入存款的利息不超过镇库实付");
+  const advanced = state.bank.totalAdvancedUnits;
+  assert.ok(advanced > 0 && advanced <= 3 * V, "镇库垫付不超过它手上的粮券");
+  assert.ok(state.bank.stats.interestPaidVoucherUnits > paidBefore, "垫付后付出了利息");
+  assert.equal(state.bank.interestPayableUnits,
+    payableBefore + (state.bank.cumulative.depositInterestExpense - expenseBefore) - (state.bank.stats.interestPaidVoucherUnits - paidBefore),
+    "应付利息逐笔对账");
   assert.ok(voucherBalance(state, "town") >= 0);
   assert.equal(bankLedgerInvariant(state).valid, true);
 });
@@ -189,7 +217,8 @@ test("银行持有国债：票息作为利息收入计入留存利润，存款�
     assert.equal(check.valid, true, `第${absDay}天不守恒：${JSON.stringify(check)}`);
   }
   assert.ok(state.bonds.issues[0].stats.couponPaidVoucherUnits > 0, "一年一次的票息已经付给银行与住户");
-  assert.ok(state.bank.retainedVoucherUnits > 0, "票息高于存款利息，银行留存利润为正");
+  // 银行付存款利息（费用）、收票息（收入）：没有贷款时留存利润 = 票息收入 − 存款利息费用，票息收入须为正。
+  assert.ok(state.bank.retainedVoucherUnits + state.bank.cumulative.depositInterestExpense > 0, "银行的票息收入计入留存利润");
   assert.equal(bankLedgerInvariant(state).bonds >= 0, true);
   assert.equal(validateCurrencyInvariant(state).valid, true);
 });
