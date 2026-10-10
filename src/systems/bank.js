@@ -7,7 +7,6 @@ import { recordHouseholdBudgetIncome } from "./household-life.js";
 import { wholesalePrice } from "./wholesale-price.js";
 import { companyWorkingCapitalReserve } from "./companies.js";
 import { ensureHouseholdInvestPropensity, householdInvestableVoucherUnits, HOUSEHOLD_RESERVE_DAYS } from "./investment-preference.js";
-import { settleHouseholdLoanRepayDay } from "./household-loans.js";
 
 // 银行系统（金融扩展第二期）：镇营银行。
 // - 只存粮券不存粮食；存款按日计息；可向上市公司放贷
@@ -475,6 +474,10 @@ function settleBankAutoLoans(state, content, bank) {
   }
 }
 
+// 住户贷款月供的日结钩子：household-loans.js 导入本模块，反向导入会成环（打包器会拒绝），所以由它加载时登记。
+let householdLoanRepayHook = null;
+export function setHouseholdLoanRepayHook(hook) { householdLoanRepayHook = hook; }
+
 export function settleBankDay(state, content) {
   if (!bankAvailable(state)) return null;
   const bank = ensureBankState(state);
@@ -485,7 +488,7 @@ export function settleBankDay(state, content) {
   settleBankDepositsDay(state, content, bank, policy, daysPerYear);
   settleBankLoansDay(state, content, bank, policy, dayIndex);
   // 住户贷款月供：到期扣款、欠期、有富余补还（docs/LENDING.md）。
-  settleHouseholdLoanRepayDay(state, content);
+  if (householdLoanRepayHook) householdLoanRepayHook(state, content);
   // 先还镇库托底的债，再放新贷款：超出准备金与安全垫的现金优先还债，不把垫付的钱又借给公司。
   settleBankDebtRepay(state, content);
   settleBankAutoLoans(state, content, bank);

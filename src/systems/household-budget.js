@@ -20,7 +20,7 @@ import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold } from "./households.js";
 import { householdLastHarvestIncomeUnits, householdRecentIncomeUnitsPerDay } from "./household-life.js";
-import { householdLoanBalanceMap, householdLoanBalanceUnits } from "./household-loans.js";
+import { householdLoanBalanceMap, householdLoanBalanceUnits } from "../economy/loan-balance.js";
 
 const cache = new WeakMap();
 

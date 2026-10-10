@@ -16,7 +16,8 @@ import { householdPopulation, isActiveHousehold, householdConvertibleWheatUnits 
 import { householdRecentIncomeUnitsPerDay } from "./household-life.js";
 import { wholesalePrice } from "./wholesale-price.js";
 import { HOUSEHOLD_RESERVE_DAYS } from "./investment-preference.js";
-import { bankAvailable, bankLoanableVoucherUnits, DEFAULT_LOAN_RATE_ANNUAL_PERCENT, ensureBankState } from "./bank.js";
+import { householdLoanBalanceMap, householdLoanBalanceUnits } from "../economy/loan-balance.js";
+import { bankAvailable, bankLoanableVoucherUnits, DEFAULT_LOAN_RATE_ANNUAL_PERCENT, ensureBankState, setHouseholdLoanRepayHook } from "./bank.js";
 import { householdGrossWealthUnits, invalidateHouseholdBudgets } from "./household-budget.js";
 
 const REPAY_INTERVAL_DAYS = 30;
@@ -68,26 +69,6 @@ export function householdFoodReserveVoucherUnits(state, household, content) {
 }
 
 // 住户的未还本息余额（只算 active 的住户贷款）。
-export function householdLoanBalanceUnits(state, householdId) {
-  let total = 0;
-  for (const loan of state.bank?.loans || []) {
-    if (loan.borrowerKind === "household" && loan.status === "active" && loan.borrowerId === householdId) {
-      total += loan.outstandingVoucherUnits || 0;
-    }
-  }
-  return total;
-}
-
-// 全镇一次性汇总：住户 id → 余额（O(贷款数)，供逐户计算的循环使用）。
-export function householdLoanBalanceMap(state) {
-  const map = new Map();
-  for (const loan of state.bank?.loans || []) {
-    if (loan.borrowerKind !== "household" || loan.status !== "active") continue;
-    map.set(loan.borrowerId, (map.get(loan.borrowerId) || 0) + (loan.outstandingVoucherUnits || 0));
-  }
-  return map;
-}
-
 export function householdActiveLoans(state, householdId) {
   return (state.bank?.loans || []).filter(loan => loan.borrowerKind === "household" && loan.status === "active" && loan.borrowerId === householdId);
 }
@@ -332,3 +313,7 @@ export function settleHouseholdLoansAtEscheat(state, household, content) {
   if (result.repaidVoucherUnits || result.writtenOffVoucherUnits) invalidateHouseholdBudgets(state);
   return result;
 }
+
+setHouseholdLoanRepayHook(settleHouseholdLoanRepayDay);
+
+export { householdLoanBalanceMap, householdLoanBalanceUnits };
