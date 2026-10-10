@@ -44,7 +44,7 @@ test("银行面板：三个折叠分组，印券默认展开，摘要带关键�
   assert.ok(html.includes("<span>国债</span>"));
   assert.ok(html.includes("在售 0 笔"), "国债摘要应给出在售笔数");
   assert.ok(html.includes("存款 2% · 贷款 6%"), "利率摘要应给出存贷款利率");
-  for (const label of ["当前制度", "镇库券池", "发行量", "存款总额", "贷款总额"]) {
+  for (const label of ["货币", "镇库券池", "发行量", "存款总额", "贷款总额"]) {
     assert.ok(html.includes(`<span class="label">${label}</span>`), `摘要卡应有「${label}」`);
   }
 });
