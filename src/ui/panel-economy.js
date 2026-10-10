@@ -1,7 +1,7 @@
 import { escapeHtml, number, numberMax, shortageJin } from "./format.js";
 import { MODS } from "../mods/registry.js";
 import { renderTrade } from "./panel-trade.js";
-import { renderOutsideTown } from "./panel-outside-town.js";
+import { renderOutsideTownSummary } from "./panel-outside-town.js";
 import { renderBusiness } from "./panel-business.js";
 import { renderLedger } from "./panel-ledger.js";
 import { renderIndustryAccounts } from "./panel-industries.js";
@@ -29,7 +29,7 @@ export function renderEconomy(view) {
       ${view.shortageQeq > 0 ? `<div class="shortage-banner visible">口粮短缺 ${shortageJin(view.shortageQeq, view.qeqUnitsPerJin)}，时光已暂停。</div>` : ""}
       <div class="cardlet"><div class="row"><span class="label">居民可吃</span><strong class="value">${numberMax(view.residentFoodDays, 1)}天</strong></div><div class="row"><span class="label">每日需要</span><strong class="value">${view.dailyNeed.toLocaleString("zh-CN")}斤</strong></div></div></section>
     ${detail("bread-trade", "居民主粮购买", renderTrade(view))}
-    ${detail("outside-town", `外贸 · ${view.outsideTown?.name || "外镇"}`, renderOutsideTown(view))}
+    ${detail("outside-town", `外贸 · ${view.outsideTown?.name || "外镇"}`, renderOutsideTownSummary(view))}
     ${detail("industry-accounts", "林业、盐业与住房", renderIndustryAccounts(view))}
     ${detail("workshop-accounts", "镇营作坊账", renderBusiness(view))}
     ${detail("industry-productivity", "产业熟练度", renderIndustryProductivity(view))}
