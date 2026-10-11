@@ -276,6 +276,9 @@ export const RULES = Object.freeze({
   townShop: Object.freeze({ supplyShareMax: 0.5, maxPerStreet: 1 }),
   // 银行镇库托底（systems/bank.js）：还债时银行须保留的安全垫（占存款比例）；缺省与 DEFAULT_BANK_DEBT_REPAY_BUFFER_SHARE 一致。
   bankDebtRepayBufferShare: 0.05,
+  // 粮券收购（systems/voucher-buyback.js）：每户每日最多卖出超额粮券的比例；留存线 = max(日开销 × 天数, 口粮钱 × 天数)。
+  voucherBuybackSellShare: 0.2,
+  voucherBuybackRetentionDays: 30,
   // 民间贷款（systems/household-loans.js，规格 docs/LENDING.md）：净家底口径下的负债上限、月供占近 30 天收入上限、单户余额上限（斤）、期限（月）。
   lending: Object.freeze({ maxDebtToWealthShare: 0.6, maxServiceShareOfIncome: 0.3, maxPerHouseholdJin: 20000, shopTermMonths: 24, villaTermMonths: 60 }),
   shopTypes: Object.freeze({
@@ -311,11 +314,11 @@ export const RULES = Object.freeze({
     town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 5, beer_premium: 12, baijiu: 20, baijiu_premium: 100, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 4, beer_premium: 9.6, baijiu: 16, baijiu_premium: 80, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 5, beer_premium: 12, baijiu: 20, baijiu_premium: 100, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 4, beer_premium: 9.6, baijiu: 16, baijiu_premium: 80, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5, coal: 4.8, iron_ore: 6.4, iron_farm_tool: 96, iron_tool: 32, gold_jewelry: 120, silver_jewelry: 12 }),
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
@@ -375,6 +378,9 @@ export const INITIAL = Object.freeze({
   standardOpeningBuildings: Object.freeze([
     Object.freeze({ typeId: "lumberyard", plotId: "forest-logging-01", level: 10 }),
     Object.freeze({ typeId: "saltworks", plotId: "forest-salt-01", level: 10 }),
-    Object.freeze({ typeId: "dock", plotId: "riverside-01", level: 10 })
+    Object.freeze({ typeId: "dock", plotId: "riverside-01", level: 10 }),
+    // 煤矿、铁矿开局各 1 级（只放在标准开局；空白开局不放）。
+    Object.freeze({ typeId: "coal_mine", plotId: "forest-coal-01", level: 1 }),
+    Object.freeze({ typeId: "iron_mine", plotId: "forest-iron-01", level: 1 })
   ])
 });

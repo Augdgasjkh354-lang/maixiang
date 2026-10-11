@@ -9,7 +9,7 @@ const LABELS = {
   construction_material: "施工材料", rent_payment: "租金转账", rent_waiver: "租金减免",
   salt_consume: "食盐消费", market_trade: "物资买卖",
   construction_prepaid_remainder: "建设预付款留存",
-  voucher_issue: "粮券印制", voucher_exchange: "粮食换券", voucher_redeem: "粮券注销/兑回",
+  voucher_issue: "粮券印制", voucher_exchange: "粮食换券", voucher_redeem: "粮券注销/兑回", voucher_buyback: "粮券收购",
   enterprise_capital_injection: "企业营运资金", enterprise_material_contribution: "企业实物投入",
   enterprise_input_payment: "企业原料采购", enterprise_sale: "企业销售", enterprise_dividend: "企业分红", enterprise_annual_distribution: "企业年度利润分配",
   enterprise_production_tax: "企业实物税", operating_right_sale: "经营权交易",

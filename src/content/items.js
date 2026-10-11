@@ -61,6 +61,38 @@ export const ITEMS = Object.freeze({
     id: "cloth", name: "布", unit: "匹", category: "household",
     edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
   }),
+  // 煤、铁矿石：南林矿点开采（煤矿、铁矿），冶炼厂原料。批发品，不上货架。
+  coal: Object.freeze({
+    wholesale: true,
+    id: "coal", name: "煤", unit: "斤", category: "material",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  iron_ore: Object.freeze({
+    wholesale: true,
+    id: "iron_ore", name: "铁矿石", unit: "斤", category: "material",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  // 金银珠宝、铁器：冶炼厂产品，按件计。第一期只做批发（金银店与铁器需求另期接入，暂不上 retail）。
+  gold_jewelry: Object.freeze({
+    wholesale: true,
+    id: "gold_jewelry", name: "黄金珠宝", unit: "件", category: "valuable",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  silver_jewelry: Object.freeze({
+    wholesale: true,
+    id: "silver_jewelry", name: "白银珠宝", unit: "件", category: "valuable",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  iron_farm_tool: Object.freeze({
+    wholesale: true,
+    id: "iron_farm_tool", name: "铁制农具", unit: "件", category: "tool",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
+  iron_tool: Object.freeze({
+    wholesale: true,
+    id: "iron_tool", name: "铁制工具", unit: "件", category: "tool",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
   // 肉：养殖基地产，算主食：1 斤肉顶 2 斤口粮（qeq 2:1），家里有肉先吃肉。越宽裕的人家主食里肉越多（market.js 的 meatStapleShare）。
   // 养殖场直接卖给综合商店，多余的卖给批发市场。
   chicken: Object.freeze({

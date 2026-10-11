@@ -8,7 +8,7 @@ import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from
 import { targetBatchCap } from "../systems/production.js";
 import { industryTypeIds } from "../content/buildings.js";
 import { shopMayStockItem, usesGeneralRules } from "../systems/shop-types.js";
-import { flexOf } from "../systems/flex-recipe.js";
+import { flexBatchInputsJin, flexCapacityPerUnit, flexInputsOf, flexOf } from "../systems/flex-recipe.js";
 import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
 import { policyShopMarginPercent, shopEffectiveMarginPercent } from "./margin-policy.js";
 
@@ -287,8 +287,10 @@ function inputAvailableUnits(state, typeId, itemId, upstreamOutputUnits) {
 }
 
 // 处理型产业按原料能撑起的最多批次（无原料配方返回 null）。
-function inputBatchCap(state, typeId, content, upstreamOutputUnits) {
-  const inputs = content.recipes[content.buildings[typeId]?.recipeId]?.inputs || [];
+// flexShares：弹性配方的产能占比（各产品），给了就按一批的实际投入估算，否则用名义配比。
+function inputBatchCap(state, typeId, content, upstreamOutputUnits, flexRecipe = null, flexShares = null) {
+  const recipe = content.recipes[content.buildings[typeId]?.recipeId];
+  const inputs = flexRecipe && flexShares ? flexBatchInputsJin(flexRecipe, flexShares) : (recipe?.inputs || []);
   if (!inputs.length) return null;
   let cap = Infinity;
   for (const input of inputs) {
@@ -416,10 +418,17 @@ function refreshOperatingPlanNow(state, content, force = false) {
     let shares = null;
     if (flexRecipe) {
       const rows = flexRecipe.itemIds.map(itemId => productionTargetForType(state, typeId, content, downstreamUnits, itemId));
-      const positive = rows.reduce((sum, row) => sum + Math.max(0, row.targetUnits), 0);
+      // 按产能点计：各产品目标件数 × 每件占用产能；批次数 = 产能点合计 ÷ 每批总产能。
+      const positive = rows.reduce((sum, row) => sum + Math.max(0, row.targetUnits) * flexCapacityPerUnit(flexRecipe, row.itemId), 0);
       totalBatches = positive > 0 ? Math.ceil(positive / (flexRecipe.totalJin * scale)) : 0;
       target = rows.reduce((best, row) => (!best || row.targetUnits > best.targetUnits ? row : best), null);
-      shares = Object.fromEntries(rows.map(row => [row.itemId, positive > 0 ? Math.max(0, row.targetUnits) / positive : 0]));
+      shares = Object.fromEntries(rows.map(row => [row.itemId, positive > 0 ? Math.max(0, row.targetUnits) * flexCapacityPerUnit(flexRecipe, row.itemId) / positive : 0]));
+      // 多投入的弹性配方（冶炼厂）：各产品目标 × 每件投入，计入上游（矿、煤、金银条）的需求。
+      for (const row of rows) {
+        for (const [inputId, perJin] of Object.entries(flexInputsOf(flexRecipe, row.itemId))) {
+          downstreamUnits[inputId] = (downstreamUnits[inputId] || 0) + Math.round(Math.max(0, row.targetUnits) * perJin);
+        }
+      }
     } else {
       target = productionTargetForType(state, typeId, content, downstreamUnits);
       const perBatch = outputRowsForType(typeId, content)[0]?.perBatch || 0;
@@ -430,8 +439,10 @@ function refreshOperatingPlanNow(state, content, force = false) {
     const rotation = plan.rotation[typeId] || 0;
     const townBatches = townExpectedBatches(state, typeId, content);
     const demandBatches = Object.values(distributeBatches(totalBatches, producers, rotation)).reduce((sum, value) => sum + value, 0) + townBatches;
-    for (const input of content.recipes[content.buildings[typeId]?.recipeId]?.inputs || []) {
-      downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(demandBatches * input.quantity * scale);
+    if (!flexRecipe) {
+      for (const input of content.recipes[content.buildings[typeId]?.recipeId]?.inputs || []) {
+        downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(demandBatches * input.quantity * scale);
+      }
     }
     drafts[typeId] = { target, totalBatches, producers, rotation, townBatches, shares, flexRecipe };
   }
@@ -439,7 +450,7 @@ function refreshOperatingPlanNow(state, content, force = false) {
   for (const typeId of order) {
     const { target, producers, rotation, townBatches, shares, flexRecipe } = drafts[typeId];
     let { totalBatches } = drafts[typeId];
-    const inputCap = inputBatchCap(state, typeId, content, plan.plannedOutputUnits);
+    const inputCap = inputBatchCap(state, typeId, content, plan.plannedOutputUnits, flexRecipe, shares);
     if (inputCap !== null && inputCap < totalBatches) {
       totalBatches = inputCap;
       target.basis = `原料不足：${target.basis}`;
@@ -466,7 +477,7 @@ function refreshOperatingPlanNow(state, content, force = false) {
     // 下游能指望的上游日产量：计划批次，但不超过本周期实际能招到的人做得完的量；镇营产出按预计批次计入。
     if (flexRecipe) {
       for (const [itemId, share] of Object.entries(shares)) {
-        plan.plannedOutputUnits[itemId] = (plan.plannedOutputUnits[itemId] || 0) + Math.round((effectiveBatches + townBatches) * flexRecipe.totalJin * scale * share);
+        plan.plannedOutputUnits[itemId] = (plan.plannedOutputUnits[itemId] || 0) + Math.round((effectiveBatches + townBatches) * flexRecipe.totalJin * scale * share / flexCapacityPerUnit(flexRecipe, itemId));
       }
     } else {
       for (const output of content.recipes[content.buildings[typeId]?.recipeId]?.outputs || []) {

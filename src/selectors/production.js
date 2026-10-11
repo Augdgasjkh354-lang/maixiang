@@ -2,12 +2,48 @@ import { jobKeyForBuilding, populationStats, readJobCount } from "./labor.js";
 import { itemQeqUnitsPerInventoryUnit } from "../economy/inventory.js";
 import { hasWholesaleMarket, townOutputMarketRoomUnits, wholesaleMonopolyItemIds } from "../systems/wholesale-market.js";
 import { laborBatches } from "../economy/productivity.js";
-import { flexRoomUnits } from "../systems/flex-recipe.js";
+import { flexInputsOf, flexPlan, flexRoomUnits } from "../systems/flex-recipe.js";
 
 // 镇营口粮储备（库存单位）：全镇人口 × 日口粮 × 储备天数。镇营磨坊/酒坊不得把镇库小麦压到这条线以下。
 export function townWheatReserveUnits(state, content) {
   const people = populationStats(state).total;
   return Math.round(people * content.rules.foodPerPersonDay * (content.rules.townWheatReserveDays ?? 180) * content.precision.inventoryUnitsPerJin);
+}
+
+// 弹性配方在镇营的投入上限（库存单位）：小麦只取镇库超出口粮储备的部分；其余投入取镇库加批发市场库存（镇营领料无偿调拨）。
+export function townFlexInputCaps(state, recipe, content) {
+  const caps = {};
+  const market = state.wholesaleMarket?.inventory || {};
+  const useMarket = hasWholesaleMarket(state);
+  for (const itemId of recipe.flex.itemIds) {
+    for (const inputId of Object.keys(flexInputsOf(recipe.flex, itemId))) {
+      if (Object.hasOwn(caps, inputId)) continue;
+      caps[inputId] = inputId === "wheat"
+        ? Math.max(0, (state.accounts?.town?.wheat || 0) - townWheatReserveUnits(state, content))
+        : Math.max(0, (state.accounts?.town?.[inputId] || 0) + (useMarket ? Math.max(0, market[inputId] || 0) : 0));
+    }
+  }
+  return caps;
+}
+
+// 弹性配方的镇营预估（只读，与 processFlexBuilding 同口径）：可投产批次与状态。
+function flexTownStatus(state, building, recipe, result, content) {
+  const rooms = flexRoomUnits(state, recipe, content);
+  const scale = content.precision.inventoryUnitsPerJin;
+  const plan = flexPlan(recipe, rooms, result.workers > 0 ? result.capacity * recipe.flex.totalJin * scale : 0, townFlexInputCaps(state, recipe, content), content);
+  const marketFull = Object.values(rooms).every(room => room <= 0);
+  if (plan.totalPoints <= 0) {
+    if (marketFull) return { ...result, status: "market_capped", batches: 0, label: CAP_LABELS.market_capped, reason: null };
+    if (plan.limitedBy === "wheat") return { ...result, status: "wheat_reserve", batches: 0, label: CAP_LABELS.wheat_reserve, reason: null };
+    return { ...result, status: "no_materials", batches: 0, label: "缺料停工（待镇库调拨）", reason: null };
+  }
+  const batches = Math.round(plan.batchEquiv * 1000) / 1000;
+  if (batches < result.capacity) {
+    // 小麦受口粮储备线限制时与生产同口径标"保留口粮储备"，其余为原料有限。
+    if (plan.limitedBy === "wheat") return { ...result, batches, status: "wheat_reserve", label: CAP_LABELS.wheat_reserve, reason: null };
+    return { ...result, batches, status: "limited_materials", label: "原料有限，正在加工", reason: null };
+  }
+  return { ...result, batches, status: "ready", label: "正在加工", reason: null };
 }
 
 // 镇营产出的市场闸门（批次数）：加工配方（有投入）的批发市场产出，按余量折算批次，取最紧的一种（单产出配方只有一种）。
@@ -136,6 +172,8 @@ export function productionStatus(state, building, content) {
     return { ...result, label: !jobs.length ? "已落成" : workers > 0 ? "运作中" : "待安排人手" };
   }
   if (result.status === "no_workers") return { ...result, label: "缺人停工" };
+  // 弹性配方（酒坊、冶炼厂）：按产能分配与投入上限预估（与 processFlexBuilding 同口径）。
+  if (result.recipe?.flex) return flexTownStatus(state, building, result.recipe, result, content);
   // 镇营生产的实际投产量以批发市场可领用量为准（processBuilding 同口径），
   // 镇库有粮不等于能开工：避免显示"正在加工"、实际却零产出误导玩家。
   const wholesale = wholesaleBatches(state, result.recipe, result.workers, content, building);

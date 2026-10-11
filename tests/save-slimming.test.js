@@ -140,12 +140,14 @@ test("读档往返后再推进 30 天，经济状态、界面汇总与原状态�
   assertValid(loaded);
 });
 
-test("[slow] 体积：maxed 档紧凑 JSON 不超过 9MB，并比带旧字段的同一状态明显小（读档再存不超过旧形状的 60%）", () => {
+test("[slow] 体积：maxed 档紧凑 JSON 不超过 9MB，并比带旧字段的同一状态明显小（读档再存不超过旧形状的 65%）", () => {
   const state = createMaxedState();
   const compact = JSON.stringify(state).length;
   assert.ok(compact <= 9e6, `紧凑 JSON ${(compact / 1e6).toFixed(2)}MB，应 ≤ 9MB`);
   const legacy = toLegacyShape(JSON.parse(JSON.stringify(state)));
   const legacySize = JSON.stringify(legacy).length;
   const reloaded = JSON.stringify(migrateSave(legacy, CONTENT)).length;
-  assert.ok(reloaded < legacySize * 0.6, `旧形状 ${(legacySize / 1e6).toFixed(2)}MB → 读档再存 ${(reloaded / 1e6).toFixed(2)}MB`);
+  // 阈值 0.65：maxed 档含煤矿、铁矿、冶炼厂（金银消费第一期 A）后，每栋建筑的工资债权表（creditorClaims 等）随建筑数增长，
+  // 这部分不属于本次瘦身的字段，比例由 0.60 升到约 0.62；瘦身掉的 recent / observation 仍是主要节省。
+  assert.ok(reloaded < legacySize * 0.65, `旧形状 ${(legacySize / 1e6).toFixed(2)}MB → 读档再存 ${(reloaded / 1e6).toFixed(2)}MB`);
 });

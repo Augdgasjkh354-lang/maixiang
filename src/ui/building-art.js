@@ -18,7 +18,7 @@ export const BUILDING_ART_CATALOG = Object.freeze({
   bakery:{name:'面包房',connected:true}, lumberyard:{name:'伐木场',connected:true},
   stock_exchange:{name:'交易所',connected:true}, bank:{name:'银行',connected:true},
   saltworks:{name:'盐场',connected:true}, wholesale_market:{name:'批发市场',connected:true},
-  winery:{name:'酒坊',connected:true},
+  winery:{name:'酒坊',connected:true}, coal_mine:{name:'煤矿',connected:true}, iron_mine:{name:'铁矿',connected:true}, smelter:{name:'冶炼厂',connected:true},
   cotton_field:{name:'棉田',connected:true}, weaving_mill:{name:'织坊',connected:true},
   commercial_street:{name:'商业街',connected:true}, town_hall:{name:'政务厅',connected:true},
   livestock_base:{name:'养殖基地',connected:true}, times_square:{name:'时代广场',connected:true},
@@ -39,6 +39,9 @@ function awning(x,y){return `<g transform="translate(${x} ${y})"><path d="M-34-5
 function logs(){return `<g fill="#b39b70">${[0,1,2].map(i=>`<path d="M${-55+i*9} 27l27-15 7 5-27 15Z"/><ellipse cx="${-51+i*9}" cy="30" rx="5" ry="4" fill="#d3c292"/>`).join('')}</g>`;}
 function jar(x,y){return `<g transform="translate(${x} ${y})"><path d="M-6-10Q-10-2-6 3Q0 6 6 3Q10-2 6-10Z" fill="#b08462" stroke="#7a5a43"/><ellipse cy="-10" rx="6.5" ry="2.2" fill="#8c6548" stroke="#6b4a36"/><path d="M-7-3h14" fill="none" stroke="#d8c59a" stroke-width="1.5"/></g>`;}
 function wineJars(){return jar(-47,34)+jar(-34,40)+jar(-21,46)+jar(40,46);}
+function orePile(fill,stroke){return `<g fill="${fill}" stroke="${stroke}" stroke-width="1"><path d="M-58 36l20-18 18 10 14-10 14 18-24 14Z"/><path d="M26 38l12-14 16 8-8 14Z"/></g>`;}
+function ironDots(){return `<g fill="#b5532f"><circle cx="-44" cy="28" r="3.5"/><circle cx="-24" cy="24" r="4.5"/><circle cx="-2" cy="30" r="3"/></g>`;}
+function furnace(){return `<g><rect x="30" y="-42" width="12" height="42" fill="#a89f8c" stroke="#6f6a5d"/><path d="M28-42h16v-4H28Z" fill="#6f6a5d"/><ellipse cx="50" cy="20" rx="14" ry="8" fill="#5d5548"/><path d="M42 18q8-10 16 0" fill="none" stroke="#e8703a" stroke-width="3"/></g>`;}
 function wineFlag(){return `<path d="M58-46V8" fill="none" stroke="#79755b" stroke-width="2"/><path d="M58-46l19 5-4 7 4 7-19-5Z" fill="#9a5f48" stroke="#6e4534"/><path d="M56 8h5" stroke="#79755b" stroke-width="2"/>`;}
 function cottonPlot(){
 const L=[-62,14],T=[-8,-16],B=[12,42],R=[66,12];
@@ -115,6 +118,9 @@ case 'logistics_center':return logisticsCenter(level);
 case 'dock':return dockScene(level);
 case 'trade_center':return tradeCenter(level);
 case 'winery':return house(-8,-6,.92,'酒')+wineJars()+wineFlag();
+case 'coal_mine':return house(-8,-6,.92,'煤')+orePile('#3b3a36','#1d1c1a')+'';
+case 'iron_mine':return house(-8,-6,.92,'铁')+orePile('#8f8a7e','#5b5750')+ironDots();
+case 'smelter':return house(-8,-6,.92,'冶')+furnace();
 case 'cotton_field':return cottonPlot()+thatchShed(-49,12,.6);
 case 'weaving_mill':return house(-8,-6,.92,'织')+clothRack();
 case 'public_housing': return courtyard()+house(-29,-9,.58)+house(27,7,.58)+house(-9,31,.58);

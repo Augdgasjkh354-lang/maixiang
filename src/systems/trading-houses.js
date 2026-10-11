@@ -179,6 +179,8 @@ function candidatesFor(state, content) {
     const profile = outsideTownProfile(content, town.id);
     if (!profile) continue;
     for (const itemId of Object.keys(profile.goods)) {
+      // 贸易行不做的商品（银条、金条，tradeHouseExcluded）只走镇长手动外贸。
+      if (content.items[itemId]?.tradeHouseExcluded) continue;
       const good = goodOf(profile, itemId);
       if (!good) continue;
       out.push({ town, profile, itemId, good, direction: "export" });

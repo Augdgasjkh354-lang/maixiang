@@ -90,6 +90,31 @@ export function buildingSymbol(type, state = "idle", ghost = false) {
       <path class="wood-line" d="M84 18v70"/><path class="wine-banner" d="M84 18l14 4-4 7 4 7-14-4Z"/>
     </g>`;
   }
+  if (type === "coal_mine" || type === "iron_mine") {
+    const ore = type === "coal_mine" ? "#3b3a36" : "#8f8a7e";
+    const dots = type === "iron_mine" ? '<circle cx="66" cy="84" r="3" fill="#b5532f"/><circle cx="74" cy="80" r="2.5" fill="#c9653a"/>' : "";
+    return `<g class="${classes}">
+      <ellipse class="building-shadow" cx="50" cy="101" rx="39" ry="7"/>
+      <path class="resource-rock" d="M8 90 36 40h28l28 50Z"/>
+      <path class="resource-rock-shade" d="M36 40h28l-6 50H42Z"/>
+      <path class="bakery-door" d="M40 90V68q10-12 20 0v22Z"/>
+      <path class="wood-line" d="M36 68h28M40 68v22M60 68v22"/>
+      <path d="M22 88h14l4-8h14l4 8h14v5H22Z" fill="${ore}"/>
+      ${dots}
+    </g>`;
+  }
+  if (type === "smelter") {
+    return `<g class="${classes}">
+      <ellipse class="building-shadow" cx="50" cy="101" rx="39" ry="7"/>
+      <path class="whitewash" d="M16 50 50 34l34 16v42H16Z"/>
+      <path class="grey-tile" d="M10 51 50 27l40 24v7H10Z"/>
+      <path class="grey-tile-line" d="M18 52 50 36l32 16"/>
+      <rect class="bakery-door" x="40" y="66" width="20" height="26" rx="3"/>
+      <path d="M68 60V18h8v42Z" fill="#8f8a7e" stroke="#5b5750"/>
+      <path d="M22 88h18l4-6 4 6h14v5H22Z" fill="#5b5750"/>
+      <path class="salt-steam" d="M72 14c-5-4 4-6 0-11"/>
+    </g>`;
+  }
   if (type === "cotton_field") {
     const bush = (x, y) => `<ellipse class="cotton-bush" cx="${x}" cy="${y}" rx="5.5" ry="3.6"/><circle class="cotton-boll" cx="${x - 2.4}" cy="${y - 1.8}" r="1.7"/><circle class="cotton-boll" cx="${x + 2.4}" cy="${y - 1.2}" r="1.7"/>`;
     return `<g class="${classes}">

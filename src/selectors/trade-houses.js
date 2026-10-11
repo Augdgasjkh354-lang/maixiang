@@ -63,7 +63,7 @@ function marketRows(state, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   const exportDays = content.rules.tradeHouseExportMinStockDays ?? 10;
   const shortageDays = content.rules.tradeHouseImportShortageDays ?? 3;
-  return wholesaleMonopolyItemIds(content).map(itemId => {
+  return wholesaleMonopolyItemIds(content).filter(itemId => !content.items[itemId]?.tradeHouseExcluded).map(itemId => {
     const stockJin = (state.wholesaleMarket?.inventory?.[itemId] || 0) / scale;
     const avgSoldJin = localAvgSoldJin(state, content, itemId);
     const stockDays = avgSoldJin > 0 ? round1(stockJin / avgSoldJin) : null;

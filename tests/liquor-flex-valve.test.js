@@ -38,7 +38,7 @@ test("配方：弹性产出 12 斤/批，一工日一批，小麦名义配比 0.
   assert.deepEqual([...flex.itemIds], LIQUORS);
   assert.equal(flex.totalJin, 12, "一工人一日总产能 12 斤");
   assert.equal(recipe.batchesPerWorkerDay, 1);
-  assert.deepEqual(flex.wheatPerJin, { beer: 0.2, beer_premium: 0.2, baijiu: 1, baijiu_premium: 1 });
+  assert.deepEqual(flex.inputsPerJin, { beer: { wheat: 0.2 }, beer_premium: { wheat: 0.2 }, baijiu: { wheat: 1 }, baijiu_premium: { wheat: 1 } });
   assert.deepEqual(recipe.losses, []);
   assert.equal(CONTENT.rules.townOutputHardCapMultiple, undefined, "硬上限规则已删除");
   assert.equal(CONTENT.buildings.winery.jobs[0].slots, 8, "岗位不变");

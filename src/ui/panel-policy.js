@@ -73,6 +73,29 @@ function liquorMonopolyCard(view) {
     </div></details>`;
 }
 
+// 粮券收购（systems/voucher-buyback.js，默认关）：镇库用小麦向居民收购超额粮券。开关按钮在 app.js 的 click 处理里。
+function voucherBuybackCard(view) {
+  const vb = view.voucherBuyback;
+  if (!vb) return "";
+  const on = vb.enabled === true;
+  const day = vb.day || {};
+  const year = vb.year || {};
+  const total = vb.cumulative || {};
+  const toggle = vb.bankReady
+    ? `<button class="${on ? "secondary" : "primary"}" data-voucher-buyback="${on ? "false" : "true"}">${on ? "关闭收购" : "开启收购"}</button>`
+    : `<button class="secondary" disabled>需先建成银行</button>`;
+  return `<details class="detail-block" data-detail-key="policy-voucher-buyback"><summary>粮券收购</summary><div class="detail-body">
+      <div class="row"><span class="label">粮券收购</span><strong class="value">${on ? "已开启" : "未开启"}</strong>${toggle}</div>
+      <div class="row"><span class="label">每日收购小麦上限</span><div class="setting-input">${renderNumericInput(view, { key: "voucher-buyback-daily", kind: "voucher-buyback-daily", target: "policy", value: vb.dailyWheatJin, label: "每日收购小麦上限", integer: true, minimum: 0, maximum: 1000000000, className: "setting-editor" })}<b>斤</b></div></div>
+      <div class="row"><span class="label">比价（每1粮券给多少斤小麦）</span><div class="setting-input">${renderNumericInput(view, { key: "voucher-buyback-ratio", kind: "voucher-buyback-ratio", target: "policy", value: vb.wheatPerVoucher, label: "粮券收购比价", minimum: 0.5, maximum: 2, className: "setting-editor" })}<b>斤/券</b></div></div>
+      <div class="row"><span class="label">收购粮券 今日 / 本年 / 累计</span><strong class="value">${number(day.voucher || 0, 1)} / ${number(year.voucher || 0, 1)} / ${number(total.voucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">付出小麦 今日 / 本年</span><strong class="value">${number(day.wheatJin || 0, 1)} / ${number(year.wheatJin || 0, 1)}斤（今日${number(day.households || 0)}户成交）</strong></div>
+      <div class="row"><span class="label">镇库小麦 / 本日可卖额度</span><strong class="value">${number(vb.townWheatJin || 0, 1)} / ${number(vb.townSellableWheatJin || 0, 1)}斤</strong></div>
+      ${vb.error ? `<div class="shortage-banner visible">${escapeHtml(vb.error)}</div>` : ""}
+      <div class="subtle">镇库用小麦向居民收购超出${vb.retentionDays}天开销的粮券，每户每日最多卖出超额部分的${number((vb.sellShare || 0) * 100)}%。小麦不销毁，只从镇库转到居民家里（居民吃掉才是消耗）；粮券转入镇库券池，粮券总量不变。副作用：居民购买力下降，物价与服务履约可能随之下降，所以默认每日上限保守。${vb.bankReady ? "" : "需先建成银行才能开启。"}</div>
+    </div></details>`;
+}
+
 // 印花税（政策 stampDutyPercent，0—5，两位小数）：二级市场每笔成交由卖方承担，交镇库；镇库卖出、一级发行与回购不征。
 function stampDutyCard(view) {
   const rate = view.policy?.stampDutyPercent ?? CONTENT.rules.stampDutyDefaultPercent ?? 0.1;
@@ -117,6 +140,7 @@ export function renderPolicy(view) {
       ${reform.legacyBankAccess && !reform.hasPhysicalBank ? `<div class="subtle">兼容银行入口已启用，不占用地图地块。</div>` : ""}
     </div>`;
   return `${reformCard}
+    ${voucherBuybackCard(view)}
     ${marginPolicyCard(view)}
     ${stampDutyCard(view)}
     ${liquorMonopolyCard(view)}

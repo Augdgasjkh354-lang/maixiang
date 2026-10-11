@@ -36,6 +36,7 @@ import { settleTradingHouses } from "./trading-houses.js";
 import { refreshOperatingPlan, recordConsumerDay } from "../economy/operating-plan.js";
 import { archiveHouseholdLifeYear, finalizeHouseholdIncomeDay, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } from "./household-life.js";
 import { settleBankDay } from "./bank.js";
+import { settleVoucherBuybackDay } from "./voucher-buyback.js";
 import { settleBondsDay } from "./bonds.js";
 import { settleStockMarketDay, settleDailyShareMarket } from "./stock-exchange.js";
 import { settleLiquidityDay } from "./liquidity.js";
@@ -242,6 +243,8 @@ export const CORE_DAILY_STEPS = [
     settleStockMarketDay(state, content);
     settleDailyShareMarket(state, content);
   } },
+  // 粮券收购（政策开启才动账）：金融之后，家底已结算；失败只记在本步。
+  { id: "voucherBuyback", run: settleVoucherBuybackDay },
   // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天一次（金融之后，家底已结算）；家产归公每日再扫一遍，补取不回的存款。
   { id: "wealthTax", when: isWealthTaxDay, run: settleWealthTax },
   { id: "escheat", run: settleEscheat },

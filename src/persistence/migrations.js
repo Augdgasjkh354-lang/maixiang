@@ -9,6 +9,7 @@ import { createInitialState, ensureProjectAccessor } from "../core/state.js";
 import { syncShopEmployment } from "../systems/shops.js";
 import { syncResidentAggregates } from "../systems/households.js";
 import { convertSplitOwnership } from "../systems/ownership-migrate.js";
+import { allocateTownOutputToWholesale, hasWholesaleMarket } from "../systems/wholesale-market.js";
 import {
   ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, renameItemIds, renameLiquorBuildings, repairHouseholdTable, resetFailingSubsystems, sanitizeNumbers
 } from "./save-compat.js";
@@ -26,6 +27,24 @@ function rehydrate(state, definitions) {
   syncShopEmployment(state, definitions);
   syncResidentAggregates(state, definitions);
   return state;
+}
+
+// 矿产（银条、金条）改为批发品：旧档镇库里的存货转入批发市场库存（成本基础随货转移，内部价 0）。
+// 没有批发市场时留在镇库（卖回外镇时镇库也能出），等建成市场后再由下一次读档或手动调拨处理。
+function mineItemIds(content) {
+  const ids = new Set();
+  for (const profile of Object.values(content.outsideTowns || {})) {
+    for (const [itemId, good] of Object.entries(profile.goods || {})) if (good.mine) ids.add(itemId);
+  }
+  return [...ids];
+}
+
+function moveLegacyMineStockToWholesale(state, content) {
+  if (!hasWholesaleMarket(state)) return;
+  for (const itemId of mineItemIds(content)) {
+    const units = Math.floor(state.accounts?.town?.[itemId] || 0);
+    if (units > 0) allocateTownOutputToWholesale(state, itemId, units, content, "旧档镇库矿产转入批发市场");
+  }
 }
 
 export function migrateSave(raw, content) {
@@ -65,6 +84,7 @@ function migrateCurrentVersion(raw, definitions, current) {
   rehydrate(state, definitions);
   // 旧存档里按等级拆开的建筑整栋换主人（docs/OWNERSHIP.md 旧存档换算）；必须在校验之前，整栋已是空操作。
   convertSplitOwnership(state, definitions, report);
+  moveLegacyMineStockToWholesale(state, definitions);
   // 日历换算：旧存档一年 365 天（没有 calendarDaysPerYear），按比例换到现在的天数（秋收日、季节对应不变）。
   const savedDaysPerYear = Number(saved?.calendarDaysPerYear) || 365;
   const daysPerYear = definitions.rules.daysPerYear;

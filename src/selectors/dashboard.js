@@ -42,6 +42,7 @@ import { selectVillaStats } from "../systems/villas.js";
 import { selectSocialSecurityStats } from "../systems/social-security.js";
 import { buildingMaxLevel } from "../content/building-level.js";
 import { bankDebtRepayableUnits } from "../systems/bank.js";
+import { selectVoucherBuyback } from "./voucher-buyback.js";
 import { decorateTownLaborRows, townBuildingWageTotals, privateBuildingWageTotals, companyWageTotals, shopPayTotals } from "./wages.js";
 
 // 日历：一年 12 个月 × 30 天。春 1—3 月，夏 4—6 月，秋 7—9 月，冬 10—12 月（10 月 1 日秋收）。
@@ -581,6 +582,8 @@ export function selectDashboard(state, content, selection) {
     laborUnemploymentLowPercent: content.rules.laborUnemploymentLowPercent ?? 5,
     wealthNow: computeWealthStats(state, content),
     inequality: needResidents || needPolicy ? selectInequality(state, content) : null,
+    // 粮券收购（只读）：政策页卡片用；口径见 systems/voucher-buyback.js。
+    voucherBuyback: needPolicy ? selectVoucherBuyback(state, content) : null,
     economy: {
       history: state.economyHistory || [],
       poachYear: state.laborCompetition?.year?.moves || 0,

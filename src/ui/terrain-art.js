@@ -129,6 +129,25 @@ function drawResourceMark(ctx, px, py, size, feature) {
     ctx.fill(); ctx.stroke();
     ctx.strokeStyle = '#fff7d9';
     ctx.beginPath(); ctx.moveTo(-3, 2); ctx.lineTo(1, -4); ctx.lineTo(5, 3); ctx.stroke();
+  } else if (feature === 'coal_mine') {
+    // 煤块：黑色斜面块。
+    ctx.fillStyle = '#2f2f2f';
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-8, 6); ctx.lineTo(-6, -3); ctx.lineTo(0, -6); ctx.lineTo(4, 1); ctx.lineTo(-2, 6); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3, 6); ctx.lineTo(5, -1); ctx.lineTo(9, 1); ctx.lineTo(8, 6); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  } else if (feature === 'iron_mine') {
+    // 铁矿石：灰岩上的锈红色斑点。
+    ctx.fillStyle = '#8e8a80';
+    ctx.strokeStyle = '#5b5750';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-9, 5); ctx.lineTo(-7, -4); ctx.lineTo(1, -6); ctx.lineTo(8, 0); ctx.lineTo(7, 6); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#b5532f';
+    ctx.beginPath(); ctx.arc(-3, -1, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(3, 2, 1.8, 0, Math.PI * 2); ctx.fill();
   } else {
     ctx.fillStyle = '#ad7944';
     ctx.fillRect(-8, 1, 15, 5);

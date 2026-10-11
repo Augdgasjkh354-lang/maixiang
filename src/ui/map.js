@@ -6,7 +6,7 @@ export const MAP_WIDTH = 2400;
 export const MAP_HEIGHT = 1800;
 
 // 资源点（有伐木 / 盐矿图形）；其他带 feature 的地块（如河岸）按空地绘制。
-const RESOURCE_FEATURES = new Set(["logging_resource", "salt_mine"]);
+const RESOURCE_FEATURES = new Set(["logging_resource", "salt_mine", "coal_mine", "iron_mine"]);
 
 // 兼容：优先读多个在建工程，旧调用方只给单工程 view.project 时也能渲染。
 function viewProjects(view) {
@@ -55,6 +55,31 @@ function loggingShape() {
     "</g>";
 }
 
+// 煤层：黑色矿堆与煤块。
+function coalShape() {
+  return '<g class="resource-pile">' +
+    '<ellipse class="resource-ground" cx="0" cy="22" rx="60" ry="10"/>' +
+    '<path class="resource-rock" d="M-50 22Q-44-6-16-14Q4-20 22-10Q46-2 50 22Z"/>' +
+    '<path class="resource-rock-shade" d="M-2-14Q20-4 20 22H50Q44-2 22-10Q8-16-2-14Z"/>' +
+    '<path d="M-30 4l10-8 10 6-6 10-12 0Z" fill="#2f2f2f" stroke="#1a1a1a" stroke-width="1.5"/>' +
+    '<path d="M-4 8l12-10 12 8-6 9-14 1Z" fill="#3b3b3b" stroke="#1a1a1a" stroke-width="1.5"/>' +
+    '<path d="M16 16l8-7 8 6-5 7Z" fill="#2f2f2f" stroke="#1a1a1a" stroke-width="1.2"/>' +
+    '</g>';
+}
+
+// 铁矿脉：灰岩中的锈红色矿石。
+function ironShape() {
+  return '<g class="resource-pile">' +
+    '<ellipse class="resource-ground" cx="0" cy="22" rx="60" ry="10"/>' +
+    '<path class="resource-rock" d="M-54 22Q-46-12-18-22Q2-30 20-20Q46-8 54 22Z"/>' +
+    '<path class="resource-rock-shade" d="M-4-24Q20-14 20 22H54Q46-8 20-20Q6-26-4-24Z"/>' +
+    '<circle cx="-22" cy="-2" r="6" fill="#b5532f" stroke="#7a3520" stroke-width="1.2"/>' +
+    '<circle cx="-4" cy="-12" r="7" fill="#c9653a" stroke="#7a3520" stroke-width="1.2"/>' +
+    '<circle cx="12" cy="0" r="5.5" fill="#b5532f" stroke="#7a3520" stroke-width="1.2"/>' +
+    '<path d="M-10 14l8-6 6 4" fill="none" stroke="#6b6558" stroke-width="2"/>' +
+    '</g>';
+}
+
 function saltShape() {
   return '<g class="resource-pile">' +
     '<ellipse class="resource-ground" cx="0" cy="22" rx="60" ry="10"/>' +
@@ -67,14 +92,21 @@ function saltShape() {
     "</g>";
 }
 
+// 资源点外观：标题、角标、图形与样式类。未知特征按伐木点画。
+const RESOURCE_SITE_STYLE = Object.freeze({
+  logging_resource: { title: "伐木资源点", tag: "伐木点", shape: loggingShape, cls: "forest" },
+  salt_mine: { title: "盐矿资源点", tag: "盐矿", shape: saltShape, cls: "salt" },
+  coal_mine: { title: "煤矿资源点", tag: "煤矿", shape: coalShape, cls: "coal" },
+  iron_mine: { title: "铁矿资源点", tag: "铁矿", shape: ironShape, cls: "iron" }
+});
+
 function resourceSite(plot, selected) {
   const x = plot.x * 12;
   const y = plot.y * 10;
-  const salt = plot.feature === "salt_mine";
-  const title = salt ? "盐矿资源点" : "伐木资源点";
-  const tag = salt ? "盐矿" : "伐木点";
-  const shape = salt ? saltShape() : loggingShape();
-  return '<g class="map-site resource-site ' + (salt ? "salt" : "forest") +
+  const style = RESOURCE_SITE_STYLE[plot.feature] || RESOURCE_SITE_STYLE.logging_resource;
+  const { title, tag, cls } = style;
+  const shape = style.shape();
+  return '<g class="map-site resource-site ' + cls +
     (selected ? " selected" : "") + '" data-site="resource:' + escapeHtml(plot.id) +
     '" role="button" tabindex="0" aria-label="查看' + title + '" transform="translate(' +
     x + " " + y + ')"><ellipse class="map-hit" cx="0" cy="2" rx="48" ry="38"/>' +

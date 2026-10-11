@@ -9,6 +9,12 @@ import { renderShopPricing } from "./panel-shop-pricing.js";
 import { renderOutsideTown } from "./panel-outside-town.js";
 import { renderExchangeBody, renderCompanySection } from "./panel-exchange.js";
 
+// 煤矿、铁矿资源点的建筑类型与说明（盐矿、伐木点在下面的分支里直接写）。
+const MINE_SITE_INFO = Object.freeze({
+  coal_mine: { kind: "coal_mine", title: "煤矿资源点", resource: "煤层" },
+  iron_mine: { kind: "iron_mine", title: "铁矿资源点", resource: "铁矿脉" }
+});
+
 // 商业街能开的店：综合商店与服务类（无宿主建筑，或宿主为商业街），排除旧别名。新增服务店自动出现在按钮里。
 const COMMERCIAL_STREET_SHOP_TYPES = Object.values(CONTENT.rules.shopTypes || {})
   .filter(def => !def.aliasOf && (def.kind === "retail" || def.kind === "service")
@@ -315,10 +321,11 @@ export function renderSite(view) {
   } else if (site.startsWith("resource:") && view.selectedResourcePlot) {
     const point = view.selectedResourcePlot;
     const isSalt = point.feature === "salt_mine";
-    const kind = isSalt ? "saltworks" : "lumberyard";
+    const mine = MINE_SITE_INFO[point.feature];
+    const kind = isSalt ? "saltworks" : (mine?.kind || "lumberyard");
     const option = view.constructionOptions.find(row => row.id === kind);
-    title = isSalt ? "盐矿资源点" : "南林资源点";
-    body = `<div class="row"><span class="label">资源</span><strong class="value">${isSalt ? "食盐矿脉" : "林木"}</strong></div><div class="row"><span class="label">已建设 / 可建</span><strong class="value">${number(view.buildings.filter(row => row.typeId === kind).length)} / ${number(option?.availablePlotCount || 0)}处</strong></div>`;
+    title = isSalt ? "盐矿资源点" : (mine?.title || "南林资源点");
+    body = `<div class="row"><span class="label">资源</span><strong class="value">${isSalt ? "食盐矿脉" : (mine?.resource || "林木")}</strong></div><div class="row"><span class="label">已建设 / 可建</span><strong class="value">${number(view.buildings.filter(row => row.typeId === kind).length)} / ${number(option?.availablePlotCount || 0)}处</strong></div>`;
     actions = `<button class="secondary" data-go="build">去建设</button>`;
   } else if (site === "bank-compat" && view.monetaryReform.legacyBankAccess) {
     title = "银行 · 旧存档兼容入口";

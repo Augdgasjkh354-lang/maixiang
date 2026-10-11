@@ -76,8 +76,8 @@ export function signTradeAgreement(state, { itemId, annualJin, years, content, t
   if (town.tradeClosed) return { ok: false, reason: `商路断绝，无法与${profile.name}签约` };
   if (!buildingOperational(state, "foreign_trade_house")) return { ok: false, reason: "外贸房无人值守，无法签约" };
   if (!profile.goods[itemId]) return { ok: false, reason: `${profile.name}不收购这种货` };
-  // 长协只对批发市场经营的商品开放（交货从批发市场扣货）；矿产等只走手动外贸的商品不能签。
-  if (!wholesaleMonopolyItemIds(content).includes(itemId)) return { ok: false, reason: `长期协定只限批发市场经营的商品，${content.items[itemId]?.name || itemId}不能签约` };
+  // 长协只对批发市场经营的商品开放（交货从批发市场扣货）；贸易行不做的商品（银条、金条，tradeHouseExcluded）不能签。
+  if (!wholesaleMonopolyItemIds(content).includes(itemId) || content.items[itemId]?.tradeHouseExcluded) return { ok: false, reason: `长期协定只限批发市场经营的商品，${content.items[itemId]?.name || itemId}不能签约` };
   const quantity = round2(Number(annualJin));
   if (!Number.isFinite(quantity) || quantity <= 0) return { ok: false, reason: "年供货量必须大于0" };
   const term = Math.floor(Number(years));

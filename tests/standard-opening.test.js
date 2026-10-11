@@ -13,9 +13,12 @@ import { migrateSave } from "../src/persistence/migrations.js";
 
 const RULES = CONTENT.rules;
 const EXPECTED = [
-  { typeId: "lumberyard", plotId: "forest-logging-01" },
-  { typeId: "saltworks", plotId: "forest-salt-01" },
-  { typeId: "dock", plotId: "riverside-01" }
+  { typeId: "lumberyard", plotId: "forest-logging-01", level: 10 },
+  { typeId: "saltworks", plotId: "forest-salt-01", level: 10 },
+  { typeId: "dock", plotId: "riverside-01", level: 10 },
+  // 煤矿、铁矿开局各 1 级（见 rules.INITIAL.standardOpeningBuildings）。
+  { typeId: "coal_mine", plotId: "forest-coal-01", level: 1 },
+  { typeId: "iron_mine", plotId: "forest-iron-01", level: 1 }
 ];
 
 function assertValid(state, label) {
@@ -40,19 +43,19 @@ function advanceUntilProjectsDone(state, limit = 600) {
 
 // ---------------------------------------------------------------- 标准开局 / 空白开局
 
-test("标准开局：伐木场、盐场、码头各一栋，10 级，地块正确，镇营所有，validateState 通过", () => {
+test("标准开局：伐木场、盐场、码头各一栋（10 级），煤矿、铁矿各一栋（1 级）；地块正确，镇营所有，validateState 通过", () => {
   const state = simulation.createInitialState({ seed: 9101, opening: "standard" });
-  assert.equal(state.buildings.length, 3, "只有三栋");
+  assert.equal(state.buildings.length, EXPECTED.length, "开局五栋");
   for (const expected of EXPECTED) {
     const rows = state.buildings.filter(row => row.typeId === expected.typeId);
     assert.equal(rows.length, 1, `${expected.typeId} 只有一栋`);
     const [building] = rows;
     assert.equal(building.plotId, expected.plotId, `${expected.typeId} 地块`);
-    assert.equal(building.level, 10, `${expected.typeId} 10 级`);
-    assert.deepEqual(building.ownership, { townLevels: 10, privateLevels: 0, listedLevels: 0 });
+    assert.equal(building.level, expected.level, `${expected.typeId} ${expected.level} 级`);
+    assert.deepEqual(building.ownership, { townLevels: expected.level, privateLevels: 0, listedLevels: 0 });
     assert.deepEqual(building.completed, { year: 1, day: 1 }, "completed 为开局日");
   }
-  assert.equal(state.nextInstanceNumber, 4, "实例编号接着开局三栋往后");
+  assert.equal(state.nextInstanceNumber, EXPECTED.length + 1, "实例编号接着开局的往后");
   assertValid(state, "标准开局");
 });
 
@@ -60,10 +63,10 @@ test("标准开局：不派工（岗位全部为空），开局文字提示派�
   const state = simulation.createInitialState({ seed: 9102, opening: "standard" });
   const typeOf = new Map(state.buildings.map(row => [row.id, row.typeId]));
   const rows = simulation.selectJobRows(state).rows.filter(row => row.buildingId && typeOf.has(row.buildingId));
-  assert.ok(rows.length >= 3, "三栋建筑都有岗位行");
+  assert.ok(rows.length >= EXPECTED.length, "开局建筑都有岗位行");
   for (const row of rows) assert.equal(row.count, 0, `${row.key} 不派工`);
   assert.equal(state.logistics.poolJin, 0, "没有码头工就没有运力");
-  assert.match(state.events[0].text, /伐木场、盐场、码头已建好.*就业面板设人数/);
+  assert.match(state.events[0].text, /伐木场、盐场、码头、煤矿、铁矿已建好.*就业面板设人数/);
 });
 
 test("空白开局是默认：不放任何建筑；显式 opening: blank 与默认一致；未知开局报错", () => {
@@ -102,7 +105,7 @@ test("旧档读入不新增建筑：空白存档与标准开局存档读回后�
 
   const standard = simulation.createInitialState({ seed: 9106, opening: "standard" });
   const migratedStandard = migrateSave(JSON.parse(JSON.stringify(standard)), CONTENT);
-  assert.equal(migratedStandard.buildings.length, 3, "标准档读回仍是三栋，不翻倍");
+  assert.equal(migratedStandard.buildings.length, EXPECTED.length, "标准档读回建筑数不变，不翻倍");
   assert.equal(migratedStandard.nextInstanceNumber, standard.nextInstanceNumber);
   assertValid(migratedStandard, "标准档读回");
 });

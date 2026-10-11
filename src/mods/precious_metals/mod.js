@@ -1,5 +1,5 @@
 // 贵金属 mod · 行为。银条、金条的产量与库存由 systems/outside-town.js 的矿产扩展（good.mine）每天结算；
-// 买卖走核心手动外贸（付小麦，镇库小麦不得低于口粮储备线）。本 mod 只做只读视图、经营页卡片与校验，
+// 买卖走核心手动外贸（付小麦，镇库小麦不得低于口粮储备线；买到的矿产直接入批发市场库存）。本 mod 只做只读视图、经营页卡片与校验，
 // 不写 state，不登记命令。
 import { defineMod } from "../api.js";
 import { currentPrice } from "../../systems/outside-town.js";
@@ -58,7 +58,7 @@ export default defineMod({
           + `<strong class="value">年产${fmt(row.annualOutputJin)}斤 · 外镇库存${fmt(row.stockJin)}斤 · 我镇${fmt(row.ourStockJin, 2)}斤</strong></div>`
           + `<div class="row"><span class="label">买 / 卖（小麦斤/${row.unit}）</span>`
           + `<strong class="value">${fmt(row.buyPrice, 2)} / ${fmt(row.sellPrice, 2)} · 累计买${fmt(row.boughtJin, 2)}斤 卖${fmt(row.soldJin, 2)}斤</strong></div>`).join("");
-        return `<div class="cardlet">${body}</div><div class="subtle">银条、金条只能用小麦在外贸面板买卖，不进批发市场与综合商店。</div>`;
+        return `<div class="cardlet">${body}</div><div class="subtle">银条、金条用小麦在外贸面板买卖；买到的入批发市场库存（冶炼厂原料），贸易行与长期协定不做。</div>`;
       }
     }
   },

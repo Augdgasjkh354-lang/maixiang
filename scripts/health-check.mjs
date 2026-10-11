@@ -50,7 +50,7 @@ const simulation = householdsArg ? createSimulation(CONTENT) : defaultSimulation
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 const MID_DAY = 180;
-const PRODUCER_TYPES = ["mill", "bakery", "saltworks", "lumberyard", "winery", "cotton_field", "weaving_mill"];
+const PRODUCER_TYPES = ["mill", "bakery", "saltworks", "lumberyard", "winery", "cotton_field", "weaving_mill", "coal_mine", "iron_mine", "smelter"];
 const UPGRADE_TYPES = ["mill", "bakery"];
 const PRICE_ITEMS = ["flour", "bread", "salt", "wood", "beer", "baijiu", "cloth", "pork"];
 const OUTSIDE_TOWN_IDS = Object.keys(CONTENT.outsideTowns || {});
@@ -98,6 +98,10 @@ function buildTown(seed) {
   staff(add("lumberyard", 2, CONTENT.buildings.lumberyard.requiredPlotFeature), 12);
   staff(add("winery"), 16); staff(add("winery"), 16);
   staff(add("cotton_field"), 8); staff(add("weaving_mill"), 6);
+  // 煤矿、铁矿、冶炼厂（金银消费第一期 A）：矿点与冶炼厂各配一座。
+  staff(add("coal_mine", 1, CONTENT.buildings.coal_mine.requiredPlotFeature), 10);
+  staff(add("iron_mine", 1, CONTENT.buildings.iron_mine.requiredPlotFeature), 10);
+  staff(add("smelter"), 8);
   const base = add("livestock_base", 1);
   add("times_square", 1);
   grantResidentVouchers(state, 200000);

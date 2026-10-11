@@ -589,6 +589,13 @@ export function mountGame(root) {
     } else if (kind === "stall-rent") {
       result = simulation.setStallRent(state, parsed.value);
       successMessage = `摊租已设为每摊每日${number(parsed.value, 2)}小麦等值。`;
+    } else if (kind === "voucher-buyback-daily") {
+      // 粮券收购每日小麦上限（斤，整数）。
+      result = simulation.setVoucherBuyback(state, { dailyWheatJin: parsed.value });
+      successMessage = `粮券收购每日小麦上限已设为${number(parsed.value)}斤。`;
+    } else if (kind === "voucher-buyback-ratio") {
+      result = simulation.setVoucherBuyback(state, { wheatPerVoucher: parsed.value });
+      successMessage = `粮券收购比价已设为每1粮券${number(parsed.value, 1)}斤小麦。`;
     } else if (kind === "stamp-duty-rate") {
       result = simulation.setStampDuty(state, parsed.value);
       successMessage = `二级市场印花税已设为${number(parsed.value, 2)}%（卖方承担，交镇库）。`;
@@ -1839,6 +1846,17 @@ export function mountGame(root) {
       changed(true);
       render(true);
       showToast(enabled ? "酒类专售令已开启：综合商店与时代广场停售酒，居民买酒只去酒馆。" : "酒类专售令已关闭，综合商店与时代广场恢复卖酒。");
+      return;
+    }
+    // 粮券收购开关（政策页）：未建银行时命令拒绝并给出原因。
+    const voucherBuybackButton = closest(target, "[data-voucher-buyback]");
+    if (voucherBuybackButton && state) {
+      const enabled = voucherBuybackButton.dataset.voucherBuyback === "true";
+      const result = simulation.setVoucherBuyback(state, { enabled });
+      if (!result?.ok) { showToast(result?.reason || "粮券收购设置失败", 3600); return; }
+      changed(true);
+      render(true);
+      showToast(enabled ? "粮券收购已开启：镇库每日用小麦向居民收购超额粮券。" : "粮券收购已关闭。");
       return;
     }
     // 0.2.3 流通改革：把目标利润率一键应用到所有综合商店。

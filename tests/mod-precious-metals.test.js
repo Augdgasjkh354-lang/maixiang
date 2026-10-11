@@ -34,12 +34,14 @@ function tradingState(seed = 6101) {
 
 const units = jin => Math.round((jin + Number.EPSILON) * I);
 
-test("内容：银条、金条是非批发、非货架的贵金属，开局价与库存正确", () => {
+test("内容：银条、金条是批发品（冶炼厂原料，不上货架），贸易行不做，开局价与库存正确", () => {
   for (const id of [SILVER, GOLD]) {
     const item = CONTENT.items[id];
     assert.equal(item.category, "valuable");
     assert.equal(item.edible, false);
-    assert.ok(!item.wholesale && !item.retail && !item.storeOnly && !item.optionalRetail, `${id} 不带流通标记`);
+    assert.equal(item.wholesale, true, `${id} 批发做市`);
+    assert.ok(!item.retail && !item.storeOnly && !item.optionalRetail, `${id} 不上货架`);
+    assert.equal(item.tradeHouseExcluded, true, `${id} 贸易行与长期协定不交易`);
   }
   assert.equal(CONTENT.outsideTowns[MIN].goods[SILVER].basePrice, 1000);
   assert.equal(CONTENT.outsideTowns[WANG].goods[GOLD].basePrice, 10000);
@@ -203,7 +205,7 @@ test("长期协定不能签银金（长协只限批发市场商品）", () => {
   assert.equal(state.tradeAgreements?.length || 0, 0);
 });
 
-test("外贸面板的长协品类不含银金", async () => {
+test("外贸面板的长协品类不含银金（批发品但贸易行不做）", async () => {
   const { renderOutsideTown } = await import("../src/ui/panel-outside-town.js");
   const state = tradingState(6113);
   const view = simulation.selectDashboard(state, { panel: "business", outsideTownId: MIN });
@@ -212,7 +214,8 @@ test("外贸面板的长协品类不含银金", async () => {
   assert.ok(html.includes(`<option value="salt">`), "盐仍是长协品类");
   const goods = view.outsideTown.goods.find(good => good.itemId === SILVER);
   assert.equal(goods.sellsToUs, true);
-  assert.equal(goods.wholesale, false);
+  assert.equal(goods.wholesale, true);
+  assert.equal(goods.tradeHouseExcluded, true);
 });
 
 test("校验：矿产年产量或库存为负时报错，镇库银条非法时报错", () => {

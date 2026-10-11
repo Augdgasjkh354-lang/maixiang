@@ -3,7 +3,7 @@ import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.
 import { addInventory, changeInventory, quantityToUnits, unitsToQuantity } from "../economy/inventory.js";
 import { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } from "../content/outside-towns.js";
 import { RULES } from "../content/rules.js";
-import { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } from "./wholesale-market.js";
+import { hasWholesaleMarket, ensureWholesaleMarket, depositWholesalePurchasedInventory, takeWholesaleInventoryForExport } from "./wholesale-market.js";
 // 镇库可卖给外镇的小麦（超出口粮储备线的部分）：foreign-wheat.js 加载时登记。
 // 直接导入会成环（outside-town → foreign-wheat → selectors/production → labor → agriculture → state → outside-town）。
 let townSellableWheatHook = null;
@@ -554,7 +554,17 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   takeFreightCapacity(state, qty, content);
   town.wheatStockJin = round2(town.wheatStockJin + valueJin);
   town.stocks[itemId] = round2(town.stocks[itemId] - qty);
-  addInventory(state, "town", itemId, qty, `从${profile.name}进口${item.name}`, "trade_import", content);
+  if (good.mine && hasWholesaleMarket(state)) {
+    // 矿产（银条、金条）是批发品：买到的直接入批发市场库存，成本基础 = 所付小麦（冶炼厂从市场领用）。
+    const units = quantityToUnits(qty, content);
+    depositWholesalePurchasedInventory(state, itemId, units, payUnits, content);
+    recordLedger(state, {
+      type: "trade_import", transactionId, source: "outside_town", destination: "wholesale_market", itemId,
+      quantityUnits: units, qeqUnits: 0, reason: `从${profile.name}进口${item.name}（入批发市场，成本基础 ${payUnits}）`
+    }, content);
+  } else {
+    addInventory(state, "town", itemId, qty, `从${profile.name}进口${item.name}`, "trade_import", content);
+  }
   recordTradeStats(town, "buy", valueJin, itemId, qty);
   return { ok: true, direction, itemId, quantityJin: qty, valueJin, priceWheatPerUnit: round2(valueJin / qty) };
 }
@@ -671,6 +681,8 @@ export function selectOutsideTownView(state, content, townId = DEFAULT_OUTSIDE_T
       dailyProduce: good.mine ? round2(perDay) : round2(town.population * good.producePerPersonDay),
       annualOutputJin: good.mine ? annualOutput : null,
       wholesale: Boolean(content.items[itemId]?.wholesale),
+      // 贸易行与长期协定不做的商品（银条、金条）：只走镇长手动外贸。
+      tradeHouseExcluded: Boolean(content.items[itemId]?.tradeHouseExcluded),
       supply: Math.round((town.supply[itemId] ?? 1) * 100),
       sellPrice: round2(unitPrice(town, good, "sell")),
       buyPrice: good.sellsToUs ? round2(unitPrice(town, good, "buy")) : null,

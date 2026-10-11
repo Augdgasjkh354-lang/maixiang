@@ -1,6 +1,6 @@
 import { atomicInventoryTransaction } from "../economy/inventory.js";
 import { commitProductionAccounting, planProductionAccounting } from "../economy/business.js";
-import { recipeCapacity, townGateCap, townOutputGate, townWheatReserveUnits } from "../selectors/production.js";
+import { recipeCapacity, townFlexInputCaps, townGateCap, townOutputGate } from "../selectors/production.js";
 import { flexAccountingRecipe, flexPlan, flexRoomUnits } from "./flex-recipe.js";
 import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
 import { procureTownInputFromWholesale, recordTownInputConsumption, transferTownToWholesale } from "./wholesale-market.js";
@@ -123,22 +123,35 @@ export function processBuilding(state, building, content) {
   };
 }
 
-// 弹性配方的镇营一日：产能 = 当日批次 × 每批斤数，按缺口分配；小麦从镇库取，扣口粮储备线。
+// 投入受限时的状态：小麦受口粮储备线 → wheat_reserve；其余投入不足 → 一批都做不成（none）或只做了一部分（limited）。
+function flexShortStatus(plan, partial = false) {
+  if (plan.limitedBy === "wheat") return "wheat_reserve";
+  return partial ? "limited_materials" : "no_materials";
+}
+
+// 弹性配方的镇营一日：产能 = 当日批次 × 每批产能，按缺口分配；小麦从镇库取（扣口粮储备线），其余投入从批发市场领用。
 function processFlexBuilding(state, building, definition, recipe, labor, targetCap, workers, content) {
   if (workers <= 0) return { buildingId: building.id, status: "no_workers", batches: 0 };
+  const scale = content.precision.inventoryUnitsPerJin;
   const batchesWanted = Math.min(labor.batches, targetCap);
-  const capacityUnits = batchesWanted * recipe.flex.totalJin * content.precision.inventoryUnitsPerJin;
+  const capacityUnits = batchesWanted * recipe.flex.totalJin * scale;
   const rooms = flexRoomUnits(state, recipe, content);
-  const wheatCapUnits = Math.max(0, (state.accounts.town.wheat || 0) - townWheatReserveUnits(state, content));
-  const plan = flexPlan(recipe, rooms, capacityUnits, wheatCapUnits, content);
-  if (plan.totalUnits <= 0) {
+  const inputCaps = townFlexInputCaps(state, recipe, content);
+  const plan = flexPlan(recipe, rooms, capacityUnits, inputCaps, content);
+  if (plan.totalPoints <= 0) {
     delete building.productivityCarry;
     const marketFull = Object.values(rooms).every(room => room <= 0);
-    return { buildingId: building.id, status: marketFull ? "market_capped" : "wheat_reserve", batches: 0 };
+    return { buildingId: building.id, status: marketFull ? "market_capped" : flexShortStatus(plan), batches: 0 };
+  }
+  // 非小麦投入从批发市场无偿领用（镇里内部调拨，不付钱）；小麦本就在镇库。领用量按方案的需求，不超过上限。
+  for (const [inputId, units] of Object.entries(plan.inputUnits)) {
+    if (inputId === "wheat" || !(units > 0)) continue;
+    const short = units - Math.max(0, state.accounts.town?.[inputId] || 0);
+    if (short > 0) procureTownInputFromWholesale(state, inputId, short, content, `${definition.name}从批发市场领用${content.items[inputId]?.name || inputId}`);
   }
   const accounting = planProductionAccounting(state, building, flexAccountingRecipe(recipe, plan, content), 1, content);
   const transaction = atomicInventoryTransaction(state, {
-    inputs: plan.wheatUnits > 0 ? [{ owner: "town", itemId: "wheat", quantityUnits: plan.wheatUnits }] : [],
+    inputs: Object.entries(plan.inputUnits).filter(([, units]) => units > 0).map(([itemId, units]) => ({ owner: "town", itemId, quantityUnits: units })),
     outputs: recipe.flex.itemIds.filter(id => plan.units[id] > 0).map(id => ({ owner: "town", itemId: id, quantityUnits: plan.units[id] })),
     losses: [],
     reason: definition.name + "生产：" + recipe.name,
@@ -146,10 +159,16 @@ function processFlexBuilding(state, building, definition, recipe, labor, targetC
   }, content);
   if (!transaction.ok) return { buildingId: building.id, status: "no_materials", batches: 0, reason: transaction.reason };
   commitProductionAccounting(state, accounting);
-  const laborLimited = plan.totalUnits >= capacityUnits * 0.999 && batchesWanted >= labor.batches;
+  // 镇营自身领用的非小麦投入计入"需求"（与市场售出一起决定下一轮的市场闸门）。
+  for (const [inputId, units] of Object.entries(plan.inputUnits)) {
+    if (inputId !== "wheat" && units > 0) recordTownInputConsumption(state, inputId, units, content);
+  }
+  const laborLimited = plan.totalPoints >= capacityUnits * 0.999 && batchesWanted >= labor.batches;
   building.productivityCarry = nextCarry(labor.exact, plan.batchEquiv, laborLimited);
   if (!building.productivityCarry) delete building.productivityCarry;
-  const status = plan.wheatUnits < wheatCapUnits || plan.totalUnits >= capacityUnits * 0.999 ? (batchesWanted < labor.batches ? "target_capped" : "ready") : "market_capped";
+  const full = plan.totalPoints >= capacityUnits * 0.999;
+  const status = full ? (batchesWanted < labor.batches ? "target_capped" : "ready")
+    : (plan.limitedBy ? flexShortStatus(plan, true) : "market_capped");
   return {
     buildingId: building.id, status, batches: Math.round(plan.batchEquiv * 1000) / 1000, transactionId: transaction.transactionId,
     outputUnits: Object.fromEntries(accounting.outputs.map(row => [row.itemId, row.quantityUnits]))

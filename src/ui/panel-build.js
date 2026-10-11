@@ -61,7 +61,7 @@ function buildCard(option, selectedBuild, view, unit) {
   ).join("<br>");
   const jobsHtml = jobs || "无固定岗位";
   const location = option.requiredPlotFeature
-    ? ({ salt_mine: "盐矿资源点", riverside: "河岸地块" }[option.requiredPlotFeature] || "南部森林资源点")
+    ? ({ salt_mine: "盐矿资源点", coal_mine: "煤矿资源点", iron_mine: "铁矿资源点", riverside: "河岸地块" }[option.requiredPlotFeature] || "南部森林资源点")
     : (option.allowedPlotFeatures || []).includes("riverside") ? "任一空地或河岸" : "任一空地";
   const shortage = materialShortageText(option.materials);
   const action = planned

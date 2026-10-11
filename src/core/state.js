@@ -285,6 +285,8 @@ export function createInitialState(options) {
       // 公租房日租（斤/人·日，0—20，一位小数；0 = 免租）。
       publicHousingRentPerResidentDayJin: content.rules.rentPerResidentDayWheatJin ?? 1,
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
+      // 粮券收购（systems/voucher-buyback.js，默认关）：开关；每日收购小麦上限（斤）；比价（每 1 粮券给多少斤小麦，0.5—2，一位小数）。
+      voucherBuyback: { enabled: false, dailyWheatJin: 50000, wheatPerVoucher: 1 },
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
       stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,
       stallRentFreeUntilSerial: 0,
@@ -355,6 +357,8 @@ export function createInitialState(options) {
     stockExchange: { legacyAccess: false, rotation: 0 },
     // 印花税账（粮券，三段记账）：二级市场卖方交给镇库的税额，年报里看 annualReports[].stampDuty。
     stampDuty: { day: {}, year: {}, cumulative: {} },
+    // 粮券收购账（粮券，三段记账；政策在 policy.voucherBuyback）。rotation：每户轮转起点（按户序号）。
+    voucherBuyback: { rotation: 0, day: {}, year: {}, cumulative: {} },
     shops: {},
     nextShopNumber: 1,
     services: {

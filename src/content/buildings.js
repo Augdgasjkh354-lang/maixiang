@@ -73,6 +73,59 @@ export const BUILDINGS = Object.freeze({
     upgrade: Object.freeze({ maxLevel: 50, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
 
+  // 煤矿、铁矿：只能建在南林矿点（requiredPlotFeature），与盐场同机制。每级 10 个矿工岗位，每人每日 10 斤（需求闸门）。
+  coal_mine: Object.freeze({
+    id: "coal_mine", name: "煤矿", icon: "🪨",
+    description: "南林煤矿点采煤 · 每级10个矿工岗位 · 每人每日产10斤煤（需求闸门）· 只能建在煤矿点",
+    industryTier: 0,
+    maxInstances: 6,
+    recipeId: "coal_mining",
+    productionRoleId: "coal_miners",
+    accountingSector: "coal",
+    requiredPlotFeature: "coal_mine",
+    jobs: Object.freeze([Object.freeze({
+      id: "coal_miners", name: "煤矿工", slots: 10, wagePerWorkerDay: 5,
+      note: "每人每日产10斤煤", releasePriority: 30
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 150 }]),
+    construction: Object.freeze({ workDays: 350, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 350, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 150 }]) })
+  }),
+  iron_mine: Object.freeze({
+    id: "iron_mine", name: "铁矿", icon: "⛏️",
+    description: "南林铁矿点采铁矿石 · 每级10个矿工岗位 · 每人每日产10斤铁矿石（需求闸门）· 只能建在铁矿点",
+    industryTier: 0,
+    maxInstances: 6,
+    recipeId: "iron_mining",
+    productionRoleId: "iron_miners",
+    accountingSector: "iron",
+    requiredPlotFeature: "iron_mine",
+    jobs: Object.freeze([Object.freeze({
+      id: "iron_miners", name: "铁矿工", slots: 10, wagePerWorkerDay: 5,
+      note: "每人每日产10斤铁矿石", releasePriority: 30
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 150 }]),
+    construction: Object.freeze({ workDays: 350, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 350, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 150 }]) })
+  }),
+  // 冶炼厂（弹性配方 smelter_work）：一名冶炼工一日 10 个产能点，铁制农具、铁制工具、金银珠宝按批发市场缺口分配产能。
+  smelter: Object.freeze({
+    id: "smelter", name: "冶炼厂", icon: "🔥",
+    description: "铁矿石与煤冶炼农具、工具，金银条制珠宝 · 每级8个冶炼工岗位 · 每工日10个产能点，产品按市场缺口分配",
+    industryTier: 1,
+    maxInstances: 6,
+    recipeId: "smelter_work",
+    productionRoleId: "smelters",
+    accountingSector: "smelting",
+    jobs: Object.freeze([Object.freeze({
+      id: "smelters", name: "冶炼工", slots: 8, wagePerWorkerDay: 5,
+      note: "每人每日10个产能点（农具4点/件、工具2点/件、珠宝1点/件）", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]),
+    construction: Object.freeze({ workDays: 500, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 500, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
+  }),
+
   // 酒坊：一座酒坊同时酿四种酒（配方 winery_brewing）。每名酿酒工每日一批：普通啤酒 2、高档啤酒 1、普通白酒 2、高档白酒 1 斤。
   winery: Object.freeze({
     id: "winery", name: "酒坊", icon: "🍶",

@@ -10,7 +10,7 @@ import {
 import {
   setEmployment, buildAt, toggleAutomaticRelief,
   setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl,
-  setBankPolicy, repayBankDebtToTown, issueGovernmentBond,
+  setBankPolicy, repayBankDebtToTown, setVoucherBuyback, issueGovernmentBond,
   setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax,
   setWealthTax, setInheritanceTax,
   setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers,
@@ -99,6 +99,9 @@ export function createSimulation(content) {
     },
     repayBankDebtToTown: function (state, amountJin) {
       return repayBankDebtToTown(state, amountJin, definitions);
+    },
+    setVoucherBuyback: function (state, patch) {
+      return setVoucherBuyback(state, patch, definitions);
     },
     setAutosaveMonths: function (state, months) {
       return setAutosaveMonths(state, months);

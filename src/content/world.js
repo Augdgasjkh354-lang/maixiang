@@ -50,7 +50,14 @@ const riversidePlots = [
 ];
 const resourcePlots = [
   Object.freeze({ id: "forest-logging-01", label: "南林伐木资源点", x: 6, y: 82, feature: "logging_resource" }),
-  Object.freeze({ id: "forest-salt-01", label: "南部盐矿资源点", x: 6, y: 96, feature: "salt_mine" })
+  Object.freeze({ id: "forest-salt-01", label: "南部盐矿资源点", x: 6, y: 96, feature: "salt_mine" }),
+  // 煤矿点、铁矿点：南部丘陵，避开河道（jiangnan-art 的河线）、河岸地块与村落网格。
+  Object.freeze({ id: "forest-coal-01", label: "南部煤矿资源点一", x: 34, y: 104, feature: "coal_mine" }),
+  Object.freeze({ id: "forest-coal-02", label: "南部煤矿资源点二", x: 34, y: 117, feature: "coal_mine" }),
+  Object.freeze({ id: "forest-coal-03", label: "南部煤矿资源点三", x: 34, y: 130, feature: "coal_mine" }),
+  Object.freeze({ id: "forest-iron-01", label: "南部铁矿资源点一", x: 46, y: 104, feature: "iron_mine" }),
+  Object.freeze({ id: "forest-iron-02", label: "南部铁矿资源点二", x: 46, y: 117, feature: "iron_mine" }),
+  Object.freeze({ id: "forest-iron-03", label: "南部铁矿资源点三", x: 46, y: 130, feature: "iron_mine" })
 ];
 // Keep all legacy IDs and coordinates stable; resource sites are appended as distinct plots.
 export const PLOTS = Object.freeze([...legacyPlots, ...expansionPlots, ...resourcePlots, ...riversidePlots]);

@@ -29,6 +29,7 @@ import { setSocialSecurityPolicy as setSocialSecurityPolicySystem, injectSocialS
 import { tradeWithOutsideTown as tradeWithOutsideTownSystem, issueWheatLoan as issueWheatLoanSystem } from "../systems/outside-town.js";
 import { signTradeAgreement as signTradeAgreementSystem, terminateTradeAgreement as terminateTradeAgreementSystem } from "../systems/trade-agreements.js";
 import { setWealthTaxPolicy, setInheritanceTaxPolicy } from "../systems/redistribution.js";
+import { setVoucherBuybackPolicy } from "../systems/voucher-buyback.js";
 
 export function setWageRate(state, roleId, dailyJin, content) {
   const value = Number(dailyJin);
@@ -110,6 +111,11 @@ export function terminateTradeAgreement(state, id, content) {
 
 export function repayBankDebtToTown(state, amountJin, content) {
   return repayBankDebtToTownSystem(state, amountJin, content);
+}
+
+// 粮券收购（政策页）：patch = { enabled?, dailyWheatJin?, wheatPerVoucher? }，开启需已建成银行。
+export function setVoucherBuyback(state, patch, content) {
+  return setVoucherBuybackPolicy(state, patch || {}, content);
 }
 
 export function injectSocialSecurity(state, amountJin, content) {

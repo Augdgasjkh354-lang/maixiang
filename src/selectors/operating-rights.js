@@ -1,6 +1,6 @@
 import { privateJobKeyForBuilding, listedJobKeyForBuilding, jobKeyForBuilding, populationStats, readJobCount, selectJobRows } from "./labor.js";
 import { isIndustryType } from "../content/buildings.js";
-import { flexOf, flexRoomUnits } from "../systems/flex-recipe.js";
+import { flexBatchInputsJin, flexCapacityPerUnit, flexOf, flexRoomUnits } from "../systems/flex-recipe.js";
 import { accountQeqUnits } from "../economy/inventory.js";
 import { voucherBalance } from "../economy/currency.js";
 import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
@@ -158,7 +158,9 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
     flexRoomTotal > 0 && Number.isFinite(flexRoomTotal) ? flexRooms[itemId] / flexRoomTotal : 1 / flexRecipe.itemIds.length])) : null;
   // 原料可得性：小麦在镇库；其余原料看批发市场现有库存。
   const market = state.wholesaleMarket || {};
-  const inputBatchLimits = recipe.inputs.map(row => {
+  // 一批的投入（斤）：弹性配方按各产品产能占比折算，其余取名义配比。
+  const batchInputs = flexRecipe ? flexBatchInputsJin(flexRecipe, flexShares) : recipe.inputs;
+  const inputBatchLimits = batchInputs.map(row => {
     const stock = row.itemId === "wheat"
       ? Math.max(0, state.accounts?.town?.wheat || 0)
       : (wholesaleMonopolyItemIds(content).includes(row.itemId) ? Math.max(0, market.inventory?.[row.itemId] || 0) : 0);
@@ -173,10 +175,10 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const maxBatches = Math.max(0, Math.min(maxDailyBatchesByLabor, maxDailyBatchesByDemand, inputBatchCap));
   const effectiveWorkers = maxBatches > 0 ? Math.ceil(maxBatches / recipe.batchesPerWorkerDay) : 0;
   const batchOutputValue = flexRecipe
-    ? flexRecipe.totalJin * flexRecipe.itemIds.reduce((sum, itemId) => sum + flexShares[itemId] * readWholesalePurchasePrice(state, itemId, content), 0)
+    ? flexRecipe.totalJin * flexRecipe.itemIds.reduce((sum, itemId) => sum + flexShares[itemId] / flexCapacityPerUnit(flexRecipe, itemId) * readWholesalePurchasePrice(state, itemId, content), 0)
     : output.quantity * outputPrice;
   const outputValue = maxBatches * batchOutputValue * (1 - taxPercent / 100);
-  const inputCost = recipe.inputs.reduce((sum, row) => sum + maxBatches * row.quantity * currentUnitPrice(state, row.itemId, content), 0);
+  const inputCost = batchInputs.reduce((sum, row) => sum + maxBatches * row.quantity * currentUnitPrice(state, row.itemId, content), 0);
   const wageRate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0;
   const wageCost = effectiveWorkers * wageRate;
   const dailyNetWheatJin = outputValue - inputCost - wageCost;

@@ -32,7 +32,7 @@ test("配方：酒坊只有一个弹性配方 winery_brewing：一工日一批�
   assert.ok(recipe, "winery_brewing 存在");
   assert.deepEqual([...recipe.flex.itemIds], LIQUORS, "四种酒都可分配");
   assert.equal(recipe.flex.totalJin, 12);
-  assert.deepEqual(recipe.flex.wheatPerJin, { beer: 0.2, beer_premium: 0.2, baijiu: 1, baijiu_premium: 1 });
+  assert.deepEqual(recipe.flex.inputsPerJin, { beer: { wheat: 0.2 }, beer_premium: { wheat: 0.2 }, baijiu: { wheat: 1 }, baijiu_premium: { wheat: 1 } });
   assert.equal(recipe.batchesPerWorkerDay, 1, "每工日一批");
   assert.deepEqual(recipe.losses, [], "无损耗");
   assert.ok(Math.abs(recipe.inputs[0].quantity - 8.4) < 1e-9, "名义配比：3 斤/种 × 麦耗 = 8.4 斤");

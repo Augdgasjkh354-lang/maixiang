@@ -146,6 +146,18 @@ export function validateState(state, content) {
   }
   if (!Number.isFinite(state.policy?.shopProfitTaxPercent) || state.policy.shopProfitTaxPercent < 0 || state.policy.shopProfitTaxPercent > (content.rules.shopProfitTaxMaximumPercent || 80)) errors.push("商业利润税设置无效");
   if (state.policy?.liquorMonopoly !== undefined && typeof state.policy.liquorMonopoly !== "boolean") errors.push("酒类专售令设置无效");
+  // 粮券收购（systems/voucher-buyback.js）：开关布尔、每日小麦上限非负有限、比价 0.5—2；账册三段为非负有限数。
+  if (state.policy?.voucherBuyback !== undefined) {
+    const vb = state.policy.voucherBuyback;
+    if (typeof vb.enabled !== "boolean" || !Number.isFinite(vb.dailyWheatJin) || vb.dailyWheatJin < 0 || !Number.isFinite(vb.wheatPerVoucher) || vb.wheatPerVoucher < 0.5 || vb.wheatPerVoucher > 2) errors.push("粮券收购政策无效");
+  }
+  if (state.voucherBuyback !== undefined) {
+    for (const period of ["day", "year", "cumulative"]) {
+      for (const [key, value] of Object.entries(state.voucherBuyback[period] || {})) {
+        if (!Number.isFinite(value) || value < 0) errors.push(`粮券收购账无效：${period}.${key}`);
+      }
+    }
+  }
   if (state.policy?.stampDutyPercent !== undefined && (!Number.isFinite(state.policy.stampDutyPercent) || state.policy.stampDutyPercent < 0 || state.policy.stampDutyPercent > (content.rules.stampDutyMaximumPercent ?? 5))) errors.push("印花税率无效");
 
   if (!state.employment || !state.employment.wageRates) {

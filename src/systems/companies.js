@@ -698,26 +698,36 @@ export function processListedCompany(state, company, content) {
     return { companyId: company.id, status: "no_demand", workers, batches: 0 };
   }
   let batches = planned;
-  for (const input of recipe.inputs) {
-    const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);
-    const need = perBatch * planned;
-    const have = company.inventory[input.itemId] || 0;
-    if (have < need) buyInputForCompany(state, company, input.itemId, need - have, content);
-    batches = Math.min(batches, Math.floor((company.inventory[input.itemId] || 0) / perBatch));
-  }
-  if (batches <= 0) {
-    company.status = maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "缺资金/原料" : "缺原料";
-    return { companyId: company.id, status: maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "no_cash_or_materials" : "no_materials", batches: 0 };
-  }
-  // 弹性配方（动态酒品）：按市场缺口分配本日产能；小麦只取分配所需，不为没用掉的产能付钱。
   const scale = content.precision.inventoryUnitsPerJin;
-  const flex = recipe.flex ? flexPlan(recipe, flexRoomUnits(state, recipe, content), batches * recipe.flex.totalJin * scale, company.inventory.wheat || 0, content) : null;
-  if (flex) {
-    if (flex.totalUnits <= 0) {
+  // 弹性配方（动态产品）：先按市场缺口算出本日需要的投入，逐项补足；再按公司实际库存分配（只为分配所需的投入付钱）。
+  let flex = null;
+  if (recipe.flex) {
+    const rooms = flexRoomUnits(state, recipe, content);
+    const capacityUnits = planned * recipe.flex.totalJin * scale;
+    const want = flexPlan(recipe, rooms, capacityUnits, null, content);
+    if (want.totalPoints <= 0) {
       company.status = "市场饱和";
       return { companyId: company.id, status: "market_capped", workers, batches: 0 };
     }
+    for (const [itemId, need] of Object.entries(want.inputUnits)) {
+      const have = company.inventory[itemId] || 0;
+      if (have < need) buyInputForCompany(state, company, itemId, need - have, content);
+    }
+    const caps = Object.fromEntries(Object.keys(want.inputUnits).map(itemId => [itemId, company.inventory[itemId] || 0]));
+    flex = flexPlan(recipe, rooms, capacityUnits, caps, content);
     batches = flex.batchEquiv;
+  } else {
+    for (const input of recipe.inputs) {
+      const perBatch = Math.round(input.quantity * scale);
+      const need = perBatch * planned;
+      const have = company.inventory[input.itemId] || 0;
+      if (have < need) buyInputForCompany(state, company, input.itemId, need - have, content);
+      batches = Math.min(batches, Math.floor((company.inventory[input.itemId] || 0) / perBatch));
+    }
+  }
+  if (flex ? flex.totalPoints <= 0 : batches <= 0) {
+    company.status = maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "缺资金/原料" : "缺原料";
+    return { companyId: company.id, status: maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "no_cash_or_materials" : "no_materials", batches: 0 };
   }
   company.productivityCarry = nextCarry(laborExact, batches, batches >= capacity);
   if (!company.productivityCarry) delete company.productivityCarry;
@@ -725,7 +735,7 @@ export function processListedCompany(state, company, content) {
   company.operatingDays += 1;
   let totalInputCost = 0;
   const inputRows = flex
-    ? (flex.wheatUnits > 0 ? [{ itemId: "wheat", units: flex.wheatUnits }] : [])
+    ? Object.entries(flex.inputUnits).filter(([, units]) => units > 0).map(([itemId, units]) => ({ itemId, units }))
     : recipe.inputs.map(input => ({ itemId: input.itemId, units: Math.round(input.quantity * batches * scale) }));
   for (const row of inputRows) totalInputCost += removeInventoryWithCost(company, row.itemId, row.units);
   const outputs = flex

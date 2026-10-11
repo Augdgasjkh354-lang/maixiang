@@ -6,7 +6,7 @@ import { readJobCount } from "../selectors/labor.js";
 import { setJobCount } from "./households.js";
 import { syncOwnershipLevels } from "./ownership.js";
 
-const PLOT_FEATURE_NAMES = { salt_mine: "盐矿", riverside: "河岸" };
+const PLOT_FEATURE_NAMES = { salt_mine: "盐矿", coal_mine: "煤矿", iron_mine: "铁矿", riverside: "河岸" };
 
 // 建筑工总量即各工程投入人数之和；不再有“一次一个工程”的人为上限。
 export function totalProjectWorkers(state) {

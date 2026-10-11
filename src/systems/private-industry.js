@@ -19,7 +19,7 @@ import { valueUnitsOfGoods, daySerialOf } from "./ownership.js";
 
 import { privateWageRate } from "./payroll.js";
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
-import { flexPlan, flexRoomUnits } from "./flex-recipe.js";
+import { flexInputsOf, flexPlan, flexRoomUnits } from "./flex-recipe.js";
 
 function targetBatches(state, building) {
   return plannedBatchesForProducer(state, `private:${building.id}`);
@@ -53,29 +53,57 @@ function purchaseUnitsNeededForProduction(state, household, itemId, wantedUnits,
   return Math.max(directShortage, qeqShortageUnits);
 }
 
+// 为经营一种投入补足 wantedUnits（库存单位）：不够的从批发市场采购，付款进家庭库存。
+function buyPrivateInputUnits(state, household, definition, itemId, wantedUnits, content) {
+  const missingUnits = purchaseUnitsNeededForProduction(state, household, itemId, wantedUnits, content);
+  if (!(missingUnits > 0)) return {};
+  const purchase = buyWholesaleForOwner(
+    state, `household:${household.id}`, itemId, missingUnits, content,
+    `${household.name}为经营${definition.name}从批发市场采购${content.items[itemId]?.name || itemId}`
+  );
+  if (purchase.boughtUnits > 0) creditHouseholdInventory(state, household.id, itemId, purchase.boughtUnits, content);
+  const purchaseReason = purchase.reason || "批发市场可售量不足";
+  const purchaseRow = { itemId, requestedUnits: missingUnits, purchasedUnits: purchase.boughtUnits || 0, paidVoucherUnits: purchase.paidVoucherUnits || 0, reason: purchaseReason, sellerRows: purchase.sellerRows || [] };
+  const availableUnits = productionAvailableUnits(state, household, itemId, content);
+  const shortage = availableUnits < wantedUnits ? { itemId, missingUnits: wantedUnits - availableUnits, reason: purchaseReason } : null;
+  return { purchase: purchaseRow, shortage };
+}
+
 function buyMissingPrivateInputs(state, household, definition, recipe, batches, content) {
   const purchases = [];
   const shortages = [];
   for (const input of recipe.inputs || []) {
-    const perBatch = quantityToUnits(input.quantity, content);
-    const wantedUnits = perBatch * batches;
-    let availableUnits = productionAvailableUnits(state, household, input.itemId, content);
-    const missingUnits = purchaseUnitsNeededForProduction(state, household, input.itemId, wantedUnits, content);
-    if (missingUnits > 0) {
-      const purchase = buyWholesaleForOwner(
-        state, `household:${household.id}`, input.itemId, missingUnits, content,
-        `${household.name}为经营${definition.name}从批发市场采购${content.items[input.itemId]?.name || input.itemId}`
-      );
-      if (purchase.boughtUnits > 0) creditHouseholdInventory(state, household.id, input.itemId, purchase.boughtUnits, content);
-      const purchaseReason = purchase.reason || "批发市场可售量不足";
-      purchases.push({ itemId: input.itemId, requestedUnits: missingUnits, purchasedUnits: purchase.boughtUnits || 0, paidVoucherUnits: purchase.paidVoucherUnits || 0, reason: purchaseReason, sellerRows: purchase.sellerRows || [] });
-      availableUnits = productionAvailableUnits(state, household, input.itemId, content);
-      if (availableUnits < wantedUnits) shortages.push({
-        itemId: input.itemId, missingUnits: wantedUnits - availableUnits, reason: purchaseReason
-      });
-    }
+    const wantedUnits = quantityToUnits(input.quantity, content) * batches;
+    const row = buyPrivateInputUnits(state, household, definition, input.itemId, wantedUnits, content);
+    if (row.purchase) purchases.push(row.purchase);
+    if (row.shortage) shortages.push(row.shortage);
   }
   return { purchases, shortages };
+}
+
+// 弹性配方：先按缺口算出一批的投入需求（不设投入上限），再逐项补足；之后的分配按家庭实际库存（flexOwnerInputCaps）。
+function buyFlexPrivateInputs(state, household, definition, recipe, rooms, capacityUnits, content) {
+  const purchases = [];
+  const shortages = [];
+  const want = flexPlan(recipe, rooms, capacityUnits, null, content);
+  for (const [itemId, wantedUnits] of Object.entries(want.inputUnits)) {
+    if (!(wantedUnits > 0)) continue;
+    const row = buyPrivateInputUnits(state, household, definition, itemId, wantedUnits, content);
+    if (row.purchase) purchases.push(row.purchase);
+    if (row.shortage) shortages.push(row.shortage);
+  }
+  return { purchases, shortages };
+}
+
+// 弹性配方的家庭投入上限：各投入的家庭可用量（食物按口粮储备扣减，见 productionAvailableUnits）。
+function flexOwnerInputCaps(state, household, recipe, content) {
+  const caps = {};
+  for (const itemId of recipe.flex.itemIds) {
+    for (const inputId of Object.keys(flexInputsOf(recipe.flex, itemId))) {
+      if (!Object.hasOwn(caps, inputId)) caps[inputId] = productionAvailableUnits(state, household, inputId, content);
+    }
+  }
+  return caps;
 }
 
 
@@ -207,16 +235,19 @@ export function processPrivateBuilding(state, building, content) {
     let ownerPlanned = index === ownerEntries.length - 1 ? batchesLeft : Math.floor(planned * levels / owners.length);
     ownerPlanned = Math.min(ownerPlanned, batchesLeft);
     if (ownerPlanned <= 0) continue;
-    const supply = buyMissingPrivateInputs(state, household, definition, recipe, ownerPlanned, content);
+    const scale = content.precision.inventoryUnitsPerJin;
+    const supply = recipe.flex
+      ? buyFlexPrivateInputs(state, household, definition, recipe, flexRooms, ownerPlanned * recipe.flex.totalJin * scale, content)
+      : buyMissingPrivateInputs(state, household, definition, recipe, ownerPlanned, content);
     for (const row of supply.purchases) inputPurchases.push({ ownerHouseholdId, ...row });
     for (const row of supply.shortages) inputShortages.push({ ownerHouseholdId, ...row });
     let batches = ownerPlanned;
     let flexRow = null;
     if (recipe.flex) {
-      const capacityUnits = ownerPlanned * recipe.flex.totalJin * content.precision.inventoryUnitsPerJin;
-      flexRow = flexPlan(recipe, flexRooms, capacityUnits, productionAvailableUnits(state, household, "wheat", content), content);
-      if (flexRow.totalUnits <= 0) continue;
-      for (const itemId of recipe.flex.itemIds) flexRooms[itemId] -= flexRow.units[itemId];
+      const capacityUnits = ownerPlanned * recipe.flex.totalJin * scale;
+      flexRow = flexPlan(recipe, flexRooms, capacityUnits, flexOwnerInputCaps(state, household, recipe, content), content);
+      if (flexRow.totalPoints <= 0) continue;
+      for (const itemId of recipe.flex.itemIds) flexRooms[itemId] -= flexRow.points[itemId];
       batches = flexRow.batchEquiv;
     } else {
       for (const input of recipe.inputs) {
@@ -242,7 +273,7 @@ export function processPrivateBuilding(state, building, content) {
       localTaxRows.push({ itemId, totalUnits, taxUnits, residentUnits, ownerHouseholdId, carryKey });
     }
     const inputs = flexRow
-      ? (flexRow.wheatUnits > 0 ? [{ owner: `household:${ownerHouseholdId}`, itemId: "wheat", quantityUnits: flexRow.wheatUnits }] : [])
+      ? Object.entries(flexRow.inputUnits).filter(([, units]) => units > 0).map(([itemId, units]) => ({ owner: `household:${ownerHouseholdId}`, itemId, quantityUnits: units }))
       : recipe.inputs.map(input => ({ owner: `household:${ownerHouseholdId}`, itemId: input.itemId, quantityUnits: quantityToUnits(input.quantity * batches, content) }));
     const losses = recipe.losses.map(loss => ({ owner: `household:${ownerHouseholdId}`, itemId: loss.itemId, quantityUnits: quantityToUnits(loss.quantity * batches, content) }));
     const transaction = atomicInventoryTransaction(state, {
