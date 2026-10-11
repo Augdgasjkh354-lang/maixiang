@@ -18,7 +18,7 @@
 // 复杂度：O(贸易行 × 外镇 × 商品)（一天一次，没有逐户循环）。
 import { currencyScale } from "../economy/currency.js";
 import { policyTradeMarginPercent } from "../economy/margin-policy.js";
-import { currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
+import { addPaymentObligation, currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { putStock, takeStock, valueOf } from "../economy/trade.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
@@ -100,14 +100,18 @@ function owner(shop) {
 }
 
 // 关税交镇库；付不起的部分记为店铺欠税（与利润税同一笔欠款，之后照常追缴），钱不凭空消失。
-function payTariff(state, shop, tariffUnits, label, content) {
+export function payTariff(state, shop, tariffUnits, label, content) {
   if (!(tariffUnits > 0)) return 0;
   const result = settleMonetaryPayment(state, owner(shop), "town", currentPaymentComposition(state, tariffUnits), content,
     "trade_tariff", `${shop.name}${label}关税`, { requireFull: false });
-  const paid = result.ok ? result.paidValueUnits || 0 : 0;
+  // 部分支付时 ok 为假但钱已经付出去了，必须按实付额记欠款，否则同一笔钱既付了又记欠。
+  const paid = result.paidValueUnits || 0;
   if (paid < tariffUnits) {
     shop.liabilities ||= {};
-    shop.liabilities.taxVoucherUnits = (shop.liabilities.taxVoucherUnits || 0) + (tariffUnits - paid);
+    const unpaid = tariffUnits - paid;
+    shop.liabilities.taxVoucherUnits = (shop.liabilities.taxVoucherUnits || 0) + unpaid;
+    // 与利润税同口径登记支付构成，否则 payLiability 按旧的 claim 付款会恒为 0。
+    shop.liabilities.taxPaymentClaim = addPaymentObligation(shop.liabilities.taxPaymentClaim, currentPaymentComposition(state, unpaid));
   }
   addBookValue(shop, "tariffVoucherUnits", tariffUnits);
   state.tradeTariffs ||= { cumulativeVoucherUnits: 0, byYear: {} };
