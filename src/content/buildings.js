@@ -266,7 +266,7 @@ export const BUILDINGS = Object.freeze({
     description: "镇营住宅 · 每座20名管理员",
     maxInstances: 12,
     accountingSector: "housing",
-    housingCapacity: 1000,
+    housingCapacity: 2000,
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 2000 }]),
     jobs: Object.freeze([Object.freeze({ id: "housing_managers", name: "公租房管理员", slots: 20, capacityMode: "building", wagePerWorkerDay: 5, note: "入住、维护与租务", releasePriority: 55 })]),
     construction: Object.freeze({
