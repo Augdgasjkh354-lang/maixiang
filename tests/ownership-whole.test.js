@@ -113,12 +113,14 @@ test("民营欠薪连续超过30天：整栋收回镇营；存货先抵欠薪，
   setHouseholdVoucherUnits(state, owner, 0);
   owner.inventory.flour = 50 * I;
   syncResidentAggregates(state, CONTENT);
+  const worker = householdList(state).filter(isActiveHousehold)[3];
+  const workerBefore = worker.voucherUnits;
   const flourPrice = wholesalePurchasePrice(state, "flour", CONTENT);
   // 欠薪 40 券：存货 50 斤面粉按收购价约 80 券，抵掉 40 券需 25 斤。
   const arrears = 40 * V;
   state.privateEconomy.payrollByBuilding[mill.id] = {
     arrearsVoucherUnits: arrears, cumulativeAccruedVoucherUnits: arrears, cumulativePaidVoucherUnits: 0,
-    claimsVoucherUnits: { [owner.id]: arrears }, claimsPayment: {}
+    claimsVoucherUnits: { [worker.id]: arrears }, claimsPayment: {}
   };
   const townWheatBefore = state.accounts.town.wheat;
   const ownerVoucherBefore = owner.voucherUnits;
@@ -131,7 +133,8 @@ test("民营欠薪连续超过30天：整栋收回镇营；存货先抵欠薪，
   assert.equal(owner.inventory.flour, 25 * I, "只抵掉欠薪所需的存货");
   assert.ok(rows[0].inKindValueUnits >= arrears - 1 && rows[0].inKindValueUnits <= arrears + 1, `in-kind ${rows[0].inKindValueUnits}`);
   assert.equal(state.privateEconomy.payrollByBuilding[mill.id], undefined);
-  assert.equal(owner.voucherUnits, ownerVoucherBefore, "业主拿不到补偿");
+  assert.equal(owner.voucherUnits, ownerVoucherBefore, "业主拿不到补偿（卖货款全部用来付工人）");
+  assert.ok(Math.abs(worker.voucherUnits - workerBefore - arrears) <= 1, "存货按收购价变现，现金真实付到工人手里");
   assert.equal(state.accounts.town.wheat, townWheatBefore);
   assert.ok(flourPrice > 0);
   assertValid(state, "收回后");

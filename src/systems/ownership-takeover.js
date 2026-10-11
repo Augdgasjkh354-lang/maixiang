@@ -7,9 +7,10 @@
 
 import { recordEvent } from "../economy/ledger.js";
 import { currencyScale } from "../economy/currency.js";
+import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { jobKeyForBuilding } from "../selectors/labor.js";
 import { syncResidentAggregates } from "./households.js";
-import { offsetWageClaims, payWages, transferWageClaimsToTown, wageArrears, wageBook } from "./employer.js";
+import { payWages, transferWageClaimsToTown, wageArrears, wageBook } from "./employer.js";
 import { depositWholesalePurchasedInventory, readWholesalePurchasePrice } from "./wholesale-market.js";
 import { liquidateCompanyForArrears } from "./companies.js";
 import { ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
@@ -36,9 +37,14 @@ function takeoverPrivateBuilding(state, building, content, days) {
       const take = Math.min(stock, unitsNeeded);
       if (take <= 0) continue;
       const value = valueUnitsOfGoods(take, price, content);
+      // 批发市场按收购价真收下这批货：镇库先付现金给业主，业主立刻用这笔钱偿付欠薪（先到先抵）；镇库付不起就停。
+      const purchase = settleMonetaryPayment(state, "town", `household:${household.id}`, currentPaymentComposition(state, value), content,
+        "wholesale_private_purchase", `批发市场收购${household.name}存货抵欠薪`, { requireFull: true });
+      if (!purchase.ok) break;
       household.inventory[itemId] = stock - take;
       depositWholesalePurchasedInventory(state, itemId, take, value, content);
-      inKindValueUnits += offsetWageClaims(state, book, value, content);
+      const paid = payWages(state, book, `household:${household.id}`, content, "private_takeover_wage_payment", `${household.name}存货变现偿付欠薪`);
+      inKindValueUnits += paid.paid || 0;
       goods.push({ itemId, units: take, valueUnits: value });
     }
   }
