@@ -630,6 +630,13 @@ button.wide { width: 100%; }
 /* 银行建筑面板：摘要卡 + 三个折叠分组；数额整体不换行，「粮券」不会被拆到下一行 */
 .bank-summary .value, .bank-groups .value { white-space: nowrap; }
 .bank-groups .detail-block > summary .subtle { font-weight: 500; white-space: nowrap; }
+/* 窄屏（如 360px 手机）：标签与数值超宽时数值换到下一行并允许折行，输入框与「偿还」按钮也折行，不横向溢出；桌面布局不变 */
+@media (max-width: 430px) {
+  .bank-summary .row, .bank-groups .row { flex-wrap: wrap; }
+  .bank-summary .value, .bank-groups .value { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .bank-summary .setting-input, .bank-groups .setting-input { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+  .bank-summary .setting-input input[type="text"], .bank-groups .setting-input input[type="text"] { width: 88px; min-width: 0; max-width: 100%; }
+}
 /* 面板标题与关闭按钮之间留出距离，长标题省略而不是顶到按钮 */
 .panel-heading { gap: 12px; }
 .panel-kicker { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2903,7 +2910,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod20 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-0585b0a";
+       const BUILD_ID = "0203-a422a26";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -6512,6 +6519,28 @@ const { RULES } = __mxmod3;
 const { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } = __mxmod37;
 const { jobCount } = __mxmod24;
 const { freightCapacityUnits, freightPoolJin, takeFreightCapacity } = __mxmod38;
+let townSellableWheatHook = null;
+       function setTownSellableWheatHook(hook) { townSellableWheatHook = hook; }
+const townSellableWheatUnits = (state, content) => (townSellableWheatHook ? townSellableWheatHook(state, content) : Number.POSITIVE_INFINITY);
+                                           
+                                                                                           
+
+                                                               
+  
+                                             
+                         
+                                                               
+                                                          
+                                                                                
+                                                       
+                                           
+                                                            
+                                                 
+                        
+                                        
+                              
+                                       
+
 const SLICES = 20;
        const RELATIONS_DEFAULT = 60;
        const RELATIONS_MAX = 100;
@@ -6931,9 +6960,9 @@ function recordItemTradeStats(town, direction, itemId, valueJin, qtyJin) {
   // 运力：货物（进出口都算）从运力池扣斤数；池子不够就只做到池子剩下的量，池子空了直接拒绝。
   if (freightPoolJin(state) < 0.01) return { ok: false, reason: `运力不足：今天最多还能运${Math.floor(freightPoolJin(state) * 100) / 100}斤` };
   const freightUnits = freightCapacityUnits(state, content);
-  const transactionId = makeTransactionId(state);
 
   if (direction === "sell") {
+    const transactionId = makeTransactionId(state);
     qty = affordableSellQuantity(town, profile, good, qty);
     if (qty < 0.01) return { ok: false, reason: `${profile.name}口粮储备以外的小麦不够，付不起这笔货款` };
     const qtyUnits = Math.min(quantityToUnits(qty, content), freightUnits);
@@ -6967,6 +6996,11 @@ function recordItemTradeStats(town, direction, itemId, valueJin, qtyJin) {
   if (qty < 0.01) return { ok: false, reason: `${profile.name}的${item.name}只够自用，暂不外卖` };
   const valueJin = round2(quoteValue(town, good, "buy", qty));
   const payUnits = quantityToUnits(valueJin, content);
+  // 与贸易行同一口径：付款不得把镇库小麦压到口粮储备线以下（townSellableWheatUnits）。预检通过才动账。
+  if (payUnits > townSellableWheatUnits(state, content)) {
+    return { ok: false, reason: `镇库小麦只够口粮储备以外的部分，付不起${item.name}的货款（${Math.round(valueJin)}斤小麦）` };
+  }
+  const transactionId = makeTransactionId(state);
   const pay = changeInventory(state, "town", "wheat", -payUnits, `从${profile.name}进口${item.name}付款`, "trade_import", content, transactionId);
   if (!pay.ok) return { ok: false, reason: "镇库小麦不足以支付" };
   // 付款已成功，之后不再失败：这时才扣运力。
@@ -7124,7 +7158,7 @@ function recordItemTradeStats(town, direction, itemId, valueJin, qtyJin) {
     foreignTradeCapacity: staff * AGREEMENTS_PER_STAFF
   };
 }
-return { RELATIONS_DEFAULT, RELATIONS_MAX, RELATIONS_TRUSTED, RELATIONS_DISTRUST, RELATIONS_BREAKOFF, AGREEMENTS_PER_STAFF, outsideTownProfile, createOutsideTowns, ensureOutsideTowns, outsideTown, readOutsideTown, targetStock, IMPORT_DISCOUNT_AFTER_YEARS, unitPrice, goodOf, quoteValue, payableWheatJin, sellableStock, affordableSellQuantity, currentPrice, buildingOperational, buildingStaffOnDuty, changeRelations, deliverToOutsideTown, advanceOutsideTownDay, settleOutsideTownYear, tradeWithOutsideTown, MAX_LOAN_RATE_PERCENT, issueWheatLoan, settleWheatLoansYear, selectOutsideTownView, recordTradeStats };
+return { setTownSellableWheatHook, RELATIONS_DEFAULT, RELATIONS_MAX, RELATIONS_TRUSTED, RELATIONS_DISTRUST, RELATIONS_BREAKOFF, AGREEMENTS_PER_STAFF, outsideTownProfile, createOutsideTowns, ensureOutsideTowns, outsideTown, readOutsideTown, targetStock, IMPORT_DISCOUNT_AFTER_YEARS, unitPrice, goodOf, quoteValue, payableWheatJin, sellableStock, affordableSellQuantity, currentPrice, buildingOperational, buildingStaffOnDuty, changeRelations, deliverToOutsideTown, advanceOutsideTownDay, settleOutsideTownYear, tradeWithOutsideTown, MAX_LOAN_RATE_PERCENT, issueWheatLoan, settleWheatLoansYear, selectOutsideTownView, recordTradeStats };
 })();
 
 // ===== core/state.js =====
@@ -11200,9 +11234,9 @@ const { currentUnitPrice, setCurrentUnitPrice } = __mxmod35;
 const { householdConvertibleWheatUnits, householdList, householdPopulation, isActiveHousehold, jobAssignments, setJobCount, syncResidentAggregates } = __mxmod24;
 const { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } = __mxmod61;
 const { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } = __mxmod30;
-const { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, readWholesalePurchasePrice, wholesaleUnitPrice } = __mxmod37;
+const { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, readWholesalePurchasePrice } = __mxmod37;
 const { buildingOwner, companyOfBuilding, transferBuildingOwnership, valueUnitsOfGoods } = __mxmod49;
-const { offsetWageClaims, transferWageClaimsToTown } = __mxmod30;
+const { transferWageClaimsToTown } = __mxmod30;
 const { privateWageRate, townWageRate } = __mxmod44;
 function blankPeriod() {
   return {
@@ -11508,7 +11542,8 @@ function closeCompanyToTown(state, company, building, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   // 1. 现金先还欠薪。
   payWages(state, book, payerId, content, "enterprise_liquidation_wage_payment", `${company.name}清算先偿付欠薪`);
-  // 2. 存货按收购价抵欠薪。
+  // 2. 存货按收购价变现：批发市场向公司买下（镇库先付现金给公司，市场 purchaseSpend 只记这笔实付），
+  //    公司即刻用这笔现金偿付欠薪（先到先抵）。镇库付不起就停，余下存货归镇库（第 3 步，不付钱）。
   let inKindValueUnits = 0;
   for (const itemId of Object.keys(content.items)) {
     if (wageArrears(book) <= 0) break;
@@ -11520,9 +11555,13 @@ function closeCompanyToTown(state, company, building, content) {
     const take = Math.min(qty, unitsNeeded);
     if (take <= 0) continue;
     const value = valueUnitsOfGoods(take, price, content);
+    const purchase = settleMonetaryPayment(state, "town", payerId, currentPaymentComposition(state, value), content,
+      "wholesale_private_purchase", `批发市场收购${company.name}清算存货抵欠薪`, { requireFull: true });
+    if (!purchase.ok) break;
     removeInventoryWithCost(company, itemId, take);
     depositWholesalePurchasedInventory(state, itemId, take, value, content);
-    inKindValueUnits += offsetWageClaims(state, book, value, content);
+    const paid = payWages(state, book, payerId, content, "enterprise_liquidation_wage_payment", `${company.name}清算存货变现偿付欠薪`);
+    inKindValueUnits += paid.paid || 0;
   }
   // 3. 余下存货归镇库（成本随货），余下现金归镇库。
   for (const itemId of Object.keys(content.items)) {
@@ -11955,7 +11994,9 @@ function planTaxUnits(state, company, outputItemId, outputUnits, content) {
       const itemId = output.itemId;
       const available = Math.max(0, company.inventory?.[itemId] || 0);
       if (available <= 0) continue;
-      const price = wholesaleUnitPrice(state, itemId, content);
+      // 与民营收购（buyPrivateOutput）同口径：批发市场按收购价买进，不按售价。非统购品收购价为 0，跳过（否则货出库而市场收不进）。
+      const price = readWholesalePurchasePrice(state, itemId, content);
+      if (!(price > 0)) continue;
       const sale = sellCompanyProduct(state, company.id, "town", itemId, available, price, content,
         `批发市场收购${company.name}的${content.items[itemId]?.name || itemId}`);
       if (!sale.ok || sale.quantityUnits <= 0) continue;
@@ -13135,7 +13176,11 @@ function applyLoanRepayment(state, content, loan, paidUnits) {
       const paid = repayFromHousehold(state, content, loan.borrowerId, due, true);
       applyLoanRepayment(state, content, loan, paid);
       repaidTotal += paid;
-      if (loan.status === "active") loan.missedInstalments = paid >= due ? 0 : loan.missedInstalments + 1;
+      // 欠期按实际未还期数重算：应还 = 本期 + 原欠期（共 missed+1 期），已还的整期从中扣掉。
+      if (loan.status === "active") {
+        const wholePaid = instalment > 0 ? Math.floor(paid / instalment) : 0;
+        loan.missedInstalments = paid >= due ? 0 : Math.max(0, (loan.missedInstalments || 0) + 1 - wholePaid);
+      }
       loan.nextDueDayIndex += REPAY_INTERVAL_DAYS;
     }
     // 有欠期：每天检查一次，有富余就补还，直到欠期清零（部分补还按整期折减欠期数）。
@@ -14783,15 +14828,17 @@ function accrueDailyLiabilities(state, shop, content) {
   const clerkWage = Math.round(clerkAssignments.reduce((sum, row) => sum + row.count, 0) * clerkRate * scale);
   const wage = merchantWage + clerkWage;
   // 负值保护：租金/工资取max(0)，避免负负债（之前无保护）。
-  const rentFree = shop.collective && stallRentFreeDaysLeft(state, content) > 0;
-  const rentVoucher = rentFree ? 0 : shopKind(shop, content) === "stall"
+  const rentVoucher = shopKind(shop, content) === "stall"
     ? (state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2)
     : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
   // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
   const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
   // 镇营综合商店不交店租（镇库自己的店）。
-  const rent = shop.town ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
-  if (rentFree) addBookValue(shop, "rentWaivedVoucherUnits", Math.round((state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2) * rentUnits * scale));
+  const rentDue = shop.town ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
+  // 免租期内，或集市断货无钱且持续无成交（见 collectiveStranded）：不累计店租，记入 rentWaivedVoucherUnits。
+  const rentFree = shop.collective && (stallRentFreeDaysLeft(state, content) > 0 || collectiveStranded(state, shop, content));
+  const rent = rentFree ? 0 : rentDue;
+  if (rentFree && rentDue > 0) addBookValue(shop, "rentWaivedVoucherUnits", rentDue);
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
   if (!shop.collective) accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
   accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
@@ -14810,7 +14857,9 @@ function payLiability(state, shop, key, destination, content, type, reason) {
   const due = shop.liabilities[key] || 0;
   if (due <= 0) return 0;
   const paymentKey = key === "rentVoucherUnits" ? "rentPaymentClaim" : "taxPaymentClaim";
-  const obligation = normalizePaymentObligation(shop.liabilities[paymentKey] || due, state);
+  // 支付构成与欠款应一致；取较大者，防止 claim 落后于欠款时付款额被压成 0。
+  const claimed = normalizePaymentObligation(shop.liabilities[paymentKey] || due, state);
+  const obligation = currentPaymentComposition(state, Math.max(claimed.valueUnits, due));
   const result = settleMonetaryPayment(state, `shop:${shop.id}`, destination, obligation, content, type, reason,
     { requireFull: false });
   const paid = result.paidValueUnits || 0;
@@ -15107,17 +15156,33 @@ function autoAdjustShopClerks(state, shop, content) {
   return tiers[tier] || 0;
 }
 
-// 集市没钱也没货、垫款已还清时，镇库再垫一次启动资金，避免永久停摆。
-       function refundCollectiveIfStranded(state, shop, content) {
-  if (!shop?.collective || (shop.townAdvanceVoucherUnits || 0) > 0) return false;
+// 集市断货、无钱（不够一次周转金的四分之一）。
+function collectiveCashStranded(state, shop, content) {
   const stock = shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory?.[itemId] || 0), 0);
   const cash = maximumPayableValueUnits(state, `shop:${shop.id}`, content);
   const advance = Math.round((shopDefinition(content, shop.typeId)?.startupVoucher ?? 200) * currencyScale(content));
-  if (stock > 0 || cash >= advance / 4) return false;
+  return { stranded: stock <= 0 && cash < advance / 4, advance };
+}
+
+// 集市断货无钱、镇库垫款未还，且连续 N 天没有成交（默认 30 天，rules.stallStrandedWaiverDays）：视为停摆。
+// 停摆期间不再累计店租（记 rentWaivedVoucherUnits），并允许镇库再垫周转金，摆摊/进货恢复后继续。
+       function collectiveStranded(state, shop, content) {
+  if (!shop?.collective) return false;
+  if (!collectiveCashStranded(state, shop, content).stranded) return false;
+  return (shop.idleDays || 0) >= (content.rules.stallStrandedWaiverDays ?? 30);
+}
+
+// 集市没钱也没货时，镇库再垫一次周转金，避免永久停摆。
+// 垫款未还时只有停摆（collectiveStranded）才再垫；垫款累计记在 townAdvanceVoucherUnits 上，卖出后先还镇库。
+       function refundCollectiveIfStranded(state, shop, content) {
+  if (!shop?.collective) return false;
+  const { stranded, advance } = collectiveCashStranded(state, shop, content);
+  if (!stranded) return false;
+  if ((shop.townAdvanceVoucherUnits || 0) > 0 && !collectiveStranded(state, shop, content)) return false;
   const paid = settleMonetaryPayment(state, "town", `shop:${shop.id}`, currentPaymentComposition(state, advance), content,
     "collective_shop_advance", `镇库再次垫付${shop.name}周转金`, { requireFull: false });
-  shop.townAdvanceVoucherUnits = paid.paidValueUnits || 0;
-  return shop.townAdvanceVoucherUnits > 0;
+  shop.townAdvanceVoucherUnits = (shop.townAdvanceVoucherUnits || 0) + (paid.paidValueUnits || 0);
+  return (paid.paidValueUnits || 0) > 0;
 }
 
 // 广场拆除时结束集市：结清欠款、先还镇库垫款、余钱按人头分给摆摊家庭、剩货归镇库，然后删档。
@@ -15408,12 +15473,15 @@ function settleTownOwesHouseholds(state, content) {
     const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
     // 贸易行不因无生意而累计坏日子：连续 tradeHousePauseDays 天无买卖且亏损由 trading-houses.js 暂停营业，暂停中不进清算。
     // 镇营综合商店不因连续无生意累计坏日子（不自动关店，由玩家关）。
+    // 集市连续无成交天数：断货无钱时据此豁免店租、允许镇库再垫（见 collectiveStranded）。
+    if (shop.collective) shop.idleDays = activity > 0 ? 0 : (shop.idleDays || 0) + 1;
     if (tradeHouse || shop.town) shop.badDays = 0;
     else if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
     else if (maximumPayableValueUnits(state, shopAccountName(shop), content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
+    else if (shop.town && shopClerkCount(state, shop) <= 0) shop.statusReason = "无店员";
     else if (shopKind(shop, content) === "trade") shop.statusReason = activity > 0 ? "营业中" : "暂无可做的买卖";
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";
@@ -15526,6 +15594,9 @@ function windUpTownShop(state, shop, content) {
     shop.liabilities.rentVoucherUnits = 0;
     shop.liabilities.taxVoucherUnits = 0;
     shop.liabilities.claimsVoucherUnits = {};
+    shop.liabilities.claimsPayment = {};
+    shop.liabilities.rentPaymentClaim = currentPaymentComposition(state, 0);
+    shop.liabilities.taxPaymentClaim = currentPaymentComposition(state, 0);
     recordEvent(state, `${shop.name}清算${liquidatingDays}天仍资不抵债，${Math.round(writtenOff / content.precision.currencyUnitsPerVoucher)}券坏账核销，强制关闭。`, content);
   }
   const finalized = finalizeShopLiquidation(state, shop, content);
@@ -15735,7 +15806,7 @@ function normalizeShopForSummary(shop, content) {
     };
   });
 }
-return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, farmsHaveStock, shopRetailItemIds, stallItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopMerchantCount, shopAccountName, shopClerkCount, shopClerkLimit, shopJinPerCustomer, shopDailyCustomerCapacity, releaseAllShopClerks, shopsForStreet, streetShopCapacity, syncShopEmployment, releaseShopStaffing, shopMinimumCapitalUnits, topUpShopCapital, reopenTradeHouse, shopsAwaitingSuccession, chooseShopSuccessor, transferShopOwnership, succeedShopsOfHousehold, succeedOrphanShops, openShop, openTownShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerRejectedHouseholds, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, stallRentFreeDaysLeft, stallDiscountPerUnit, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
+return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, farmsHaveStock, shopRetailItemIds, stallItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopMerchantCount, shopAccountName, shopClerkCount, shopClerkLimit, shopJinPerCustomer, shopDailyCustomerCapacity, releaseAllShopClerks, shopsForStreet, streetShopCapacity, syncShopEmployment, releaseShopStaffing, shopMinimumCapitalUnits, topUpShopCapital, reopenTradeHouse, shopsAwaitingSuccession, chooseShopSuccessor, transferShopOwnership, succeedShopsOfHousehold, succeedOrphanShops, openShop, openTownShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerRejectedHouseholds, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, stallRentFreeDaysLeft, stallDiscountPerUnit, collectiveStranded, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
 })();
 
 // ===== systems/building-development.js =====
@@ -17526,7 +17597,6 @@ const BOND_MAX_EXTENSIONS = 2;
   const bonds = state.bonds;
   bonds.seq ||= 0;
   if (!Array.isArray(bonds.issues)) bonds.issues = [];
-  bonds.townOwesBankVoucherUnits ||= 0;
   return bonds;
 }
 
@@ -17564,7 +17634,32 @@ function payToHolder(state, holderKey, units, content = null, incomeUnits = 0) {
     const bank = ensureBankState(state);
     bank.cashVoucherUnits = (bank.cashVoucherUnits || 0) + units;
     bank.retainedVoucherUnits += incomeUnits;
+  } else if (kind === "town") {
+    // 镇库自持（整户无人家产归镇库后）：付出的现金原样回到镇库，净额为零。
+    addTownCashUnits(state, units);
   }
+}
+
+// 整户无人：该户名下的国债持仓转为镇库自持（同一期国债内并入镇库已有持仓）。
+// 只改持仓归属，不动现金与粮券：镇库照常付息、到期还本，资金在镇库内部流转，台账守恒。返回转出的本金。
+       function transferBondHoldingsToTown(state, householdId) {
+  const issues = state.bonds?.issues;
+  if (!Array.isArray(issues)) return 0;
+  const owner = holderKeyOf("household", householdId);
+  let moved = 0;
+  for (const issue of issues) {
+    const holdings = issue.holdings || [];
+    const own = holdings.filter(holding => holding.holderKey === owner);
+    if (!own.length) continue;
+    const principal = own.reduce((sum, holding) => sum + Math.max(0, holding.principalVoucherUnits || 0), 0);
+    if (!(principal > 0)) continue;
+    moved += principal;
+    issue.holdings = holdings.filter(holding => holding.holderKey !== owner);
+    const town = issue.holdings.find(holding => holding.holderKey === "town:town");
+    if (town) town.principalVoucherUnits = (town.principalVoucherUnits || 0) + principal;
+    else issue.holdings.push({ holderKey: "town:town", principalVoucherUnits: principal });
+  }
+  return moved;
 }
 
        function bondOutstandingVoucherUnits(state) {
@@ -17790,26 +17885,11 @@ function settleMaturity(state, issue, content) {
   return { ok: true, principalVoucherUnits: holding.principalVoucherUnits, interestVoucherUnits: accrued };
 }
 
-// 流拍退款挂账的镇库应付：每日用镇库现有现金尽量补付给银行，绝不透支。
-function settleTownBondPayables(state, bonds, content) {
-  const owed = bonds.townOwesBankVoucherUnits || 0;
-  if (owed <= 0) return;
-  const pay = Math.min(owed, Math.max(0, townCashUnits(state)));
-  if (pay <= 0) return;
-  addTownCashUnits(state, -pay);
-  const bank = ensureBankState(state);
-  bank.cashVoucherUnits = (bank.cashVoucherUnits || 0) + pay;
-  bonds.townOwesBankVoucherUnits = owed - pay;
-  recordEvent(state, `镇库补付国债流拍退款${pay}券给银行。`, content);
-}
-
        function settleBondsDay(state, content) {
   if (!bondAvailable(state)) return null;
   const bonds = ensureBondState(state);
   const daysPerYear = content.rules.daysPerYear || 360;
   const dayIndex = (state.year - 1) * daysPerYear + state.day;
-  // 镇库欠银行/住户的流拍退款：镇库有钱就优先补付（家庭侧由 shops 结算的 townOwes 一并处理）。
-  settleTownBondPayables(state, bonds, content);
   for (const issue of bonds.issues) {
     if (issue.status === "active") {
       if (dayIndex - issue.lastCouponDayIndex >= daysPerYear) {
@@ -17821,7 +17901,7 @@ function settleTownBondPayables(state, bonds, content) {
   }
   return { issues: bonds.issues.length, outstandingVoucherUnits: bondOutstandingVoucherUnits(state) };
 }
-return { BOND_MAX_EXTENSIONS, ensureBondState, bondAvailable, bondOutstandingVoucherUnits, householdBondPrincipalMap, issueGovernmentBond, subscribeBond, redeemBondEarly, settleBondsDay };
+return { BOND_MAX_EXTENSIONS, ensureBondState, bondAvailable, transferBondHoldingsToTown, bondOutstandingVoucherUnits, householdBondPrincipalMap, issueGovernmentBond, subscribeBond, redeemBondEarly, settleBondsDay };
 })();
 
 // ===== systems/trade-agreements.js =====
@@ -18011,9 +18091,11 @@ function settleAgreementMonth(state, agreement, content, result) {
   const orderJin = round2(actualJin * agreement.pricePerUnit);
   if (payableWheatJin(town, profile) < orderJin) {
     returnToMarket(state, agreement.itemId, takenUnits);
+    // 对方付不起：本月应交（含之前顺延的）整笔顺延到下月，不计我方违约（与商路断绝口径一致）。
+    agreement.carryJin = dueJin;
     changeRelations(town, -AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS);
     result.partnerBreached += 1;
-    recordEvent(state, `${profile.name}余粮不足，本月长期协定未能付款，交付顺延。`, content);
+    recordEvent(state, `${profile.name}余粮不足，本月长期协定未能付款，交付顺延（待交累计${Math.round(agreement.carryJin)}斤）。`, content);
     return;
   }
   if (takenUnits > 0) {
@@ -18055,7 +18137,12 @@ function consumeAgreementTerm(state, agreement, content) {
   if (left > 0) return;
   agreement.status = "expired";
   const name = outsideTownProfile(content, agreement.townId || DEFAULT_OUTSIDE_TOWN_ID)?.name || "外镇";
-  recordEvent(state, `与${name}的${content.items[agreement.itemId]?.name || agreement.itemId}长期协定已到期，可续签。`, content);
+  const itemName = content.items[agreement.itemId]?.name || agreement.itemId;
+  // 期满不顺延：期限按日历走，尚未交付的顺延量随协定作废（不计违约），事件里明说。
+  const lapsedJin = round2(agreement.carryJin || 0);
+  agreement.carryJin = 0;
+  const lapsedText = lapsedJin > 0 ? `，期满时仍有顺延的${Math.round(lapsedJin)}斤未交，随协定作废（不计违约）` : "";
+  recordEvent(state, `与${name}的${itemName}长期协定已到期${lapsedText}，可续签。`, content);
 }
 
 // 主动解约：赔年货值 10%（关系融洽减半），关系分 −5。
@@ -18111,7 +18198,7 @@ const { daysUntilHarvest, householdGrossWealthUnits } = __mxmod64;
 const { householdLoanBalanceMap } = __mxmod56;
 const { settleHouseholdLoansAtEscheat } = __mxmod65;
 const { wholesalePrice } = __mxmod53;
-const { householdBondPrincipalMap } = __mxmod76;
+const { householdBondPrincipalMap, transferBondHoldingsToTown } = __mxmod76;
 const { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } = __mxmod49;
 const { transferWageClaimsToTown, wageBook } = __mxmod30;
 const { jobKeyForBuilding } = __mxmod46;
@@ -18360,6 +18447,8 @@ function householdHasEscheatableAssets(state, household) {
   if ((state.bank?.loans || []).some(loan => loan.borrowerKind === "household" && loan.status === "active" && loan.borrowerId === household.id)) return true;
   // 店铺在等业主更替（无人接手时也算，直到有人接手或店铺关闭）。
   if (shopsAwaitingSuccession(state, household.id).length > 0) return true;
+  // 名下国债持仓：整户无人时转为镇库自持（见 escheatHousehold）。
+  if ((householdBondPrincipalMap(state).get(household.id) || 0) > 0) return true;
   return ownedPrivateBuildings(state, household.id).length > 0;
 }
 
@@ -18372,12 +18461,14 @@ function escheatHousehold(state, household, content) {
   const totals = { voucherUnits: 0, inventoryValueUnits: 0, shareCount: 0, buildingCount: 0, villaCount: 0 };
   // 0. 民间贷款：先用手头与存款还一部分，剩余核销（留存利润减少）。须先于下面的家产划转。
   settleHouseholdLoansAtEscheat(state, household, content);
+  // 0b. 国债持仓 → 镇库自持（不动现金，只改持仓归属；之后付息、还本都在镇库内部流转）。
+  const bondMoved = transferBondHoldingsToTown(state, id);
 
   // 1. 存款：银行现金不够时镇库可垫付（记为银行欠镇库），两者都不够才取不回；取不回的留在存款台账，之后每日再试。
   const deposit = Math.max(0, state.bank?.deposits?.[id] || 0);
   const takeable = Math.min(deposit, depositWithdrawableUnits(state, owner));
   // 只剩取不回的存款：这一次什么也动不了，不记事件，等银行有现金再办。
-  const movable = takeable > 0 || (household.voucherUnits || 0) > 0 || ownedPrivateBuildings(state, id).length > 0
+  const movable = bondMoved > 0 || takeable > 0 || (household.voucherUnits || 0) > 0 || ownedPrivateBuildings(state, id).length > 0
     || Object.values(household.inventory || {}).some(units => units > 0)
     || Object.values(household.shares || {}).some(count => count > 0);
   // 别墅与店铺不取决于现金：即使其余家产动不了，也要交接（店铺）或空置（别墅）。
@@ -19624,12 +19715,17 @@ function validateState(state, content) {
       if (!isActiveHousehold(household) && householdEmploymentCount(household) > 0) errors.push("无人家庭仍占用岗位：" + household.id);
     }
     for (const itemId of Object.keys(content.items)) {
-      const sum = households.reduce((total, h) => total + (h.inventory[itemId] || 0), 0);
+      const sum = households.reduce((total, h) => total + (h.inventory?.[itemId] || 0), 0);
       if (sum !== (state.accounts?.residents?.[itemId] || 0)) errors.push("居民汇总库存与家庭不一致：" + itemId);
     }
   }
   if (!Number.isFinite(state.policy?.employmentExchangeJin) || state.policy.employmentExchangeJin < (content.rules.employmentExchangeMinimumJin ?? 0) || state.policy.employmentExchangeJin > (content.rules.employmentExchangeMaximumJin ?? 50)) errors.push("就业换券额度无效");
   if (!Number.isFinite(state.policy?.shopRentVoucher) || state.policy.shopRentVoucher < 0) errors.push("店租设置无效");
+  // 利润率政策：0—200（一位小数由命令层保证）；缺省时由代码取 rules 默认值，所以只校验已设置的值。
+  for (const key of ["shopMarginPercent", "tradeMarginPercent", "tradeImportMarginPercent"]) {
+    const value = state.policy?.[key];
+    if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 200)) errors.push("利润率政策无效：" + key);
+  }
   {
     const rent = state.policy?.publicHousingRentPerResidentDayJin;
     const min = content.rules.publicHousingRentMinimumJin ?? 0;
@@ -20020,6 +20116,7 @@ const { makeTransactionId, recordLedger } = __mxmod16;
 const { mintTownVouchers, transferVouchers, voucherBalance } = __mxmod27;
 const { voucherUnitsForWheatUnits } = __mxmod26;
 const { townWheatReserveUnits } = __mxmod58;
+const { setTownSellableWheatHook } = __mxmod39;
 function townSellableWheatUnits(state, content) {
   return Math.max(0, (state.accounts?.town?.wheat || 0) - townWheatReserveUnits(state, content));
 }
@@ -20069,6 +20166,8 @@ function townSellableWheatUnits(state, content) {
   }, content);
   return { ok: true, wheatUnits: units, voucherUnits, transactionId };
 }
+
+setTownSellableWheatHook(townSellableWheatUnits);
 return { townSellableWheatUnits, townBuysOutsideWheat, townSellsWheatToOutside };
 })();
 
@@ -21159,22 +21258,61 @@ function shareOf(units, share) {
   return Math.max(0, Math.floor(Math.max(0, units || 0) * share));
 }
 
-// 岗位：原户按"商人先、越难释放的越先留"保留到自己的劳动力，放不下的给新户。
-function splitJobs(original, newHousehold) {
+// 原户拥有的店铺的商人岗位键（shop:<id>:merchant）对应的店铺；不是原户名下的店铺返回 null。
+function ownedMerchantShop(state, original, jobKey) {
+  const match = /^shop:(.+):merchant$/.exec(jobKey);
+  if (!match) return null;
+  const shop = state.shops?.[match[1]];
+  if (!shop || shop.collective || shop.town || shop.ownerHouseholdId !== original.id) return null;
+  return shop;
+}
+
+// 店铺整体交给新户：业主身份与 shopIds 一起换。商人岗位已随之搬走。
+function handOverShop(shop, original, newHousehold) {
+  shop.ownerHouseholdId = newHousehold.id;
+  original.shopIds = (original.shopIds || []).filter(id => id !== shop.id);
+  newHousehold.shopIds ||= [];
+  if (!newHousehold.shopIds.includes(shop.id)) newHousehold.shopIds.push(shop.id);
+}
+
+// 入职日随人走：原户保留最早的 keep 人（前缀），搬走的是最近入职的 count - keep 人（后缀）。
+// 与 updateJobSince 一样按人数补齐：缺的记录视为早已入职（0）。
+function splitJobSince(original, newHousehold, jobKey, count, keep) {
+  let since = Array.isArray(original.jobSince?.[jobKey]) ? original.jobSince[jobKey].slice(-count) : [];
+  while (since.length < count) since.unshift(0);
+  original.jobSince ||= {};
+  newHousehold.jobSince ||= {};
+  if (keep > 0) original.jobSince[jobKey] = since.slice(0, keep);
+  else delete original.jobSince[jobKey];
+  if (count > keep) newHousehold.jobSince[jobKey] = since.slice(keep);
+}
+
+// 岗位：商人岗位与其余岗位一样，原户按"商人先、越难释放的越先留"保留到自己的劳动力。
+// 放不下的岗位随人去新户，入职日一起搬。原户名下店铺的商人岗位若整组放不下，
+// 且新户劳动力够，则整店交给新户（店铺不停业、店员不动）。
+function splitJobs(state, original, newHousehold) {
   const capacity = householdWorkingAge(original);
+  const newCapacity = householdWorkingAge(newHousehold);
   const keys = Object.keys(original.jobs || {}).filter(key => (original.jobs[key] || 0) > 0)
     .sort((a, b) => jobReleaseRank(a) - jobReleaseRank(b) || a.localeCompare(b));
   let kept = 0;
+  let movedTotal = 0;
   for (const key of keys) {
     const count = original.jobs[key];
-    const keep = key.endsWith(":merchant") ? count : Math.max(0, Math.min(count, capacity - kept));
-    kept += keep;
+    let keep = Math.max(0, Math.min(count, capacity - kept));
+    const shop = ownedMerchantShop(state, original, key);
+    const wholeShop = Boolean(shop) && keep < count && movedTotal + count <= newCapacity;
+    if (wholeShop) keep = 0;
     const move = count - keep;
     if (move > 0) {
-      original.jobs[key] = keep;
+      splitJobSince(original, newHousehold, key, count, keep);
       newHousehold.jobs[key] = move;
-      if (keep === 0) delete original.jobs[key];
+      movedTotal += move;
     }
+    if (keep > 0) original.jobs[key] = keep;
+    else delete original.jobs[key];
+    kept += keep;
+    if (wholeShop) handOverShop(shop, original, newHousehold);
   }
 }
 
@@ -21204,7 +21342,7 @@ function splitOne(state, original, number, content) {
     const moved = shareOf(deposits[original.id], share);
     if (moved > 0) { deposits[original.id] -= moved; deposits[household.id] = moved; }
   }
-  splitJobs(original, household);
+  splitJobs(state, original, household);
   if (Number.isFinite(original.meatHabit)) household.meatHabit = original.meatHabit;
   // 近期收入按人口比例分：两户人均收入不变（无记录时先把收入预期折成近期日收入再分）。
   const perDayIncome = householdRecentIncomeUnitsPerDay(original, content);
@@ -22223,7 +22361,7 @@ return { privateHireCapByOwnerMoney, arrangePrivateWorkers, payPrivateIndustryWa
 const __mxmod101 = (() => {
 const { currencyScale } = __mxmod27;
 const { policyTradeMarginPercent } = __mxmod60;
-const { currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } = __mxmod29;
+const { addPaymentObligation, currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } = __mxmod29;
 const { putStock, takeStock, valueOf } = __mxmod33;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod16;
 const { voucherUnitsForWheatUnits } = __mxmod26;
@@ -22295,14 +22433,18 @@ function owner(shop) {
 }
 
 // 关税交镇库；付不起的部分记为店铺欠税（与利润税同一笔欠款，之后照常追缴），钱不凭空消失。
-function payTariff(state, shop, tariffUnits, label, content) {
+       function payTariff(state, shop, tariffUnits, label, content) {
   if (!(tariffUnits > 0)) return 0;
   const result = settleMonetaryPayment(state, owner(shop), "town", currentPaymentComposition(state, tariffUnits), content,
     "trade_tariff", `${shop.name}${label}关税`, { requireFull: false });
-  const paid = result.ok ? result.paidValueUnits || 0 : 0;
+  // 部分支付时 ok 为假但钱已经付出去了，必须按实付额记欠款，否则同一笔钱既付了又记欠。
+  const paid = result.paidValueUnits || 0;
   if (paid < tariffUnits) {
     shop.liabilities ||= {};
-    shop.liabilities.taxVoucherUnits = (shop.liabilities.taxVoucherUnits || 0) + (tariffUnits - paid);
+    const unpaid = tariffUnits - paid;
+    shop.liabilities.taxVoucherUnits = (shop.liabilities.taxVoucherUnits || 0) + unpaid;
+    // 与利润税同口径登记支付构成，否则 payLiability 按旧的 claim 付款会恒为 0。
+    shop.liabilities.taxPaymentClaim = addPaymentObligation(shop.liabilities.taxPaymentClaim, currentPaymentComposition(state, unpaid));
   }
   addBookValue(shop, "tariffVoucherUnits", tariffUnits);
   state.tradeTariffs ||= { cumulativeVoucherUnits: 0, byYear: {} };
@@ -22743,7 +22885,7 @@ function resumeTradeHouses(state, content) {
       profitVoucherUnits: run.row.profitVoucherUnits, freightVoucherUnits: run.row.freightVoucherUnits, tariffVoucherUnits: run.row.tariffVoucherUnits };
   });
 }
-return { isTradeHouse, tradeHouseStaff, localAvgSoldJin, tradeMarginTarget, tradeTariffRate, exportReserveJin, tradeHousePauseDue, settleTradingHouses };
+return { isTradeHouse, tradeHouseStaff, payTariff, localAvgSoldJin, tradeMarginTarget, tradeTariffRate, exportReserveJin, tradeHousePauseDue, settleTradingHouses };
 })();
 
 // ===== systems/income-expectation.js =====
@@ -22979,9 +23121,10 @@ return { buildAnnualReport, applyCompanyDistributionsToAnnualReport };
 const __mxmod105 = (() => {
 const { recordEvent } = __mxmod16;
 const { currencyScale } = __mxmod27;
+const { currentPaymentComposition, settleMonetaryPayment } = __mxmod29;
 const { jobKeyForBuilding } = __mxmod46;
 const { syncResidentAggregates } = __mxmod24;
-const { offsetWageClaims, payWages, transferWageClaimsToTown, wageArrears, wageBook } = __mxmod30;
+const { payWages, transferWageClaimsToTown, wageArrears, wageBook } = __mxmod30;
 const { depositWholesalePurchasedInventory, readWholesalePurchasePrice } = __mxmod37;
 const { liquidateCompanyForArrears } = __mxmod62;
 const { ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } = __mxmod49;
@@ -23007,9 +23150,14 @@ function takeoverPrivateBuilding(state, building, content, days) {
       const take = Math.min(stock, unitsNeeded);
       if (take <= 0) continue;
       const value = valueUnitsOfGoods(take, price, content);
+      // 批发市场按收购价真收下这批货：镇库先付现金给业主，业主立刻用这笔钱偿付欠薪（先到先抵）；镇库付不起就停。
+      const purchase = settleMonetaryPayment(state, "town", `household:${household.id}`, currentPaymentComposition(state, value), content,
+        "wholesale_private_purchase", `批发市场收购${household.name}存货抵欠薪`, { requireFull: true });
+      if (!purchase.ok) break;
       household.inventory[itemId] = stock - take;
       depositWholesalePurchasedInventory(state, itemId, take, value, content);
-      inKindValueUnits += offsetWageClaims(state, book, value, content);
+      const paid = payWages(state, book, `household:${household.id}`, content, "private_takeover_wage_payment", `${household.name}存货变现偿付欠薪`);
+      inKindValueUnits += paid.paid || 0;
       goods.push({ itemId, units: take, valueUnits: value });
     }
   }
@@ -25354,26 +25502,16 @@ return { isWholeBuilding, convertSplitOwnership };
 
 // ===== persistence/save-compat.js =====
 const __mxmod117 = (() => {
-// 存档兼容：让存档跨版本一直能读。三层兜底：
-//
-// 1. 补默认值：用当前版本的新开局状态当底板，把存档逐项盖上去。存档里没有的新字段自动取新默认值，
-//    所以只是"新增字段/新系统/新商品/新外镇"的改动，开发时完全不用管存档。
-// 2. 改名清单 RENAMES：字段改名或搬家时在这里加一行 { from, to }，读档时自动搬（幂等）。
-// 3. 修复：数值坏了（NaN/∞）归零；仍校验不过的顶层子系统重置为新开局状态，其他进度保留，并在报告里说明。
-//
-// 合并规则：
-// - 普通对象逐键合并（底板有、存档没有的键保留底板值；存档多出的键保留存档值）。
-// - 数组、数值、字符串等直接用存档的值。
-// - ENTITY_MAPS：按实体 id 存的表（如家庭），整表用存档的，不从底板补实体（否则已消亡的家庭会"复活"）。
-// - FROM_CONTENT：完全由内容定义决定、运行时不改的数据（地块），一律用当前版本的。
-
-       const RENAMES = Object.freeze([
+const { createHousehold } = __mxmod24;
+const RENAMES = Object.freeze([
   // 示例：{ from: "outsideTown", to: "outsideTowns.minzhen" },
 ]);
 
        const ENTITY_MAPS = new Set(["households.byId"]);
 // 存档里出现这些键一律丢弃，防止原型污染。
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+// 一户家庭的必备字段（与 systems/households.js 的 createHousehold 一致），读档缺失时以新开局户补齐。
+const HOUSEHOLD_FIELDS = ["id", "name", "ageBands", "jobs", "inventory", "voucherUnits", "shares", "shopIds", "operatingRights", "income", "agricultureWorkUnits"];
 const FROM_CONTENT = new Set(["plots"]);
 // 校验失败时不允许单独重置的顶层键：它们和整体进度/货币恒等式绑在一起，重置反而会破坏一致性。
 const NEVER_RESET = new Set(["version", "schemaVersion", "year", "day", "accounts", "currency", "households", "cohorts", "buildings", "plots", "rng"]);
@@ -25419,11 +25557,28 @@ function kindOf(value) {
   return typeof value;
 }
 
-// 类型对不上（比如该是对象却存成了字符串、该是数字却是 null）时用新版本的默认值，并记一笔修复。
+// 能转成有限数字就转（数字字符串），否则返回 null。JSON 存不下 NaN/∞，它们在存档里就是 null。
+       function coerceNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  return null;
+}
+
+// 类型对不上（比如该是对象却存成了字符串）时用新版本的默认值，并记一笔修复。
+// 数值字段例外：读到 null、非有限数、数字字符串时，能转就转，否则归零，绝不取底板默认值
+// （库存、账户余额取底板默认会凭空变出货币和粮食）。
        function mergeOntoBase(base, saved, path = "", report = null, entityMaps = ENTITY_MAPS) {
   if (FROM_CONTENT.has(path)) return base;
   if (saved === undefined) return base;
   const baseKind = kindOf(base);
+  if (baseKind === "number") {
+    if (typeof saved === "number" && Number.isFinite(saved)) return saved;
+    report?.repaired.push(path);
+    return coerceNumber(saved) ?? 0;
+  }
   if (baseKind !== "empty" && kindOf(saved) !== baseKind) {
     report?.repaired.push(path);
     return base;
@@ -25436,6 +25591,85 @@ function kindOf(value) {
     result[key] = key in base ? mergeOntoBase(base[key], value, childPath, report, entityMaps) : value;
   }
   return result;
+}
+
+// 家庭表读档修复（家庭按实体 id 存，不走底板合并，所以在这里逐户补齐）：
+// - 键是危险键（__proto__ 等）：丢弃；值不是对象：丢弃该户（人口对不上时校验会给出中文错误）。
+// - id 与键不一致：以键为准。缺字段：以新开局户模板补齐。
+// - 数值 null / 数字字符串：能转就转，否则归零；库存 null 归零。
+// 每一处修复都写进读档报告。修不了的由后续校验抛中文错误。
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function numberInPlace(holder, key, path, report) {
+  const value = holder[key];
+  if (value === undefined || isFiniteNumber(value)) return;
+  holder[key] = coerceNumber(value) ?? 0;
+  report.repaired.push(`${path}.${key}`);
+}
+
+function safeKeys(object, path, report) {
+  return Object.keys(object).filter(key => {
+    if (!UNSAFE_KEYS.has(key)) return true;
+    report.repaired.push(`${path}.${key}`);
+    return false;
+  });
+}
+
+       function repairHouseholdTable(saved, content, report) {
+  const table = saved?.households;
+  if (!isPlainObject(table) || table.byId === undefined) return;
+  if (!isPlainObject(table.byId)) throw new Error("家庭数据损坏：家庭表不是对象，无法读取。");
+  const template = createHousehold(0, content);
+  const byId = {};
+  for (const key of safeKeys(table.byId, "households.byId", report)) {
+    const path = `households.byId.${key}`;
+    const entry = table.byId[key];
+    if (!isPlainObject(entry)) { report.repaired.push(path); continue; }
+    const household = { ...entry };
+    if (household.id !== key) { household.id = key; report.repaired.push(`${path}.id`); }
+    for (const field of HOUSEHOLD_FIELDS) {
+      if (household[field] === undefined) { household[field] = structuredClone(template[field]); report.repaired.push(`${path}.${field}`); }
+    }
+    if (!isPlainObject(household.ageBands)) { household.ageBands = structuredClone(template.ageBands); report.repaired.push(`${path}.ageBands`); }
+    for (const band of ["children", "workers", "elders"]) {
+      if (household.ageBands[band] === undefined) { household.ageBands[band] = 0; report.repaired.push(`${path}.ageBands.${band}`); }
+      else numberInPlace(household.ageBands, band, `${path}.ageBands`, report);
+    }
+    if (!isPlainObject(household.inventory)) { household.inventory = structuredClone(template.inventory); report.repaired.push(`${path}.inventory`); }
+    else {
+      const inventory = {};
+      for (const itemId of safeKeys(household.inventory, `${path}.inventory`, report)) {
+        const value = household.inventory[itemId];
+        if (value === undefined || isFiniteNumber(value)) { inventory[itemId] = value; continue; }
+        inventory[itemId] = coerceNumber(value) ?? 0;
+        report.repaired.push(`${path}.inventory.${itemId}`);
+      }
+      household.inventory = inventory;
+    }
+    if (!isPlainObject(household.jobs)) { household.jobs = {}; report.repaired.push(`${path}.jobs`); }
+    else {
+      const jobs = {};
+      for (const jobKey of safeKeys(household.jobs, `${path}.jobs`, report)) {
+        const value = household.jobs[jobKey];
+        if (isFiniteNumber(value)) { jobs[jobKey] = value; continue; }
+        jobs[jobKey] = coerceNumber(value) ?? 0;
+        report.repaired.push(`${path}.jobs.${jobKey}`);
+      }
+      household.jobs = jobs;
+    }
+    numberInPlace(household, "voucherUnits", path, report);
+    numberInPlace(household, "agricultureWorkUnits", path, report);
+    for (const field of ["shares", "income"]) {
+      if (!isPlainObject(household[field])) { household[field] = structuredClone(template[field]); report.repaired.push(`${path}.${field}`); }
+    }
+    for (const field of ["shopIds", "operatingRights"]) {
+      if (!Array.isArray(household[field])) { household[field] = structuredClone(template[field]); report.repaired.push(`${path}.${field}`); }
+    }
+    byId[key] = household;
+  }
+  table.byId = byId;
 }
 
 // 把 NaN / ±Infinity 归零，记录路径。
@@ -25501,7 +25735,7 @@ function tryReplace(holder, key, replacement, validate, errors) {
   if (report.calendar?.length) parts.push(report.calendar.join("；"));
   return parts.length ? `存档来自旧版本，已自动处理（${parts.join("；")}），其余进度保留。` : null;
 }
-return { RENAMES, ENTITY_MAPS, applyRenames, mergeOntoBase, sanitizeNumbers, resetFailingSubsystems, emptyLoadReport, describeLoadReport };
+return { RENAMES, ENTITY_MAPS, applyRenames, coerceNumber, mergeOntoBase, repairHouseholdTable, sanitizeNumbers, resetFailingSubsystems, emptyLoadReport, describeLoadReport };
 })();
 
 // ===== persistence/migrations.js =====
@@ -25513,7 +25747,7 @@ const { createInitialState, ensureProjectAccessor } = __mxmod40;
 const { syncShopEmployment } = __mxmod68;
 const { syncResidentAggregates } = __mxmod24;
 const { convertSplitOwnership } = __mxmod116;
-const { ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers } = __mxmod117;
+const { ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, repairHouseholdTable, resetFailingSubsystems, sanitizeNumbers } = __mxmod117;
 const MIN_SAVE_VERSION = 18;
 
 function cloneJson(value) {
@@ -25536,10 +25770,23 @@ function rehydrate(state, definitions) {
   const stored = Math.max(Number(raw.schemaVersion) || 0, Number(raw.version) || 0);
   if (stored > current) throw new Error("该存档来自更新版本，当前版本无法读取。");
   if (stored < MIN_SAVE_VERSION) throw new Error("旧版存档不兼容，请开始新游戏。");
+  try {
+    return migrateCurrentVersion(raw, definitions, current);
+  } catch (error) {
+    // 结构坏到内部访问报 TypeError/RangeError 时，给玩家一句中文说明（原始错误留作 cause）。
+    if (error instanceof TypeError || error instanceof RangeError) {
+      throw new Error("存档数据结构损坏，无法读取：" + error.message, { cause: error });
+    }
+    throw error;
+  }
+}
 
+function migrateCurrentVersion(raw, definitions, current) {
   const report = emptyLoadReport();
   // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
   const saved = applyRenames(cloneJson(raw), report, definitions.modSave?.renames || []);
+  // 家庭表按实体 id 存、不走底板合并：先逐户补齐、丢弃危险键，修不了的抛中文错误。
+  repairHouseholdTable(saved, definitions, report);
   const base = createInitialState({ content: definitions });
   const entityMaps = new Set([...ENTITY_MAPS, ...(definitions.modSave?.entityMaps || [])]);
   const state = mergeOntoBase(cloneJson(base), saved, "", report, entityMaps);
@@ -25943,12 +26190,15 @@ function safeError(error, action) {
   }
   let catalog = defaultCatalog();
   let slotRecords = new Map();
-  // 已校验过的 primary 元信息缓存（按 id，primary 文本不同则失效），避免每次存档都重新 parse 旧主档。
+  // 已完整解码过的 primary 元信息缓存（按 id，primary 文本不同则失效）。
   const metaCache = new Map();
-  function cachedMeta(id, primary) {
+  // 旧 primary 只有能完整解码（容器校验 + 存档解析 + 数据校验）才允许轮转成 backup；
+  // 仅校验和通过但解不开的主档不能覆盖仍可读的备份。解不开时抛错。
+  function cachedDecodable(id, primary) {
     const cached = metaCache.get(id);
     if (cached && cached.primary === primary) return cached.meta;
-    const meta = inspect(primary, id);
+    const entry = decode(primary, id, content);
+    const meta = { name: entry.name, savedAt: entry.savedAt };
     metaCache.set(id, { primary, meta });
     return meta;
   }
@@ -26050,7 +26300,12 @@ function safeError(error, action) {
     let oldMeta = null;
     let backup = oldRecord?.backup || null;
     if (oldRecord?.primary) {
-      try { oldMeta = cachedMeta(id, oldRecord.primary); backup = oldRecord.primary; } catch {}
+      try { oldMeta = cachedDecodable(id, oldRecord.primary); backup = oldRecord.primary; }
+      catch {
+        // 旧主档解不开：不轮转，备份保持原样；元信息只为取名字与时间，校验和通过即可。
+        backup = oldRecord.backup || null;
+        try { oldMeta = inspect(oldRecord.primary, id); } catch {}
+      }
     }
     if (!oldMeta && oldRecord?.backup) {
       try { oldMeta = inspect(oldRecord.backup, id); } catch {}
@@ -26068,7 +26323,8 @@ function safeError(error, action) {
       // 校验通过后改用本地对象（与回读副本逐字相同），两份回读副本随即可回收。
       seedBackupBytes(record, oldRecord, backup);
       slotRecords.set(id, record);
-      metaCache.set(id, { primary, meta: { ...oldMeta, savedAt } });
+      // 新主档尚未解码验证，下次存档时再验（cachedDecodable），这里不预先标记为可用。
+      metaCache.delete(id);
       return { id, name: oldMeta.name, savedAt, state, recovered: false };
     } catch (error) {
       throw decorate(error, "save_current_write_verify", () => byteLength(primary) + byteLength(backup || ""));
@@ -29853,7 +30109,8 @@ function bankManagementMarkup(view, physical = true) {
   const bank = view.policy?.bankStats || {};
   const bonds = view.policy?.bondStats || {};
   const issueControls = `<div class="row"><span class="label">每名就业者每日换券额度</span><div class="setting-input">${renderNumericInput(view, { key: "employment-exchange", kind: "employment-exchange", target: "households", value: reform.employmentExchangeJin, label: "每名就业者每日换券额度", minimum: reform.employmentExchangeMinimumJin, maximum: reform.employmentExchangeMaximumJin, className: "setting-editor" })}<b>斤</b></div></div>
-      <div class="row"><span class="label">镇库 / 居民资金</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentFundsJin ?? c.residentVoucher, 2)}粮券 <small class="subtle">（手头 ${number(c.residentFunds?.handJin ?? c.residentVoucher, 2)} + 存款 ${number(c.residentFunds?.depositJin ?? 0, 2)}）</small></strong></div>
+      <div class="row"><span class="label">镇库 / 居民资金</span><strong class="value">${number(c.townVoucher, 2)} / ${number(c.residentFundsJin ?? c.residentVoucher, 2)}粮券</strong></div>
+      <div class="subtle">居民资金：手头 ${number(c.residentFunds?.handJin ?? c.residentVoucher, 2)} + 存款 ${number(c.residentFunds?.depositJin ?? 0, 2)}粮券</div>
       <div class="row"><span class="label">粮券总量（含镇库）</span><strong class="value">${number(c.circulationVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">镇库外流通</span><strong class="value">${number(c.outsideTownVoucher, 2)}粮券</strong></div>
       <div class="subtle">总量只在印制、注销时变；居民以粮换券、用券兑粮只是在镇库与民间之间流动。</div>
@@ -29864,29 +30121,30 @@ function bankManagementMarkup(view, physical = true) {
       <div class="row"><span class="label">货币</span><strong class="value">粮券</strong></div>
       <div class="row"><span class="label">镇库券池</span><strong class="value">${number(c.townVoucher, 2)}粮券</strong></div>
       <div class="row"><span class="label">发行量</span><strong class="value">${number(c.issuedVoucher, 2)}粮券</strong></div>
-      <div class="row"><span class="label">存款总额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">贷款总额</span><strong class="value">${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">闲置现金</span><strong class="value">${number(bank.idleCashJin ?? bank.loanableVoucher ?? 0, 1)}券</strong></div>
-      <div class="row"><span class="label">住户贷款（笔数 / 余额 / 有欠期）</span><strong class="value">${number(bank.householdLoans?.count || 0)}笔 / ${number(bank.householdLoans?.outstandingJin || 0, 1)}券 / 有欠期${number(bank.householdLoans?.overdueCount || 0)}笔</strong></div>
-      <div class="row"><span class="label">欠镇库</span><strong class="value">${number(bank.debtToTownJin || 0, 1)}券（累计垫付 ${number(bank.totalAdvancedJin || 0, 1)} · 累计还款 ${number(bank.totalRepaidJin || 0, 1)} · 可还 ${number(bank.debtRepayableJin || 0, 1)}）</strong></div>
+      <div class="row"><span class="label">存款总额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 2)}券</strong></div>
+      <div class="row"><span class="label">贷款总额</span><strong class="value">${number(bank.outstandingLoansVoucher || 0, 2)}券</strong></div>
+      <div class="row"><span class="label">闲置现金</span><strong class="value">${number(bank.idleCashJin ?? bank.loanableVoucher ?? 0, 2)}券</strong></div>
+      <div class="row"><span class="label">住户贷款（笔数 / 余额 / 有欠期）</span><strong class="value">${number(bank.householdLoans?.count || 0)}笔 / ${number(bank.householdLoans?.outstandingJin || 0, 2)}券 / 有欠期${number(bank.householdLoans?.overdueCount || 0)}笔</strong></div>
+      <div class="row"><span class="label">欠镇库</span><strong class="value">${number(bank.debtToTownJin || 0, 2)}券</strong></div>
+      <div class="subtle">累计垫付 ${number(bank.totalAdvancedJin || 0, 2)}券 · 累计还款 ${number(bank.totalRepaidJin || 0, 2)}券 · 可还 ${number(bank.debtRepayableJin || 0, 2)}券</div>
       <div class="row"><span class="label">偿还镇库</span><div class="setting-input">${stagedBankInput(view, "bank-repay", "偿还镇库金额", Math.round((bank.debtRepayableJin || 0) * 100) / 100)}<b>券</b><button class="secondary" data-bank-repay ${(bank.debtRepayableJin || 0) > 0 ? "" : "disabled"}>偿还</button></div></div>
     </div>`;
   // 三个折叠分组：印券与换券（默认展开，保持第一屏）、利率与存款、国债。
-  const issueGroup = `<details class="detail-block bank-group" data-detail-key="bank-issue" open><summary><span>印券与换券</span><span class="subtle">流通 ${number(c.circulationVoucher, 0)}券</span></summary><div class="detail-body">${issueControls}</div></details>`;
+  const issueGroup = `<details class="detail-block bank-group" data-detail-key="bank-issue" open><summary><span>印券与换券</span><span class="subtle">流通 ${number(c.circulationVoucher, 2)}券</span></summary><div class="detail-body">${issueControls}</div></details>`;
   const ratesGroup = `<details class="detail-block bank-group" data-detail-key="bank-rates"><summary><span>利率与存款</span><span class="subtle">存款 ${numberMax(bank.depositRateAnnualPercent ?? 2, 2)}% · 贷款 ${numberMax(bank.loanRateAnnualPercent ?? 5, 2)}%</span></summary><div class="detail-body">
       <div class="row"><span class="label">存款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-deposit-rate", kind: "bank-deposit-rate", target: "bank", value: bank.depositRateAnnualPercent ?? 2, label: "银行存款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">贷款年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-loan-rate", kind: "bank-loan-rate", target: "bank", value: bank.loanRateAnnualPercent ?? 5, label: "银行贷款年利率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">准备金率</span><div class="setting-input">${renderNumericInput(view, { key: "bank-reserve", kind: "bank-reserve", target: "bank", value: bank.reserveRequirementPercent ?? 10, label: "银行准备金率", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>
-      <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 1)} / ${number(bank.outstandingLoansVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(bank.loanableVoucher || 0, 1)} / ${number(bank.badDebtVoucher || 0, 1)}券</strong></div>
-      <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(bank.interestEarnedVoucher || 0, 1)} / ${number(bank.interestPaidVoucher || 0, 1)}券</strong></div>
+      <div class="row"><span class="label">居民存款 / 在贷余额</span><strong class="value">${number(bank.totalDepositsVoucher || 0, 2)} / ${number(bank.outstandingLoansVoucher || 0, 2)}券</strong></div>
+      <div class="row"><span class="label">可贷额度 / 坏账累计</span><strong class="value">${number(bank.loanableVoucher || 0, 2)} / ${number(bank.badDebtVoucher || 0, 2)}券</strong></div>
+      <div class="row"><span class="label">累计收息 / 付息</span><strong class="value">${number(bank.interestEarnedVoucher || 0, 2)} / ${number(bank.interestPaidVoucher || 0, 2)}券</strong></div>
       <div class="subtle">按日计息；逾期30天核销坏账。</div>
     </div></details>`;
   const bondsGroup = `<details class="detail-block bank-group" data-detail-key="bank-bonds"><summary><span>国债</span><span class="subtle">在售 ${number(bonds.activeCount || 0)} 笔</span></summary><div class="detail-body">
       <div class="row"><span class="label">发行总额</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-total", kind: "bond-issue-total", target: "bonds", value: 100000, label: "国债发行总额", minimum: 1, maximum: 1000000000, className: "setting-editor" })}<b>券</b></div></div>
       <div class="row"><span class="label">期限</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-years", kind: "bond-issue-years", target: "bonds", value: 3, label: "国债期限", minimum: 1, maximum: 10, className: "setting-editor" })}<b>年</b><button class="secondary" data-bond-issue>发行</button></div></div>
       <div class="row"><span class="label">票面年利率</span><div class="setting-input">${renderNumericInput(view, { key: "bond-issue-rate", kind: "bond-issue-rate", target: "bonds", value: 3, label: "国债票面年利率", minimum: 0, maximum: 20, className: "setting-editor" })}<b>%</b></div></div>
-      ${(bonds.issues || []).map(issue => `<div class="row"><span class="label">${issue.id} · ${issue.statusLabel}</span><strong class="value">${number(issue.totalVoucher)}券 · 票面${number(issue.couponRateAnnualPercent, 2)}% · ${issue.termYears}年</strong></div>`).join("")}
+      ${(bonds.issues || []).map(issue => `<div class="row"><span class="label">${issue.id} · ${issue.statusLabel}</span><strong class="value">${number(issue.totalVoucher, 2)}券 · 票面${number(issue.couponRateAnnualPercent, 2)}% · ${issue.termYears}年</strong></div>`).join("")}
       <div class="subtle">发行当天居民与银行按闲钱认购，利率高于存款利率才有人买；每年付息，到期还本。</div>
     </div></details>`;
   return `<div class="status-strip"><span class="status-light working"></span><strong>${physical ? "银行" : "兼容银行入口"}</strong><span>粮券</span></div>

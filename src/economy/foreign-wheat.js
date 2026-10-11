@@ -10,6 +10,7 @@ import { makeTransactionId, recordLedger } from "./ledger.js";
 import { mintTownVouchers, transferVouchers, voucherBalance } from "./currency.js";
 import { voucherUnitsForWheatUnits } from "./money-units.js";
 import { townWheatReserveUnits } from "../selectors/production.js";
+import { setTownSellableWheatHook } from "../systems/outside-town.js";
 
 // 镇库可以卖给贸易行的小麦（单位同库存精度）：超出口粮储备线的部分。
 export function townSellableWheatUnits(state, content) {
@@ -61,3 +62,5 @@ export function townSellsWheatToOutside(state, content, payer, wheatUnits, reaso
   }, content);
   return { ok: true, wheatUnits: units, voucherUnits, transactionId };
 }
+
+setTownSellableWheatHook(townSellableWheatUnits);

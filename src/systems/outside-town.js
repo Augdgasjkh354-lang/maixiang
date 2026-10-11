@@ -4,7 +4,11 @@ import { addInventory, changeInventory, quantityToUnits, unitsToQuantity } from 
 import { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } from "../content/outside-towns.js";
 import { RULES } from "../content/rules.js";
 import { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } from "./wholesale-market.js";
-import { townSellableWheatUnits } from "../economy/foreign-wheat.js";
+// 镇库可卖给外镇的小麦（超出口粮储备线的部分）：foreign-wheat.js 加载时登记。
+// 直接导入会成环（outside-town → foreign-wheat → selectors/production → labor → agriculture → state → outside-town）。
+let townSellableWheatHook = null;
+export function setTownSellableWheatHook(hook) { townSellableWheatHook = hook; }
+const townSellableWheatUnits = (state, content) => (townSellableWheatHook ? townSellableWheatHook(state, content) : Number.POSITIVE_INFINITY);
 import { jobCount } from "./households.js";
 import { freightCapacityUnits, freightPoolJin, takeFreightCapacity } from "./logistics.js";
 
