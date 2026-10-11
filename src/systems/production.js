@@ -6,6 +6,7 @@ import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
 import { procureTownInputFromWholesale, recordTownInputConsumption, transferTownToWholesale } from "./wholesale-market.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
 import { isRetailIndustryType } from "../content/buildings.js";
+import { applyToolUse, planToolUse, stockBuildingTools } from "./tool-boost.js";
 
 function recipeDeltas(recipe, batches, content) {
   const inputs = [];
@@ -39,11 +40,14 @@ export function processBuilding(state, building, content) {
   const workers = role ? readJobCount(state, jobKeyForBuilding(building.id, role.id)) : 0;
   // 用户 0.1.11：镇营目标日产量（outputTargetJin，斤）。>0 时按"目标斤数/每批产量"向上取整
   // 封顶每日批次数；用不上的人手仍照常领工资。用 0 表示取消（按人手满产）。
+  // 铁制工具（systems/tool-boost.js）：投产前备工具，加成乘进人手产量；用量在投产成功后才结转（applyToolUse）。
+  const tools = workers > 0 ? stockBuildingTools(state, building, content, workers, "town") : null;
+  const toolUse = tools ? planToolUse(building, tools.need) : null;
   const targetCap = targetBatchCap(building, recipeDef);
-  const labor = laborBatches(state, building.typeId, building.level, workers, recipeDef?.batchesPerWorkerDay, building.productivityCarry);
+  const labor = laborBatches(state, building.typeId, building.level, workers, recipeDef?.batchesPerWorkerDay, building.productivityCarry, tools?.factor ?? 1);
   // 镇营产出闸门（用户口径：市场积压、口粮储备）：在领原料之前封顶批次数，免得白领用不掉的小麦/面粉。
   // 弹性配方（动态酒品）：按各酒的市场缺口分配产能，不走单品闸门（见 systems/flex-recipe.js）。
-  if (recipeDef?.flex) return processFlexBuilding(state, building, definition, recipeDef, labor, targetCap, workers, content);
+  if (recipeDef?.flex) return processFlexBuilding(state, building, definition, recipeDef, labor, targetCap, workers, content, toolUse);
   const gate = recipeDef && workers > 0 ? townOutputGate(state, recipeDef, Math.min(labor.batches, targetCap), content) : null;
   let wholesaleBatchCap = gate ? gate.batches : Number.POSITIVE_INFINITY;
   const procuredInputs = [];
@@ -88,7 +92,7 @@ export function processBuilding(state, building, content) {
   }
   const recipe = capacity.recipe;
   const prepared = recipeDeltas(recipe, allowedBatches, content);
-  const accounting = planProductionAccounting(state, building, recipe, allowedBatches, content);
+  const accounting = planProductionAccounting(state, building, recipe, allowedBatches, content, toolUse?.costUnits || 0);
   const transaction = atomicInventoryTransaction(state, {
     inputs: prepared.inputs,
     outputs: prepared.outputs,
@@ -105,6 +109,7 @@ export function processBuilding(state, building, content) {
     };
   }
   commitProductionAccounting(state, accounting);
+  applyToolUse(state, building, toolUse, content);
   // 镇营自身领用的原料计入"需求"（与市场售出一起决定下一轮的市场闸门）。
   for (const input of recipe.inputs || []) {
     recordTownInputConsumption(state, input.itemId, Math.round(input.quantity * allowedBatches * content.precision.inventoryUnitsPerJin), content);
@@ -133,7 +138,7 @@ function flexShortStatus(plan, partial = false) {
 }
 
 // 弹性配方的镇营一日：产能 = 当日批次 × 每批产能，按缺口分配；小麦从镇库取（扣口粮储备线），其余投入从批发市场领用。
-function processFlexBuilding(state, building, definition, recipe, labor, targetCap, workers, content) {
+function processFlexBuilding(state, building, definition, recipe, labor, targetCap, workers, content, toolUse = null) {
   if (workers <= 0) return { buildingId: building.id, status: "no_workers", batches: 0 };
   const scale = content.precision.inventoryUnitsPerJin;
   const batchesWanted = Math.min(labor.batches, targetCap);
@@ -152,7 +157,7 @@ function processFlexBuilding(state, building, definition, recipe, labor, targetC
     const short = units - Math.max(0, state.accounts.town?.[inputId] || 0);
     if (short > 0) procureTownInputFromWholesale(state, inputId, short, content, `${definition.name}从批发市场领用${content.items[inputId]?.name || inputId}`);
   }
-  const accounting = planProductionAccounting(state, building, flexAccountingRecipe(recipe, plan, content), 1, content);
+  const accounting = planProductionAccounting(state, building, flexAccountingRecipe(recipe, plan, content), 1, content, toolUse?.costUnits || 0);
   const transaction = atomicInventoryTransaction(state, {
     inputs: Object.entries(plan.inputUnits).filter(([, units]) => units > 0).map(([itemId, units]) => ({ owner: "town", itemId, quantityUnits: units })),
     outputs: recipe.flex.itemIds.filter(id => plan.units[id] > 0).map(id => ({ owner: "town", itemId: id, quantityUnits: plan.units[id] })),
@@ -162,6 +167,7 @@ function processFlexBuilding(state, building, definition, recipe, labor, targetC
   }, content);
   if (!transaction.ok) return { buildingId: building.id, status: "no_materials", batches: 0, reason: transaction.reason };
   commitProductionAccounting(state, accounting);
+  applyToolUse(state, building, toolUse, content);
   // 镇营自身领用的非小麦投入计入"需求"（与市场售出一起决定下一轮的市场闸门）。
   for (const [inputId, units] of Object.entries(plan.inputUnits)) {
     if (inputId !== "wheat" && units > 0) recordTownInputConsumption(state, inputId, units, content);

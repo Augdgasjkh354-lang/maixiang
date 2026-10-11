@@ -37,9 +37,10 @@ export function productivityFactor(state, typeId, level = 1) {
 }
 
 // 当日可做批次（含昨天留下的零头）。返回 { batches, exact }：batches 取整，exact 留给 nextCarry。
-export function laborBatches(state, typeId, level, workers, batchesPerWorkerDay, carry = 0) {
+// toolFactor：铁制工具加成乘子（1 = 无加成），由 systems/tool-boost.js 算出，乘在生产率系数之后。
+export function laborBatches(state, typeId, level, workers, batchesPerWorkerDay, carry = 0, toolFactor = 1) {
   if (!(workers > 0) || !(batchesPerWorkerDay > 0)) return { batches: 0, exact: 0 };
-  const exact = workers * batchesPerWorkerDay * productivityFactor(state, typeId, level) + Math.max(0, carry || 0);
+  const exact = workers * batchesPerWorkerDay * productivityFactor(state, typeId, level) * toolFactor + Math.max(0, carry || 0);
   return { batches: Math.floor(exact + 1e-9), exact };
 }
 

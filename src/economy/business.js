@@ -68,10 +68,12 @@ function splitCost(totalCost, rows) {
   });
 }
 
-export function planProductionAccounting(state, building, recipe, batches, content) {
+// extraInputCostUnits：不经库存成本基础的原料成本（铁制工具的损耗成本，见 systems/tool-boost.js），按原料口径并入总成本。
+export function planProductionAccounting(state, building, recipe, batches, content, extraInputCostUnits = 0) {
   const removals = [];
-  let totalInputCost = 0;
-  let rawInputCostWheatUnits = 0;
+  const extraCost = Math.max(0, Math.round(extraInputCostUnits || 0));
+  let totalInputCost = extraCost;
+  let rawInputCostWheatUnits = extraCost;
   for (const input of recipe.inputs) {
     const quantityUnits = Math.round(input.quantity * batches * content.precision.inventoryUnitsPerJin);
     const quote = quoteTownCostRemoval(state, input.itemId, quantityUnits, content);

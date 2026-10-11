@@ -119,6 +119,8 @@ test("冶炼厂：全部产品缺口为 0 时停产，不领料、不耗料", ()
   const m = marketOf(state);
   m.inventory.iron_ore = 5000 * I; m.inventory.coal = 5000 * I; m.inventory.gold_bar = 2 * I; m.inventory.silver_bar = 2 * I;
   for (const itemId of PRODUCTS) m.inventory[itemId] = Math.round(townOutputTargetUnits(state, itemId, CONTENT));
+  // 冶炼厂自己也备铁制工具（toolBoost）：市场铁制工具留足余量，备工具不会把市场拉低到缺口。
+  m.inventory.iron_tool += 1000 * I;
   const r = processBuilding(state, bld(state, id), CONTENT);
   assert.equal(r.batches, 0);
   assert.equal(r.status, "market_capped");

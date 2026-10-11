@@ -228,6 +228,10 @@ export function validateState(state, content) {
     if (!Number.isFinite(rate) || rate < 0 || rate > 80) errors.push("民营生产税率无效：" + typeId);
   }
   for (const building of state.buildings || []) {
+    // 铁制工具（systems/tool-boost.js）：库存件数与成本基础为有限非负数。
+    if (!Number.isFinite(building.toolStock ?? 0) || (building.toolStock ?? 0) < 0 || !Number.isFinite(building.toolCostUnits ?? 0) || (building.toolCostUnits ?? 0) < 0) {
+      errors.push("建筑铁制工具库存无效：" + building.id);
+    }
     const level = building.level || 1;
     const townLevels = building.ownership?.townLevels;
     const privateLevels = building.ownership?.privateLevels;

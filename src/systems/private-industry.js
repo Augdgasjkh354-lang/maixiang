@@ -20,6 +20,7 @@ import { valueUnitsOfGoods, daySerialOf } from "./ownership.js";
 import { privateWageRate } from "./payroll.js";
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
 import { flexInputsOf, flexPlan, flexRoomUnits } from "./flex-recipe.js";
+import { applyToolUse, planToolUse, stockBuildingTools, toolBoostSpec } from "./tool-boost.js";
 
 function targetBatches(state, building) {
   return plannedBatchesForProducer(state, `private:${building.id}`);
@@ -170,11 +171,11 @@ function privateOwners(building, state) {
   return building.privateOwners.slice();
 }
 
-function ownerCapacity(state, building, content) {
+function ownerCapacity(state, building, content, toolFactor = 1) {
   const definition = content.buildings[building.typeId];
   const job = definition.jobs[0];
   const workers = readJobCount(state, privateJobKeyForBuilding(building.id, job.id));
-  const labor = laborBatches(state, building.typeId, building.level, workers, content.recipes[definition.recipeId].batchesPerWorkerDay, building.privateProductivityCarry);
+  const labor = laborBatches(state, building.typeId, building.level, workers, content.recipes[definition.recipeId].batchesPerWorkerDay, building.privateProductivityCarry, toolFactor);
   return { workers, batches: labor.batches, exact: labor.exact };
 }
 
@@ -211,7 +212,12 @@ function arrearsFlag(state, buildingId) {
 export function processPrivateBuilding(state, building, content) {
   const definition = content.buildings[building.typeId];
   const recipe = content.recipes[definition.recipeId];
-  const { workers, batches: capacity, exact: laborExact } = ownerCapacity(state, building, content);
+  // 铁制工具（systems/tool-boost.js）：有工人且建筑需要工具时，先由业主备工具（按售价付给批发市场），加成乘进产能。
+  const staffed = readJobCount(state, privateJobKeyForBuilding(building.id, definition.jobs[0].id));
+  const toolOwner = staffed > 0 && toolBoostSpec(content, building.typeId) ? privateOwners(building, state)[0] || null : null;
+  const tools = toolOwner ? stockBuildingTools(state, building, content, staffed, `household:${toolOwner}`) : null;
+  const toolUse = tools ? planToolUse(building, tools.need) : null;
+  const { workers, batches: capacity, exact: laborExact } = ownerCapacity(state, building, content, tools?.factor ?? 1);
   const target = targetBatches(state, building);
   const planned = Math.min(capacity, target == null ? capacity : target);
   if (workers <= 0 || planned <= 0) return { buildingId: building.id, status: workers <= 0 ? "no_workers" : "no_demand", arrears: arrearsFlag(state, building.id), batches: 0 };
@@ -303,7 +309,10 @@ export function processPrivateBuilding(state, building, content) {
     completed += batches;
     batchesLeft -= batches;
   }
+  // 工具的购入行与原料同口径，计入当日投入（民营日利润口径，见 recordPrivateDayProfit）；排在原料行之后。
+  if (tools?.purchaseRow) inputPurchases.push({ ownerHouseholdId: toolOwner, ...tools.purchaseRow });
   syncResidentAggregates(state, content);
+  if (completed > 0) applyToolUse(state, building, toolUse, content);
   // 满负荷生产才把零头留到明天。
   building.privateProductivityCarry = nextCarry(laborExact, completed, completed >= capacity);
   if (!building.privateProductivityCarry) delete building.privateProductivityCarry;

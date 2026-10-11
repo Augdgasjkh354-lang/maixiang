@@ -3,6 +3,7 @@ import { itemQeqUnitsPerInventoryUnit } from "../economy/inventory.js";
 import { hasWholesaleMarket, townOutputMarketRoomUnits, wholesaleMonopolyItemIds } from "../systems/wholesale-market.js";
 import { laborBatches } from "../economy/productivity.js";
 import { flexInputsOf, flexPlan, flexRoomUnits } from "../systems/flex-recipe.js";
+import { toolFactorEstimate } from "../systems/tool-boost.js";
 
 // 镇营口粮储备（库存单位）：全镇人口 × 日口粮 × 储备天数。镇营磨坊/酒坊不得把镇库小麦压到这条线以下。
 export function townWheatReserveUnits(state, content) {
@@ -105,7 +106,7 @@ function wholesaleBatches(state, recipe, workers, content, building) {
   if (!hasWholesaleMarket(state) || !market) {
     return { batches: 0, reason: "尚未建成批发市场" };
   }
-  const wanted = laborBatches(state, building.typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry).batches;
+  const wanted = laborBatches(state, building.typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry, toolFactorEstimate(state, building, content, workers)).batches;
   const gate = townOutputGate(state, recipe, wanted, content);
   let batches = gate.batches;
   let shortestName = null;
@@ -139,7 +140,7 @@ export function recipeCapacity(state, building, content) {
   });
   const workers = role ? readJobCount(state, jobKeyForBuilding(building.id, role.id)) : 0;
   if (workers <= 0) return { status: "no_workers", batches: 0, workers, recipe };
-  const capacity = laborBatches(state, building.typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry).batches;
+  const capacity = laborBatches(state, building.typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry, toolFactorEstimate(state, building, content, workers)).batches;
   let available = capacity;
   for (const input of recipe.inputs) {
     const perBatch = Math.round(input.quantity * content.precision.inventoryUnitsPerJin);

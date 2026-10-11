@@ -72,7 +72,7 @@ export const ITEMS = Object.freeze({
     id: "iron_ore", name: "铁矿石", unit: "斤", category: "material",
     edible: false, qeq: null, openingCostWheatPerJin: 0
   }),
-  // 金银珠宝、铁器：冶炼厂产品，按件计。珠宝经金银店零售（见上）；铁器暂无需求侧（第二期）。
+  // 金银珠宝、铁器：冶炼厂产品，按件计。珠宝经金银店零售（见上）；铁制农具经综合商店卖给农户（耐用品），铁制工具被建筑消耗（toolBoost）。
   // 珠宝：批发 + 零售（第一期 B）。居民只能经金银店买（retailShopTypeIds 限定店型，不进综合商店、酒馆、集市）。
   gold_jewelry: Object.freeze({
     wholesale: true, retail: true, storeOnly: true, optionalRetail: true, retailShopTypeIds: Object.freeze(["jewelry"]),
@@ -84,8 +84,9 @@ export const ITEMS = Object.freeze({
     id: "silver_jewelry", name: "白银珠宝", unit: "件", category: "valuable",
     edible: false, qeq: null, openingCostWheatPerJin: 0
   }),
+  // 铁制农具：耐用品（rules.durableGoods）。农民家庭经综合商店买（storeOnly：只经商店卖给居民），没货时才等批发市场补。
   iron_farm_tool: Object.freeze({
-    wholesale: true,
+    wholesale: true, retail: true, storeOnly: true, optionalRetail: true,
     id: "iron_farm_tool", name: "铁制农具", unit: "件", category: "tool",
     edible: false, qeq: null, openingCostWheatPerJin: 0
   }),

@@ -2,6 +2,7 @@ import { inOpeningPeriod, reviewStaffing } from "./employment-contracts.js";
 import { payDayFor } from "./paydays.js";
 import { populationStats, readJobCount, jobKeyForBuilding, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
+import { applyToolUse, planToolUse, stockBuildingTools, toolBoostSpec, toolWorkerCount } from "./tool-boost.js";
 import { isIndustryType, isRetailIndustryType } from "../content/buildings.js";
 import { householdIdOf } from "../economy/accounts.js";
 import { putStock, sellCompanyGoods, takeStock } from "../economy/trade.js";
@@ -666,14 +667,14 @@ export function payListedCompanyWages(state, content) {
   return results;
 }
 
-function companyCapacity(company, state, content) {
+function companyCapacity(company, state, content, toolFactor = 1) {
   const definition = content.buildings[company.typeId];
   const recipe = content.recipes[definition?.recipeId];
   const job = definition?.jobs?.[0];
   if (!recipe || !job) return { workers: 0, capacity: 0, recipe, definition };
   const workers = readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id));
   const level = state.buildings.find(row => row.id === company.buildingId)?.level || 1;
-  const labor = laborBatches(state, company.typeId, level, workers, recipe.batchesPerWorkerDay, company.productivityCarry);
+  const labor = laborBatches(state, company.typeId, level, workers, recipe.batchesPerWorkerDay, company.productivityCarry, toolFactor);
   return { workers, capacity: labor.batches, exact: labor.exact, recipe, definition };
 }
 
@@ -686,7 +687,13 @@ function planTaxUnits(state, company, outputItemId, outputUnits, content) {
 
 export function processListedCompany(state, company, content) {
   ensureCompanyBooks(company);
-  const { workers, capacity, exact: laborExact, recipe, definition } = companyCapacity(company, state, content);
+  // 铁制工具（systems/tool-boost.js）：有工人且建筑需要工具时，先向批发市场备工具（按售价付款，计入公司库存成本），加成乘进产能。
+  const building = state.buildings.find(row => row.id === company.buildingId) || null;
+  const staffed = building && toolBoostSpec(content, company.typeId) ? toolWorkerCount(state, building, content) : 0;
+  const tools = staffed > 0 ? stockBuildingTools(state, building, content, staffed, `company:${company.id}`) : null;
+  if (tools?.paidVoucherUnits > 0) addPeriodValue(company, "inputPurchaseVoucherUnits", tools.paidVoucherUnits);
+  const toolUse = tools ? planToolUse(building, tools.need) : null;
+  const { workers, capacity, exact: laborExact, recipe, definition } = companyCapacity(company, state, content, tools?.factor ?? 1);
   if (workers <= 0 || capacity <= 0) {
     company.status = "缺工人";
     return { companyId: company.id, status: "no_workers", batches: 0 };
@@ -738,6 +745,11 @@ export function processListedCompany(state, company, content) {
     ? Object.entries(flex.inputUnits).filter(([, units]) => units > 0).map(([itemId, units]) => ({ itemId, units }))
     : recipe.inputs.map(input => ({ itemId: input.itemId, units: Math.round(input.quantity * batches * scale) }));
   for (const row of inputRows) totalInputCost += removeInventoryWithCost(company, row.itemId, row.units);
+  // 铁制工具的损耗成本并入原料成本（与库存原料同口径，随产品结转）。
+  if (toolUse) {
+    totalInputCost += toolUse.costUnits;
+    applyToolUse(state, building, toolUse, content);
+  }
   const outputs = flex
     ? recipe.flex.itemIds.filter(itemId => flex.units[itemId] > 0).map(itemId => ({ itemId, units: flex.units[itemId] }))
     : recipe.outputs.map(row => ({ itemId: row.itemId, units: Math.round(row.quantity * batches * scale) }));

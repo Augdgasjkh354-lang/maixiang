@@ -11,6 +11,7 @@ import { companyActualProfitValuation } from "../systems/companies.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
 import { buildingOwner, companyOfBuilding } from "../systems/ownership.js";
 import { readWholesalePurchasePrice, wholesaleMonopolyItemIds } from "../systems/wholesale-market.js";
+import { toolBoostSpec, toolFactorEstimate, toolNeedPieces } from "../systems/tool-boost.js";
 
 
 function outputCompetitionStock(state, itemId) {
@@ -169,7 +170,11 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
     return perBatchUnits > 0 ? Math.floor(stock / perBatchUnits) : Number.POSITIVE_INFINITY;
   });
   const inputBatchCap = inputBatchLimits.length ? Math.min(...inputBatchLimits) : Number.POSITIVE_INFINITY;
-  const maxDailyBatchesByLabor = availableLabor * recipe.batchesPerWorkerDay;
+  // 铁制工具加成（与生产同口径的预估）与每日工具成本（按批发价，计入投入）。
+  const toolFactor = toolFactorEstimate(state, building, content, availableLabor);
+  const toolSpec = toolBoostSpec(content, building.typeId);
+  const toolCost = toolSpec ? toolNeedPieces(content, building.typeId, availableLabor) * currentUnitPrice(state, toolSpec.itemId, content) : 0;
+  const maxDailyBatchesByLabor = availableLabor * recipe.batchesPerWorkerDay * toolFactor;
   const maxDailyBatchesByDemand = flexRecipe
     ? (Number.isFinite(flexRoomTotal) ? Math.floor(flexRoomTotal / (flexRecipe.totalJin * scale)) : Number.POSITIVE_INFINITY)
     : netOutputUnitsPerBatch > 0 ? Math.floor(demand.opportunityUnits / netOutputUnitsPerBatch) : 0;
@@ -182,7 +187,7 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const inputCost = batchInputs.reduce((sum, row) => sum + maxBatches * row.quantity * currentUnitPrice(state, row.itemId, content), 0);
   const wageRate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0;
   const wageCost = effectiveWorkers * wageRate;
-  const dailyNetWheatJin = outputValue - inputCost - wageCost;
+  const dailyNetWheatJin = outputValue - inputCost - wageCost - toolCost;
   const theoreticalAnnual = Number.isFinite(dailyNetWheatJin) ? dailyNetWheatJin * content.rules.daysPerYear : 0;
   // 金银店（零售型）：估值 = 店铺近 30 日实际利润年化 ×5 年（店在营业后才有利润记录，之前不可售）。
   const jewelerShop = isRetailIndustryType(content, building.typeId) ? Object.values(state.shops || {}).find(row => row.jeweler && row.buildingId === buildingId) : null;

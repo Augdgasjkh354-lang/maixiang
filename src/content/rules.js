@@ -250,6 +250,12 @@ export const RULES = Object.freeze({
   }),
   // 金银店（systems/jewelers.js）：每名首饰匠在岗每日接待的件数（再乘生产率系数：等级、熟练、教育）。
   jewelerPiecesPerWorkerDay: 20,
+  // 耐用品（systems/durable-goods.js，金银消费第二期 A）：目标持有 = 持有者人数 × perFarmer（件）；每件每日折旧 1/(lifeYears × daysPerYear) 件；
+  // 采购只经综合商店，每户每日买入不超过当日可花预算的 durableSpendCapShare（农具作为生产资料优先于日用品）。第三期耕牛复用同一机制。
+  durableGoods: Object.freeze({
+    iron_farm_tool: Object.freeze({ holderJobId: "farmers", perFarmer: 1, lifeYears: 5 })
+  }),
+  durableSpendCapShare: 0.5,
   // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/fullAffluence)^exponent（封顶 maxShare），
   // fullAffluence 是肉占比达到 maxShare 的宽裕度（不再跟 householdBudget.maxAffluence 挂钩：那已是渐近上限 4，会让肉的曲线整体漂移）；
   // 宽裕度 1 约 5%、2 约 27%、3 为 75%；肉按 weights 分到鸡鸭鹅猪，没买到的改买面粉。comfortMaximum：肉占口粮 1/4 时的舒心值加成。
@@ -354,6 +360,9 @@ export const AGRICULTURE = Object.freeze({
   acresMaximum: 200000,
   acresPerFarmer: 10,
   yieldPerAcre: 600,
+  // 铁制农具（金银消费第二期 A）：覆盖率 = 全镇农民持有件数 ÷ 农民人数（封顶 1）；每亩产量 = yieldPerAcre + farmToolYieldBonusPerAcre × 覆盖率（见 selectors/durable-goods.js）。
+  farmToolItemId: "iron_farm_tool",
+  farmToolYieldBonusPerAcre: 200,
   cropItemId: "wheat",
   farmerRoleId: "farmers",
   // 每 100 亩开荒需 100 工日，即 1 亩 1 工日。

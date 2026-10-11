@@ -10,6 +10,7 @@ import { industryTypeIds, isRetailIndustryType } from "../content/buildings.js";
 import { shopMayStockItem, usesGeneralRules } from "../systems/shop-types.js";
 import { flexBatchInputsJin, flexCapacityPerUnit, flexInputsOf, flexOf } from "../systems/flex-recipe.js";
 import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
+import { toolFactorEstimate } from "../systems/tool-boost.js";
 import { policyShopMarginPercent, shopEffectiveMarginPercent } from "./margin-policy.js";
 
 
@@ -229,11 +230,14 @@ function producerRows(state, typeId, content) {
     const job = definition?.jobs?.[0];
     if (!recipe || !job) continue;
     const privateLevels = Math.max(0, building.ownership?.privateLevels || 0);
-    if (privateLevels > 0) rows.push({
-      key: `private:${building.id}`, kind: "private", buildingId: building.id, typeId,
-      maxWorkers: job.slots * privateLevels, batchesPerWorkerDay: (recipe.batchesPerWorkerDay || 0) * productivityFactor(state, typeId, building.level),
-      currentWorkers: readJobCount(state, privateJobKeyForBuilding(building.id, job.id)), ageDays: state.privateEconomy?.plans?.[building.id]?.ageDays || 0
-    });
+    if (privateLevels > 0) {
+      const currentWorkers = readJobCount(state, privateJobKeyForBuilding(building.id, job.id));
+      rows.push({
+        key: `private:${building.id}`, kind: "private", buildingId: building.id, typeId,
+        maxWorkers: job.slots * privateLevels, batchesPerWorkerDay: (recipe.batchesPerWorkerDay || 0) * productivityFactor(state, typeId, building.level) * toolFactorEstimate(state, building, content, currentWorkers),
+        currentWorkers, ageDays: state.privateEconomy?.plans?.[building.id]?.ageDays || 0
+      });
+    }
   }
   for (const company of Object.values(state.companies || {})) {
     if (company.typeId !== typeId) continue;
@@ -241,10 +245,13 @@ function producerRows(state, typeId, content) {
     const recipe = content.recipes[definition?.recipeId];
     const job = definition?.jobs?.[0];
     if (!recipe || !job) continue;
+    const companyBuilding = state.buildings.find(row => row.id === company.buildingId) || null;
+    const currentWorkers = readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id));
     rows.push({
       key: `company:${company.id}`, kind: "company", companyId: company.id, buildingId: company.buildingId, typeId,
-      maxWorkers: job.slots * company.listedLevels, batchesPerWorkerDay: (recipe.batchesPerWorkerDay || 0) * productivityFactor(state, typeId, state.buildings.find(row => row.id === company.buildingId)?.level || 1),
-      currentWorkers: readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id)), ageDays: company.plan?.ageDays || 0
+      maxWorkers: job.slots * company.listedLevels, batchesPerWorkerDay: (recipe.batchesPerWorkerDay || 0) * productivityFactor(state, typeId, companyBuilding?.level || 1)
+        * (companyBuilding ? toolFactorEstimate(state, companyBuilding, content, currentWorkers) : 1),
+      currentWorkers, ageDays: company.plan?.ageDays || 0
     });
   }
   return rows.sort((a, b) => a.key.localeCompare(b.key));
@@ -264,7 +271,7 @@ function townExpectedBatches(state, typeId, content) {
   for (const building of state.buildings || []) {
     if (building.typeId !== typeId || !(building.ownership?.townLevels > 0)) continue;
     const workers = readJobCount(state, jobKeyForBuilding(building.id, role.id));
-    const labor = laborBatches(state, typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry).batches;
+    const labor = laborBatches(state, typeId, building.level, workers, recipe.batchesPerWorkerDay, building.productivityCarry, toolFactorEstimate(state, building, content, workers)).batches;
     const wanted = Math.min(labor, targetBatchCap(building, recipe));
     batches += townOutputGate(state, recipe, wanted, content).batches;
   }

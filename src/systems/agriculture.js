@@ -9,6 +9,7 @@ import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId } from "../economy/ledger.js";
 import { educationBonus } from "../economy/productivity.js";
+import { farmYieldPerAcre } from "../selectors/durable-goods.js";
 
 // ── 耕地开荒 ────────────────────────────────────────────────────────────────
 // 亩数是权威数据：state.agriculture.reclaimedAcres 记录已开荒亩数，
@@ -184,7 +185,8 @@ export function harvest(state, content) {
   const acres = reclaimedAcres(state, content);
   // 与雇佣上限口径一致：取整，避免满员也达不到100%产量。
   const capacity = Math.floor(acres / content.agriculture.acresPerFarmer);
-  const maximum = acres * content.agriculture.yieldPerAcre;
+  // 每亩产量 = 基础 yieldPerAcre + 铁制农具覆盖率加成（selectors/durable-goods.js）；无农具时即基础值。
+  const maximum = acres * farmYieldPerAcre(state, content);
   const workCapacity = capacity * content.rules.growingDays;
   const proportion = Math.max(0, Math.min(1, state.agriculture.workUnits / workCapacity));
   // 教育加成（economy/productivity.js）：学堂办学让农民也干得更快，收成在出工比例之上再乘全镇教育加成（无学堂时为 1）。

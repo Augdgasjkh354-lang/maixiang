@@ -8,6 +8,8 @@ import { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privat
 import { selectAccounts, selectFoodDays, selectTotalQeq } from "./economy.js";
 import { productionStatus } from "./production.js";
 import { selectHarvestForecast } from "./agriculture.js";
+import { farmYieldPerAcre, selectDurableCoverage } from "./durable-goods.js";
+import { toolBoostSpec, toolFactorEstimate, toolWorkerCount } from "../systems/tool-boost.js";
 import { reclaimCostEstimate, reclaimWorkDaysForAcres, reclaimedAcres, reclaimedAcresMaximum } from "../systems/agriculture.js";
 import { qeqUnitsToJin } from "../economy/inventory.js";
 import { selectHousing, publicHousingRentPerResidentDayJin } from "./housing.js";
@@ -179,6 +181,23 @@ function productivityView(state, typeId, level, content) {
     levelBonusPercent: Math.round((levelBonus(level) - 1) * 100),
     experienceBonusPercent: Math.round((experienceBonus(state, typeId) - 1) * 1000) / 10,
     educationBonusPercent: Math.round((educationBonus(state) - 1) * 1000) / 10
+  };
+}
+
+// 铁制工具（金银消费第二期 B）只读视图：今日加成（投产前备工具后的实际值；尚未投产时按库存与上一日覆盖率预估）、库存件数、每日需要件数。
+function toolBoostView(state, building, content) {
+  const spec = toolBoostSpec(content, building.typeId);
+  if (!spec) return null;
+  const workers = toolWorkerCount(state, building, content);
+  const need = workers * spec.perWorkerDay;
+  const factor = workers <= 0 ? 1 : Number.isFinite(building.toolBoostToday) ? 1 + building.toolBoostToday : toolFactorEstimate(state, building, content, workers);
+  return {
+    itemId: spec.itemId, itemName: content.items[spec.itemId]?.name || spec.itemId,
+    bonusPercent: Math.round((spec.bonus) * 1000) / 10,
+    todayPercent: Math.round((factor - 1) * 1000) / 10,
+    stockPieces: Math.round((building.toolStock || 0) * 100) / 100,
+    needPiecesPerDay: Math.round(need * 100) / 100,
+    workers
   };
 }
 
@@ -418,6 +437,7 @@ export function selectDashboard(state, content, selection) {
       mainOutputItemId: definition?.recipeId ? content.recipes[definition.recipeId]?.outputs?.[0]?.itemId || null : null,
       // 人均产出（劳动生产率）：仅产业建筑有；等级加成与熟练度加成拆开展示。
       ...productivityView(state, building.typeId, Math.max(1, Math.min(buildingMaxLevel(content, building.typeId), building.level || 1)), content),
+      toolBoost: toolBoostView(state, building, content),
       // 物流中心 / 码头：等级、熟练度、教育加成后的人均运力（非运力类为 null）。
       freight: freightBuildingView(state, content, building)
     };
@@ -869,8 +889,11 @@ export function selectDashboard(state, content, selection) {
     farmAcres: reclaimedAcres(state, content),
     farmAcresMaximum: content.agriculture.acresMaximum ?? content.agriculture.acres,
     acresPerFarmer: content.agriculture.acresPerFarmer,
-    farmYieldPerAcre: content.agriculture.yieldPerAcre,
-    farmMaximumHarvest: reclaimedAcres(state, content) * content.agriculture.yieldPerAcre * educationBonus(state),
+    farmYieldPerAcre: farmYieldPerAcre(state, content),
+    farmYieldBaseAcre: content.agriculture.yieldPerAcre,
+    farmYieldFullAcre: content.agriculture.yieldPerAcre + (content.agriculture.farmToolYieldBonusPerAcre || 0),
+    farmToolCoverage: selectDurableCoverage(state, content, content.agriculture.farmToolItemId),
+    farmMaximumHarvest: reclaimedAcres(state, content) * farmYieldPerAcre(state, content) * educationBonus(state),
     reclaim: needSite || needResidents ? selectReclaimView(state, content) : null,
     ledgerQuantity: function (row) {
       return row.quantityUnits / content.precision.inventoryUnitsPerJin;

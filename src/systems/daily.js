@@ -43,6 +43,7 @@ import { settleLiquidityDay } from "./liquidity.js";
 import { fillMissingHouseholdLastHarvestIncome, maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
 import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
+import { buyDurableGoodsForHouseholds, resetDurableDay, resetDurableYear, wearDurableGoods } from "./durable-goods.js";
 import { accrueEducationDay, accrueIndustryExperience } from "./productivity.js";
 import { resetWholesaleDay, resetWholesaleYear, reviewWholesaleAutoPricing, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
@@ -73,6 +74,7 @@ function resetDayBooks(state, content) {
     industry.day = { producedUnits: {}, soldUnits: 0, revenueWheatUnits: 0, operatingWagesWheatUnits: 0 };
   }
   resetPrivateDaily(state);
+  resetDurableDay(state);
   resetRedistributionDay(state);
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
   if (state.stampDuty) state.stampDuty.day = {};
@@ -96,6 +98,7 @@ function resetYearBooks(state, content) {
     industry.year = { producedUnits: {}, soldUnits: 0, revenueWheatUnits: 0, operatingWagesWheatUnits: 0 };
   }
   resetPrivateYear(state);
+  resetDurableYear(state);
   resetCompanyYear(state, content, state.year - 1);
   resetShopYear(state, content);
   resetWholesaleYear(state, content);
@@ -198,6 +201,8 @@ export const CORE_DAILY_STEPS = [
   { id: "saltTrade", run: buySaltForResidents },
   { id: "trade", run: (state, content, day) => buyStaplesForResidents(state, day.peopleAtStart.total, content) },
   { id: "repairWood", run: buyRepairWoodForResidents },
+  // 耐用品（铁制农具）：农户补置，排在日用品之前（生产资料优先，每户不超过当日可花预算的一半）。
+  { id: "durableTrade", run: buyDurableGoodsForHouseholds },
   { id: "goodsTrade", run: buyGoodsForResidents },
   { id: "services", run: processServiceDemand },
   // 教育：学堂当天实际接待了学生才累计办学天数（服务结算之后，见 economy/productivity.js 的 educationBonus）。
@@ -209,6 +214,8 @@ export const CORE_DAILY_STEPS = [
   { id: "meal", run: (state, content, day) => consumeDailyRations(state, day.peopleAtStart.total, content) },
   { id: "saltMeal", run: consumeDailySalt },
   { id: "goodsUsed", run: consumeGoods },
+  // 耐用品每日折旧（寿命 lifeYears 年线性损耗）。
+  { id: "durableWear", run: wearDurableGoods },
   { id: "satisfaction", run: (state, content, day) => {
     const comfortQeq = day.meal.moves.reduce((sum, move) => sum + move.qeqUnits * (content.items[move.itemId]?.satisfactionPerQeq || 0), 0);
     const interval = content.rules.satisfactionUpdateIntervalDays || 1;

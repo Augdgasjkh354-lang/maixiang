@@ -1,3 +1,6 @@
+// 铁制工具（金银消费第二期 B）：这些建筑每天生产前备工具，每名在岗工人每日耗 perWorkerDay 件；库存够则获得 bonus 的人均产出加成（见 systems/tool-boost.js）。
+const IRON_TOOL_BOOST = Object.freeze({ itemId: "iron_tool", perWorkerDay: 0.02, bonus: 0.15 });
+
 export const BUILDINGS = Object.freeze({
   mill: Object.freeze({
     id: "mill", name: "磨坊", icon: "⚙️",
@@ -6,6 +9,7 @@ export const BUILDINGS = Object.freeze({
     maxInstances: 12,
     recipeId: "mill_flour",
     productionRoleId: "millers",
+    toolBoost: IRON_TOOL_BOOST,
     jobs: Object.freeze([Object.freeze({
       id: "millers", name: "磨坊工", slots: 12, wagePerWorkerDay: 5,
       note: "每人每日最多磨160斤麦", releasePriority: 30
@@ -40,6 +44,7 @@ export const BUILDINGS = Object.freeze({
     maxInstances: 12,
     recipeId: "lumber_gathering",
     productionRoleId: "lumberjacks",
+    toolBoost: IRON_TOOL_BOOST,
     accountingSector: "forestry",
     requiredPlotFeature: "logging_resource",
     jobs: Object.freeze([Object.freeze({
@@ -59,6 +64,7 @@ export const BUILDINGS = Object.freeze({
     maxInstances: 12,
     recipeId: "salt_gathering",
     productionRoleId: "salt_workers",
+    toolBoost: IRON_TOOL_BOOST,
     accountingSector: "salt",
     requiredPlotFeature: "salt_mine",
     jobs: Object.freeze([Object.freeze({
@@ -81,6 +87,7 @@ export const BUILDINGS = Object.freeze({
     maxInstances: 6,
     recipeId: "coal_mining",
     productionRoleId: "coal_miners",
+    toolBoost: IRON_TOOL_BOOST,
     accountingSector: "coal",
     requiredPlotFeature: "coal_mine",
     jobs: Object.freeze([Object.freeze({
@@ -98,6 +105,7 @@ export const BUILDINGS = Object.freeze({
     maxInstances: 6,
     recipeId: "iron_mining",
     productionRoleId: "iron_miners",
+    toolBoost: IRON_TOOL_BOOST,
     accountingSector: "iron",
     requiredPlotFeature: "iron_mine",
     jobs: Object.freeze([Object.freeze({
@@ -116,6 +124,7 @@ export const BUILDINGS = Object.freeze({
     maxInstances: 6,
     recipeId: "smelter_work",
     productionRoleId: "smelters",
+    toolBoost: IRON_TOOL_BOOST,
     accountingSector: "smelting",
     jobs: Object.freeze([Object.freeze({
       id: "smelters", name: "冶炼工", slots: 8, wagePerWorkerDay: 5,
@@ -169,6 +178,7 @@ export const BUILDINGS = Object.freeze({
     maxInstances: 12,
     recipeId: "cotton_growing",
     productionRoleId: "cotton_farmers",
+    toolBoost: IRON_TOOL_BOOST,
     accountingSector: "textile",
     jobs: Object.freeze([Object.freeze({
       id: "cotton_farmers", name: "棉农", slots: 20, wagePerWorkerDay: 5,
