@@ -253,11 +253,11 @@ test("mill to bakery accounting counts sold stock once and keeps unsold cost in 
   const before = simulation.totalQeq(state);
   simulation.advanceDay(state);
   const day = state.business.day;
-  assert.equal(day.producedUnits.flour / SCALE, 64);
+  assert.equal(day.producedUnits.flour / SCALE, 128); // 磨坊每工人每日 8 批 × 16 斤
   // 生产先上游后下游：面包房除了垫的 60 斤，还能用磨坊当天磨的面粉，按 1 名面包师的产能出 96 斤。
   assert.equal(day.producedUnits.bread / SCALE, 96);
-  assert.equal(day.rawInputCostWheatUnits / SCALE, 80);
-  assert.equal(day.processingLossWheatUnits / SCALE, 16);
+  assert.equal(day.rawInputCostWheatUnits / SCALE, 160);
+  assert.equal(day.processingLossWheatUnits / SCALE, 32);
   // 默认日薪 10→5 斤（8cf03ae）：磨坊工 + 面包师各 1 人，合计 10 斤。
   assert.equal(day.operatingWagesWheatUnits / SCALE, 10);
   // 0.2.3 镇营统购统销：产成品无偿调拨进批发市场，成本基础随货转移，镇库不再留存。
@@ -265,13 +265,15 @@ test("mill to bakery accounting counts sold stock once and keeps unsold cost in 
   assert.equal(state.accounts.town.bread, 0);
   assert.ok(state.wholesaleMarket.inventory.flour > 0, "面粉产出应留在批发市场");
   assert.ok(state.wholesaleMarket.monopoly.allocatedInValueUnits > 0, "统购统销应记录调拨入库价值");
-  assert.ok(state.wholesaleMarket.monopoly.allocatedInputValueUnits > 0, "原料无偿调拨应记录转移成本");
+  // 磨坊每工人每日 8 批，当日产的 128 斤面粉已够面包房 1 名面包师的 80 斤，面包房直接用上游产出，不再从批发市场领料。
+  assert.equal(state.wholesaleMarket.monopoly.allocatedInputValueUnits, 0, "上游产出够用时面包房不从批发市场领料");
+  assert.equal(state.wholesaleMarket.inventory.flour / SCALE, 60 + 128 - 80, "垫的 60 斤 + 磨坊 128 斤 − 面包房用 80 斤");
   const view = simulation.selectDashboard(state);
   const millView = view.buildings.find(row => row.id === mill.instanceId);
   const bakeryView = view.buildings.find(row => row.id === bakery.instanceId);
   assert.equal(millView.jobs[0].workers, 1);
   assert.equal(bakeryView.jobs[0].workers, 1);
-  assert.equal(millView.jobs[0].outputToday.flour / SCALE, 64);
+  assert.equal(millView.jobs[0].outputToday.flour / SCALE, 128);
   const millPay = view.payroll.lastDay.workers.find(row => row.buildingId === mill.instanceId);
   const bakeryPay = view.payroll.lastDay.workers.find(row => row.buildingId === bakery.instanceId);
   // 默认日薪 10→5 斤（8cf03ae）：每名工人当日应计提 5 斤；月薪要到下个发薪日（5 号）才付，当日不付。

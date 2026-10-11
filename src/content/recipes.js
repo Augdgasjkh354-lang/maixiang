@@ -5,7 +5,7 @@ export const RECIPES = Object.freeze({
     inputs: Object.freeze([{ itemId: "wheat", quantity: 20 }]),
     outputs: Object.freeze([{ itemId: "flour", quantity: 16 }]),
     losses: Object.freeze([{ itemId: "wheat", quantity: 4 }]),
-    batchesPerWorkerDay: 4
+    batchesPerWorkerDay: 8
   }),
   bakery_bread: Object.freeze({
     id: "bakery_bread", name: "烤面包",
@@ -24,7 +24,7 @@ export const RECIPES = Object.freeze({
   salt_gathering: Object.freeze({
     id: "salt_gathering", name: "采盐与加工",
     kind: "gather", inputs: Object.freeze([]),
-    outputs: Object.freeze([{ itemId: "salt", quantity: 5 }]),
+    outputs: Object.freeze([{ itemId: "salt", quantity: 10 }]),
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
   }),

@@ -39,11 +39,11 @@ function assertFinitePreview(preview) {
 test("新版默认价下四行业满产满销人均日利润符合校验值（产出按批发收购价、扣生产税）", () => {
   const state = legacyVoucherState();
   // 所有制（docs/OWNERSHIP.md）：民营业主拿到的是批发收购价减生产税，不是批发售价。
-  // 校验值按收购价：磨坊 4 批×16 斤面粉×1.6×0.9 − 4 批×20 斤小麦 − 工资 5 = 7.16；
-  // 面包房 16 批×6 斤×2.0×0.9 − 16 批×5 斤面粉×1.8 − 5 = 23.8；伐木 1×12×0.9 − 5 = 5.8；盐 5×8×0.9 − 5 = 31。
+  // 校验值按收购价：磨坊 8 批×16 斤面粉×1.6×0.9 − 8 批×20 斤小麦 − 工资 5 = 19.32；
+  // 面包房 16 批×6 斤×2.0×0.9 − 16 批×5 斤面粉×1.8 − 5 = 23.8；伐木 1×12×0.9 − 5 = 5.8；盐 10×8×0.9 − 5 = 67（每人每日产量 5→10 翻倍）。
   // 没有批发市场建筑时无收购口径，产出按 0 计（下一测试）。
   addBuilding(state, "wholesale_market", "wm-industry", 1, 1, 0);
-  const expected = { mill: 7.16, bakery: 23.8, lumberyard: 5.8, saltworks: 31 };
+  const expected = { mill: 19.32, bakery: 23.8, lumberyard: 5.8, saltworks: 67 };
   assert.deepEqual(state.market.pricesVoucherPerUnit, { ...CONTENT.rules.marketPricesVoucherPerUnit });
   for (const [itemId, price] of Object.entries({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10 })) assert.equal(state.market.pricesVoucherPerUnit[itemId], price);
   for (const [typeId, profit] of Object.entries(expected)) {

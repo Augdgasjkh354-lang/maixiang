@@ -8,7 +8,7 @@ export const BUILDINGS = Object.freeze({
     productionRoleId: "millers",
     jobs: Object.freeze([Object.freeze({
       id: "millers", name: "磨坊工", slots: 12, wagePerWorkerDay: 5,
-      note: "每人每日最多磨80斤麦", releasePriority: 30
+      note: "每人每日最多磨160斤麦", releasePriority: 30
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 600 }]),
     construction: Object.freeze({
@@ -62,7 +62,7 @@ export const BUILDINGS = Object.freeze({
     requiredPlotFeature: "salt_mine",
     jobs: Object.freeze([Object.freeze({
       id: "salt_workers", name: "盐工", slots: 10, wagePerWorkerDay: 5,
-      note: "每人每日产5斤食盐", releasePriority: 30
+      note: "每人每日产10斤食盐", releasePriority: 30
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]),
     construction: Object.freeze({

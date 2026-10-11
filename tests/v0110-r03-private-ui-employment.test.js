@@ -48,7 +48,7 @@ test("0.1.10-r03 民营磨坊会从镇库采购小麦，同时保留业主家庭
   const result = processPrivateBuilding(state, mill, CONTENT);
 
   assert.equal(result.status, "ready", result.reason);
-  assert.equal(result.batches, 4);
+  assert.equal(result.batches, 8);
   assert.ok(result.inputPurchases.length > 0);
   assert.equal(result.inputPurchases[0].itemId, "wheat");
   assert.equal(result.inputPurchases[0].sellerRows[0].seller, "town", "生产原料应优先从镇库供应");
