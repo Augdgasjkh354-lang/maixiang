@@ -290,7 +290,7 @@ export function issueBankLoan(state, borrowerKind, borrowerId, voucherUnits, con
   bank.loans.push(loan);
   bank.stats.loansIssuedCount += 1;
   bank.stats.loansIssuedVoucherUnits += units;
-  recordEvent(state, `银行向${borrowerName(state, loan)}发放贷款${units}券，期限${termDays}天。`, content);
+  recordEvent(state, `银行向${borrowerName(state, loan)}发放贷款${voucherText(units, currencyScale(content))}券，期限${termDays}天。`, content);
   return { ok: true, loan };
 }
 

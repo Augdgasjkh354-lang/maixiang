@@ -134,17 +134,42 @@ test("合理价 = 年利润 ÷ 4%：按现价的年利润率 4% 算合理", () =
   assert.equal(performance.referencePerShareVoucherUnits, Math.floor(performance.referenceCompanyValueVoucherUnits / company.totalShares));
 });
 
-test("业绩锚跟着合理价走；观察够了仍不赚钱，锚缓慢下滑", () => {
+test("业绩锚逐日逼近合理价（每天最多 ±4%）；观察够了仍不赚钱，锚缓慢下滑但不低于挂牌价的 10%", () => {
   const { state, company } = listedState({ price: 2 });
   state.year = 1; state.day = 60;
   company.history = [];
   for (let serial = 1; serial <= 59; serial += 1) company.history.push({ serial, profitVoucherUnits: 10 * V, revenueVoucherUnits: 20 * V, soldUnits: 0 });
+  const target = stockReference(state, company, CONTENT).referencePerShareVoucherUnits;
+  const start = company.stockMarket.anchorUnits;
+  assert.ok(target > start * 1.5, "测试前提：合理价远高于起步锚");
   settleStockMarketDay(state, CONTENT);
-  assert.equal(company.stockMarket.anchorUnits, stockReference(state, company, CONTENT).referencePerShareVoucherUnits);
+  assert.ok(company.stockMarket.anchorUnits <= Math.round(start * 1.04) + 1, "首日锚只涨约 4%，不一步跳到位");
+  assert.ok(company.stockMarket.anchorUnits > start);
+  for (let i = 0; i < 200; i += 1) settleStockMarketDay(state, CONTENT);
+  assert.equal(company.stockMarket.anchorUnits, target, "足够多天后锚到位");
   company.history = company.history.map(row => ({ ...row, profitVoucherUnits: -V }));
   const before = company.stockMarket.anchorUnits;
   settleStockMarketDay(state, CONTENT);
   assert.ok(company.stockMarket.anchorUnits < before, "亏损公司的锚下滑");
+  for (let i = 0; i < 2000; i += 1) settleStockMarketDay(state, CONTENT);
+  const floor = Math.round(company.stockMarket.listingUnits * 0.1);
+  assert.ok(company.stockMarket.anchorUnits >= floor, "亏损锚不低于挂牌价的 10%");
+});
+
+test("低价股小数步累积不钉死；常态单日涨跌 ≤10%、破裂期 ≤20%", () => {
+  const tick = shareTick(CONTENT);
+  const draw = { uniform: () => 0.5, gauss: () => -0.3 };
+  const market = { regime: "normal", daysLeft: 0, drift: 0, momentum: 0 };
+  let price = 5 * tick;
+  const seen = new Set();
+  for (let i = 0; i < 40; i += 1) { price = stepSharePrice(price, 20 * tick, market, 0, draw, CONTENT); seen.add(price); }
+  assert.ok(price > 5 * tick, "锚远高于价时低价股会被慢慢推起，不被一档取整钉死");
+  const big = { regime: "normal", daysLeft: 0, drift: 0, momentum: 0 };
+  const up = stepSharePrice(1000 * tick, 1000 * tick, big, 0, { uniform: () => 0.5, gauss: () => 10 }, CONTENT);
+  assert.ok(up <= 1100 * tick, `常态涨幅 ≤10%：${up / tick}`);
+  const crash = { regime: "crash", daysLeft: 5, drift: -0.05, momentum: 0 };
+  const down = stepSharePrice(1000 * tick, 500 * tick, crash, 0, { uniform: () => 0.5, gauss: () => -10 }, CONTENT);
+  assert.ok(down >= 800 * tick && down < 900 * tick, `破裂期可跌超 10% 但不超 20%：${down / tick}`);
 });
 
 test("股票看利润只看最近 60 天：更早的利润不计", () => {

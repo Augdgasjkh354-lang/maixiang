@@ -33,6 +33,11 @@ export const STOCK_MARKET = {
   crashDriftMin: 0.02, crashDriftSpan: 0.03, crashNoise: 0.05, // 破裂期日均跌幅 2%—5%，单日可近 20%
   crashMinDays: 8, crashSpanDays: 14,
   crashEndGap: 0.05,       // 跌回业绩锚附近即结束
+  dailyLimit: 0.1,         // 常态/泡沫期单日涨跌幅上限（主板式 ±10%）；破裂期放宽到 SHARE_PRICE_DAILY_LIMIT（±20%）
+  anchorGlide: 0.04,       // 业绩锚每天最多向目标移动的比例：首次有业绩时的重估（挂牌价与利润估值口径不同）要一个多月走完，不在一天内跳完
+  lossAnchorDecay: 0.99,   // 观察够了仍不赚钱：锚每天乘以它
+  lossAnchorFloor: 0.1,    // 亏损锚地板 = 挂牌价 × 它（公司仍有建筑等资产，股价不归零）
+  fractionalBelowTicks: 50, // 股价低于这么多档时小数步累积，避免一档取整把价格钉死
   // 居民买卖对价格的影响（docs/STOCK.md）：当日净买入（买入股数 − 卖出意愿股数）÷ 总股本，次日价格加 flowImpact × 净流量。
   flowImpact: 0.5,         // 净流量每占股本 1%，次日涨跌 0.5%
   flowCap: 0.1,            // 净流量折算的上限（±10% 股本，即单日最多 ±5% 股价）
@@ -158,7 +163,7 @@ export function applyCompanyListing(state, company, terms, seller, content) {
   // 实时股价（金融扩展四期）：挂牌价起步，每日向利润锚波动
   company.sharePriceVoucherUnits = priceUnits;
   company.sharePriceHistory = [priceUnits];
-  company.stockMarket = { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: priceUnits };
+  company.stockMarket = { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: priceUnits, listingUnits: priceUnits };
   company.shareSale ||= {};
   company.shareSale.sellerOwner = seller.kind === "household" ? seller.householdId : "town";
   company.shareSale.offeredShares = offeredShares;
@@ -336,9 +341,16 @@ export function stepSharePrice(price, anchorUnits, market, sentiment, draw, cont
   // 居民买卖的净流量（上一日成交写入 market.flow，settleStockMarketDay 用完清零）：买盘推价、卖压压价。
   change += P.flowImpact * Math.max(-P.flowCap, Math.min(P.flowCap, Number(market.flow) || 0));
   if (market.regime !== "normal") market.daysLeft -= 1;
-  // 涨跌幅钳制：不超过 ±20%，价格很低时至少允许一档。
-  const maxSteps = Math.max(1, Math.floor(price * SHARE_PRICE_DAILY_LIMIT / tick));
-  const steps = Math.max(-maxSteps, Math.min(maxSteps, Math.round(price * change / tick)));
+  // 涨跌幅钳制：常态/泡沫 ±10%，破裂期 ±20%；价格很低时至少允许一档。
+  const limit = market.regime === "crash" ? SHARE_PRICE_DAILY_LIMIT : Math.min(SHARE_PRICE_DAILY_LIMIT, P.dailyLimit);
+  const maxSteps = Math.max(1, Math.floor(price * limit / tick));
+  // 低价股的小数步累积（price/tick 很小时单日变动不足一档会被取整抹掉，价格钉死在地板）。
+  let raw = price * change / tick;
+  const lowPrice = price < P.fractionalBelowTicks * tick;
+  if (lowPrice) raw += Number(market.stepCarry) || 0;
+  const steps = Math.max(-maxSteps, Math.min(maxSteps, Math.round(raw)));
+  if (lowPrice) market.stepCarry = Math.abs(raw - steps) <= 1 ? raw - steps : 0;
+  else if (market.stepCarry) market.stepCarry = 0;
   const next = Math.max(tick, price + steps * tick);
   market.momentum = P.momentumDecay * market.momentum + (1 - P.momentumDecay) * (next / price - 1);
   return next;
@@ -378,8 +390,15 @@ export function settleStockMarketDay(state, content) {
     // 业绩锚 = 合理价（年利润 ÷ 4%）：有业绩就用它；观察够了仍不赚钱，锚每天缓慢下滑；还没有业绩（新股）沿用上一次的锚，从未有过就用挂牌价。
     const performance = stockReference(state, company, content);
     const reference = performance.referencePerShareVoucherUnits || 0;
-    if (reference > 0) market.anchorUnits = reference;
-    else if (performance.observedDays >= (content.rules.sharePerformanceObservationDays || 30)) market.anchorUnits = Math.max(shareTick(content), Math.floor((market.anchorUnits || current) * 0.99));
+    const P = STOCK_MARKET;
+    if (reference > 0) {
+      // 业绩锚向参考价逐日逼近（每天最多 ±anchorGlide），不一步跳到位。
+      const from = market.anchorUnits > 0 ? market.anchorUnits : reference;
+      market.anchorUnits = Math.max(shareTick(content), Math.round(Math.max(from * (1 - P.anchorGlide), Math.min(from * (1 + P.anchorGlide), reference))));
+    } else if (performance.observedDays >= (content.rules.sharePerformanceObservationDays || 30)) {
+      const floor = Math.max(shareTick(content), Math.round((market.listingUnits || 0) * P.lossAnchorFloor));
+      market.anchorUnits = Math.max(floor, Math.round((market.anchorUnits || current) * P.lossAnchorDecay));
+    }
     const next = stepSharePrice(current, effectiveAnchorUnits(company, market, absDay, content), market, exchange.sentiment, draw, content);
     market.flow = 0;
     company.sharePriceVoucherUnits = next;
