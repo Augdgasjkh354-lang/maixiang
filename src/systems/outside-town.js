@@ -4,6 +4,7 @@ import { addInventory, changeInventory, quantityToUnits, unitsToQuantity } from 
 import { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } from "../content/outside-towns.js";
 import { RULES } from "../content/rules.js";
 import { hasWholesaleMarket, ensureWholesaleMarket, takeWholesaleInventoryForExport } from "./wholesale-market.js";
+import { townSellableWheatUnits } from "../economy/foreign-wheat.js";
 import { jobCount } from "./households.js";
 import { freightCapacityUnits, freightPoolJin, takeFreightCapacity } from "./logistics.js";
 
@@ -442,9 +443,9 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   // 运力：货物（进出口都算）从运力池扣斤数；池子不够就只做到池子剩下的量，池子空了直接拒绝。
   if (freightPoolJin(state) < 0.01) return { ok: false, reason: `运力不足：今天最多还能运${Math.floor(freightPoolJin(state) * 100) / 100}斤` };
   const freightUnits = freightCapacityUnits(state, content);
-  const transactionId = makeTransactionId(state);
 
   if (direction === "sell") {
+    const transactionId = makeTransactionId(state);
     qty = affordableSellQuantity(town, profile, good, qty);
     if (qty < 0.01) return { ok: false, reason: `${profile.name}口粮储备以外的小麦不够，付不起这笔货款` };
     const qtyUnits = Math.min(quantityToUnits(qty, content), freightUnits);
@@ -478,6 +479,11 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   if (qty < 0.01) return { ok: false, reason: `${profile.name}的${item.name}只够自用，暂不外卖` };
   const valueJin = round2(quoteValue(town, good, "buy", qty));
   const payUnits = quantityToUnits(valueJin, content);
+  // 与贸易行同一口径：付款不得把镇库小麦压到口粮储备线以下（townSellableWheatUnits）。预检通过才动账。
+  if (payUnits > townSellableWheatUnits(state, content)) {
+    return { ok: false, reason: `镇库小麦只够口粮储备以外的部分，付不起${item.name}的货款（${Math.round(valueJin)}斤小麦）` };
+  }
+  const transactionId = makeTransactionId(state);
   const pay = changeInventory(state, "town", "wheat", -payUnits, `从${profile.name}进口${item.name}付款`, "trade_import", content, transactionId);
   if (!pay.ok) return { ok: false, reason: "镇库小麦不足以支付" };
   // 付款已成功，之后不再失败：这时才扣运力。
