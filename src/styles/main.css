@@ -618,6 +618,13 @@ button.wide { width: 100%; }
 /* 银行建筑面板：摘要卡 + 三个折叠分组；数额整体不换行，「粮券」不会被拆到下一行 */
 .bank-summary .value, .bank-groups .value { white-space: nowrap; }
 .bank-groups .detail-block > summary .subtle { font-weight: 500; white-space: nowrap; }
+/* 窄屏（如 360px 手机）：标签与数值超宽时数值换到下一行并允许折行，输入框与「偿还」按钮也折行，不横向溢出；桌面布局不变 */
+@media (max-width: 430px) {
+  .bank-summary .row, .bank-groups .row { flex-wrap: wrap; }
+  .bank-summary .value, .bank-groups .value { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .bank-summary .setting-input, .bank-groups .setting-input { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+  .bank-summary .setting-input input[type="text"], .bank-groups .setting-input input[type="text"] { width: 88px; min-width: 0; max-width: 100%; }
+}
 /* 面板标题与关闭按钮之间留出距离，长标题省略而不是顶到按钮 */
 .panel-heading { gap: 12px; }
 .panel-kicker { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
