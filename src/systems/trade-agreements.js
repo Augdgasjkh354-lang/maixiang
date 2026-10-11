@@ -193,9 +193,11 @@ function settleAgreementMonth(state, agreement, content, result) {
   const orderJin = round2(actualJin * agreement.pricePerUnit);
   if (payableWheatJin(town, profile) < orderJin) {
     returnToMarket(state, agreement.itemId, takenUnits);
+    // 对方付不起：本月应交（含之前顺延的）整笔顺延到下月，不计我方违约（与商路断绝口径一致）。
+    agreement.carryJin = dueJin;
     changeRelations(town, -AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS);
     result.partnerBreached += 1;
-    recordEvent(state, `${profile.name}余粮不足，本月长期协定未能付款，交付顺延。`, content);
+    recordEvent(state, `${profile.name}余粮不足，本月长期协定未能付款，交付顺延（待交累计${Math.round(agreement.carryJin)}斤）。`, content);
     return;
   }
   if (takenUnits > 0) {
@@ -237,7 +239,12 @@ function consumeAgreementTerm(state, agreement, content) {
   if (left > 0) return;
   agreement.status = "expired";
   const name = outsideTownProfile(content, agreement.townId || DEFAULT_OUTSIDE_TOWN_ID)?.name || "外镇";
-  recordEvent(state, `与${name}的${content.items[agreement.itemId]?.name || agreement.itemId}长期协定已到期，可续签。`, content);
+  const itemName = content.items[agreement.itemId]?.name || agreement.itemId;
+  // 期满不顺延：期限按日历走，尚未交付的顺延量随协定作废（不计违约），事件里明说。
+  const lapsedJin = round2(agreement.carryJin || 0);
+  agreement.carryJin = 0;
+  const lapsedText = lapsedJin > 0 ? `，期满时仍有顺延的${Math.round(lapsedJin)}斤未交，随协定作废（不计违约）` : "";
+  recordEvent(state, `与${name}的${itemName}长期协定已到期${lapsedText}，可续签。`, content);
 }
 
 // 主动解约：赔年货值 10%（关系融洽减半），关系分 −5。
