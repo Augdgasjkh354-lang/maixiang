@@ -219,17 +219,17 @@ test("公租房只在开工时扣木材；按真实入住计租并保护口粮�
   assert.equal(state.buildings[0].typeId, "public_housing");
   assert.equal(totalItem(state, "wood"), woodBefore - 2000 * SCALE);
   let housing = selectHousing(state, CONTENT);
-  assert.equal(housing.capacity, 2000);
+  assert.equal(housing.capacity, 3000);
   assert.equal(housing.villageOccupied, 1000);
-  // 人口 1100→3300（8cf03ae）：无房户远超公租房容量，入住直接顶满 1000（原先只有 120 人无房）。
-  assert.equal(housing.rentals[0].occupied, 1000);
-  assert.equal(housing.rentals[0].dailyRentDueWheatJin, 1000);
+  // 人口 1100→3300（8cf03ae）：无房户远超公租房容量，入住直接顶满 2000（原先只有 120 人无房）。
+  assert.equal(housing.rentals[0].occupied, 2000);
+  assert.equal(housing.rentals[0].dailyRentDueWheatJin, 2000);
 
   const wheatBeforeRentDay = totalItem(state, "wheat") + state.currency.reserveWheatUnits;
   simulation.advanceDay(state);
-  assert.equal(state.fiscal.lastRentDay.dueWheatJin, 1000, "聚合家庭中的1000名真实公租房入住者应计租");
+  assert.equal(state.fiscal.lastRentDay.dueWheatJin, 2000, "聚合家庭中的2000名真实公租房入住者应计租");
   assert.equal(state.fiscal.lastRentDay.collectedWheatJin, 0);
-  assert.equal(state.fiscal.lastRentDay.waivedWheatJin, 1000);
+  assert.equal(state.fiscal.lastRentDay.waivedWheatJin, 2000);
   // 当日全镇口粮 6600人×2斤=13200斤，加上 40 斤其他支出，共 13240 斤。
   assert.equal(totalItem(state, "wheat") + state.currency.reserveWheatUnits, wheatBeforeRentDay - 13200 * SCALE - 120000);
 
@@ -237,9 +237,9 @@ test("公租房只在开工时扣木材；按真实入住计租并保护口粮�
   setStock(state, "residents", "wheat", 61200);
   const arrearsBeforeProtectedRent = Object.values(state.payroll.arrearsWheatUnits).reduce((sum, value) => sum + value, 0);
   simulation.advanceDay(state);
-  assert.equal(state.fiscal.lastRentDay.dueWheatJin, 1000);
+  assert.equal(state.fiscal.lastRentDay.dueWheatJin, 2000);
   assert.equal(state.fiscal.lastRentDay.collectedWheatJin, 0);
-  assert.equal(state.fiscal.lastRentDay.waivedWheatJin, 1000);
+  assert.equal(state.fiscal.lastRentDay.waivedWheatJin, 2000);
   assert.equal(Object.values(state.payroll.arrearsWheatUnits).reduce((sum, value) => sum + value, 0), arrearsBeforeProtectedRent);
   assert.equal(state.ledger.some(row => row.type === "rent_waiver"), true);
 });

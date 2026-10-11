@@ -83,11 +83,11 @@ test("completed public-housing upgrade adds capacity and demolition is blocked i
   const started = simulation.buildAt(state, "public_housing", "east");
   simulation.advanceDays(state, 100);
   const housing = state.buildings[0];
-  assert.equal(simulation.selectDashboard(state).housing.capacity, 2000);
+  assert.equal(simulation.selectDashboard(state).housing.capacity, 3000);
   assert.equal(simulation.upgradeBuilding(state, housing.id).ok, true);
   simulation.advanceDays(state, 100);
   assert.equal(housing.level, 2);
-  assert.equal(simulation.selectDashboard(state).housing.capacity, 3000);
+  assert.equal(simulation.selectDashboard(state).housing.capacity, 5000);
   state.cohorts.find(row => row.age === 30).m += 2001;
   const preview = simulation.selectDemolitionPreview(state, housing.id);
   assert.equal(preview.available, false);
