@@ -1,4 +1,5 @@
 import { createHousehold } from "../systems/households.js";
+import { repairHouseholdLife } from "../systems/household-life.js";
 
 // 存档兼容：让存档跨版本一直能读。三层兜底：
 //
@@ -171,7 +172,14 @@ function safeKeys(object, path, report) {
   });
 }
 
+// 已不再存档的派生字段：满意度分项全镇快照（satisfactionFactors.rows，现由日结缓存或界面现算）。
+// 逐户的 life.recent / life.satisfactionHistory / life.lastFactors 与观察行格式在下面的户循环里由 repairHouseholdLife 处理。
+function dropRetiredFields(saved) {
+  if (isPlainObject(saved?.satisfactionFactors)) delete saved.satisfactionFactors.rows;
+}
+
 export function repairHouseholdTable(saved, content, report) {
+  dropRetiredFields(saved);
   const table = saved?.households;
   if (!isPlainObject(table) || table.byId === undefined) return;
   if (!isPlainObject(table.byId)) throw new Error("家庭数据损坏：家庭表不是对象，无法读取。");
@@ -182,6 +190,7 @@ export function repairHouseholdTable(saved, content, report) {
     const entry = table.byId[key];
     if (!isPlainObject(entry)) { report.repaired.push(path); continue; }
     const household = { ...entry };
+    repairHouseholdLife(household.life);
     if (household.id !== key) { household.id = key; report.repaired.push(`${path}.id`); }
     for (const field of HOUSEHOLD_FIELDS) {
       if (household[field] === undefined) { household[field] = structuredClone(template[field]); report.repaired.push(`${path}.${field}`); }

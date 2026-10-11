@@ -21,13 +21,23 @@ function createFakeIndexedDb() {
     return req;
   }
 
+  // 存储值可能是明文字符串（v2）或 gzip 字节（v3）：两种都要能被改坏。
   function corrupt(row, mode) {
     const copy = { ...row };
     if (mode === "truncate") copy.primary = copy.primary.slice(0, -1);
     else if (mode === "middle") {
       const at = Math.floor(copy.primary.length / 2);
-      copy.primary = copy.primary.slice(0, at) + (copy.primary[at] === "0" ? "1" : "0") + copy.primary.slice(at + 1);
-    } else if (mode === "backup") copy.backup = (copy.backup || "") + " ";
+      if (typeof copy.primary === "string") {
+        copy.primary = copy.primary.slice(0, at) + (copy.primary[at] === "0" ? "1" : "0") + copy.primary.slice(at + 1);
+      } else {
+        copy.primary = copy.primary.slice();
+        copy.primary[at] ^= 0x01;
+      }
+    } else if (mode === "backup") {
+      copy.backup = typeof copy.backup === "string" || !copy.backup
+        ? (copy.backup || "") + " "
+        : Uint8Array.from([...copy.backup, 0x20]);
+    }
     return copy;
   }
 
@@ -130,7 +140,7 @@ test("回读损坏（截断、中间单字符改动、备份被改）都会被�
     );
     fake.controller.corruptNextSlotRead = null;
     // 检测失败后内存中的存档仍可读，并且保存恢复正常。
-    assert.equal(manager.read(created.id).state.year, state.year);
+    assert.equal((await manager.read(created.id)).state.year, state.year);
     await manager.saveCurrent(state, created.id);
   }
 });
@@ -141,7 +151,7 @@ test("正常写入时回读校验通过", async () => {
   const created = await manager.saveAs(state, "正常");
   const saved = await manager.saveCurrent(state, created.id);
   assert.equal(saved.id, created.id);
-  assert.equal(manager.read(created.id).state.year, state.year);
+  assert.equal((await manager.read(created.id)).state.year, state.year);
 });
 
 test("写入失败时 pendingBytes 等于 primary 与 backup 的 UTF-8 字节数之和", async () => {

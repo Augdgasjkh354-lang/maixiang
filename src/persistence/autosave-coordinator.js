@@ -1,28 +1,49 @@
-export function createAutosaveCoordinator({ capture, save, onSuccess = () => {}, onFailure = () => {} }) {
+// 自动存档协调器（单飞）。这里只做调度与失败退避，不碰 DOM、不碰存储细节。
+// 失败退避：第 n 次连续失败后，等待 min(30 秒, 2 秒 × 2^(n-1)) 再由调用方发起强制重试。
+
+export const AUTOSAVE_RETRY_MAX_MS = 30000;
+export const AUTOSAVE_RETRY_BASE_MS = 2000;
+
+export function autosaveRetryDelayMs(failures) {
+  if (!(failures > 0)) return 0;
+  return Math.min(AUTOSAVE_RETRY_MAX_MS, AUTOSAVE_RETRY_BASE_MS * 2 ** (failures - 1));
+}
+
+export function createAutosaveCoordinator({ capture, save, onSuccess = () => {}, onFailure = () => {}, now = () => Date.now() }) {
   let running = null;
   let requested = false;
   let requestedForce = false;
+  let requestedManual = false;
   let suspendDepth = 0;
   let failedKey = null;
+  let failures = 0;
+  let retryAt = 0;
 
   function snapshotKey(snapshot) {
     if (!snapshot) return "";
     return `${snapshot.session ?? 0}:${snapshot.slotId ?? ""}:${snapshot.revision ?? 0}`;
   }
 
-  async function saveSnapshot(force = false) {
+  // manual：由玩家操作触发的保存（失败要明确告知）；否则为自动存档。
+  async function saveSnapshot(force = false, manual = false) {
     const snapshot = capture();
     if (!snapshot || (!snapshot.dirty && !force)) return true;
     const key = snapshotKey(snapshot);
     if (!force && failedKey === key) return false;
+    // 自动存档在退避期内不写（否则每个新修订都会立刻再失败一次）；玩家主动保存与强制重试不受影响。
+    if (!force && !manual && failures > 0 && now() < retryAt) return false;
     try {
       const result = await save(snapshot);
       failedKey = null;
+      failures = 0;
+      retryAt = 0;
       onSuccess(snapshot, result);
       return true;
     } catch (error) {
       failedKey = key;
-      onFailure(snapshot, error);
+      failures += 1;
+      retryAt = now() + autosaveRetryDelayMs(failures);
+      onFailure(snapshot, error, { manual, failures, retryAt });
       return false;
     }
   }
@@ -32,9 +53,11 @@ export function createAutosaveCoordinator({ capture, save, onSuccess = () => {},
     try {
       while (requested && suspendDepth === 0) {
         const force = requestedForce;
+        const manual = requestedManual;
         requested = false;
         requestedForce = false;
-        ok = await saveSnapshot(force);
+        requestedManual = false;
+        ok = await saveSnapshot(force, manual);
         if (!ok) break;
         // 不因"存完后又变脏"自动再存：快进时日结一直在推进，状态永远是脏的，
         // 原来会一存完就接着存（每秒一两次整局存档，快进卡顿的主因）。存档期间有新的
@@ -47,9 +70,10 @@ export function createAutosaveCoordinator({ capture, save, onSuccess = () => {},
     }
   }
 
-  function request({ force = false } = {}) {
+  function request({ force = false, manual = false } = {}) {
     requested = true;
     requestedForce = requestedForce || force;
+    requestedManual = requestedManual || manual;
     if (suspendDepth > 0) return Promise.resolve(true);
     if (!running) running = drain();
     return running;
@@ -75,7 +99,7 @@ export function createAutosaveCoordinator({ capture, save, onSuccess = () => {},
     while (true) {
       const snapshot = capture();
       if (!snapshot || (!snapshot.dirty && !(force && first))) return true;
-      const ok = await saveSnapshot(force && first);
+      const ok = await saveSnapshot(force && first, true);
       first = false;
       if (!ok) return false;
     }
@@ -83,6 +107,13 @@ export function createAutosaveCoordinator({ capture, save, onSuccess = () => {},
 
   function clearFailure() {
     failedKey = null;
+    failures = 0;
+    retryAt = 0;
+  }
+
+  // 上次保存失败且退避时间已到、当前没有保存在进行：调用方应发起一次强制重试。
+  function retryDue() {
+    return failures > 0 && suspendDepth === 0 && !running && now() >= retryAt;
   }
 
   return {
@@ -92,6 +123,9 @@ export function createAutosaveCoordinator({ capture, save, onSuccess = () => {},
     resume,
     flushSuspended,
     clearFailure,
+    retryDue,
+    get failures() { return failures; },
+    get retryAt() { return retryAt; },
     get inFlight() { return Boolean(running); },
     get suspended() { return suspendDepth > 0; }
   };

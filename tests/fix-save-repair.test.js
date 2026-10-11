@@ -4,6 +4,7 @@ import { simulation } from "../src/engine.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { createIndexedSaveManager } from "../src/persistence/indexed-save-manager.js";
 import { checksumSaveText } from "../src/persistence/save-container.js";
+import { gunzipToText } from "../src/persistence/compression.js";
 import { validateState } from "../src/core/validation.js";
 
 const sim = simulation;
@@ -124,15 +125,16 @@ test("旧主档校验和正确但解不开时，保存不会用它覆盖仍可�
   const goodBackup = rec.backup;
   assert.ok(goodBackup, "第二次存档后应有备份");
 
-  rec.primary = checksumValidButInvalid(rec.primary);
+  // 篡改的主档换成明文容器（校验和对、数据不合法）；元数据指纹仍是写入时那份，所以不再被信任。
+  rec.primary = checksumValidButInvalid(await gunzipToText(rec.primary));
   stores.get("slots").set(id, rec);
   const mgr2 = await createIndexedSaveManager({ indexedDB: factory, content: sim.content });
-  assert.equal(mgr2.read(id).recovered, true);
+  assert.equal((await mgr2.read(id)).recovered, true);
 
-  await mgr2.saveCurrent(mgr2.read(id).state, id);
+  await mgr2.saveCurrent((await mgr2.read(id)).state, id);
   const after = stores.get("slots").get(id);
-  assert.equal(after.backup, goodBackup, "备份必须保持为最后一份可读的存档");
-  assert.equal(after.backup.includes("\"wheat\":-5"), false);
+  assert.deepEqual(Buffer.from(after.backup), Buffer.from(goodBackup), "备份必须保持为最后一份可读的存档");
+  assert.equal((await gunzipToText(after.backup)).includes("\"wheat\":-5"), false);
 });
 
 test("旧主档完整可读时，保存照常把它轮转为备份", async () => {
@@ -144,7 +146,7 @@ test("旧主档完整可读时，保存照常把它轮转为备份", async () =>
   const firstPrimary = stores.get("slots").get(created.id).primary;
   sim.advanceDays(state, 3);
   await mgr.saveCurrent(state, created.id);
-  assert.equal(stores.get("slots").get(created.id).backup, firstPrimary);
+  assert.deepEqual(Buffer.from(stores.get("slots").get(created.id).backup), Buffer.from(firstPrimary));
 });
 
 // ---------- 3) 畸形家庭条目：补齐、丢弃危险键、中文错误而非 TypeError ----------

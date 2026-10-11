@@ -12,6 +12,7 @@ import { simulation, CONTENT } from "../src/engine.js";
 import { grantResidentVouchers } from "../tests/helpers-v16.js";
 import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js";
 import { householdList, householdPopulation, isActiveHousehold } from "../src/systems/households.js";
+import { currentSatisfactionFactorRows } from "../src/systems/satisfaction.js";
 
 const WINDOW = 60;
 const I = CONTENT.precision.inventoryUnitsPerJin;
@@ -137,7 +138,7 @@ function sampleDay(state, storeId, acc) {
   add("households", hs.length);
 
   // 满意度构成：按人口加权的各数值字段（跳过对象与 householdId）。
-  const rows = state.satisfactionFactors?.rows || [];
+  const rows = currentSatisfactionFactorRows(state, CONTENT);
   const popSum = rows.reduce((s, r) => s + (r.people || 0), 0);
   if (popSum > 0) {
     const sums = new Map();

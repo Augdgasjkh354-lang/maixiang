@@ -8,7 +8,7 @@ import { householdList, householdWorkingAge, isActiveHousehold } from "../src/sy
 import { createIndependentCompany } from "../src/systems/companies.js";
 import { isWholeBuilding } from "../src/systems/ownership-migrate.js";
 import { jobKeyForBuilding, privateJobKeyForBuilding } from "../src/selectors/labor.js";
-import { checksumSaveText, decodeSaveContainer, SAVE_CONTAINER_VERSION } from "../src/persistence/save-container.js";
+import { checksumSaveText, decodeSaveContainerText, SAVE_CONTAINER_VERSION } from "../src/persistence/save-container.js";
 import { parseSaveFile } from "../src/persistence/storage.js";
 import { loadReportMessage } from "../src/persistence/migrations.js";
 import { setHouseholdVoucherUnits } from "./helpers-monetary.js";
@@ -68,7 +68,7 @@ function addSplitListedMill(state, id, { level, split, privateOwners = null, lis
   return { mill, company };
 }
 
-// 旧存档经真实的 IndexedDB 容器读档路径加载（decodeSaveContainer → migrateSave）。
+// 旧存档经真实的容器读档路径加载（明文容器：decodeSaveContainerText → migrateSave）。
 function loadOldSave(old) {
   const stateText = JSON.stringify(old);
   const header = JSON.stringify({
@@ -76,7 +76,7 @@ function loadOldSave(old) {
     savedAt: new Date().toISOString(), checksum: checksumSaveText(stateText)
   });
   const raw = header.slice(0, -1) + ',"state":' + stateText + "}";
-  return decodeSaveContainer(raw, "slot-old", CONTENT).state;
+  return decodeSaveContainerText(raw, "slot-old", CONTENT).state;
 }
 
 function assertValid(state, label = "") {

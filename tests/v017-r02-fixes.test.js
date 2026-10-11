@@ -11,6 +11,7 @@ import { householdIdleWorkers, householdList, releaseJobFromHousehold } from "..
 import { exportState, parseSaveFile } from "../src/persistence/storage.js";
 import { grantResidentVouchers } from "./helpers-v16.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
+import { householdRecentTotals } from "../src/systems/household-life.js";
 
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 
@@ -156,7 +157,7 @@ test("r02 年度居民利润分配经过完整新年日结进入日/近期/年�
   assert.equal(shareholder.life.day.incomeVoucherUnits, 2000 * V);
   assert.equal(shareholder.life.year.incomeVoucherUnits, 2000 * V);
   assert.equal(shareholder.life.cumulative.incomeVoucherUnits - cumulativeBefore, 2000 * V);
-  assert.equal(shareholder.life.recent.at(-1).incomeVoucherUnits, 2000 * V);
+  assert.equal(householdRecentTotals(shareholder, 1, CONTENT).incomeVoucherUnits, 2000 * V);
   // 分红的一部分被同一日结用于股票买入：持股数增加，且总账守恒。
   const sharesAfter = shareholder.shares?.[company.id] || 0;
   const depositsAfter = state.bank?.deposits?.[shareholder.id] || 0;

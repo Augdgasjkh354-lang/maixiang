@@ -35,6 +35,7 @@ import { selectTradeAgreementView } from "../systems/trade-agreements.js";
 import { selectLogisticsView } from "../systems/logistics.js";
 import { selectTradeHouseView } from "./trade-houses.js";
 import { householdRecentTotalsReadonly, householdFoodDays } from "../systems/household-life.js";
+import { currentSatisfactionFactorRows, lastHouseholdFactors } from "../systems/satisfaction.js";
 import { createDashboardRuntime, employmentExchangeRemainingUnits } from "./dashboard-runtime.js";
 import { selectVillaStats } from "../systems/villas.js";
 import { selectSocialSecurityStats } from "../systems/social-security.js";
@@ -449,12 +450,12 @@ export function selectDashboard(state, content, selection) {
     ? new Map((housing.householdHousing || []).map(row => [row.householdId, row]))
     : new Map();
   const factorByHousehold = needResidents
-    ? new Map((state.satisfactionFactors?.rows || []).map(row => [row.householdId, row]))
+    ? new Map(currentSatisfactionFactorRows(state, content, housingByHousehold).map(row => [row.householdId, row]))
     : new Map();
   const householdDetails = needResidents ? households.map(household => {
     const life = household.life || {};
     const recent = householdRecentTotalsReadonly(household, content.rules.satisfactionObservationDays || 14, content);
-    const factors = factorByHousehold.get(household.id) || life.lastFactors || {};
+    const factors = factorByHousehold.get(household.id) || lastHouseholdFactors(household) || {};
     const housingRow = housingByHousehold.get(household.id) || { unhousedPeople: 0, rentalPeople: 0 };
     const foodDays = householdFoodDays(state, household, content);
     const issues = [];

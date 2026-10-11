@@ -12,15 +12,56 @@ const PERIOD_FIELDS = [
 function blankPeriod() { return {}; }
 function zeroPeriod() { return Object.fromEntries(PERIOD_FIELDS.map(key => [key, 0])); }
 
+// 观察窗（最近 satisfactionObservationDays 天，默认 14）是家庭近期汇总的唯一来源（已不再另存一份 recent 副本）。
+// 每天一行压成紧凑数组 [year, day, 键序号, 数值, 键序号, 数值, ...]，只存非零项；键名表 observation.keys 逐户记一份，只增不减。
+// 旧存档里的对象行由读档修复（repairHouseholdLife）转成这种格式。
+export function packObservationRow(observation, row) {
+  const keys = observation.keys ||= [];
+  const packed = [row.year, row.day];
+  for (const key in row) {
+    if (key === "year" || key === "day") continue;
+    const value = row[key];
+    if (!value) continue;
+    let index = keys.indexOf(key);
+    if (index < 0) { keys.push(key); index = keys.length - 1; }
+    packed.push(index, value);
+  }
+  return packed;
+}
+
+function unpackObservationRow(observation, packed) {
+  if (!Array.isArray(packed)) return packed;
+  const keys = observation.keys || [];
+  const row = { year: packed[0], day: packed[1] };
+  for (let i = 2; i < packed.length; i += 2) row[keys[packed[i]]] = packed[i + 1];
+  return row;
+}
+
+function normalizeObservation(observation) {
+  observation.keys = Array.isArray(observation.keys) ? observation.keys : [];
+  const rows = Array.isArray(observation.rows) ? observation.rows : [];
+  observation.rows = rows.filter(row => row && typeof row === "object").map(row => (Array.isArray(row) ? row : packObservationRow(observation, row)));
+  observation.totals ||= blankPeriod();
+  return observation;
+}
+
+// 读档修复（save-compat 逐户调用）：删掉旧版的 life.recent（与观察窗逐字重复）、life.satisfactionHistory（无读取方）、
+// life.lastFactors（派生，界面现算）；观察行转紧凑格式。
+export function repairHouseholdLife(life) {
+  if (!life || typeof life !== "object") return;
+  delete life.recent;
+  delete life.satisfactionHistory;
+  delete life.lastFactors;
+  if (!life.observation || typeof life.observation !== "object") life.observation = {};
+  normalizeObservation(life.observation);
+}
+
 export function ensureHouseholdLife(household, content) {
   if (household.life?._v012Ready) return household.life;
-  household.life ||= { day: blankPeriod(), year: blankPeriod(), cumulative: blankPeriod(), recent: [], observation: { rows: [], totals: blankPeriod() }, satisfaction: null, satisfactionHistory: [] };
+  household.life ||= { day: blankPeriod(), year: blankPeriod(), cumulative: blankPeriod(), observation: { keys: [], rows: [], totals: blankPeriod() }, satisfaction: null };
   ensureBook(household.life, blankPeriod);
-  household.life.recent = Array.isArray(household.life.recent) ? household.life.recent : [];
-  household.life.satisfactionHistory = Array.isArray(household.life.satisfactionHistory) ? household.life.satisfactionHistory : [];
-  household.life.observation ||= { rows: [], totals: blankPeriod() };
-  household.life.observation.rows = Array.isArray(household.life.observation.rows) ? household.life.observation.rows : [];
-  household.life.observation.totals ||= blankPeriod();
+  household.life.observation ||= { keys: [], rows: [], totals: blankPeriod() };
+  normalizeObservation(household.life.observation);
   household.life._v012Ready = true;
   return household.life;
 }
@@ -161,28 +202,30 @@ export function recordHouseholdRentDue(state, householdId, units, content) { rec
 export function recordHouseholdRentPaid(state, householdId, units, content) { recordHouseholdInKind(state, householdId, "rentPaidVoucherUnits", units, content); }
 
 export function finalizeHouseholdLifeDay(state, content) {
-  const limit = content.rules.householdLifeHistoryDays || 90;
+  const obsLimit = content.rules.satisfactionObservationDays || 14;
   for (const household of householdList(state)) {
     const life = ensureHouseholdLife(household, content);
     const row = { year: state.year, day: state.day + 1, ...life.day };
-    life.recent.push(row);
-    if (life.recent.length > limit) life.recent.splice(0, life.recent.length - limit);
-    const obs = life.observation; obs.rows.push(row);
+    const obs = life.observation;
+    obs.rows.push(packObservationRow(obs, row));
     const day = life.day;
     for (const key in day) { const value = day[key]; if (value) obs.totals[key] = (obs.totals[key] || 0) + value; }
-    const obsLimit = content.rules.satisfactionObservationDays || 14;
-    while (obs.rows.length > obsLimit) { const removed = obs.rows.shift(); for (const key in removed) { const value = removed[key]; if (key !== "year" && key !== "day" && value) obs.totals[key] = (obs.totals[key] || 0) - value; } }
+    while (obs.rows.length > obsLimit) { const removed = unpackObservationRow(obs, obs.rows.shift()); for (const key in removed) { const value = removed[key]; if (key !== "year" && key !== "day" && value) obs.totals[key] = (obs.totals[key] || 0) - value; } }
   }
+}
+
+// 观察窗内最后 days 天的分项合计（days 超过观察窗时以窗口为上限）。
+function sumObservationRows(observation, days) {
+  const packedRows = Array.isArray(observation?.rows) ? observation.rows.slice(-Math.max(1, days || 1)) : [];
+  const totals = zeroPeriod();
+  for (const packed of packedRows) { const row = unpackObservationRow(observation, packed); for (const key of PERIOD_FIELDS) totals[key] += row[key] || 0; }
+  return { days: packedRows.length, ...totals };
 }
 
 export function householdRecentTotals(household, days, content) {
   const life = ensureHouseholdLife(household, content);
-  const rows = life.recent.slice(-Math.max(1, days || 1));
-  const totals = zeroPeriod();
-  for (const row of rows) for (const key of PERIOD_FIELDS) totals[key] += row[key] || 0;
-  return { days: rows.length, ...totals };
+  return sumObservationRows(life.observation, days);
 }
-
 
 export function householdRecentTotalsReadonly(household, days, content) {
   const life = household?.life || {};
@@ -192,10 +235,7 @@ export function householdRecentTotalsReadonly(household, days, content) {
   if (requestedDays === observationDays && Array.isArray(observation?.rows) && observation?.totals) {
     return { days: observation.rows.length, ...zeroPeriod(), ...observation.totals };
   }
-  const rows = Array.isArray(life.recent) ? life.recent.slice(-requestedDays) : [];
-  const totals = zeroPeriod();
-  for (const row of rows) for (const key of PERIOD_FIELDS) totals[key] += row[key] || 0;
-  return { days: rows.length, ...totals };
+  return sumObservationRows(observation, requestedDays);
 }
 export function householdFoodDays(state, household, content) {
   const people = Math.max(1, householdPopulation(household));

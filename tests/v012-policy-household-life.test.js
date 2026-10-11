@@ -6,7 +6,7 @@ import { householdList, householdIdleWorkers, householdPopulation, syncResidentA
 import { transferVouchers } from "../src/economy/currency.js";
 import { accountQeqUnits, totalQeqUnits } from "../src/economy/inventory.js";
 import { applyAutomaticRelief, redeemEssentialFoodForHouseholds } from "../src/systems/finance.js";
-import { ensureHouseholdLife, householdRecentTotals } from "../src/systems/household-life.js";
+import { ensureHouseholdLife, householdRecentTotals, packObservationRow } from "../src/systems/household-life.js";
 import { exportState, importState } from "../src/persistence/storage.js";
 import { grantResidentVouchers, setHouseholdInventoryJin } from "./helpers-v16.js";
 import { legacyVoucherState } from "./helpers-monetary.js";
@@ -181,15 +181,16 @@ function assertReliefConservation(before, after, result) {
 
 test("0.1.2-r02家庭近期汇总从0初始化：空历史、缺字段和多历史日均返回有限金额", () => {
   const s = cloneInitial(1211); const h = householdList(s)[0]; const life = ensureHouseholdLife(h, CONTENT);
-  life.recent = [];
+  const obs = life.observation;
+  obs.rows = [];
   let totals = householdRecentTotals(h, 14, CONTENT);
   assert.equal(totals.days, 0);
   for (const [key, value] of Object.entries(totals)) if (key !== "days") assert.equal(value, 0, `${key} 空历史应为0`);
-  life.recent = [
+  obs.rows = [
     { year: 1, day: 1, incomeVoucherUnits: 7 * V },
     { year: 1, day: 2, lifeExpenseVoucherUnits: 2 * V, wageDueVoucherUnits: 5 * V },
     { year: 1, day: 3, incomeVoucherUnits: 3 * V, foodConsumedQeqUnits: 4 * CONTENT.precision.qeqUnitsPerJin }
-  ];
+  ].map(row => packObservationRow(obs, row));
   totals = householdRecentTotals(h, 14, CONTENT);
   assert.equal(totals.days, 3); assert.equal(totals.incomeVoucherUnits, 10 * V); assert.equal(totals.lifeExpenseVoucherUnits, 2 * V); assert.equal(totals.wageDueVoucherUnits, 5 * V);
   for (const value of Object.values(totals)) assert.equal(Number.isFinite(value), true);

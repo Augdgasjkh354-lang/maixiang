@@ -5,6 +5,7 @@ import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js"
 import { grantResidentVouchers } from "./helpers-v16.js";
 import { shopSalesCapacityUnits, stallItemIds } from "../src/systems/shops.js";
 import { shopTradePrices } from "../src/economy/operating-plan.js";
+import { lastHouseholdFactors } from "../src/systems/satisfaction.js";
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
@@ -170,7 +171,7 @@ test("肉是主食：四种肉不再是日用品，都在综合商店货架上�
   const { state, base, storeId } = town(6111, { square: false });
   simulation.openResidentShop(state, base, "chicken_farm");
   simulation.advanceDays(state, 40);
-  const comforts = Object.values(state.households.byId).map(h => h.life?.lastFactors?.meatComfort || 0);
+  const comforts = Object.values(state.households.byId).map(h => lastHouseholdFactors(h)?.meatComfort || 0);
   assert.ok(comforts.some(v => v > 0), "吃到肉的家庭应有 meatComfort 舒心值");
   assert.ok(comforts.every(v => v <= CONTENT.rules.meatStaple.comfortMaximum + 1e-9), "meatComfort 不超过上限");
   assert.ok((state.shops[storeId].accounts.cumulative.soldUnits?.chicken || 0) > 0, "综合商店卖出鸡肉");

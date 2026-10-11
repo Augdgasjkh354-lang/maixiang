@@ -1,6 +1,7 @@
 import { simulation as rawSimulation } from "../engine.js";
 import { loadReportMessage } from "../persistence/migrations.js";
-import { exportState } from "../persistence/storage.js";
+import { exportState, exportStateGzipBlob, readSaveFileText } from "../persistence/storage.js";
+import { gzipSupported } from "../persistence/compression.js";
 import { classifyPersistenceError } from "../persistence/save-container.js";
 import { createIndexedSaveManager, SAVE_DB_NAME } from "../persistence/indexed-save-manager.js";
 import { createAutosaveCoordinator } from "../persistence/autosave-coordinator.js";
@@ -93,7 +94,9 @@ export function mountGame(root) {
   let activeDay = null;
   let stateRevision = 0;
   let saveSession = 0;
-  let saveWarningShown = false;
+  // 自动存档失败提示的节流：上次弹出 toast 的时刻（连续失败时第 1 次、每 5 次、或距上次 10 分钟各弹一次）。
+  let autosaveToastAt = -Infinity;
+  const AUTOSAVE_TOAST_INTERVAL_MS = 10 * 60 * 1000;
   let transientMode = false;
   let previousFrame = performance.now();
   let animationFrame = 0;
@@ -159,31 +162,43 @@ export function mountGame(root) {
       // 存档快照必须是完整的一天：排队的存档可能在前一次 await 之后才抓快照，那时帧循环可能已开了新的一天。
       flushDay();
       return state && saves && activeId && !transientMode
-        ? { state, slotId: activeId, revision: stateRevision, session: saveSession, dirty }
+        ? { state, slotId: activeId, revision: stateRevision, session: saveSession, dirty, absDay: absoluteGameDay() }
         : null;
     },
     save: snapshot => saves.saveCurrent(snapshot.state, snapshot.slotId),
     onSuccess: (snapshot, saved) => {
       if (snapshot.session !== saveSession || snapshot.slotId !== activeId) return;
       if (snapshot.revision === stateRevision) dirty = false;
-      saveWarningShown = false;
+      // 只有成功才算"上次自动存档"：失败时下次检查仍会到期。
+      lastAutosaveAbsDay = snapshot.absDay;
+      // 写入已成功，之前因存档失败挂上的存储故障标记不再有效。
+      persistenceIssue = null;
       saveNotice = `最近保存：${new Date(saved.savedAt).toLocaleString("zh-CN", { hour12: false })} · 成功`;
       const indicator = $("#saveStatus");
       if (indicator) indicator.textContent = saveNotice;
       const slotTime = root.querySelector(".save-slot.is-current [data-slot-time]");
       if (slotTime) slotTime.textContent = new Date(saved.savedAt).toLocaleString("zh-CN", { hour12: false });
     },
-    onFailure: (snapshot, error) => {
+    onFailure: (snapshot, error, info) => {
       if (snapshot.session !== saveSession || snapshot.slotId !== activeId) return;
       persistenceIssue = error;
       console.error("[麦乡存档] 保存失败", error, error?.cause || "");
-      saveNotice = `保存失败：${error.message}`;
+      const reason = error?.message || "未知错误";
+      if (info.manual) {
+        saveNotice = `保存失败：${reason}`;
+        showToast(saveNotice, 5000);
+      } else {
+        // 自动存档失败：状态里保留原因与重试信息；toast 节流（第 1 次、每 5 次、距上次 10 分钟）。
+        const seconds = Math.max(1, Math.ceil((info.retryAt - Date.now()) / 1000));
+        saveNotice = `上次自动存档失败：${reason}（已连续失败 ${info.failures} 次，约 ${seconds} 秒后重试）`;
+        const nowMs = Date.now();
+        if (info.failures === 1 || info.failures % 5 === 0 || nowMs - autosaveToastAt >= AUTOSAVE_TOAST_INTERVAL_MS) {
+          autosaveToastAt = nowMs;
+          showToast(saveNotice, 5000);
+        }
+      }
       const indicator = $("#saveStatus");
       if (indicator) indicator.textContent = saveNotice;
-      if (!saveWarningShown) {
-        showToast(saveNotice, 5000);
-        saveWarningShown = true;
-      }
     }
   });
 
@@ -197,7 +212,8 @@ export function mountGame(root) {
     lastAutosaveAbsDay = absoluteGameDay();
   }
 
-  async function saveIfDirty(force = false) {
+  // manual：玩家主动保存（失败时明确提示）；否则为自动存档。
+  async function saveIfDirty(force = false, manual = false) {
     flushDay();
     if (!state || (!dirty && !force)) return true;
     if (transientMode) {
@@ -208,7 +224,7 @@ export function mountGame(root) {
       return true;
     }
     if (!saves) return false;
-    return autosave.request({ force });
+    return autosave.request({ force, manual });
   }
 
   function invalidateStateView() {
@@ -364,7 +380,7 @@ export function mountGame(root) {
       }
       let storageStats = null;
       try { storageStats = saves?.storageStats?.() || null; } catch {}
-      return { soundMuted: sound.isMuted, slots, warning: saveWarning, saveStatus: saveNotice,
+      return { soundMuted: sound.isMuted, slots, warning: saveWarning, saveStatus: saveNotice, gzipExport: gzipSupported(),
         managerOpen, pending: pendingAction, transientMode, persistenceIssue, persistenceBusy, storageStats,
         appVersion: APP_VERSION, buildId: BUILD_ID, pageAddress: window.location.href };
     };
@@ -824,16 +840,29 @@ export function mountGame(root) {
     }
   }
 
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function exportCurrentState() {
     flushDay();
     if (!state) return false;
     const blob = new Blob([exportState(state)], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `maixiang-current-year${state.year}-day${state.day}.json`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadBlob(blob, `maixiang-current-year${state.year}-day${state.day}.json`);
+    return true;
+  }
+
+  // 压缩导出（.json.gz）。文件名在序列化前取值，与导出内容一致。
+  async function exportCurrentStateGzip() {
+    flushDay();
+    if (!state) return false;
+    const filename = `maixiang-current-year${state.year}-day${state.day}.json.gz`;
+    downloadBlob(await exportStateGzipBlob(state), filename);
     return true;
   }
 
@@ -929,11 +958,11 @@ export function mountGame(root) {
       if (!await retryPersistentStorage()) { render(true); showToast(persistenceIssue?.message || "本机存储仍不可用。", 5000); return; }
       if (!state) {
         try {
-          const loaded = saves.initialize();
+          const loaded = await saves.initialize();
           state = loaded.state; activeId = loaded.activeId; saveWarning = loadReportMessage(loaded.state) || loaded.warning;
           resetAutosaveClock();
           if (state && activeId) {
-            const entry = saves.read(activeId);
+            const entry = await saves.read(activeId);
             adoptSave(entry);
             showToast("本机存储已恢复，存档已读取。");
             return;
@@ -963,6 +992,13 @@ export function mountGame(root) {
     }
     if (closest(target, "[data-export-current]")) {
       if (exportCurrentState()) showToast("当前进度已导出。", 3200);
+      return;
+    }
+    if (closest(target, "[data-export-current-gz]")) {
+      if (!gzipSupported()) { showToast("当前浏览器不支持压缩导出，请使用普通导出。", 4200); return; }
+      try {
+        if (await exportCurrentStateGzip()) showToast("当前进度已导出（压缩）。", 3200);
+      } catch (error) { showToast("压缩导出失败：" + error.message, 5000); }
       return;
     }
     if (closest(target, "[data-new-game]")) {
@@ -1054,7 +1090,7 @@ export function mountGame(root) {
     if (closest(target, "[data-save-current]")) {
       if (transientMode) {
         showToast("当前为临时游玩；请选择“保存到本机”或“导出当前进度”。", 4200);
-      } else if (await saveIfDirty(true)) { render(true); showToast("当前进度已保存。"); }
+      } else if (await saveIfDirty(true, true)) { render(true); showToast("当前进度已保存。"); }
       return;
     }
     if (closest(target, "[data-save-as]") && state && saves && !transientMode) {
@@ -1098,14 +1134,9 @@ export function mountGame(root) {
     const exportSlot = closest(target, "[data-export-slot]");
     if (exportSlot && saves) {
       try {
-        const entry = saves.read(exportSlot.dataset.exportSlot);
+        const entry = await saves.read(exportSlot.dataset.exportSlot);
         const blob = new Blob([exportState(entry.state)], { type: "application/json;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `maixiang-save-year${entry.state.year}-day${entry.state.day}.json`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        downloadBlob(blob, `maixiang-save-year${entry.state.year}-day${entry.state.day}.json`);
         showToast("存档文件已导出。");
       } catch (error) { showToast("导出失败：" + error.message, 5000); }
       return;
@@ -2019,7 +2050,10 @@ export function mountGame(root) {
       return;
     }
     if (target.matches("#saveImportFile") && target.files?.[0]) {
-      target.files[0].text().then(applyImported).catch(error => {
+      // 明文 JSON 与压缩（.json.gz，按魔数识别）都读；读完后清空选择，同一文件可再次导入。
+      const input = target;
+      const file = input.files[0];
+      readSaveFileText(file).then(text => { input.value = ""; return applyImported(text); }).catch(error => {
         showToast("无法读取导入文件：" + error.message, 5000);
       });
     }
@@ -2053,6 +2087,7 @@ export function mountGame(root) {
   root.addEventListener("change", changeHandler);
   root.addEventListener("keydown", keyHandler);
   const pageHideHandler = () => { void saveIfDirty(); };
+
   const visibilityHandler = () => {
     previousFrame = performance.now();
     if (document.hidden && animationFrame) {
@@ -2066,11 +2101,17 @@ export function mountGame(root) {
   // 自动存档：日结完成时检查（见 frame）；定时器只在没有半天进行中时补查，不为它打断快进。
   function maybeAutosave() {
     if (!state || transientMode || !saves) return;
-    const months = state.policy?.autosaveMonths ?? 1;
-    if (absoluteGameDay() - lastAutosaveAbsDay >= months * 30) {
-      lastAutosaveAbsDay = absoluteGameDay();
-      void saveIfDirty();
+    // 上次自动存档失败：退避到点后强制重试一次（同一修订不会被 failedKey 自动跳过）。
+    if (autosave.retryDue()) {
+      if (dirty) void saveIfDirty(true);
+      return;
     }
+    const months = state.policy?.autosaveMonths ?? 1;
+    const today = absoluteGameDay();
+    if (today - lastAutosaveAbsDay < months * 30) return;
+    // 到期但没有改动：不必写，直接把计时挪到今天。有改动：保存成功后计时才会更新（见 onSuccess）。
+    if (!dirty) { lastAutosaveAbsDay = today; return; }
+    void saveIfDirty();
   }
   const saveTimer = setInterval(() => {
     if (activeDay) return;
@@ -2195,7 +2236,7 @@ export function mountGame(root) {
       saves = await createIndexedSaveManager({ indexedDB: window.indexedDB, content: simulation.content });
       const probe = await saves.probePersistentStorage();
       if (!probe?.ok) throw new Error("IndexedDB 写入探测未通过");
-      const loaded = saves.initialize();
+      const loaded = await saves.initialize();
       state = loaded.state;
       resetAutosaveClock();
       dashboardViews.clear();
@@ -2226,7 +2267,7 @@ export function mountGame(root) {
   void bootstrapPersistence();
   animationFrame = requestAnimationFrame(frame);
   return {
-    save: () => saveIfDirty(true),
+    save: () => saveIfDirty(true, true),
     getSaveKey: () => SAVE_DB_NAME,
     destroy() {
       clearInterval(saveTimer);
