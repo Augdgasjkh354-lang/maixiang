@@ -1,4 +1,4 @@
-// 店型判断：综合商店与酒馆共用的规则，以及酒类专售令（policy.liquorMonopoly）。纯函数，不写 state。
+// 店型判断：综合商店与酒馆共用的规则，以及酒类专售令（policy.liquorMonopoly）、限定店型的商品（retailShopTypeIds）。纯函数，不写 state。
 //
 // usesGeneralRules：与综合商店同规则的店型（接待能力、店员上限、动态加价与调价、目标利润率、居民买卖的价格弹性）。
 //   综合商店自身 id 为 general；酒馆在 rules.shopTypes 里标 generalRules: true。
@@ -16,7 +16,10 @@ export function liquorMonopolyOn(state) {
   return state?.policy?.liquorMonopoly === true;
 }
 
+// 限定店型的商品（items 的 retailShopTypeIds，如珠宝只进金银店）：其他店型不经营、不进货。
 export function shopMayStockItem(state, def, itemId, content) {
+  const allowed = content.items?.[itemId]?.retailShopTypeIds;
+  if (allowed && !allowed.includes(def?.id)) return false;
   if (!liquorMonopolyOn(state) || !isLiquorItem(content, itemId)) return true;
   return def?.id === "tavern";
 }

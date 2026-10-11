@@ -6,7 +6,7 @@ import { populationStats, readJobCount, jobKeyForBuilding, privateJobKeyForBuild
 import { townOutputGate } from "../selectors/production.js";
 import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from "../systems/households.js";
 import { targetBatchCap } from "../systems/production.js";
-import { industryTypeIds } from "../content/buildings.js";
+import { industryTypeIds, isRetailIndustryType } from "../content/buildings.js";
 import { shopMayStockItem, usesGeneralRules } from "../systems/shop-types.js";
 import { flexBatchInputsJin, flexCapacityPerUnit, flexInputsOf, flexOf } from "../systems/flex-recipe.js";
 import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
@@ -405,7 +405,8 @@ function refreshOperatingPlanNow(state, content, force = false) {
   plan.rows = {};
   plan.demand = {};
   const scale = content.precision.inventoryUnitsPerJin;
-  const order = industryTypeIds(content);
+  // 零售型产业（金银店）不进经营计划：没有产量，用工由业主的岗位人数定（不由计划压成 0）。
+  const order = industryTypeIds(content).filter(typeId => !isRetailIndustryType(content, typeId));
   const drafts = {};
   // 第一遍，从下游往上游：先定面包、酒、布要多少，再把它们照实需要的原料（不受原料封顶影响）传给磨坊、棉田。
   // 需求不封顶是关键：否则下游缺料少报需求 → 上游少产 → 下游更缺，一路缩到停产。

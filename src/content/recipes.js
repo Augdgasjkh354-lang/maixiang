@@ -64,6 +64,12 @@ export const RECIPES = Object.freeze({
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
   }),
+  // 金银零售（金银店）：零产出的零售配方。retail 标记：生产流水线不处理（店铺按首饰匠在岗接待，见 systems/jewelers.js）。
+  jewelry_retail: Object.freeze({
+    id: "jewelry_retail", name: "金银零售", retail: true,
+    inputs: Object.freeze([]), outputs: Object.freeze([]), losses: Object.freeze([]),
+    batchesPerWorkerDay: 1 // 不用于产出（零售配方）；内容校验要求正整数。
+  }),
   // 酒坊（弹性配方）：一名酿酒工一日一批，每批总产能 12 斤酒，四种酒按市场缺口动态分配（systems/flex-recipe.js）。
   // 小麦按实际产出折算（inputsPerJin）：啤酒、高档啤酒每斤 0.2 斤麦，白酒、高档白酒每斤 1 斤麦。
   // inputs / outputs 是名义配比（每种 3 斤、小麦 8.4 斤/批），只供估算与内容校验，实际产出由缺口分配决定。

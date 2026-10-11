@@ -243,8 +243,13 @@ export const RULES = Object.freeze({
     beer: Object.freeze({ annualPerPerson: 12, incomeElasticity: 1, comfortMaximum: 0.8 }),
     beer_premium: Object.freeze({ annualPerPerson: 2, incomeElasticity: 2, comfortMaximum: 0.3 }),
     baijiu: Object.freeze({ annualPerPerson: 3, incomeElasticity: 1.2, comfortMaximum: 0.6 }),
-    baijiu_premium: Object.freeze({ annualPerPerson: 1, incomeElasticity: 2, comfortMaximum: 0.3 })
+    baijiu_premium: Object.freeze({ annualPerPerson: 1, incomeElasticity: 2, comfortMaximum: 0.3 }),
+    // 珠宝（金银消费第一期 B）：只经金银店买。minAffluence = 宽裕度达到此值的人家才买（富户消费，见 goods-demand.js）。
+    silver_jewelry: Object.freeze({ annualPerPerson: 0.3, incomeElasticity: 2.5, comfortMaximum: 0.5, minAffluence: 1.2 }),
+    gold_jewelry: Object.freeze({ annualPerPerson: 0.05, incomeElasticity: 3.5, comfortMaximum: 0.8, minAffluence: 2.0 })
   }),
+  // 金银店（systems/jewelers.js）：每名首饰匠在岗每日接待的件数（再乘生产率系数：等级、熟练、教育）。
+  jewelerPiecesPerWorkerDay: 20,
   // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/fullAffluence)^exponent（封顶 maxShare），
   // fullAffluence 是肉占比达到 maxShare 的宽裕度（不再跟 householdBudget.maxAffluence 挂钩：那已是渐近上限 4，会让肉的曲线整体漂移）；
   // 宽裕度 1 约 5%、2 约 27%、3 为 75%；肉按 weights 分到鸡鸭鹅猪，没买到的改买面粉。comfortMaximum：肉占口粮 1/4 时的舒心值加成。
@@ -311,7 +316,10 @@ export const RULES = Object.freeze({
     bakery: Object.freeze({ id: "bakery", name: "面包店", kind: "legacy_retail", itemId: "bread", aliasOf: "general" }),
     salt: Object.freeze({ id: "salt", name: "盐店", kind: "legacy_retail", itemId: "salt", aliasOf: "general" }),
     // 镇营综合商店：镇里持有的综合商店（systems/shops.js 的 openTownShop）。别名归一为综合商店，town 标记镇营。
-    town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true })
+    town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true }),
+    // 金银店：金银店建筑（jeweler）内置的零售店，每栋一个，由建筑业主经营（镇营 / 民营 / 公司），见 systems/jewelers.js。
+    // generalRules：动态加价与目标利润率同综合商店；接待能力按首饰匠在岗人数计件（不走综合商店的客流口径）。
+    jewelry: Object.freeze({ id: "jewelry", name: "金银店", kind: "retail", generalRules: true, jeweler: true, hostBuildingTypeId: "jeweler", maxClerks: 60, itemIds: Object.freeze(["gold_jewelry", "silver_jewelry"]) })
   }),
 
   marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15 }),

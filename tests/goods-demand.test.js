@@ -43,12 +43,15 @@ test("日用品需求跟家底走：没家底的不买，越宽裕买得越多�
   assert.equal(normal.life.day.baijiuConsumedUnits, Math.floor(standard(normal)));
   assert.ok(Math.abs(rich.life.day.baijiuConsumedUnits - Math.floor(standard(rich) * Math.pow(3, cfg.incomeElasticity))) <= 1, "富户按 3^弹性 倍消费");
 
-  const max = Object.values(CONTENT.rules.householdGoods).reduce((sum, row) => sum + row.comfortMaximum, 0);
+  // 有宽裕度门槛（minAffluence，如珠宝）的品类不计入普通人家的满额：正常人家够不着。
+  const max = Object.values(CONTENT.rules.householdGoods).filter(row => !row.minAffluence).reduce((sum, row) => sum + row.comfortMaximum, 0);
   assert.equal(goodsComfortPoints(state, poor, householdPopulation(poor), poor.life?.day || {}, CONTENT), 0, "没有日用品不加分也不扣分");
   const normalPoints = goodsComfortPoints(state, normal, householdPopulation(normal), normal.life.day, CONTENT);
   assert.ok(normalPoints > max * 0.95 && normalPoints <= max * 1.01, `标准量接近满额，实际${normalPoints}`);
   const richPoints = goodsComfortPoints(state, rich, householdPopulation(rich), rich.life.day, CONTENT);
-  assert.ok(richPoints > normalPoints && richPoints <= max * 1.5 + 1e-9, "多用多加，但最多 1.5 倍");
+  // 富户还能买有门槛的珠宝，满额按全部品类算。
+  const maxAll = Object.values(CONTENT.rules.householdGoods).reduce((sum, row) => sum + row.comfortMaximum, 0);
+  assert.ok(richPoints > normalPoints && richPoints <= maxAll * 1.5 + 1e-9, "多用多加，但最多 1.5 倍");
 });
 
 test("家底只扣 30 天口粮：存粮只够 30 天口粮的人家没有家底，多出来的小麦才算", () => {

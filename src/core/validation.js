@@ -426,7 +426,8 @@ export function validateState(state, content) {
       const street = state.buildings.find(row => row.id === shop.buildingId && row.typeId === (shopTypeDef?.hostBuildingTypeId || "commercial_street"));
       if (!street && shop.status !== "closed") errors.push("店铺引用了无效商业街：" + shop.id);
       const owner = state.households?.byId?.[shop.ownerHouseholdId];
-      if (!owner && !shop.collective && !shop.town) errors.push("店铺缺少家庭所有者：" + shop.id);
+      // 金银店的业主是建筑主人（镇营 / 民营 / 公司），公司店没有业主家庭（见 systems/jewelers.js）。
+      if (!owner && !shop.collective && !shop.town && !(shop.jeweler && shop.companyId)) errors.push("店铺缺少家庭所有者：" + shop.id);
       if (!content.rules.shopTypes?.[shop.typeId]) errors.push("店铺类型无效：" + shop.id);
       if (!Number.isSafeInteger(shop.cashVoucherUnits) || shop.cashVoucherUnits < 0) errors.push("店铺粮券余额无效：" + shop.id);
       if (!Number.isSafeInteger(shop.retainedEarningsVoucherUnits)) errors.push("店铺未分配利润无效：" + shop.id);
@@ -439,11 +440,12 @@ export function validateState(state, content) {
       const clerkCount = jobCount(state, clerkKey);
       if (!shop.collective && !shop.town && merchantCount > (shopTypeDef?.maxMerchants ?? content.rules.shopMaxMerchants ?? 4)) errors.push("商人超过上限：" + shop.id);
       if (shop.town && merchantCount > 0) errors.push("镇营店不应有商人：" + shop.id);
+      if (shop.jeweler && (merchantCount > 0 || clerkCount > 0)) errors.push("金银店不设商人或店员岗位（岗位归建筑业主）：" + shop.id);
       const shopClerkMax = Number.isFinite(shopTypeDef?.maxClerks) ? shopTypeDef.maxClerks
         : usesGeneralRules(shopTypeDef) ? (content.rules.generalStoreMaxClerks || 50) : (content.rules.shopMaxClerks || 20);
       if (clerkCount > shopClerkMax) errors.push("店员超过上限：" + shop.id);
       if (shop.status === "open") {
-        if (!shop.collective && !shop.town && (!owner || !isActiveHousehold(owner) || (owner.jobs?.[merchantKey] || 0) < 1 || merchantCount < 1)) errors.push("商人岗位归属无效：" + shop.id);
+        if (!shop.collective && !shop.town && !shop.jeweler && (!owner || !isActiveHousehold(owner) || (owner.jobs?.[merchantKey] || 0) < 1 || merchantCount < 1)) errors.push("商人岗位归属无效：" + shop.id);
       } else if (merchantCount || clerkCount) {
         errors.push("非营业店铺仍保留岗位：" + shop.id);
       }

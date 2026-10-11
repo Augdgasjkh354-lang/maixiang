@@ -52,7 +52,8 @@ function householdTargets(state, content) {
     const m = householdAffluence(state, household, content);
     const row = {};
     for (const [itemId, cfg] of Object.entries(goodsConfig(content))) {
-      row[itemId] = Math.floor(standardDailyUnits(people, cfg, content) * Math.pow(m, cfg.incomeElasticity ?? 1));
+      // minAffluence：宽裕度达不到门槛的人家不买（珠宝等富户消费）；门槛以下目标为 0，不上街、不用、不计舒心。
+      row[itemId] = cfg.minAffluence && m < cfg.minAffluence ? 0 : Math.floor(standardDailyUnits(people, cfg, content) * Math.pow(m, cfg.incomeElasticity ?? 1));
     }
     targets.set(household.id, row);
   }

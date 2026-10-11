@@ -126,6 +126,25 @@ export const BUILDINGS = Object.freeze({
     upgrade: Object.freeze({ maxLevel: 10, workDays: 500, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 800 }]) })
   }),
 
+  // 金银店（金银消费第一期 B）：产业建筑（industryTier 2，配方 jewelry_retail 为零产出的零售配方），批发市场进珠宝、零售给居民。
+  // 建筑内置一个金银店（shop kind retail，店型 jewelry，systems/jewelers.js）：首饰匠在岗即营业，接待能力 = 在岗人数 × 每人日件数 × 生产率系数。
+  // 所有制、上市、民营、公司、生产税、经营计划都按产业建筑处理；利润归业主（镇库 / 业主家庭 / 公司）。
+  jeweler: Object.freeze({
+    id: "jeweler", name: "金银店", icon: "💍",
+    description: "批发珠宝零售给居民 · 每级6个首饰匠岗位 · 每人每日接待20件（等级、熟练、教育加成另计）· 富户才买",
+    industryTier: 2,
+    maxInstances: 4,
+    recipeId: "jewelry_retail",
+    productionRoleId: "jewelers",
+    accountingSector: "jewelry",
+    jobs: Object.freeze([Object.freeze({
+      id: "jewelers", name: "首饰匠", slots: 6, wagePerWorkerDay: 5,
+      note: "每人每日接待20件珠宝（金银珠宝）", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 600 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 6 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 600 }]) })
+  }),
   // 酒坊：一座酒坊同时酿四种酒（配方 winery_brewing）。每名酿酒工每日一批：普通啤酒 2、高档啤酒 1、普通白酒 2、高档白酒 1 斤。
   winery: Object.freeze({
     id: "winery", name: "酒坊", icon: "🍶",
@@ -353,6 +372,11 @@ export function industryTypeIds(content) {
     .filter(def => Number.isInteger(def.industryTier) && def.recipeId)
     .sort((a, b) => a.industryTier - b.industryTier || a.id.localeCompare(b.id))
     .map(def => def.id);
+}
+
+// 零售型产业（金银店）：配方带 retail 标记，产业流水线不生产（店铺经营，见 systems/jewelers.js），不进经营计划的产量与用工计划。
+export function isRetailIndustryType(content, typeId) {
+  return Boolean(content.recipes[content.buildings[typeId]?.recipeId]?.retail);
 }
 
 export function isIndustryType(content, typeId) {

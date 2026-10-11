@@ -5,6 +5,7 @@ import { flexAccountingRecipe, flexPlan, flexRoomUnits } from "./flex-recipe.js"
 import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
 import { procureTownInputFromWholesale, recordTownInputConsumption, transferTownToWholesale } from "./wholesale-market.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
+import { isRetailIndustryType } from "../content/buildings.js";
 
 function recipeDeltas(recipe, batches, content) {
   const inputs = [];
@@ -31,6 +32,8 @@ function recipeDeltas(recipe, batches, content) {
 
 export function processBuilding(state, building, content) {
   const definition = content.buildings[building.typeId];
+  // 零售型产业（金银店）不走生产：店铺按首饰匠在岗接待（systems/jewelers.js、shops.js）。
+  if (isRetailIndustryType(content, building.typeId)) return { buildingId: building.id, status: "retail", batches: 0 };
   const recipeDef = definition?.recipeId ? content.recipes[definition.recipeId] : null;
   const role = (definition?.jobs || []).find(job => job.id === definition.productionRoleId);
   const workers = role ? readJobCount(state, jobKeyForBuilding(building.id, role.id)) : 0;

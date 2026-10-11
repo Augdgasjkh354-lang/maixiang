@@ -51,10 +51,10 @@ export function assembleContent(core, modContents = []) {
     rules = mergeRules(rules, mod.rules);
     modStates[mod.id] = mod.initialState || {};
   }
-  // 综合商店货架 = 所有标了 retail 的物品。
+  // 综合商店货架 = 所有标了 retail 的物品（限定了店型 retailShopTypeIds 的除外，如珠宝只进金银店）。
   const general = rules.shopTypes?.general;
   if (general) {
-    rules.shopTypes = { ...rules.shopTypes, general: { ...general, itemIds: Object.keys(items).filter(id => items[id].retail) } };
+    rules.shopTypes = { ...rules.shopTypes, general: { ...general, itemIds: Object.keys(items).filter(id => items[id].retail && !items[id].retailShopTypeIds) } };
   }
   return Object.freeze({
     ...core,

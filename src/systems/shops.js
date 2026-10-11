@@ -25,6 +25,7 @@ import { allocateInputToTown, buyWholesaleForOwner, hasWholesaleMarket, recordTo
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
 import { farmSalePriceVoucher } from "./farm-pricing.js";
 import { shopMayStockItem, usesGeneralRules } from "./shop-types.js";
+import { jewelerCapacityPieces, jewelerOwnerFields, jewelerOwnerOf, jewelerStaffCount } from "./jewelers.js";
 import {
   ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory,
   updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop
@@ -184,7 +185,7 @@ export function shopSoldTodayUnits(shop) {
 
 // 集市卖日用品（rules.householdGoods）和肉（像菜市场，肉直接从养殖场进），不卖面粉面包盐。
 export function stallItemIds(content) {
-  const goods = Object.keys(content.rules.householdGoods || {}).filter(itemId => content.items[itemId]);
+  const goods = Object.keys(content.rules.householdGoods || {}).filter(itemId => content.items[itemId] && !content.items[itemId].retailShopTypeIds);
   const meats = Object.keys(content.items).filter(itemId => content.items[itemId]?.livestock && !goods.includes(itemId));
   return [...goods, ...meats];
 }
@@ -245,15 +246,15 @@ export function shopAccountName(shop) {
 }
 
 function shopMerchantOnDuty(state, shop) {
-  // 镇营综合商店：没有商人，有店员即营业（店员由镇里设定）。
-  if (shop.town) return shopClerkCount(state, shop) > 0;
+  // 镇营综合商店：没有商人，有店员即营业（店员由镇里设定）。金银店：没有商人，有首饰匠在岗即营业（岗位归业主）。
+  if (shop.town || shop.jeweler) return shopClerkCount(state, shop) > 0;
   // 集体经营（时代广场）：有人在摊上就算营业，不认某一户店主。
   if (shop.collective) return shopMerchantCount(state, shop) > 0;
   const owner = state.households?.byId?.[shop.ownerHouseholdId];
   return Boolean(owner && isActiveHousehold(owner) && (owner.jobs?.[merchantJobKey(shop)] || 0) >= 1 && shopMerchantCount(state, shop) > 0);
 }
 
-export function shopClerkCount(state, shop) { return jobCount(state, clerkJobKey(shop)); }
+export function shopClerkCount(state, shop) { return shop.jeweler ? jewelerStaffCount(state, shop) : jobCount(state, clerkJobKey(shop)); }
 
 function shopSerial(state, content) {
   return (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
@@ -292,6 +293,8 @@ export function shopDailyCustomerCapacity(state, shop, content) {
   if (!shop || shop.status !== "open" || !shopMerchantOnDuty(state, shop)) return 0;
   const def = shopDefinition(content, shop.typeId);
   if (def?.kind === "farm") return 0;
+  // 金银店：接待能力按件数封顶（见 shopSalesCapacityUnits），客流不另设限制（一户一天买的常只有零点几件，按户数封顶会误伤）。
+  if (shop.jeweler) return content.rules.generalStoreMaxDailyCustomers || 1000;
   // 摊位按卖货量封顶，客流不另设限制。
   if (def?.kind === "stall") return shopMerchantCount(state, shop) * 1000;
   if (!usesGeneralRules(def)) {
@@ -331,6 +334,11 @@ export function syncShopEmployment(state, content) {
     if (shop.status === "closed" || shop.status === "liquidating") {
       setJobCount(state, merchantJobKey(shop), 0, null);
       releaseAllShopClerks(state, shop);
+      continue;
+    }
+    // 金银店：业主是建筑的主人（镇营 / 民营 / 公司），没有商人家庭，不因"商人缺位"暂停。
+    if (shop.jeweler) {
+      if (shop.status === "paused") { shop.status = "open"; shop.statusReason = "准备营业"; }
       continue;
     }
     if (shop.collective) {
@@ -415,7 +423,7 @@ function livingWorkerHousehold(state, householdId) {
 
 // 店铺在等待业主更替：非集体、未关闭、未清算，且业主家庭不存在或已失效。
 export function shopsAwaitingSuccession(state, householdId) {
-  return Object.values(state.shops || {}).filter(shop => !shop.collective && shop.ownerHouseholdId === householdId
+  return Object.values(state.shops || {}).filter(shop => !shop.collective && !shop.jeweler && shop.ownerHouseholdId === householdId
     && shop.status !== "closed" && shop.status !== "liquidating");
 }
 
@@ -519,7 +527,7 @@ export function succeedShopsOfHousehold(state, householdId, content) {
 export function succeedOrphanShops(state, content) {
   const rows = [];
   for (const shop of Object.values(ensureShops(state, content))) {
-    if (shop.collective || shop.town || shop.status === "closed" || shop.status === "liquidating") continue;
+    if (shop.collective || shop.town || shop.jeweler || shop.status === "closed" || shop.status === "liquidating") continue;
     const owner = state.households?.byId?.[shop.ownerHouseholdId];
     if (owner && isActiveHousehold(owner)) continue;
     rows.push({ shopId: shop.id, ...succeedOrphanShop(state, shop, content) });
@@ -801,6 +809,7 @@ export function shopSalesCapacityUnits(state, shop, content) {
   if (!shop || shop.status !== "open" || !shopMerchantOnDuty(state, shop) || shopIsService(shop, content)) return 0;
   const kind = shopKind(shop, content);
   if (kind === "farm") return 0;
+  if (shop.jeweler) return Math.round(jewelerCapacityPieces(state, shop, content) * content.precision.inventoryUnitsPerJin);
   // 贸易行的接待能力 = 店员与商人人数 × 每人可成交斤数（docs/TRADE.md）。
   if (kind === "trade") return Math.round((shopClerkCount(state, shop) + shopMerchantCount(state, shop)) * (content.rules.tradeHouseJinPerClerk || 100) * content.precision.inventoryUnitsPerJin);
   if (kind === "stall") {
@@ -1053,6 +1062,8 @@ function procureTownStoreFromMarket(state, shop, itemId, wantedUnits, content) {
 export function procureShopInventory(state, shop, content) {
   if (shop.status !== "open") return { purchasedUnits: 0, purchasedByItem: {}, reason: shop.status === "paused" ? "暂停经营" : "已停业" };
   if (shop.town && !shopMerchantOnDuty(state, shop)) return { purchasedUnits: 0, purchasedByItem: {}, reason: "无店员，暂不进货" };
+  if (shop.jeweler && !shopMerchantOnDuty(state, shop)) return { purchasedUnits: 0, purchasedByItem: {}, reason: "无首饰匠，暂不进货" };
+  if (shop.jeweler) fundJewelerShop(state, shop, content);
   const invScale = content.precision.inventoryUnitsPerJin;
   const def = shopDefinition(content, shop.typeId);
   let itemTargets = [];
@@ -1150,7 +1161,7 @@ function accrueDailyLiabilities(state, shop, content) {
   // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
   const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
   // 镇营综合商店不交店租（镇库自己的店）。
-  const rentDue = shop.town ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
+  const rentDue = shop.town || shop.jeweler ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
   // 免租期内，或集市断货无钱且持续无成交（见 collectiveStranded）：不累计店租，记入 rentWaivedVoucherUnits。
   const rentFree = shop.collective && (stallRentFreeDaysLeft(state, content) > 0 || collectiveStranded(state, shop, content));
   const rent = rentFree ? 0 : rentDue;
@@ -1214,6 +1225,7 @@ function settleTownShop(state, shop) {
 
 export function settleShopTaxAndDistribution(state, shop, content, force = false, options = {}) {
   if (shop.town) return settleTownShop(state, shop);
+  if (shop.jeweler && shop.companyId) return settleJewelerCompany(state, shop, content);
   const interval = shopDefinition(content, shop.typeId)?.settlementDays || content.rules.shopSettlementDays || 30;
   if (!force && shop.settlement.days < interval) return { settled: false };
   const periodProfit = shop.settlement.profitVoucherUnits || 0;
@@ -1458,6 +1470,116 @@ export function openCollectiveShop(state, building, typeId, content) {
     "collective_shop_advance", `镇库垫付${shop.name}启动资金`, { requireFull: false });
   shop.townAdvanceVoucherUnits = paid.paidValueUnits || 0;
   return shop;
+}
+
+// ---------------------------------------------------------------- 金银店（systems/jewelers.js）
+// 金银店：建筑内置的零售店（店型 jewelry，jeweler 标记）。店员 = 建筑的首饰匠岗位（岗位与工资归业主）；没有商人、不交店租、不自动关店（建筑在则店在）。
+// 镇营：收入直接进镇库（town 标记，同镇营综合商店）；民营：店里留现金，利润按店铺口径结账给业主家庭（交利润税）；
+// 公司：利润每天结账上缴公司现金（留够周转金，不交利润税：公司的产业税按实物）。
+
+export function openJewelerShop(state, building, content) {
+  ensureShops(state, content);
+  const shopId = `shop-${state.nextShopNumber++}`;
+  const shop = {
+    id: shopId, name: content.buildings[building.typeId]?.name || "金银店", buildingId: building.id, typeId: "jewelry",
+    jeweler: true, collective: false, town: false, ownerHouseholdId: null, companyId: null, jewelerOwner: null,
+    primaryItemId: null, itemId: null, itemIds: [], serviceId: null,
+    cashVoucherUnits: 0, inventory: emptyShopInventory(content), inventoryCostVoucherUnits: {},
+    status: "open", statusReason: "准备营业", openedYear: state.year, openedDay: state.day + 1, badDays: 0,
+    accounts: { day: blankShopPeriod(), year: blankShopPeriod(), cumulative: blankShopPeriod() },
+    liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0 },
+    settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
+    retainedEarningsVoucherUnits: 0, townAdvanceVoucherUnits: 0,
+    initialCapital: { valueUnits: 0, voucherValueUnits: 0 }
+  };
+  state.shops[shopId] = shop;
+  ensureShopBooks(shop, content);
+  return shop;
+}
+
+// 业主易手：店里剩余现金先归原业主（镇库 / 公司 / 原业主家庭），之后按新业主口径经营。
+function handOverJewelerShop(state, shop, previous, content) {
+  const payer = shopOwner(shop.id);
+  const destination = previous.kind === "town" ? "town" : previous.kind === "company" ? `company:${previous.id}` : `household:${previous.id}`;
+  const cash = maximumPayableValueUnits(state, payer, content);
+  if (cash <= 0) return;
+  const result = settleMonetaryPayment(state, payer, destination, currentPaymentComposition(state, cash), content,
+    "jeweler_handover", `${shop.name}易主，余款归原业主`, { requireFull: false });
+  shop.retainedEarningsVoucherUnits = Math.max(0, (shop.retainedEarningsVoucherUnits || 0) - (result.paidValueUnits || 0));
+}
+
+// 金银店建筑拆除：余款归原业主，剩货归镇库（内部调拨，成本随货），店铺撤销。
+export function windUpJewelerShop(state, shop, content) {
+  if (!shop?.jeweler) return false;
+  if (shop.jewelerOwner) handOverJewelerShop(state, shop, shop.jewelerOwner, content);
+  for (const [itemId, units] of Object.entries(shop.inventory || {})) {
+    if (!(units > 0)) continue;
+    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + units;
+    addTownCostBasis(state, itemId, shop.inventoryCostVoucherUnits?.[itemId] || 0);
+    shop.inventory[itemId] = 0;
+  }
+  delete state.shops[shop.id];
+  return true;
+}
+
+// 每日：补齐金银店（每栋金银店建筑一个），同步业主派生字段；业主变了先交接。
+export function syncJewelerShops(state, content) {
+  ensureShops(state, content);
+  for (const building of (state.buildings || []).filter(row => row.typeId === "jeweler")) {
+    let shop = Object.values(state.shops).find(row => row.jeweler && row.buildingId === building.id) || null;
+    if (!shop) shop = openJewelerShop(state, building, content);
+    const owner = jewelerOwnerOf(state, building);
+    const previous = shop.jewelerOwner;
+    if (previous && (previous.kind !== owner.kind || previous.id !== owner.id)) handOverJewelerShop(state, shop, previous, content);
+    Object.assign(shop, jewelerOwnerFields(owner));
+    shop.jewelerOwner = { kind: owner.kind, id: owner.id };
+  }
+  return state.shops;
+}
+
+// 金银店进货周转金：民营店由业主补足（topUpShopCapital）；公司店由公司现金拨付；镇营店不需要（进货从镇库调拨）。
+function fundJewelerShop(state, shop, content) {
+  if (shop.town || !shop.jeweler) return;
+  const target = shopWorkingCapitalReserve(state, shop, content);
+  const cash = maximumPayableValueUnits(state, shopOwner(shop.id), content);
+  if (cash >= target) return;
+  if (shop.ownerHouseholdId) { topUpShopCapital(state, shop, target, content); return; }
+  if (!shop.companyId) return;
+  const available = maximumPayableValueUnits(state, `company:${shop.companyId}`, content);
+  const amount = Math.min(target - cash, available);
+  if (amount <= 0) return;
+  settleMonetaryPayment(state, `company:${shop.companyId}`, shopOwner(shop.id), currentPaymentComposition(state, amount), content,
+    "jeweler_working_capital", `${shop.name}由公司拨付周转金`, { requireFull: false });
+}
+
+// 公司金银店的结账：利润每天上缴公司（留够周转金）。公司的利润口径同步记入公司留存。
+function settleJewelerCompany(state, shop, content) {
+  const reserve = shopWorkingCapitalReserve(state, shop, content);
+  const payer = shopOwner(shop.id);
+  const cash = maximumPayableValueUnits(state, payer, content);
+  const amount = Math.min(Math.max(0, shop.retainedEarningsVoucherUnits || 0), Math.max(0, cash - reserve));
+  let paid = 0;
+  if (amount > 0) {
+    const result = settleMonetaryPayment(state, payer, `company:${shop.companyId}`, currentPaymentComposition(state, amount), content,
+      "jeweler_profit_remit", `${shop.name}利润上缴公司`, { requireFull: true });
+    if (result.ok) {
+      paid = amount;
+      shop.retainedEarningsVoucherUnits -= amount;
+      addBookValue(shop, "distributedVoucherUnits", amount);
+      const company = state.companies?.[shop.companyId];
+      if (company) {
+        company.retainedEarningsVoucherUnits = (company.retainedEarningsVoucherUnits || 0) + amount;
+        bookAdd(company.accounts, "profitVoucherUnits", amount);
+      }
+    }
+  }
+  shop.settlement.days = 0;
+  shop.settlement.profitVoucherUnits = 0;
+  shop.settlement.lossCarryVoucherUnits = 0;
+  shop.settlement.lastSettlementYear = state.year;
+  shop.settlement.lastSettlementDay = state.day + 1;
+  return { settled: true, periodProfitVoucherUnits: 0, taxVoucherUnits: 0, lossCarryVoucherUnits: 0, distributedVoucherUnits: paid,
+    retainedEarningsVoucherUnits: shop.retainedEarningsVoucherUnits, reserveVoucherUnits: reserve };
 }
 
 // 集市补贴：免租剩余天数、批发特价（每单位少收多少斤）。
@@ -1722,6 +1844,8 @@ function buyFromFarms(state, store, itemId, wantedUnits, content, dailyUnits = w
 
 export function prepareShopsForDay(state, content) {
   ensureShops(state, content);
+  // 金银店：每栋金银店建筑一个店；业主变化（镇营 / 民营 / 公司）在这里交接并写回派生字段。
+  syncJewelerShops(state, content);
   // 业主已失效的店铺先交接（旧档里已被暂停的孤儿店也在这里恢复），再做日常同步。
   succeedOrphanShops(state, content);
   syncShopEmployment(state, content);
@@ -1791,13 +1915,13 @@ export function finishShopsDay(state, content, forceSettlement = false) {
     // 镇营综合商店不因连续无生意累计坏日子（不自动关店，由玩家关）。
     // 集市连续无成交天数：断货无钱时据此豁免店租、允许镇库再垫（见 collectiveStranded）。
     if (shop.collective) shop.idleDays = activity > 0 ? 0 : (shop.idleDays || 0) + 1;
-    if (tradeHouse || shop.town) shop.badDays = 0;
+    if (tradeHouse || shop.town || shop.jeweler) shop.badDays = 0;
     else if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
     else if (maximumPayableValueUnits(state, shopAccountName(shop), content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
-    else if (shop.town && shopClerkCount(state, shop) <= 0) shop.statusReason = "无店员";
+    else if ((shop.town || shop.jeweler) && shopClerkCount(state, shop) <= 0) shop.statusReason = shop.jeweler ? "无首饰匠" : "无店员";
     else if (shopKind(shop, content) === "trade") shop.statusReason = activity > 0 ? "营业中" : "暂无可做的买卖";
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";

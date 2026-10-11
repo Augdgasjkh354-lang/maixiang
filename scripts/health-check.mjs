@@ -216,7 +216,9 @@ function producedGoodBuildings(state) {
   for (const b of state.buildings || []) {
     const recipeId = CONTENT.buildings[b.typeId]?.recipeId;
     const recipe = recipeId ? CONTENT.recipes?.[recipeId] : null;
-    for (const o of recipe?.outputs || []) out[o.itemId] = (out[o.itemId] || 0) + 1;
+    // 弹性配方（冶炼厂、酒坊）的产品在 flex.itemIds 里，名义 outputs 不全。
+    const outputIds = [...(recipe?.outputs || []).map(o => o.itemId), ...(recipe?.flex?.itemIds || [])];
+    for (const itemId of new Set(outputIds)) out[itemId] = (out[itemId] || 0) + 1;
   }
   return out;
 }

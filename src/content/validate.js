@@ -22,7 +22,8 @@ export function validateContent(content) {
   }
   for (const [key, recipe] of Object.entries(content.recipes || {})) {
     if (recipe.id !== key) errors.push("配方定义的 id 与注册键不同：" + key);
-    if (!recipe.outputs?.length || (!recipe.inputs?.length && recipe.kind !== "gather")) {
+    // 零售配方（retail，金银店）没有产物：店铺经营，不走生产流水线。
+    if (!recipe.retail && (!recipe.outputs?.length || (!recipe.inputs?.length && recipe.kind !== "gather"))) {
       errors.push("配方必须有产物；无原料配方须明确标为采集：" + key);
     }
     if (!Number.isInteger(recipe.batchesPerWorkerDay) || recipe.batchesPerWorkerDay <= 0) {

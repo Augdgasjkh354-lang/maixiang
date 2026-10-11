@@ -2,7 +2,7 @@ import { inOpeningPeriod, reviewStaffing } from "./employment-contracts.js";
 import { payDayFor } from "./paydays.js";
 import { populationStats, readJobCount, jobKeyForBuilding, listedJobKeyForBuilding, selectJobRows } from "../selectors/labor.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
-import { isIndustryType } from "../content/buildings.js";
+import { isIndustryType, isRetailIndustryType } from "../content/buildings.js";
 import { householdIdOf } from "../economy/accounts.js";
 import { putStock, sellCompanyGoods, takeStock } from "../economy/trade.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
@@ -792,7 +792,11 @@ export function processListedCompany(state, company, content) {
 
 export function processListedCompanies(state, content) {
   const results = [];
-  for (const company of Object.values(ensureCompanies(state, content))) results.push(processListedCompany(state, company, content));
+  for (const company of Object.values(ensureCompanies(state, content))) {
+    // 金银店公司：不生产，店铺经营（shops.js 的 settleJewelerCompany 把利润上缴公司）。
+    if (isRetailIndustryType(content, company.typeId)) { results.push({ companyId: company.id, status: "retail", batches: 0 }); continue; }
+    results.push(processListedCompany(state, company, content));
+  }
   return results;
 }
 

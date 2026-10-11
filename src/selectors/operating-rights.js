@@ -1,5 +1,5 @@
 import { privateJobKeyForBuilding, listedJobKeyForBuilding, jobKeyForBuilding, populationStats, readJobCount, selectJobRows } from "./labor.js";
-import { isIndustryType } from "../content/buildings.js";
+import { isIndustryType, isRetailIndustryType } from "../content/buildings.js";
 import { flexBatchInputsJin, flexCapacityPerUnit, flexOf, flexRoomUnits } from "../systems/flex-recipe.js";
 import { accountQeqUnits } from "../economy/inventory.js";
 import { voucherBalance } from "../economy/currency.js";
@@ -137,10 +137,11 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const job = definition.jobs[0];
   const recipe = content.recipes[definition.recipeId];
   const taxPercent = state.policy.privateProductionTaxPercent?.[building.typeId] ?? content.rules.privateProductionTaxDefaultPercent ?? 10;
-  const output = recipe.outputs[0];
-  const sellPrice = currentUnitPrice(state, output.itemId, content);
+  // 零售型产业（金银店）没有产出：output 为空，估值走店铺实际利润（见下文）。
+  const output = recipe.outputs[0] || null;
+  const sellPrice = output ? currentUnitPrice(state, output.itemId, content) : 0;
   // 业主拿到的是收购价（无批发市场时为 0，即没有可成交的产品口径）。
-  const outputPrice = readWholesalePurchasePrice(state, output.itemId, content);
+  const outputPrice = output ? readWholesalePurchasePrice(state, output.itemId, content) : 0;
   const demand = demandForType(paymentState, building.typeId, content);
   const scale = content.precision.inventoryUnitsPerJin;
   const moneyScale = content.precision.currencyUnitsPerVoucher || scale;
@@ -149,7 +150,7 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const publicWorkers = readJobCount(state, townKey);
   const availableLabor = Math.min(job.slots * level, publicWorkers + rows.idle);
   const taxKeep = Math.max(0, 1 - taxPercent / 100);
-  const netOutputUnitsPerBatch = Math.max(0, Math.floor(Math.round(output.quantity * scale) * taxKeep));
+  const netOutputUnitsPerBatch = output ? Math.max(0, Math.floor(Math.round(output.quantity * scale) * taxKeep)) : 0;
   // 弹性配方（动态酒品）：一批 totalJin 斤，各酒按当前市场缺口占比分配（预览用当前缺口估算），按收购价计值；日批次不超过缺口总量折算。单产出配方走原路径。
   const flexRecipe = flexOf(recipe);
   const flexRooms = flexRecipe ? flexRoomUnits(state, recipe, content) : null;
@@ -176,13 +177,16 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const effectiveWorkers = maxBatches > 0 ? Math.ceil(maxBatches / recipe.batchesPerWorkerDay) : 0;
   const batchOutputValue = flexRecipe
     ? flexRecipe.totalJin * flexRecipe.itemIds.reduce((sum, itemId) => sum + flexShares[itemId] / flexCapacityPerUnit(flexRecipe, itemId) * readWholesalePurchasePrice(state, itemId, content), 0)
-    : output.quantity * outputPrice;
+    : (output ? output.quantity * outputPrice : 0);
   const outputValue = maxBatches * batchOutputValue * (1 - taxPercent / 100);
   const inputCost = batchInputs.reduce((sum, row) => sum + maxBatches * row.quantity * currentUnitPrice(state, row.itemId, content), 0);
   const wageRate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0;
   const wageCost = effectiveWorkers * wageRate;
   const dailyNetWheatJin = outputValue - inputCost - wageCost;
   const theoreticalAnnual = Number.isFinite(dailyNetWheatJin) ? dailyNetWheatJin * content.rules.daysPerYear : 0;
+  // 金银店（零售型）：估值 = 店铺近 30 日实际利润年化 ×5 年（店在营业后才有利润记录，之前不可售）。
+  const jewelerShop = isRetailIndustryType(content, building.typeId) ? Object.values(state.shops || {}).find(row => row.jeweler && row.buildingId === buildingId) : null;
+  const jewelerDays = (jewelerShop?.history || []).slice(-30);
 
   // 优先使用同一建筑公司最近365个日历日的实际净利润（公司即整栋，无需再按级折算）。
   const company = companyOfBuilding(state, buildingId);
@@ -201,6 +205,14 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
     } else {
       valuationBasis = `已观察${actual.observedDays}个日历日，实际净利润未形成正的利润法参考价；理论估算仅作旁注。`;
     }
+  }
+  if (jewelerShop && jewelerDays.length > 0) {
+    const avgDailyProfit = jewelerDays.reduce((sum, row) => sum + (row.profitVoucherUnits || 0), 0) / jewelerDays.length;
+    actualObservedDays = jewelerDays.length;
+    actualAnnualProfitWheatJin = avgDailyProfit * content.rules.daysPerYear / moneyScale;
+    annualizedEstimateWheatJin = actualAnnualProfitWheatJin;
+    referencePriceWheatJin = Math.max(0, annualizedEstimateWheatJin * 5);
+    valuationBasis = `金银店近${jewelerDays.length}日实际利润年化×5年；整栋（含店）估值。`;
   }
   const theoreticalFiveYear = Math.max(0, theoreticalAnnual * 5);
   if (referencePriceWheatJin <= 0 && actualObservedDays === 0) referencePriceWheatJin = theoreticalFiveYear;
@@ -268,7 +280,7 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
     dailyNetWheatJin: Number.isFinite(dailyNetWheatJin) ? dailyNetWheatJin : 0,
     annualReferenceNetWheatJin: annualizedEstimateWheatJin || theoreticalAnnual,
     estimatedAnnualReferenceReturn: annualizedEstimateWheatJin || theoreticalAnnual,
-    outputItemId: output.itemId,
+    outputItemId: output?.itemId || null,
     outputPriceVoucherPerUnit: outputPrice, itemPriceVoucher: outputPrice,
     sellPriceVoucherPerUnit: sellPrice,
     inputPricesVoucherPerUnit: Object.fromEntries(recipe.inputs.map(row => [row.itemId, currentUnitPrice(state, row.itemId, content)])),

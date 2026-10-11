@@ -2,7 +2,7 @@ import { inOpeningPeriod, reviewStaffing } from "./employment-contracts.js";
 import { payDayFor } from "./paydays.js";
 import { accountQeqUnits, atomicInventoryTransaction, quantityToUnits, qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
-import { industryTypeIds, isIndustryType } from "../content/buildings.js";
+import { industryTypeIds, isIndustryType, isRetailIndustryType } from "../content/buildings.js";
 import { bookAdd, bookAddMap } from "../economy/books.js";
 import { recordEvent } from "../economy/ledger.js";
 import { privateJobKeyForBuilding, readJobCount, selectJobRows } from "../selectors/labor.js";
@@ -350,6 +350,7 @@ export function processPrivateIndustries(state, content) {
   const ordered = state.buildings.slice().sort((a, b) => order.indexOf(a.typeId) - order.indexOf(b.typeId));
   for (const building of ordered) {
     if (!isIndustryType(content, building.typeId) || !(building.ownership?.privateLevels || 0)) continue;
+    if (isRetailIndustryType(content, building.typeId)) continue; // 金银店：不生产，经营见 shops.js（工资照常由 payPrivateIndustryWages 付）
     const row = processPrivateBuilding(state, building, content);
     row.intake = runWholesaleIntake(state, [], [row], content, { includeTownAllocation: false }).intakeUnits;
     recordPrivateDayProfit(state, building, row, content);
