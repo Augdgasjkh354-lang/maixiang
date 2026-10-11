@@ -1081,6 +1081,9 @@ const THEATER_MIN_AFFLUENCE = 1.5;
   saltAnnualDemandJinPerPerson: 10,
   saltPriceWheatPerJin: 10,
   rentPerResidentDayWheatJin: 1,
+  // 公租房日租可调范围（斤/人·日）：政策 policy.publicHousingRentPerResidentDayJin 缺省取 rentPerResidentDayWheatJin；0 = 免租。
+  publicHousingRentMinimumJin: 0,
+  publicHousingRentMaximumJin: 20,
   saltFoodReserveDays: 30,
   saltGraceDays: 30,
   buildingMaxLevel: 10,
@@ -1367,9 +1370,9 @@ const THEATER_MIN_AFFLUENCE = 1.5;
 });
 
        const AGRICULTURE = Object.freeze({
-  // 总可开垦上限；acres 为初始已开荒亩数（新档即 15000 亩供 1500 人耕种）。
-  acres: 15000,
-  acresMaximum: 100000,
+  // 总可开垦上限；acres 为初始已开荒亩数（新档即 30000 亩供 3000 人耕种）。
+  acres: 30000,
+  acresMaximum: 200000,
   acresPerFarmer: 10,
   yieldPerAcre: 600,
   cropItemId: "wheat",
@@ -1391,14 +1394,14 @@ const THEATER_MIN_AFFLUENCE = 1.5;
        const INITIAL = Object.freeze({
   seed: 917309,
   stocks: Object.freeze({
-    residents: Object.freeze({ wheat: 3000000 }),
-    town: Object.freeze({ wheat: 3000000 })
+    residents: Object.freeze({ wheat: 6000000 }),
+    town: Object.freeze({ wheat: 6000000 })
   }),
-  roleCounts: Object.freeze({ farmers: 1500, builders: 0 }),
+  roleCounts: Object.freeze({ farmers: 3000, builders: 0 }),
   satisfaction: 75,
-  // 开局即粮券阶段（core/state.js 的 issueOpeningVouchers）：居民每人 1000 斤粮券（按户人口），镇库券池 670 万斤，合计 1000 万斤。
+  // 开局即粮券阶段（core/state.js 的 issueOpeningVouchers）：居民每人 1000 斤粮券（按户人口），镇库券池 1340 万斤，合计 2000 万斤。
   openingVoucherPerResidentJin: 1000,
-  openingVoucherTownPoolJin: 6700000
+  openingVoucherTownPoolJin: 13400000
 });
 return { SAVE_VERSION, RULES, AGRICULTURE, PRECISION, INITIAL };
 })();
@@ -1628,7 +1631,7 @@ const P = RULES.marketPricesVoucherPerUnit;
 // 我方出口品（盐、木材、酒、布）的外镇基准价整体抬高这个倍数（外贸稳定性改动：让出口更有利可图）。
 const EXPORT_PRICE_FACTOR = 1.2;
 const exportPrice = price => price * EXPORT_PRICE_FACTOR;
-// 初始人口 6000、耕地 30000 亩；库存与初始小麦按人口相对 3500 放大（× 6000/3500 = 12/7），人均初始库存不变。
+// 初始人口 12000、耕地 60000 亩；库存与初始小麦按人口相对 6000 放大（× 2），人均初始库存不变（原档 6000 人 / 3 万亩，世界规模翻倍）。
 
        const OUTSIDE_TOWNS = Object.freeze({
   minzhen: Object.freeze({
@@ -1636,25 +1639,25 @@ const exportPrice = price => price * EXPORT_PRICE_FACTOR;
     name: "民镇",
     rulers: Object.freeze(["民镇议事会"]),
     description: "农业小镇，盛产小麦，自产面粉面包；盐、木材完全不产，全靠我方供给。",
-    population: 6000,
-    landMu: 30000,
+    population: 12000,
+    landMu: 60000,
     // 每年开垦的新耕地；耕地决定口粮上限，从而决定人口能长多大。
-    landGrowthMuPerYear: 500,
+    landGrowthMuPerYear: 1000,
     yieldPerMuJin: 300,
     foodPerPersonDayJin: 2,
-    wheatStockJin: 5142857,
+    wheatStockJin: 10285714,
     // 口粮储备：付货款、还贷款都不会动用这部分小麦。
     foodReserveDays: 90,
     prosperity: 60,
     relations: 60,
     goods: Object.freeze({
-      salt: Object.freeze({ basePrice: exportPrice(P.salt), needPerPersonDay: 10 / 365, producePerPersonDay: 0, targetDays: 240, stock: 34286, sellsToUs: false, supplyWeight: 0.35 }),
-      wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 13714, sellsToUs: false, supplyWeight: 0.2 }),
-      flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
-      bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 27000, sellsToUs: true, supplyWeight: 0 }),
+      salt: Object.freeze({ basePrice: exportPrice(P.salt), needPerPersonDay: 10 / 365, producePerPersonDay: 0, targetDays: 240, stock: 68572, sellsToUs: false, supplyWeight: 0.35 }),
+      wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 27428, sellsToUs: false, supplyWeight: 0.2 }),
+      flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 108000, sellsToUs: true, supplyWeight: 0 }),
+      bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
       // 民镇自己酿一些酒、织一些布，不够的部分从外面买。
-      wine: Object.freeze({ basePrice: exportPrice(P.wine), needPerPersonDay: 6 / 365, producePerPersonDay: 4 / 365, targetDays: 90, stock: 8914, sellsToUs: false, supplyWeight: 0.05 }),
-      cloth: Object.freeze({ basePrice: exportPrice(P.cloth), needPerPersonDay: 1 / 365, producePerPersonDay: 0.55 / 365, targetDays: 180, stock: 2914, sellsToUs: false, supplyWeight: 0.1 })
+      wine: Object.freeze({ basePrice: exportPrice(P.wine), needPerPersonDay: 6 / 365, producePerPersonDay: 4 / 365, targetDays: 90, stock: 17828, sellsToUs: false, supplyWeight: 0.05 }),
+      cloth: Object.freeze({ basePrice: exportPrice(P.cloth), needPerPersonDay: 1 / 365, producePerPersonDay: 0.55 / 365, targetDays: 180, stock: 5828, sellsToUs: false, supplyWeight: 0.1 })
     })
   }),
   // 王镇：规模与民镇相同（待调），但几乎不产布、少酿酒，更看重布和酒——我镇新产业的主要买家。
@@ -1663,22 +1666,22 @@ const exportPrice = price => price * EXPORT_PRICE_FACTOR;
     name: "王镇",
     rulers: Object.freeze(["王氏宗族"]),
     description: "宗族治理的富庶小镇，讲究衣着、好饮酒；布几乎全靠外购，盐木同样不产。",
-    population: 6000,
-    landMu: 30000,
-    landGrowthMuPerYear: 500,
+    population: 12000,
+    landMu: 60000,
+    landGrowthMuPerYear: 1000,
     yieldPerMuJin: 300,
     foodPerPersonDayJin: 2,
-    wheatStockJin: 5142857,
+    wheatStockJin: 10285714,
     foodReserveDays: 90,
     prosperity: 60,
     relations: 50,
     goods: Object.freeze({
-      salt: Object.freeze({ basePrice: exportPrice(P.salt), needPerPersonDay: 10 / 365, producePerPersonDay: 0, targetDays: 240, stock: 34286, sellsToUs: false, supplyWeight: 0.25 }),
-      wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 13714, sellsToUs: false, supplyWeight: 0.15 }),
-      flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
-      bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 27000, sellsToUs: true, supplyWeight: 0 }),
-      wine: Object.freeze({ basePrice: exportPrice(P.wine * 1.2), needPerPersonDay: 10 / 365, producePerPersonDay: 2 / 365, targetDays: 90, stock: 10286, sellsToUs: false, supplyWeight: 0.1 }),
-      cloth: Object.freeze({ basePrice: exportPrice(P.cloth * 1.2), needPerPersonDay: 1.5 / 365, producePerPersonDay: 0.1 / 365, targetDays: 180, stock: 2571, sellsToUs: false, supplyWeight: 0.2 })
+      salt: Object.freeze({ basePrice: exportPrice(P.salt), needPerPersonDay: 10 / 365, producePerPersonDay: 0, targetDays: 240, stock: 68572, sellsToUs: false, supplyWeight: 0.25 }),
+      wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 27428, sellsToUs: false, supplyWeight: 0.15 }),
+      flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 108000, sellsToUs: true, supplyWeight: 0 }),
+      bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
+      wine: Object.freeze({ basePrice: exportPrice(P.wine * 1.2), needPerPersonDay: 10 / 365, producePerPersonDay: 2 / 365, targetDays: 90, stock: 20572, sellsToUs: false, supplyWeight: 0.1 }),
+      cloth: Object.freeze({ basePrice: exportPrice(P.cloth * 1.2), needPerPersonDay: 1.5 / 365, producePerPersonDay: 0.1 / 365, targetDays: 180, stock: 5142, sellsToUs: false, supplyWeight: 0.2 })
     })
   })
 });
@@ -1818,7 +1821,7 @@ const __dflt = {
 
   // 给已有外镇加陶器：两镇都要买，不自产、不卖给我们。
   outsideTownGoods: {
-    minzhen: { pottery: { basePrice: 8, needPerPersonDay: 1 / 365, producePerPersonDay: 0, targetDays: 180, stock: 1500, sellsToUs: false, supplyWeight: 0.05 } },
+    minzhen: { pottery: { basePrice: 8, needPerPersonDay: 1 / 365, producePerPersonDay: 0, targetDays: 180, stock: 3000, sellsToUs: false, supplyWeight: 0.05 } },
     wangzhen: { pottery: { basePrice: 9.6, needPerPersonDay: 1.5 / 365, producePerPersonDay: 0, targetDays: 180, stock: 1200, sellsToUs: false, supplyWeight: 0.08 } }
   },
 
@@ -2900,7 +2903,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod20 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-db078ce";
+       const BUILD_ID = "0203-0585b0a";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -7166,15 +7169,15 @@ function spreadAgeBand(total, start, end) {
 }
 
        function createInitialCohorts() {
-  // 总人口 3300：未成年 1050 / 劳动力 1750 / 老年 500。
+  // 总人口 6600：未成年 2100 / 劳动力 3500 / 老年 1000（世界规模翻倍，人均结构不变）。
   // 未成年占比 31.8%（原 27.3%），每年约 58 人成年、约 37 人退出劳动力，
   // 劳动力年净增约 21 人，前期呈增长趋势。
   const cohorts = [
-    ...spreadAgeBand(1050, 0, 17),
-    ...spreadAgeBand(1750, 18, 64),
-    ...spreadAgeBand(500, 65, 84)
+    ...spreadAgeBand(2100, 0, 17),
+    ...spreadAgeBand(3500, 18, 64),
+    ...spreadAgeBand(1000, 65, 84)
   ];
-  let couples = 288;
+  let couples = 576;
   for (const cohort of cohorts) {
     if (cohort.age < 20 || cohort.age > 39 || couples <= 0) continue;
     const pairs = Math.min(cohort.m, cohort.f, couples);
@@ -7308,7 +7311,7 @@ function issueOpeningVouchers(state, content) {
     household.voucherUnits = units;
     residentUnits += units;
   }
-  const townUnits = perJin(content.initial.openingVoucherTownPoolJin ?? 6700000);
+  const townUnits = perJin(content.initial.openingVoucherTownPoolJin ?? 13400000);
   const currency = state.currency;
   currency.balances.town = townUnits;
   currency.issuedUnits = residentUnits + townUnits;
@@ -7363,6 +7366,8 @@ function issueOpeningVouchers(state, content) {
       tradeMarginPercent: content.rules.tradeHouseTargetMarginPercent ?? 20,
       tradeImportMarginPercent: content.rules.tradeHouseImportMarginPercent ?? 25,
       employmentExchangeJin: content.rules.employmentExchangeDefaultJin ?? 5,
+      // 公租房日租（斤/人·日，0—20，一位小数；0 = 免租）。
+      publicHousingRentPerResidentDayJin: content.rules.rentPerResidentDayWheatJin ?? 1,
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
       stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,
@@ -10018,7 +10023,13 @@ return { redeemEssentialFoodForHouseholds, setAutomaticRelief, applyAutomaticRel
 const __mxmod52 = (() => {
 const { populationStats } = __mxmod46;
 const { householdList, householdPopulation, isActiveHousehold } = __mxmod24;
-function selectHousing(state, content) {
+function publicHousingRentPerResidentDayJin(state, content) {
+  const raw = state?.policy?.publicHousingRentPerResidentDayJin;
+  if (raw === undefined || raw === null) return content.rules.rentPerResidentDayWheatJin ?? 1;
+  return Number(raw);
+}
+
+       function selectHousing(state, content) {
   const people = populationStats(state).total;
   const villageCapacity = state.housing?.villageCapacity ?? content.rules.housingCapacity;
   const rentalDefs = [];
@@ -10052,7 +10063,8 @@ function selectHousing(state, content) {
   let unassignedVillage = Math.min(unassignedPeople, villageLeft); villageLeft -= unassignedVillage; unassignedPeople -= unassignedVillage;
   let unassignedRental = 0;
   for (let i = 0; i < rentalDefs.length && unassignedPeople > 0; i += 1) { const count=Math.min(unassignedPeople,rentalLeft[i]); rentalLeft[i]-=count; rentalDefs[i].occupied+=count; unassignedPeople-=count; unassignedRental+=count; }
-  const rentals = rentalDefs.map((row, index) => ({ ...row, vacancies: rentalLeft[index], dailyRentDueWheatJin: row.occupied * (content.rules.rentPerResidentDayWheatJin || 1) }));
+  const rentPerPerson = publicHousingRentPerResidentDayJin(state, content);
+  const rentals = rentalDefs.map((row, index) => ({ ...row, vacancies: rentalLeft[index], dailyRentDueWheatJin: row.occupied * rentPerPerson }));
   const occupied = householdHousing.reduce((sum, row) => sum + row.people - row.unhousedPeople, 0) + unassignedVillage + unassignedRental;
   const shortage = householdHousing.reduce((sum, row) => sum + row.unhousedPeople, 0) + unassignedPeople;
   return {
@@ -10066,10 +10078,11 @@ function selectHousing(state, content) {
     shortage,
     rentDuePeople: householdHousing.reduce((sum, row) => sum + row.rentalPeople, 0),
     unassignedRentalPeople: unassignedRental,
-    dailyRentDueWheatJin: householdHousing.reduce((sum, row) => sum + row.rentalPeople, 0) * (content.rules.rentPerResidentDayWheatJin || 1)
+    rentPerResidentDayJin: rentPerPerson,
+    dailyRentDueWheatJin: householdHousing.reduce((sum, row) => sum + row.rentalPeople, 0) * rentPerPerson
   };
 }
-return { selectHousing };
+return { publicHousingRentPerResidentDayJin, selectHousing };
 })();
 
 // ===== systems/wholesale-price.js =====
@@ -17350,24 +17363,17 @@ function soldVillaKeys(villas) {
   const owners = new Set(villas.sold.map(row => row.householdId));
   // 生活困难线以下的部分不计入可动用购房资金，避免掏空穷人。
   const minimumPerCapita = content.rules.householdLiving?.difficultPerCapitaVoucher ?? 30;
-  const candidates = householdList(state)
-    .filter(household => isActiveHousehold(household) && !owners.has(household.id))
-    .map(household => {
-      const reserve = Math.round(householdPopulation(household) * minimumPerCapita * scale);
-      const liquid = householdLiquidValueUnits(state, household, content);
-      return { household, liquid, affordable: liquid - reserve };
-    })
-    .filter(row => row.affordable >= priceUnits)
-    .sort((a, b) => b.liquid - a.liquid || String(a.household.id).localeCompare(String(b.household.id)));
+  // 每户的可动用资金只算一次（遍历全体家庭，较贵）：够买的进现款候选，不够的进借款候选。
+  const rows = [];
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household) || owners.has(household.id)) continue;
+    const reserve = Math.round(householdPopulation(household) * minimumPerCapita * scale);
+    rows.push({ household, liquid: householdLiquidValueUnits(state, household, content), reserve });
+  }
+  const byLiquidity = (x, y) => y.liquid - x.liquid || String(x.household.id).localeCompare(String(y.household.id));
+  const candidates = rows.filter(row => row.liquid - row.reserve >= priceUnits).sort(byLiquidity);
   // 资金不足的候选（按可动用资金从多到少）：候选用完后再借款补缺口买房（docs/LENDING.md）。
-  const loanCandidates = householdList(state)
-    .filter(household => isActiveHousehold(household) && !owners.has(household.id))
-    .map(household => {
-      const reserve = Math.round(householdPopulation(household) * minimumPerCapita * scale);
-      return { household, liquid: householdLiquidValueUnits(state, household, content), reserve };
-    })
-    .filter(row => row.liquid - row.reserve < priceUnits)
-    .sort((a, b) => b.liquid - a.liquid || String(a.household.id).localeCompare(String(b.household.id)));
+  const loanCandidates = rows.filter(row => row.liquid - row.reserve < priceUnits).sort(byLiquidity);
   let loanIndex = 0;
   if (!candidates.length && !loanCandidates.length) return { sold: 0 };
   let sold = 0;
@@ -18902,6 +18908,19 @@ const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋�
   return { ok: true, value: state.policy.employmentExchangeJin };
 }
 
+// 公租房日租（斤/人·日）：0—规则上限，一位小数；0 = 免租。
+       function setPublicHousingRent(state, jin, content) {
+  const value = typeof jin === "string" && jin.trim() === "" ? NaN : Number(jin);
+  const minimum = content.rules.publicHousingRentMinimumJin ?? 0;
+  const maximum = content.rules.publicHousingRentMaximumJin ?? 20;
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    return { ok: false, reason: `公租房日租须为${minimum}—${maximum}斤` };
+  }
+  state.policy ||= {};
+  state.policy.publicHousingRentPerResidentDayJin = Math.round(value * 10) / 10;
+  return { ok: true, value: state.policy.publicHousingRentPerResidentDayJin };
+}
+
        function setShopRent(state, voucher) {
   const value = Number(voucher);
   if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "店租须为非负数" };
@@ -19089,7 +19108,7 @@ const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋�
        function reclaimFarmland(state, acres, workers, content) {
   return reclaimFarmlandSystem(state, content, { acres, workers });
 }
-return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setEmployerSocialSharePercent, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, repayBankDebtToTown, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setWealthTax, setInheritanceTax, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listBuilding, approveIpoApplication, rejectIpoApplication, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallRentFree, setStallDiscountTier, setStallKeeperLimit, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland };
+return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setEmployerSocialSharePercent, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, repayBankDebtToTown, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setWealthTax, setInheritanceTax, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listBuilding, approveIpoApplication, rejectIpoApplication, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallRentFree, setStallDiscountTier, setStallKeeperLimit, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland };
 })();
 
 // ===== mods/api.js =====
@@ -19611,6 +19630,12 @@ function validateState(state, content) {
   }
   if (!Number.isFinite(state.policy?.employmentExchangeJin) || state.policy.employmentExchangeJin < (content.rules.employmentExchangeMinimumJin ?? 0) || state.policy.employmentExchangeJin > (content.rules.employmentExchangeMaximumJin ?? 50)) errors.push("就业换券额度无效");
   if (!Number.isFinite(state.policy?.shopRentVoucher) || state.policy.shopRentVoucher < 0) errors.push("店租设置无效");
+  {
+    const rent = state.policy?.publicHousingRentPerResidentDayJin;
+    const min = content.rules.publicHousingRentMinimumJin ?? 0;
+    const max = content.rules.publicHousingRentMaximumJin ?? 20;
+    if (rent !== undefined && (!Number.isFinite(rent) || rent < min || rent > max)) errors.push("公租房日租无效");
+  }
   for (const key of ["importPercent", "exportPercent"]) {
     const value = state.policy?.tradeTariff?.[key];
     if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > (content.rules.tradeTariffMaximumPercent ?? 50))) errors.push("关税设置无效");
@@ -20296,6 +20321,13 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
 }
 
 // 粗估一户按某价能买多少（粮券 + 今日还能换券的小麦）：不走支付层报价，用于需求统计和二分查找的初值。
+// 32 位 FNV-1a：同一天内对同一户恒定，日序号变了就整体换序。
+function rotationHash(id, serial) {
+  let hash = 2166136261 ^ (serial & 0xffffffff);
+  for (let i = 0; i < id.length; i += 1) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619) >>> 0;
+  return hash >>> 0;
+}
+
 function quickAffordableUnits(state, household, price, content, reserveDays, capUnits = Number.POSITIVE_INFINITY) {
   if (!(price > 0)) return 0;
   const spendable = householdSpendableVoucherUnits(state, household);
@@ -20491,10 +20523,15 @@ function applyRetailElasticity(state, itemId, desiredUnits, content, sellers) {
   // 先按价格选择；同价卖家用轮换游标，避免长期只成交第一家。
   const prices = [...new Set(sellers.map(row => row.price))].sort((a, b) => a - b);
   const ordered = prices.flatMap(price => rotated(sellers.filter(row => row.price === price), rotation));
+  // 同等缺货的户之间按"户 id × 日序号"的散列轮换先后：接待能力封顶时每天服务的不是同一批户
+  // （原先按 id 字典序，永远是排在前面的那批户被服务，其余户长期买不到）。
+  const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 360) + (state.day || 0);
+  const tieKey = new Map();
+  for (const household of householdList(state)) tieKey.set(household.id, rotationHash(household.id, serial));
   const households = householdList(state).filter(isActiveHousehold).slice().sort((a, b) => {
     const aPer = (a.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(a));
     const bPer = (b.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(b));
-    return aPer - bPer || a.id.localeCompare(b.id);
+    return aPer - bPer || tieKey.get(a.id) - tieKey.get(b.id) || a.id.localeCompare(b.id);
   });
   if (!households.length) return { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: "没有居民家庭" };
   const requestedNeeds = options.householdNeedsUnits || null;
@@ -21369,13 +21406,13 @@ const { bookAddAll, PERIODS } = __mxmod22;
 const { currentPaymentComposition, settleMonetaryPayment } = __mxmod29;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod16;
 const { currentUnitPrice } = __mxmod35;
-const { selectHousing } = __mxmod52;
+const { selectHousing, publicHousingRentPerResidentDayJin } = __mxmod52;
 const { activeHouseholds, householdConvertibleWheatUnits, householdList, syncResidentAggregates } = __mxmod24;
 const { purchaseItemForResidents } = __mxmod89;
 const { recordHouseholdRentDue, recordHouseholdRentPaid } = __mxmod25;
 function settleHousingRent(state, housingAtStart, content) {
   const scale = currencyScale(content);
-  const perPerson = content.rules.rentPerResidentDayWheatJin || 1;
+  const perPerson = publicHousingRentPerResidentDayJin(state, content);
   const dueRows = (housingAtStart.householdHousing || []).filter(row => row.rentalPeople > 0).map(row => ({ householdId: row.householdId, units: Math.round(row.rentalPeople * perPerson * scale) }));
   const dueUnits = dueRows.reduce((sum, row) => sum + row.units, 0);
   let collectedUnits = 0;
@@ -23923,7 +23960,7 @@ const { productionStatus } = __mxmod58;
 const { selectHarvestForecast } = __mxmod108;
 const { reclaimCostEstimate, reclaimWorkDaysForAcres, reclaimedAcres, reclaimedAcresMaximum } = __mxmod41;
 const { qeqUnitsToJin } = __mxmod18;
-const { selectHousing } = __mxmod52;
+const { selectHousing, publicHousingRentPerResidentDayJin } = __mxmod52;
 const { selectSaltCoverage } = __mxmod98;
 const { selectDemolitionPreview, selectUpgradePreview } = __mxmod69;
 const { selectOperatingRightPreview } = __mxmod70;
@@ -24638,8 +24675,10 @@ function selectHeaderVoucher(state, content) {
     payroll: (needBusiness || needResidents || needSite) ? state.payroll : null,
     housing: (needBusiness || needResidents || needSite || needPolicy) ? {
       ...housing,
-      rentPerResidentDayWheatJin: content.rules.rentPerResidentDayWheatJin,
-      rentPerResidentDayVoucher: content.rules.rentPerResidentDayWheatJin,
+      rentPerResidentDayWheatJin: publicHousingRentPerResidentDayJin(state, content),
+      rentPerResidentDayVoucher: publicHousingRentPerResidentDayJin(state, content),
+      rentMinimumJin: content.rules.publicHousingRentMinimumJin ?? 0,
+      rentMaximumJin: content.rules.publicHousingRentMaximumJin ?? 20,
       lastRentDay: state.fiscal?.lastRentDay || null,
       rentFiscal: state.fiscal || null
     } : null,
@@ -24784,7 +24823,7 @@ const { validateContent } = __mxmod19;
 const { createInitialState } = __mxmod40;
 const { settleOneDay, createDayRunner } = __mxmod106;
 const { advanceGameDays: advanceDaysWithClock } = __mxmod21;
-const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, repayBankDebtToTown, issueGovernmentBond, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setWealthTax, setInheritanceTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, listBuilding, approveIpoApplication, rejectIpoApplication, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland } = __mxmod79;
+const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, repayBankDebtToTown, issueGovernmentBond, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setWealthTax, setInheritanceTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, listBuilding, approveIpoApplication, rejectIpoApplication, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland } = __mxmod79;
 const { selectDemolitionPreview, selectUpgradePreview } = __mxmod69;
 const { validateState } = __mxmod85;
 const { selectDashboard } = __mxmod114;
@@ -24936,6 +24975,7 @@ function createSimulation(content) {
     adoptRecommendedIndustryPrices: function (state) { return adoptRecommendedIndustryPrices(state, definitions); },
     retainExistingIndustryPrices: function (state) { return retainExistingIndustryPrices(state, definitions); },
     setEmploymentExchangeQuota: function (state, value) { return setEmploymentExchangeQuota(state, value, definitions); },
+    setPublicHousingRent: function (state, jin) { return setPublicHousingRent(state, jin, definitions); },
     setShopRent: function (state, value) { return setShopRent(state, value); },
     setStallRent: function (state, value) { return setStallRent(state, value); },
     setStallKeeperLimit: function (state, value) { return setStallKeeperLimit(state, value); },
@@ -30123,7 +30163,10 @@ function timesSquareMarkup(view, building, development) {
   } else if (building?.typeId === "public_housing") {
     const home = building.housing;
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
-    body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">入住 / 容量 / 空位</span><strong class="value">${number(home?.occupied || 0)} / ${number(home?.capacity || 1000)} / ${number(home?.vacancies || 0)}人</strong></div><div class="row"><span class="label">租金已收 / 减免</span><strong class="value">${number(view.housing.lastRentDay?.collectedWheatJin || 0)} / ${number(view.housing.lastRentDay?.waivedWheatJin || 0)}${escapeHtml(unit)}</strong></div>${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
+    const rentPerPerson = view.housing?.rentPerResidentDayJin ?? view.housing?.rentPerResidentDayWheatJin ?? 1;
+    const rentDailyTotal = (view.housing?.rentDuePeople ?? 0) * rentPerPerson;
+    const rentControl = `<div class="row"><span class="label">公租房日租（券/人·日）</span><div class="setting-input">${renderNumericInput(view, { key: "public-housing-rent", kind: "public-housing-rent", target: "policy", value: rentPerPerson, label: "公租房日租（券/人·日）", minimum: view.housing?.rentMinimumJin ?? 0, maximum: view.housing?.rentMaximumJin ?? 20, className: "setting-editor" })}<b>${unit}</b></div></div><div class="row"><span class="label">预估每日租金收入（入住 × 日租）</span><strong class="value">${number(rentDailyTotal, 1)}${escapeHtml(unit)}</strong></div>`;
+    body = `<div class="status-strip"><span class="status-light working"></span><strong>已落成</strong><span>${number(building.level)}级</span></div><div class="row"><span class="label">入住 / 容量 / 空位</span><strong class="value">${number(home?.occupied || 0)} / ${number(home?.capacity || 1000)} / ${number(home?.vacancies || 0)}人</strong></div>${rentControl}<div class="row"><span class="label">租金已收 / 减免</span><strong class="value">${number(view.housing.lastRentDay?.collectedWheatJin || 0)} / ${number(view.housing.lastRentDay?.waivedWheatJin || 0)}${escapeHtml(unit)}</strong></div>${buildingStaffingMarkup(view, building)}${developmentMarkup(view, building, development)}`;
     actions = `<button class="secondary" data-go="residents">查看镇民</button>`;
   } else if (building?.typeId === "villa_complex") {
     title = `${building.name} · ${humanizePlotLabel(view, building)}`;
@@ -30991,6 +31034,9 @@ function guardSimulation(engine, beforeCall) {
     } else if (kind === "employment-exchange") {
       result = simulation.setEmploymentExchangeQuota(state, parsed.value);
       successMessage = `在岗居民每日换券额度已设为${number(parsed.value, 2)}斤。`;
+    } else if (kind === "public-housing-rent") {
+      result = simulation.setPublicHousingRent(state, parsed.value);
+      successMessage = `公租房日租已设为每人每日${number(parsed.value, 1)}斤${parsed.value === 0 ? "（免租）" : ""}。`;
     } else if (kind === "shop-target-margin") {
       // 单店目标利润率（覆盖全局默认）。
       result = simulation.configureShopTargetMargin(state, input.dataset.draftTarget, parsed.value);
