@@ -18,9 +18,9 @@ import { householdConvertibleWheatUnits, householdList, householdPopulation, isA
 import { plannedBatchesForProducer, plannedWorkersForProducer, recentAverage } from "../economy/operating-plan.js";
 
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
-import { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, readWholesalePurchasePrice, wholesaleUnitPrice } from "./wholesale-market.js";
+import { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesalePurchasedInventory, hasWholesaleMarket, readWholesalePurchasePrice } from "./wholesale-market.js";
 import { buildingOwner, companyOfBuilding, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
-import { offsetWageClaims, transferWageClaimsToTown } from "./employer.js";
+import { transferWageClaimsToTown } from "./employer.js";
 import { privateWageRate, townWageRate } from "./payroll.js";
 
 function blankPeriod() {
@@ -327,7 +327,8 @@ export function liquidateCompanyForArrears(state, companyId, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   // 1. 现金先还欠薪。
   payWages(state, book, payerId, content, "enterprise_liquidation_wage_payment", `${company.name}清算先偿付欠薪`);
-  // 2. 存货按收购价抵欠薪。
+  // 2. 存货按收购价变现：批发市场向公司买下（镇库先付现金给公司，市场 purchaseSpend 只记这笔实付），
+  //    公司即刻用这笔现金偿付欠薪（先到先抵）。镇库付不起就停，余下存货归镇库（第 3 步，不付钱）。
   let inKindValueUnits = 0;
   for (const itemId of Object.keys(content.items)) {
     if (wageArrears(book) <= 0) break;
@@ -339,9 +340,13 @@ export function liquidateCompanyForArrears(state, companyId, content) {
     const take = Math.min(qty, unitsNeeded);
     if (take <= 0) continue;
     const value = valueUnitsOfGoods(take, price, content);
+    const purchase = settleMonetaryPayment(state, "town", payerId, currentPaymentComposition(state, value), content,
+      "wholesale_private_purchase", `批发市场收购${company.name}清算存货抵欠薪`, { requireFull: true });
+    if (!purchase.ok) break;
     removeInventoryWithCost(company, itemId, take);
     depositWholesalePurchasedInventory(state, itemId, take, value, content);
-    inKindValueUnits += offsetWageClaims(state, book, value, content);
+    const paid = payWages(state, book, payerId, content, "enterprise_liquidation_wage_payment", `${company.name}清算存货变现偿付欠薪`);
+    inKindValueUnits += paid.paid || 0;
   }
   // 3. 余下存货归镇库（成本随货），余下现金归镇库。
   for (const itemId of Object.keys(content.items)) {
@@ -774,7 +779,9 @@ export function sellCompanyOutputsToWholesale(state, content) {
       const itemId = output.itemId;
       const available = Math.max(0, company.inventory?.[itemId] || 0);
       if (available <= 0) continue;
-      const price = wholesaleUnitPrice(state, itemId, content);
+      // 与民营收购（buyPrivateOutput）同口径：批发市场按收购价买进，不按售价。非统购品收购价为 0，跳过（否则货出库而市场收不进）。
+      const price = readWholesalePurchasePrice(state, itemId, content);
+      if (!(price > 0)) continue;
       const sale = sellCompanyProduct(state, company.id, "town", itemId, available, price, content,
         `批发市场收购${company.name}的${content.items[itemId]?.name || itemId}`);
       if (!sale.ok || sale.quantityUnits <= 0) continue;
