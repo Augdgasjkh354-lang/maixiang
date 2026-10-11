@@ -72,7 +72,7 @@ function withGeneralStore(state, stock = {}) {
   };
   owner.jobs ||= {};
   owner.jobs["shop:shop-test:merchant"] = 1;
-  setJobCount(state, "shop:shop-test:clerk", 40, CONTENT);
+  setJobCount(state, "shop:shop-test:clerk", 80, CONTENT);
   return state;
 }
 
@@ -98,8 +98,8 @@ test("宽裕度 1/2/3 时肉占口粮约 5%/27%/75%，宽裕度 0 时没有肉",
 });
 
 test("宽裕人家买主食先买肉（按鸡鸭鹅猪权重分），有肉时面粉只买标准部分", () => {
-  const population = 250;
-  const state = withGeneralStore(voucherState(), { wheat: 3000 * I, flour: 3000 * I, bread: 3000 * I, pork: 3000 * I, chicken: 3000 * I, duck: 3000 * I, goose: 3000 * I });
+  const population = 6600; // 形参实际未用（按户计算），仅作注释用途
+  const state = withGeneralStore(voucherState(), { wheat: 6000 * I, flour: 6000 * I, bread: 6000 * I, pork: 6000 * I, chicken: 6000 * I, duck: 6000 * I, goose: 6000 * I });
   grantResidentVouchers(state, 10000000, CONTENT);
   setAllHouseholdsAffluenceAtLeast(state, 3, CONTENT); // 很富：宽裕度到封顶
   clearStaples(state);
@@ -115,7 +115,7 @@ test("宽裕人家买主食先买肉（按鸡鸭鹅猪权重分），有肉时�
 });
 
 test("没有肉（无养殖场、无卖家）时，没买到的肉算回其余口粮，面粉面包按正常比例买", () => {
-  const state = withGeneralStore(voucherState(), { wheat: 3000 * I, flour: 3000 * I, bread: 3000 * I });
+  const state = withGeneralStore(voucherState(), { wheat: 6000 * I, flour: 6000 * I, bread: 6000 * I });
   grantResidentVouchers(state, 10000000, CONTENT);
   setAllHouseholdsAffluenceAtLeast(state, 3, CONTENT);
   clearStaples(state);

@@ -276,11 +276,10 @@ test("r03 镇库销售统一同步移除库存成本：企业连续采购、店�
 test("r03 建设预览与实际分配共用真实就业：5名待业只安排5人，0待业显示等待用工", () => {
   const state = legacyVoucherState({ seed: 120308 });
   setJobCount(state, "farmers", 0, CONTENT);
-  // 劳动力 600→1750（8cf03ae）：50 级磨坊仅 600 岗位，不足以吃掉新劳动力，
-  // 提升到 146 级（146×12=1752 岗位）才能精确构造"仅剩 5 名待业"。
-  const listedBuilding = addBuilding(state, "mill", "r03-labor-listed", 146);
-  listedBuilding.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 146 };
-  setJobCount(state, `${listedBuilding.id}::millers::listed`, 1745, CONTENT);
+  // 劳动力 600→1750（8cf03ae）→ 3500（世界规模翻倍）：提升到 292 级（292×12=3504 岗位）才能精确构造"仅剩 5 名待业"。
+  const listedBuilding = addBuilding(state, "mill", "r03-labor-listed", 292);
+  listedBuilding.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 292 };
+  setJobCount(state, `${listedBuilding.id}::millers::listed`, 3495, CONTENT);
   assert.equal(simulation.selectJobRows(state).idle, 5);
   const preview = simulation.selectDashboard(state).constructionOptions.find(row => row.id === "bakery");
   assert.equal(preview.previewBuilders, 5);
@@ -294,9 +293,9 @@ test("r03 建设预览与实际分配共用真实就业：5名待业只安排5�
 
   const noIdle = legacyVoucherState({ seed: 120309 });
   setJobCount(noIdle, "farmers", 0, CONTENT);
-  const full = addBuilding(noIdle, "mill", "r03-labor-full", 146);
-  full.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 146 };
-  setJobCount(noIdle, `${full.id}::millers::listed`, 1750, CONTENT);
+  const full = addBuilding(noIdle, "mill", "r03-labor-full", 292);
+  full.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 292 };
+  setJobCount(noIdle, `${full.id}::millers::listed`, 3500, CONTENT);
   assert.equal(simulation.selectJobRows(noIdle).idle, 0);
   const zeroPreview = simulation.selectDashboard(noIdle).constructionOptions.find(row => row.id === "bakery");
   assert.equal(zeroPreview.waitingForWorkers, true);
@@ -312,10 +311,10 @@ test("r03 建设预览与实际分配共用真实就业：5名待业只安排5�
   const existingBuilders = legacyVoucherState({ seed: 120311 });
   setJobCount(existingBuilders, "farmers", 0, CONTENT);
   setJobCount(existingBuilders, "builders", 10, CONTENT);
-  const almostFull = addBuilding(existingBuilders, "mill", "r03-labor-existing-builders", 146);
-  almostFull.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 146 };
-  // 1740 磨坊 + 10 营造 = 1750，恰好零待业。
-  setJobCount(existingBuilders, `${almostFull.id}::millers::listed`, 1740, CONTENT);
+  const almostFull = addBuilding(existingBuilders, "mill", "r03-labor-existing-builders", 292);
+  almostFull.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 292 };
+  // 3490 磨坊 + 10 营造 = 3500，恰好零待业。
+  setJobCount(existingBuilders, `${almostFull.id}::millers::listed`, 3490, CONTENT);
   assert.equal(simulation.selectJobRows(existingBuilders).idle, 0);
   const retainedPreview = simulation.selectDashboard(existingBuilders).constructionOptions.find(row => row.id === "bakery");
   assert.equal(retainedPreview.previewBuilders, 10, "已有建筑工即使没有待业者也应计入施工口径");
@@ -328,10 +327,10 @@ test("r03 建设预览与实际分配共用真实就业：5名待业只安排5�
 
   const upgradeState = legacyVoucherState({ seed: 120310 });
   setJobCount(upgradeState, "farmers", 0, CONTENT);
-  // 同上：劳动力 1750，需 146 级磨坊（1752 岗位）才能构造零待业。
-  const fullUpgradeLabor = addBuilding(upgradeState, "mill", "r03-upgrade-labor-full", 146);
-  fullUpgradeLabor.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 146 };
-  setJobCount(upgradeState, `${fullUpgradeLabor.id}::millers::listed`, 1750, CONTENT);
+  // 同上：劳动力 3500，需 292 级磨坊（3504 岗位）才能构造零待业。
+  const fullUpgradeLabor = addBuilding(upgradeState, "mill", "r03-upgrade-labor-full", 292);
+  fullUpgradeLabor.ownership = { townLevels: 0, privateLevels: 0, listedLevels: 292 };
+  setJobCount(upgradeState, `${fullUpgradeLabor.id}::millers::listed`, 3500, CONTENT);
   const housing = addBuilding(upgradeState, "public_housing", "r03-upgrade-target");
   addInventory(upgradeState, "town", "wood", 2000, "r03升级材料", "test", CONTENT);
   assert.equal(simulation.selectJobRows(upgradeState).idle, 0);

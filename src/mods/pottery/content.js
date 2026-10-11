@@ -57,7 +57,7 @@ export default {
 
   // 给已有外镇加陶器：两镇都要买，不自产、不卖给我们。
   outsideTownGoods: {
-    minzhen: { pottery: { basePrice: 8, needPerPersonDay: 1 / 365, producePerPersonDay: 0, targetDays: 180, stock: 1500, sellsToUs: false, supplyWeight: 0.05 } },
+    minzhen: { pottery: { basePrice: 8, needPerPersonDay: 1 / 365, producePerPersonDay: 0, targetDays: 180, stock: 3000, sellsToUs: false, supplyWeight: 0.05 } },
     wangzhen: { pottery: { basePrice: 9.6, needPerPersonDay: 1.5 / 365, producePerPersonDay: 0, targetDays: 180, stock: 1200, sellsToUs: false, supplyWeight: 0.08 } }
   },
 

@@ -24,17 +24,17 @@ function recordByType(state, type) {
 test("initial population, jobs and both food accounts match the v1 start", () => {
   const state = simulation.createInitialState();
   // 开局数值调整（8cf03ae）：人口 1100→3300（未成年1050/劳动力1750/老年500），
-  // 初始耕地 4000→15000 亩，农民目标 400→1500。
+  // 初始耕地 4000→15000 亩，农民目标 400→1500；世界规模翻倍：人口 6600（2100/3500/1000），耕地 30000，农民 3000。
   assert.deepEqual(populationStats(state), {
-    children: 1050, workers: 1750, elders: 500, total: 3300,
-    marriedCouples: 288, marriedWomen: 288
+    children: 2100, workers: 3500, elders: 1000, total: 6600,
+    marriedCouples: 576, marriedWomen: 576
   });
   assert.deepEqual(simulation.selectJobRows(state).rows.map(function (row) {
     return [row.key, row.count, row.capacity];
-  }), [["farmers", 1500, 1500], ["builders", 0, 0]]);
-  assert.equal(simulation.accountQeq(state, "residents"), 3000000);
-  assert.equal(simulation.accountQeq(state, "town"), 3000000);
-  assert.equal(simulation.totalQeq(state), 6000000);
+  }), [["farmers", 3000, 3000], ["builders", 0, 0]]);
+  assert.equal(simulation.accountQeq(state, "residents"), 6000000);
+  assert.equal(simulation.accountQeq(state, "town"), 6000000);
+  assert.equal(simulation.totalQeq(state), 12000000);
 });
 
 test("[slow] full-year consumption is exact; the annual harvest, report and first-year labor ledger are not duplicated", () => {
@@ -46,22 +46,22 @@ test("[slow] full-year consumption is exact; the annual harvest, report and firs
   // 所以"秋收只记一次"改为在收获当日核对，年末只核对报告口径不重复。
   const state = simulation.createInitialState();
   // 开局人口（原 first-year labor 用例）。
-  assert.equal(populationStats(state).children, 1050);
-  assert.equal(populationStats(state).workers, 1750);
-  assert.equal(populationStats(state).elders, 500);
+  assert.equal(populationStats(state).children, 2100);
+  assert.equal(populationStats(state).workers, 3500);
+  assert.equal(populationStats(state).elders, 1000);
   const result = simulation.advanceDays(state, CONTENT.rules.growingDays);
   const harvest = result.results.find(function (row) { return row.harvest; }).harvest;
-  // 初始耕地 4000→15000 亩（8cf03ae），亩产 600 斤 → 总产 15000×600 = 9,000,000 斤。
-  assert.equal(harvest.total, 9000000);
+  // 初始耕地 4000→15000 亩（8cf03ae）→ 30000 亩（世界规模翻倍），亩产 600 斤 → 总产 18,000,000 斤。
+  assert.equal(harvest.total, 18000000);
   // 基线清理：新档默认农业税为 40%（rules.agricultureTaxDefaultPercent，0.1.11 调优），
   // 原断言按 0% 税写死 800000/800000，已与当前默认政策不符。
   assert.equal(CONTENT.rules.agricultureTaxDefaultPercent, 40);
-  assert.equal(harvest.residentShare, 5400000);
-  assert.equal(harvest.townShare, 3600000);
+  assert.equal(harvest.residentShare, 10800000);
+  assert.equal(harvest.townShare, 7200000);
   const entries = recordByType(state, "harvest");
   assert.deepEqual(entries.map(function (row) {
     return [row.destination, row.quantityUnits / CONTENT.precision.inventoryUnitsPerJin];
-  }).sort(), [["residents", 5400000], ["town", 3600000]]);
+  }).sort(), [["residents", 10800000], ["town", 7200000]]);
   assert.equal(state.agriculture.lastHarvestYear, 1);
 
   const taxed = createSimulation(CONTENT);
@@ -72,8 +72,8 @@ test("[slow] full-year consumption is exact; the annual harvest, report and firs
     result[row.destination] = row.quantityUnits / CONTENT.precision.inventoryUnitsPerJin;
     return result;
   }, {});
-  assert.equal(split.town, 2700000);
-  assert.equal(split.residents, 6300000);
+  assert.equal(split.town, 5400000);
+  assert.equal(split.residents, 12600000);
 
   assert.equal(recordByType(state, "harvest").filter(function (row) {
     return row.transactionId === "harvest-y1";
@@ -83,32 +83,32 @@ test("[slow] full-year consumption is exact; the annual harvest, report and firs
 
   assert.equal(state.year, 2);
   assert.equal(state.day, 0);
-  assert.equal(state.annualReports[0].consumptionQeq / CONTENT.precision.qeqUnitsPerJin, 3300 * 2 * CONTENT.rules.daysPerYear); // 满额：3300人×2斤×360天（旧2060600是缺粮短缺值）
-  assert.equal(state.annualReports[0].harvestQeq / CONTENT.precision.qeqUnitsPerJin, 9000000);
+  assert.equal(state.annualReports[0].consumptionQeq / CONTENT.precision.qeqUnitsPerJin, 6600 * 2 * CONTENT.rules.daysPerYear); // 满额：6600人×2斤×360天（旧2060600是缺粮短缺值）
+  assert.equal(state.annualReports[0].harvestQeq / CONTENT.precision.qeqUnitsPerJin, 18000000);
   assert.equal(state.annualReports.length, 1);
   assert.ok(recordByType(state, "harvest").filter(function (row) {
     return row.transactionId === "harvest-y1";
   }).length <= 2, "harvest-y1 最多是最初的一对分粮行（粮足时流水少，可能尚未滚出500行窗口）");
-  assert.equal(simulation.totalQeq(state), 12624000); // 初始600万 + 秋收900万 − 满额消耗237.6万（3300×2×360）− 其他流水
+  assert.equal(simulation.totalQeq(state), 25248000); // 初始1200万 + 秋收1800万 − 满额消耗475.2万（6600×2×360）− 其他流水
 
   // 首年劳动力账（原 first-year labor ledger 用例）：年内跨 17 岁与 64 岁的人各只计一次。
-  // 人口 1100→3300（8cf03ae）后年龄结构变化：劳动力 1750 开局，年内成年 58、退休 37、劳动年龄死亡 2。
+  // 人口 6600（世界规模翻倍）后年龄结构变化：劳动力 3500 开局，年内成年 116、退休 74、劳动年龄死亡 11（随机二项抽样，种子固定）。
   const labor = state.annualReports[0].laborChange;
   assert.deepEqual(labor, {
-    openingWorkers: 1750,
-    adults: 58,
-    retirees: 37,
-    laborAgeDeaths: 2,
-    closingWorkers: 1769,
-    netChange: 19,
+    openingWorkers: 3500,
+    adults: 116,
+    retirees: 74,
+    laborAgeDeaths: 11,
+    closingWorkers: 3531,
+    netChange: 31,
     balanceDifference: 0
   });
   const peoplePanel = renderPeople(simulation.selectDashboard(state));
   assert.match(peoplePanel, /年初 \/ 年末劳动力/);
-  // 面板对 ≥1000 的数字加千分位（人口 3300 后劳动力首次超过四位数）。
-  assert.match(peoplePanel, /1,750 \/ 1,769人/);
+  // 面板对 ≥1000 的数字加千分位（人口 6600 后劳动力 3500 → 3531）。
+  assert.match(peoplePanel, /3,500 \/ 3,531人/);
   assert.match(peoplePanel, /成年 \/ 退休/);
-  assert.match(peoplePanel, /58 \/ 37人/);
+  assert.match(peoplePanel, /116 \/ 74人/);
 
   simulation.advanceDays(state, CONTENT.rules.growingDays);
   assert.equal(state.year, 2);
@@ -122,15 +122,15 @@ test("agricultural output reflects labor put in before the harvest", () => {
   simulation.setEmployment(state, "farmers", 0);
   simulation.advanceDays(state, 100);
   assert.equal(selectHarvestForecast(state, CONTENT), 0);
-  // 农民目标 400→1500（8cf03ae）：为覆盖 15000 亩上限，按满配 1500 人补足。
-  simulation.setEmployment(state, "farmers", 1500);
+  // 农民目标 400→1500（8cf03ae）→ 3000（世界规模翻倍）：为覆盖 30000 亩上限，按满配 3000 人补足。
+  simulation.setEmployment(state, "farmers", 3000);
   simulation.advanceDays(state, CONTENT.rules.growingDays - 100);
   const harvest = state.ledger.filter(function (row) { return row.type === "harvest"; });
   const output = harvest.reduce(function (sum, row) {
     return sum + row.quantityUnits / CONTENT.precision.inventoryUnitsPerJin;
   }, 0);
-  // 亩产 600、满额 900 万斤；1500 人农事满配，按农事日占全年秋收日的比例出粮。
-  assert.ok(Math.abs(output - 9000000 * (CONTENT.rules.growingDays - 100) / CONTENT.rules.growingDays) < 1e-3, `实际${output}`);
+  // 亩产 600、满额 1800 万斤；3000 人农事满配，按农事日占全年秋收日的比例出粮。
+  assert.ok(Math.abs(output - 18000000 * (CONTENT.rules.growingDays - 100) / CONTENT.rules.growingDays) < 1e-3, `实际${output}`);
 });
 
 test("wages, relief and construction start preserve total food until workers are paid day by day", () => {
@@ -142,7 +142,7 @@ test("wages, relief and construction start preserve total food until workers are
     state, "town", "residents", qeqJinToUnits(10000, CONTENT), "test wage", "wage", CONTENT
   );
   assert.equal(wage.ok, true);
-  assert.equal(simulation.totalQeq(state), 6000000);
+  assert.equal(simulation.totalQeq(state), 12000000);
   const afterTransfers = Object.fromEntries(Object.keys(CONTENT.items).map(function (id) {
     return [id, totalItemUnits(state, id)];
   }));
@@ -174,9 +174,9 @@ test("construction consumes worker-days, releases jobs, and rejects duplicate si
   assert.equal(state.buildings[0].id, start.instanceId);
   assert.equal(jobCount(state, "builders"), 0);
   // 40天建设期：镇库→居民工资转账不改变总 qeq，只有口粮消耗减少总量。
-  // 人口 3300（8cf03ae）：3300人 × 40天 × 2斤/天 = 264000 斤。
+  // 人口 6600：6600人 × 40天 × 2斤/天 = 528000 斤。
   // （原始断言的 80000/144000000 是 1100 人时代 88000 斤口粮的拆分写法。）
-  assert.equal(totalQeqUnits(state, CONTENT), before - 264000 * 18000);
+  assert.equal(totalQeqUnits(state, CONTENT), before - 528000 * 18000);
   assert.equal(simulation.buildAt(state, "bakery", "east").ok, false);
   assert.equal(simulation.setEmployment(state, "millers", 12).ok, false);
   assert.equal(simulation.selectJobRows(state).rows.some(function (row) {
@@ -354,7 +354,7 @@ test("bread mass increase keeps the same qeq and shortage never makes balances n
   }
   simulation.advanceDay(hungry);
   // 人口 1100→3300（8cf03ae）：全镇口粮缺口 2200→6600 斤。
-  assert.equal(hungry.shortageQeq / CONTENT.precision.qeqUnitsPerJin, 6600);
+  assert.equal(hungry.shortageQeq / CONTENT.precision.qeqUnitsPerJin, 13200);
   for (const owner of ["residents", "town"]) {
     assert.ok(Object.values(hungry.accounts[owner]).every(value => value >= 0));
   }
@@ -371,8 +371,8 @@ test("recipe gates expose missing workers and materials and enforce job caps", (
     "remove material for gate test", "test_adjustment", CONTENT);
   assert.equal(productionStatus(state, state.buildings[0], CONTENT).status, "no_materials");
   // 农民目标上限 1500（8cf03ae）：超配只按上限到岗；加 12 名磨坊工 = 1512 在岗。
-  assert.equal(simulation.setEmployment(state, "farmers", 5000).assigned, 1500);
-  assert.equal(simulation.selectJobRows(state).employed, 1512);
+  assert.equal(simulation.setEmployment(state, "farmers", 5000).assigned, 3000);
+  assert.equal(simulation.selectJobRows(state).employed, 3012);
   assert.equal(simulation.validateState(state).valid, true);
 });
 
@@ -397,8 +397,8 @@ test("registered non-food items transfer and ledger but never count or get consu
   assert.ok(Math.abs(state.accounts.residents.wood / content.precision.inventoryUnitsPerJin - 5) < 0.1,
     `居民木材应接近5斤，实际${state.accounts.residents.wood / content.precision.inventoryUnitsPerJin}`);
   assert.equal(state.accounts.town.wood / content.precision.inventoryUnitsPerJin, 15);
-  // 人口 1100→3300（8cf03ae）：当日口粮消耗 2200→6600 斤。
-  assert.equal(game.totalQeq(state), beforeQeq - 6600);
+  // 人口 6600：当日口粮消耗 13200 斤。
+  assert.equal(game.totalQeq(state), beforeQeq - 13200);
   assert.equal(recordByType(state, "consume").some(function (row) { return row.itemId === "wood"; }), false);
 });
 

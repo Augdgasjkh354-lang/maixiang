@@ -319,9 +319,9 @@ export const RULES = Object.freeze({
 });
 
 export const AGRICULTURE = Object.freeze({
-  // 总可开垦上限；acres 为初始已开荒亩数（新档即 15000 亩供 1500 人耕种）。
-  acres: 15000,
-  acresMaximum: 100000,
+  // 总可开垦上限；acres 为初始已开荒亩数（新档即 30000 亩供 3000 人耕种）。
+  acres: 30000,
+  acresMaximum: 200000,
   acresPerFarmer: 10,
   yieldPerAcre: 600,
   cropItemId: "wheat",
@@ -343,12 +343,12 @@ export const PRECISION = Object.freeze({
 export const INITIAL = Object.freeze({
   seed: 917309,
   stocks: Object.freeze({
-    residents: Object.freeze({ wheat: 3000000 }),
-    town: Object.freeze({ wheat: 3000000 })
+    residents: Object.freeze({ wheat: 6000000 }),
+    town: Object.freeze({ wheat: 6000000 })
   }),
-  roleCounts: Object.freeze({ farmers: 1500, builders: 0 }),
+  roleCounts: Object.freeze({ farmers: 3000, builders: 0 }),
   satisfaction: 75,
-  // 开局即粮券阶段（core/state.js 的 issueOpeningVouchers）：居民每人 1000 斤粮券（按户人口），镇库券池 670 万斤，合计 1000 万斤。
+  // 开局即粮券阶段（core/state.js 的 issueOpeningVouchers）：居民每人 1000 斤粮券（按户人口），镇库券池 1340 万斤，合计 2000 万斤。
   openingVoucherPerResidentJin: 1000,
-  openingVoucherTownPoolJin: 6700000
+  openingVoucherTownPoolJin: 13400000
 });

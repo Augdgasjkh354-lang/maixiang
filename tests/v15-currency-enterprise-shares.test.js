@@ -139,8 +139,8 @@ test("股份出售只把居民粮券转给镇库；高价降低认购，股份�
   assert.equal(simulation.issueGrainVouchers(state, "town", 50000).ok, true);
   const listed = listForShareTest(state, salt.id, { levels: 1, operatingCapitalVoucher: 10000, initialMaterialQuantity: 0 }, "101", 1000);
   const company = state.companies[listed.companyId];
-  // 股票不会自动换粮；这里由居民主动存粮取得投资所需粮券。
-  assert.equal(grantResidentVouchers(state, 150000, CONTENT).ok, true);
+  // 股票不会自动换粮；这里由居民主动存粮取得投资所需粮券（世界规模翻倍：户数 660→1320，总额同步翻倍，人均不变）。
+  assert.equal(grantResidentVouchers(state, 300000, CONTENT).ok, true);
   company.operatingDays = 30;
   company.accounts.cumulative.profitVoucherUnits = 10000 * V;
   company.retainedEarningsVoucherUnits = 10000 * V;

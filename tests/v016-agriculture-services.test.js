@@ -70,21 +70,21 @@ function openService(state, street, typeId, owner) {
 
 test("农业目标与实际在岗分离：退休缺员自动补足、无人可补保留缺员、主动减员不反弹", () => {
   const state = simulation.createInitialState({ seed: 161601 });
-  // 初始耕地 15000 亩、农民目标 1500（8cf03ae）。
-  assert.equal(state.employment.targets.farmers, 1500);
-  assert.equal(jobCount(state, "farmers"), 1500);
+  // 初始耕地 30000 亩、农民目标 3000（世界规模翻倍）。
+  assert.equal(state.employment.targets.farmers, 3000);
+  assert.equal(jobCount(state, "farmers"), 3000);
 
   // 释放一名实际农人，不改变目标；有待业劳动力时自动补回。
   const farmerHousehold = householdList(state).find(h => (h.jobs?.farmers || 0) > 0);
   assert.ok(farmerHousehold);
   assert.equal(setHouseholdJobCount(state, farmerHousehold.id, "farmers", farmerHousehold.jobs.farmers - 1, CONTENT).ok, true);
-  assert.equal(jobCount(state, "farmers"), 1499);
+  assert.equal(jobCount(state, "farmers"), 2999);
   const refill = refillAgricultureToTarget(state, CONTENT);
-  assert.equal(refill.after, 1500);
-  assert.equal(refill.target, 1500);
+  assert.equal(refill.after, 3000);
+  assert.equal(refill.target, 3000);
 
-  // 把全部闲置劳动力（1750-1500=250）占到别的岗位，再模拟一名农人退休：总劳动力与岗位同时减1，没有人可补。
-  assert.equal(setJobCount(state, "test:other", 250, CONTENT).assigned, 250);
+  // 把全部闲置劳动力（3500-3000=500）占到别的岗位，再模拟一名农人退休：总劳动力与岗位同时减1，没有人可补。
+  assert.equal(setJobCount(state, "test:other", 500, CONTENT).assigned, 500);
   const retiring = householdList(state).find(h => (h.jobs?.farmers || 0) > 0 && h.ageBands.workers > 0);
   const workerCohort = state.cohorts.find(row => row.age >= 18 && row.age < 65 && (row.m + row.f) > 0);
   const elderCohort = state.cohorts.find(row => row.age >= 65);
@@ -94,19 +94,19 @@ test("农业目标与实际在岗分离：退休缺员自动补足、无人可�
   retiring.ageBands.elders += 1;
   if (workerCohort.m > 0) { workerCohort.m -= 1; elderCohort.m += 1; } else { workerCohort.f -= 1; elderCohort.f += 1; }
   const shortage = refillAgricultureToTarget(state, CONTENT);
-  assert.equal(shortage.after, 1499);
+  assert.equal(shortage.after, 2999);
   assert.equal(shortage.shortage, 1);
-  assert.equal(state.employment.targets.farmers, 1500);
+  assert.equal(state.employment.targets.farmers, 3000);
 
-  // 玩家主动调低目标后，以新目标为准，不补回1500。
-  const lowered = simulation.setEmployment(state, "farmers", 1490);
-  assert.equal(lowered.target, 1490);
+  // 玩家主动调低目标后，以新目标为准，不补回3000。
+  const lowered = simulation.setEmployment(state, "farmers", 2990);
+  assert.equal(lowered.target, 2990);
   reconcileEmployment(state, CONTENT);
-  assert.equal(state.employment.targets.farmers, 1490);
-  assert.equal(jobCount(state, "farmers"), 1490);
+  assert.equal(state.employment.targets.farmers, 2990);
+  assert.equal(jobCount(state, "farmers"), 2990);
   const restored = parseSaveFile(exportState(state), CONTENT);
-  assert.equal(restored.employment.targets.farmers, 1490);
-  assert.equal(jobCount(restored, "farmers"), 1490);
+  assert.equal(restored.employment.targets.farmers, 2990);
+  assert.equal(jobCount(restored, "farmers"), 2990);
 });
 
 test("真实年度人口结算释放退休农人后，会在下一用工快照前按目标自动补员", () => {

@@ -63,8 +63,8 @@ test("伐木场与盐场按岗位人数生产；行业工资不混入面包链",
   assert.equal(state.industries.forestry.day.operatingWagesWheatUnits / SCALE, 35);
   assert.equal(state.business.day.producedUnits.wood, undefined);
   assert.equal(state.business.day.operatingWagesWheatUnits, 0);
-  // 人口 3300：当日口粮消耗 2200→6600 斤。
-  assert.equal(totalItem(state, "wheat"), wheatBefore - 6600 * SCALE);
+  // 人口 6600（世界规模翻倍）：当日口粮消耗 13200 斤。
+  assert.equal(totalItem(state, "wheat"), wheatBefore - 13200 * SCALE);
 
   const saltState = simulation.createInitialState();
   addInventory(saltState, "town", "wood", 100, "test stock", "test", CONTENT);
@@ -86,9 +86,9 @@ test("伐木场与盐场按岗位人数生产；行业工资不混入面包链",
 test("[slow] 年度盐需求精确；六名盐工连续生产全年的物理产能按工资口径记账", () => {
   const demandState = simulation.createInitialState({ seed: 1501 });
   simulation.advanceDays(demandState, CONTENT.rules.daysPerYear);
-  // 人口 1100→3300（8cf03ae）：年盐需求 11000→33000（人均 10/年）。
-  assert.equal(demandState.annualReports[0].populationAtClose, 3300);
-  assert.equal(demandState.annualReports[0].salt.demandUnits / SCALE, 33000);
+  // 人口 6600（世界规模翻倍）：年盐需求 66000（人均 10/年）。
+  assert.equal(demandState.annualReports[0].populationAtClose, 6600);
+  assert.equal(demandState.annualReports[0].salt.demandUnits / SCALE, 66000);
   assert.equal(demandState.annualReports[0].salt.satisfiedUnits, 0);
   assert.equal(demandState.salt.graceDaysElapsed, 30);
 
@@ -125,7 +125,7 @@ test("[slow] 年度盐需求精确；六名盐工连续生产全年的物理产�
   const produced = saltYear.producedUnits.salt / SCALE;
   const yearBaseJin = 6 * 5 * CONTENT.rules.daysPerYear;
   assert.ok(produced > yearBaseJin && produced < yearBaseJin * 1.06, `盐产量应略高于基准，实际${produced}`);
-  assert.equal(state.annualReports[0].salt.demandUnits / SCALE, 33000);
+  assert.equal(state.annualReports[0].salt.demandUnits / SCALE, 66000);
   // 默认日薪 10→5 斤（8cf03ae）：6 名盐工年工资 21900→10950 斤。
   assert.equal(saltYear.operatingWagesWheatUnits / SCALE, yearBaseJin);
   // 基线清理：0.2.3 起面粉/面包/盐只能经综合商店零售（consumer-market.js generalStoreOnly），
@@ -230,8 +230,8 @@ test("公租房只在开工时扣木材；按真实入住计租并保护口粮�
   assert.equal(state.fiscal.lastRentDay.dueWheatJin, 1000, "聚合家庭中的1000名真实公租房入住者应计租");
   assert.equal(state.fiscal.lastRentDay.collectedWheatJin, 0);
   assert.equal(state.fiscal.lastRentDay.waivedWheatJin, 1000);
-  // 当日全镇口粮 3300人×2斤=6600斤，加上 40 斤其他支出，共 6640 斤。
-  assert.equal(totalItem(state, "wheat") + state.currency.reserveWheatUnits, wheatBeforeRentDay - 6600 * SCALE - 120000);
+  // 当日全镇口粮 6600人×2斤=13200斤，加上 40 斤其他支出，共 13240 斤。
+  assert.equal(totalItem(state, "wheat") + state.currency.reserveWheatUnits, wheatBeforeRentDay - 13200 * SCALE - 120000);
 
   assert.equal(state.currency.balances.town, 0, "被口粮保护线减免的租金不会凭空形成镇库粮券");
   setStock(state, "residents", "wheat", 61200);

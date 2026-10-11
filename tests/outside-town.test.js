@@ -149,7 +149,7 @@ test("秋收按耕地×亩产×天气入库，余粮不会无限堆积", () => {
   runDays(state, CONTENT.rules.daysPerYear * 12);
   const yearFood = town.population * PROFILE.foodPerPersonDayJin * CONTENT.rules.daysPerYear;
   assert.ok(town.lastYear.harvestJin > 0);
-  // 耕地 30000 亩（亩产 300）的秋收远大于口粮，存量会涨到一个由每日 0.1% 损耗决定的上限，不能无限堆积。
+  // 耕地 60000 亩（亩产 300）的秋收远大于口粮，存量会涨到一个由每日 0.1% 损耗决定的上限，不能无限堆积。
   assert.ok(town.wheatStockJin < yearFood * 8, `小麦存量应有上限，实际${town.wheatStockJin}`);
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });
@@ -162,17 +162,17 @@ test("长协按签约时收购价锁定，每月交付进入外镇库存", () =>
   assert.ok(signed.agreement.pricePerUnit > 0);
 });
 
-test("初始外镇：人口 6000、耕地 30000 亩；库存与初始小麦按人口放大，人均与原来（3500 人）一致", () => {
+test("初始外镇：人口 12000、耕地 60000 亩；库存与初始小麦按人口放大，人均与原来（3500 人）一致", () => {
   const state = simulation.createInitialState({ seed: 4410 });
   // 原档案（3500 人）的人均初始库存：小麦 3000000，盐 20000，木 8000，面粉 31500，面包 15750。
   const originalPerCapita = { wheat: 3000000 / 3500, salt: 20000 / 3500, wood: 8000 / 3500, flour: 31500 / 3500, bread: 15750 / 3500 };
   for (const id of ["minzhen", "wangzhen"]) {
     const town = state.outsideTowns[id];
-    assert.equal(town.population, 6000, `${id} 人口`);
-    assert.equal(town.landMu, 30000, `${id} 耕地`);
-    assert.ok(Math.abs(town.wheatStockJin / 6000 - originalPerCapita.wheat) < 0.5, `${id} 人均小麦`);
+    assert.equal(town.population, 12000, `${id} 人口`);
+    assert.equal(town.landMu, 60000, `${id} 耕地`);
+    assert.ok(Math.abs(town.wheatStockJin / 12000 - originalPerCapita.wheat) < 0.5, `${id} 人均小麦`);
     for (const itemId of ["salt", "wood", "flour", "bread"]) {
-      assert.ok(Math.abs(town.stocks[itemId] / 6000 - originalPerCapita[itemId]) < 0.01, `${id} ${itemId} 人均库存`);
+      assert.ok(Math.abs(town.stocks[itemId] / 12000 - originalPerCapita[itemId]) < 0.01, `${id} ${itemId} 人均库存`);
     }
   }
   assert.equal(simulation.validateState(state).valid, true);

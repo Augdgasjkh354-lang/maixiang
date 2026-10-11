@@ -41,8 +41,8 @@ function withGeneralStore(state, stock = {}) {
   };
   owner.jobs ||= {};
   owner.jobs["shop:shop-test:merchant"] = 1;
-  // 伙计决定综合商店的日销售容量，容量不足会掩盖真实的居民需求。
-  setJobCount(state, "shop:shop-test:clerk", 40, CONTENT);
+  // 伙计决定综合商店的日销售容量，容量不足会掩盖真实的居民需求（世界规模翻倍，伙计 40→80）。
+  setJobCount(state, "shop:shop-test:clerk", 80, CONTENT);
   return state;
 }
 
@@ -56,7 +56,7 @@ function residentPeople(state) {
 
 test("主食：宽裕人家把口粮换成面粉、面包（标准比例 × 宽裕度，最多 1.5 倍），穷户吃自家小麦", () => {
   const population = 250;
-  const rich = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE, bread: 3000 * SCALE });
+  const rich = withGeneralStore(voucherState(), { wheat: 6000 * SCALE, flour: 6000 * SCALE, bread: 6000 * SCALE });
   grantResidentVouchers(rich, 10000000, CONTENT);
   setAllHouseholdsAffluenceAtLeast(rich, 3, CONTENT);
   clearStaples(rich);
@@ -72,7 +72,7 @@ test("主食：宽裕人家把口粮换成面粉、面包（标准比例 × 宽�
   for (const itemId of ["chicken", "duck", "goose", "pork"]) assert.equal(byId[itemId].purchasedJin, 0, `${itemId} 无卖家，不应购买`);
   assert.equal(itemQeqUnitsPerInventoryUnit(CONTENT.items.bread, CONTENT), 5);
 
-  const poor = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE, bread: 3000 * SCALE });
+  const poor = withGeneralStore(voucherState(), { wheat: 6000 * SCALE, flour: 6000 * SCALE, bread: 6000 * SCALE });
   for (const household of Object.values(poor.households.byId)) household.voucherUnits = 0;
   syncResidentAggregates(poor, CONTENT);
   clearStaples(poor);
@@ -84,7 +84,7 @@ test("主食：宽裕人家把口粮换成面粉、面包（标准比例 × 宽�
 
 test("主食替代：买不到面包改买面粉；已有库存扣减当日购买量", () => {
   const population = 250;
-  const noBread = withGeneralStore(voucherState(), { wheat: 3000 * SCALE, flour: 3000 * SCALE });
+  const noBread = withGeneralStore(voucherState(), { wheat: 6000 * SCALE, flour: 6000 * SCALE });
   grantResidentVouchers(noBread, 10000000, CONTENT);
   setAllHouseholdsAffluenceAtLeast(noBread, 3, CONTENT);
   clearStaples(noBread);
@@ -95,7 +95,7 @@ test("主食替代：买不到面包改买面粉；已有库存扣减当日购�
   assert.ok(rows.flour.purchasedJin > 0);
 
   // 已有面粉多于目标：不再买面粉。
-  const stocked = withGeneralStore(voucherState(), { flour: 3000 * SCALE, bread: 3000 * SCALE });
+  const stocked = withGeneralStore(voucherState(), { flour: 6000 * SCALE, bread: 6000 * SCALE });
   grantResidentVouchers(stocked, 10000000, CONTENT);
   setAllHouseholdsAffluenceAtLeast(stocked, 3, CONTENT);
   clearStaples(stocked);

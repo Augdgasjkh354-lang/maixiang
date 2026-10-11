@@ -103,8 +103,8 @@ test("0.1.1多家企业共享同一需求，过剩库存后按周期缩减计划
   refreshOperatingPlan(state, CONTENT, true);
   const plannedWithoutStock = [a, b].reduce((sum, c) => sum + state.market.operatingPlan.rows[`company:${c.id}`].plannedBatches, 0);
   // 市面积压大量面包：备货缺口分几天消化，计划减产而不是一刀切停工；用工每个周期最多减 1 人。
-  a.inventory.bread = 2000 * I;
-  b.inventory.bread = 2000 * I;
+  a.inventory.bread = 6000 * I;
+  b.inventory.bread = 6000 * I;
   refreshOperatingPlan(state, CONTENT, true);
   const after = [a, b].map(c => state.market.operatingPlan.rows[`company:${c.id}`]);
   const plannedWithStock = after.reduce((sum, row) => sum + row.plannedBatches, 0);

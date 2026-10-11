@@ -40,19 +40,19 @@ function fundedHousehold(state, amount = 1000, exclude = new Set()) {
   return household;
 }
 
-test("v16初始家庭保持3300人口、1750劳动力和居民总财富汇总一致", () => {
+test("v16初始家庭保持6600人口、3500劳动力和居民总财富汇总一致", () => {
   const state = legacyVoucherState();
   const households = householdList(state);
-  // 开局户数 = 人口 ÷ initialHouseholdSize（5 人一户）：3300 人 = 660 户。
-  assert.equal(households.length, 3300 / CONTENT.rules.initialHouseholdSize);
+  // 开局户数 = 人口 ÷ initialHouseholdSize（5 人一户）：6600 人 = 1320 户。
+  assert.equal(households.length, 6600 / CONTENT.rules.initialHouseholdSize);
   assert.equal(state.households.members, undefined);
-  // 开局数值调整（8cf03ae）：人口 1100→3300（未成年1050/劳动力1750/老年500）。
-  assert.equal(households.reduce((sum, h) => sum + h.ageBands.children + h.ageBands.workers + h.ageBands.elders, 0), 3300);
-  assert.equal(simulation.populationStats(state).children, 1050);
-  assert.equal(simulation.populationStats(state).workers, 1750);
-  assert.equal(simulation.populationStats(state).elders, 500);
+  // 开局数值调整（8cf03ae）：人口 1100→3300（未成年1050/劳动力1750/老年500）；世界规模翻倍后 6600（2100/3500/1000）。
+  assert.equal(households.reduce((sum, h) => sum + h.ageBands.children + h.ageBands.workers + h.ageBands.elders, 0), 6600);
+  assert.equal(simulation.populationStats(state).children, 2100);
+  assert.equal(simulation.populationStats(state).workers, 3500);
+  assert.equal(simulation.populationStats(state).elders, 1000);
   const occupations = simulation.selectDashboard(state).households.occupations;
-  assert.equal(occupations["农民"], 1500);
+  assert.equal(occupations["农民"], 3000);
   const summedWheat = households.reduce((sum, h) => sum + (h.inventory.wheat || 0), 0);
   const summedVouchers = households.reduce((sum, h) => sum + (h.voucherUnits || 0), 0);
   assert.equal(state.accounts.residents.wheat, summedWheat);
@@ -66,14 +66,14 @@ test("就业换券额度按实际在岗成员每日生成，换岗不刷新，�
   // 基线清理：居民换券是把小麦交给镇库、换回镇库**已发行**的粮券
   // （issueVouchersFromWheat 要求 voucherBalance(town) >= 兑换额）。本用例原先没印券，
   // 镇库余额为 0，换券必然被"镇库已发行粮券余额不足"挡下——是测试夹具缺前置，不是逻辑退化。
-  assert.equal(simulation.issueGrainVouchers(state, "town", 8000).ok, true);
-  // 换券额度按在岗农人计：农民 1500 人，本用例设为每人每日 5 斤，共 7500 斤。
-  assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT) / I, 7500);
-  assert.equal(simulation.issueGrainVouchers(state, "residents", 7500).ok, true);
+  assert.equal(simulation.issueGrainVouchers(state, "town", 16000).ok, true);
+  // 换券额度按在岗农人计：农民 3000 人，本用例设为每人每日 5 斤，共 15000 斤。
+  assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT) / I, 15000);
+  assert.equal(simulation.issueGrainVouchers(state, "residents", 15000).ok, true);
   assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT), 0);
   assert.equal(simulation.issueGrainVouchers(state, "residents", 1).ok, false);
-  simulation.setEmployment(state, "farmers", 1499);
-  simulation.setEmployment(state, "farmers", 1500);
+  simulation.setEmployment(state, "farmers", 2999);
+  simulation.setEmployment(state, "farmers", 3000);
   assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT), 0, "同日离岗再入岗不得刷新额度");
 
   const beforeIncome = state.currency.balances.residents;
@@ -82,44 +82,49 @@ test("就业换券额度按实际在岗成员每日生成，换岗不刷新，�
   assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT), 0, "工资/收入类转账不应消耗或刷新换券额度");
 
   state.day += 1;
-  assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT) / I, 7500, "额度次日重置且不累计");
+  assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT) / I, 15000, "额度次日重置且不累计");
   assert.equal(simulation.setEmploymentExchangeQuota(state, 0).ok, true);
   state.day += 1;
   assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT), 0);
   assert.equal(simulation.setEmploymentExchangeQuota(state, 10).ok, true);
   state.day += 1;
-  assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT) / I, 15000);
+  assert.equal(maximumResidentExchangeWheatUnits(state, CONTENT) / I, 30000);
 });
 
-test("公务员与警察需求按全镇人口计算，3300人为7、3701人为8且不按建筑重复", () => {
+test("公务员与警察需求按全镇人口计算，6600人为14、7001人为15且不按建筑重复", () => {
   const state = legacyVoucherState();
   const hallA = addCompletedBuilding(state, "town_hall", "hall-a");
   addCompletedBuilding(state, "town_hall", "hall-b");
   const policeA = addCompletedBuilding(state, "police_station", "police-a");
+  addCompletedBuilding(state, "police_station", "police-b");
   let jobs = simulation.selectJobRows(state);
-  // 需求 = ceil(人口 / 500)：3300 → 7（8cf03ae 人口调整）。
-  assert.equal(jobs.publicServiceDemand, 7);
-  assert.equal(simulation.setEmployment(state, `${hallA.id}::civil_servants`, 10).assigned, 7);
-  assert.equal(simulation.setEmployment(state, `${policeA.id}::police`, 10).assigned, 7);
-  assert.equal(simulation.setEmployment(state, "hall-b::civil_servants", 10).assigned, 0, "第二栋不能再复制一份全镇需求");
+  // 需求 = ceil(人口 / 500)：6600 → 14（8cf03ae 人口调整，世界规模翻倍）。
+  assert.equal(jobs.publicServiceDemand, 14);
+  // 每栋市政厅 10 个岗位：第一栋占满 10，第二栋只补剩余 4，不能各复制一份全镇需求。
+  assert.equal(simulation.setEmployment(state, `${hallA.id}::civil_servants`, 20).assigned, 10);
+  assert.equal(simulation.setEmployment(state, "hall-b::civil_servants", 20).assigned, 4, "第二栋只补全镇需求的剩余部分");
+  assert.equal(simulation.setEmployment(state, `${policeA.id}::police`, 20).assigned, 10);
+  assert.equal(simulation.setEmployment(state, "police-b::police", 20).assigned, 4);
 
-  // 加401人（3300→3701），跨过3500阈值，需求从7变8
+  // 加401人（6600→7001），跨过7000阈值，需求从14变15
   const workerCohort = state.cohorts.find(row => row.age >= 18 && row.age < 65);
   const extraHousehold = householdList(state)[0];
   workerCohort.m += 401;
   extraHousehold.ageBands.workers += 401;
   jobs = simulation.selectJobRows(state);
-  assert.equal(jobs.publicServiceDemand, 8);
-  assert.equal(simulation.setEmployment(state, `${hallA.id}::civil_servants`, 10).assigned, 8);
-  assert.equal(simulation.setEmployment(state, `${policeA.id}::police`, 10).assigned, 8);
+  assert.equal(jobs.publicServiceDemand, 15);
+  assert.equal(simulation.setEmployment(state, `${hallA.id}::civil_servants`, 20).assigned, 10);
+  assert.equal(simulation.setEmployment(state, "hall-b::civil_servants", 20).assigned, 5);
+  assert.equal(simulation.setEmployment(state, `${policeA.id}::police`, 20).assigned, 10);
+  assert.equal(simulation.setEmployment(state, "police-b::police", 20).assigned, 5);
 
   workerCohort.m -= 401;
   extraHousehold.ageBands.workers -= 401;
   reconcileEmployment(state, CONTENT);
   jobs = simulation.selectJobRows(state);
-  assert.equal(jobs.publicServiceDemand, 7);
-  assert.equal(jobs.civilServants, 7);
-  assert.equal(jobs.police, 7);
+  assert.equal(jobs.publicServiceDemand, 14);
+  assert.equal(jobs.civilServants, 14);
+  assert.equal(jobs.police, 14);
 });
 
 test("商业街每级2铺、综合商店每铺最多50店员且所有岗位占用真实唯一劳动力", () => {

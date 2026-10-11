@@ -142,7 +142,7 @@ test("兑付：增量路径与逐笔全量同步路径结果逐字段一致", ()
 });
 
 test("救济：增量路径与逐笔全量同步路径结果逐字段一致（资格核算兑付 + 镇库拨粮）", () => {
-  const base = hungryTownState(8306, 2000, 5);
+  const base = hungryTownState(8306, 4000, 5); // 镇库小麦随户数翻倍（2000→4000）
   const population = simulation.populationStats(base).total;
   const { result } = runBothPaths(base, state => applyAutomaticRelief(state, population, CONTENT));
   assert.ok(result.eligibleHouseholds > 0, "救济应当有合格家庭");

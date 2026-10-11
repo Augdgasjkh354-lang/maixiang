@@ -23,25 +23,25 @@ test("新开局粮券是唯一货币，monetaryReform 只剩 legacyBankAccess，
   assertValid(state, "开局");
 });
 
-test("开局发行 1000 万斤粮券：居民每人 1000 斤（按户人口），镇库券池 670 万斤，发行量与账户余额一致", () => {
+test("开局发行 2000 万斤粮券：居民每人 1000 斤（按户人口），镇库券池 1340 万斤，发行量与账户余额一致", () => {
   const state = simulation.createInitialState({ seed: 4102 });
   const households = householdList(state);
   const population = households.reduce((sum, household) => sum + householdPopulation(household), 0);
-  assert.equal(population, 3300);
+  assert.equal(population, 6600);
   for (const household of households) {
     assert.equal(household.voucherUnits, householdPopulation(household) * 1000 * V, household.id);
   }
-  assert.equal(voucherBalance(state, "town"), 6700000 * V);
-  assert.equal(state.currency.balances.residents, 3300 * 1000 * V);
-  assert.equal(state.currency.issuedUnits, 10000000 * V);
+  assert.equal(voucherBalance(state, "town"), 13400000 * V);
+  assert.equal(state.currency.balances.residents, 6600 * 1000 * V);
+  assert.equal(state.currency.issuedUnits, 20000000 * V);
   assert.equal(validateCurrencyInvariant(state).valid, true);
   assertValid(state, "开局发行");
 });
 
 test("开局粮券不动小麦：居民与镇库的小麦库存保持开局值", () => {
   const state = simulation.createInitialState({ seed: 4103 });
-  assert.equal(state.accounts.town.wheat, 3000000 * I);
-  assert.equal(state.accounts.residents.wheat, 3000000 * I);
+  assert.equal(state.accounts.town.wheat, 6000000 * I);
+  assert.equal(state.accounts.residents.wheat, 6000000 * I);
 });
 
 test("开局发行不经银行闸门，但之后的印券仍需银行", () => {

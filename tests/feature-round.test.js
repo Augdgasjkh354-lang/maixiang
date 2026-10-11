@@ -146,22 +146,22 @@ test("[slow] unemployment benefit is limited to idle workers, can be disabled, a
   addInventory(state, "town", "wheat", 50, "test fund", "test_adjustment", CONTENT);
   assert.equal(simulation.issueGrainVouchers(state, "town", 50).ok, true);
   simulation.advanceDay(state);
-  // 人口 1100→3300（8cf03ae）：合格失业劳动力 200→250，镇库 50 斤只够 50 人，缺口 200 斤。
-  assert.equal(state.policy.lastDay.eligible, 250);
+  // 人口 6600（世界规模翻倍）：合格失业劳动力 500（3500 劳动力 − 3000 农民），镇库 50 斤只够 50 人，缺口 450 斤。
+  assert.equal(state.policy.lastDay.eligible, 500);
   assert.equal(state.policy.lastDay.paidPeople, 50);
   assert.equal(state.policy.lastDay.paidWheatJin, 50);
-  assert.equal(state.policy.lastDay.shortWheatJin, 200);
+  assert.equal(state.policy.lastDay.shortWheatJin, 450);
   assert.equal(rows(state, "unemployment_benefit").reduce((sum, row) => sum + row.quantityUnits, 0) / CONTENT.precision.currencyUnitsPerVoucher, 50);
-  assert.equal(rows(state, "unemployment_shortfall")[0].quantityUnits / CONTENT.precision.currencyUnitsPerVoucher, 200);
+  assert.equal(rows(state, "unemployment_shortfall")[0].quantityUnits / CONTENT.precision.currencyUnitsPerVoucher, 450);
   assert.deepEqual(state.payroll.arrearsWheatUnits, {});
   assert.equal(simulation.setUnemploymentPolicy(state, { dailyPerWorkerJin: 0 }).dailyPerWorkerJin, 0);
 
   const funded = legacyVoucherState();
   simulation.setUnemploymentPolicy(funded, { enabled: true, dailyPerWorkerJin: 1 });
-  assert.equal(simulation.issueGrainVouchers(funded, "town", 100000).ok, true);
+  assert.equal(simulation.issueGrainVouchers(funded, "town", 200000).ok, true);
   simulation.advanceDays(funded, CONTENT.rules.daysPerYear);
-  // 合格人数扩大后年度失业金同步放大（250 人 × 全年天数）。
-  assert.equal(funded.annualReports[0].payroll.unemploymentPaidVoucherUnits / CONTENT.precision.currencyUnitsPerVoucher, 250 * CONTENT.rules.daysPerYear);
+  // 合格人数扩大后年度失业金同步放大（500 人 × 全年天数）。
+  assert.equal(funded.annualReports[0].payroll.unemploymentPaidVoucherUnits / CONTENT.precision.currencyUnitsPerVoucher, 500 * CONTENT.rules.daysPerYear);
 });
 
 test("bread barter is atomic, price sensitive, uses existing stock and protects thirty days", () => {
@@ -187,9 +187,9 @@ test("bread barter is atomic, price sensitive, uses existing stock and protects 
     "买面包只是把面包从商店搬到居民，总量不变");
   assert.equal(totalQeqUnits(barterState, CONTENT), voucherBefore);
   const meal = simulation.advanceDay(barterState).meal;
-  // 人口 1100→3300（8cf03ae）：全镇口粮消耗 2200→6600 斤（逐户取整有微小误差）。
-  assert.ok(Math.abs(meal.consumedQeqUnits / CONTENT.precision.qeqUnitsPerJin - 6600) < 1,
-    `口粮消耗应接近6600，实际${meal.consumedQeqUnits / CONTENT.precision.qeqUnitsPerJin}`);
+  // 人口 6600（世界规模翻倍）：全镇口粮消耗 13200 斤（逐户取整有微小误差）。
+  assert.ok(Math.abs(meal.consumedQeqUnits / CONTENT.precision.qeqUnitsPerJin - 13200) < 1,
+    `口粮消耗应接近13200，实际${meal.consumedQeqUnits / CONTENT.precision.qeqUnitsPerJin}`);
   // 面包份额随宽裕度变化，这里只验证吃到了面包、且不超过买到的量加原有库存。
   const breadMove = meal.moves.find(row => row.itemId === "bread").quantityUnits / SCALE;
   assert.ok(breadMove > 0, `应吃到面包，实际${breadMove}`);

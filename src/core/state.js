@@ -42,15 +42,15 @@ function spreadAgeBand(total, start, end) {
 }
 
 export function createInitialCohorts() {
-  // 总人口 3300：未成年 1050 / 劳动力 1750 / 老年 500。
+  // 总人口 6600：未成年 2100 / 劳动力 3500 / 老年 1000（世界规模翻倍，人均结构不变）。
   // 未成年占比 31.8%（原 27.3%），每年约 58 人成年、约 37 人退出劳动力，
   // 劳动力年净增约 21 人，前期呈增长趋势。
   const cohorts = [
-    ...spreadAgeBand(1050, 0, 17),
-    ...spreadAgeBand(1750, 18, 64),
-    ...spreadAgeBand(500, 65, 84)
+    ...spreadAgeBand(2100, 0, 17),
+    ...spreadAgeBand(3500, 18, 64),
+    ...spreadAgeBand(1000, 65, 84)
   ];
-  let couples = 288;
+  let couples = 576;
   for (const cohort of cohorts) {
     if (cohort.age < 20 || cohort.age > 39 || couples <= 0) continue;
     const pairs = Math.min(cohort.m, cohort.f, couples);
@@ -184,7 +184,7 @@ function issueOpeningVouchers(state, content) {
     household.voucherUnits = units;
     residentUnits += units;
   }
-  const townUnits = perJin(content.initial.openingVoucherTownPoolJin ?? 6700000);
+  const townUnits = perJin(content.initial.openingVoucherTownPoolJin ?? 13400000);
   const currency = state.currency;
   currency.balances.town = townUnits;
   currency.issuedUnits = residentUnits + townUnits;
