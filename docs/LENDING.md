@@ -66,7 +66,7 @@
 1. 应还 = 一期月供 × (1 + 已欠期数)，不超过 `outstandingVoucherUnits`。
 2. 能还多少：住户 `spendableVoucherUnits`（手头 + 存款）**扣掉 30 天口粮钱**（`householdStartupReserveUnits` 同口径，或 `householdFoodReserveDays` 折算）之后的部分。
 3. 先用手头粮券，不够再 `withdrawFromBank` 取自己的存款（取款失败就停）。实还 = min(应还, 能还)。
-4. 实还全额：`missedInstalments = 0`，`nextDueDayIndex += 30`。不足：已还的先冲利息再冲本金，`missedInstalments += 1`（每个到期日最多 +1），`nextDueDayIndex += 30`。
+4. 实还全额：`missedInstalments = 0`，`nextDueDayIndex += 30`。不足：已还的先冲利息再冲本金，欠期数按实际未还期数重算：`missedInstalments = max(0, 原欠期 + 1 − floor(实还 ÷ 一期月供))`（本期加原欠期共 原欠期+1 期，已还的整期从中扣掉；不足一整期的部分不折减），`nextDueDayIndex += 30`。例：欠 1 期时到期只还 1 期月供，欠期仍为 1；还清全部欠期后为 0，之后每期只收一期月供。
 5. 还款分录：`bank.cashVoucherUnits += paid`；`loan.outstandingVoucherUnits -= paid`；`bank.stats.loansRepaidVoucherUnits`、`interestEarnedVoucherUnits`（先冲利息）累加；账本类型 `household_loan_repay`。
 6. 有欠期的贷款，每天额外检查一次：住户有富余（同第 2 条口径）就补还欠款，直到欠期清零。**有钱就还**。
 7. `outstandingVoucherUnits <= 0` → `status = "repaid"`，记事件。

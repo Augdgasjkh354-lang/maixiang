@@ -16,7 +16,6 @@ export function ensureBondState(state) {
   const bonds = state.bonds;
   bonds.seq ||= 0;
   if (!Array.isArray(bonds.issues)) bonds.issues = [];
-  bonds.townOwesBankVoucherUnits ||= 0;
   return bonds;
 }
 
@@ -54,7 +53,32 @@ function payToHolder(state, holderKey, units, content = null, incomeUnits = 0) {
     const bank = ensureBankState(state);
     bank.cashVoucherUnits = (bank.cashVoucherUnits || 0) + units;
     bank.retainedVoucherUnits += incomeUnits;
+  } else if (kind === "town") {
+    // 镇库自持（整户无人家产归镇库后）：付出的现金原样回到镇库，净额为零。
+    addTownCashUnits(state, units);
   }
+}
+
+// 整户无人：该户名下的国债持仓转为镇库自持（同一期国债内并入镇库已有持仓）。
+// 只改持仓归属，不动现金与粮券：镇库照常付息、到期还本，资金在镇库内部流转，台账守恒。返回转出的本金。
+export function transferBondHoldingsToTown(state, householdId) {
+  const issues = state.bonds?.issues;
+  if (!Array.isArray(issues)) return 0;
+  const owner = holderKeyOf("household", householdId);
+  let moved = 0;
+  for (const issue of issues) {
+    const holdings = issue.holdings || [];
+    const own = holdings.filter(holding => holding.holderKey === owner);
+    if (!own.length) continue;
+    const principal = own.reduce((sum, holding) => sum + Math.max(0, holding.principalVoucherUnits || 0), 0);
+    if (!(principal > 0)) continue;
+    moved += principal;
+    issue.holdings = holdings.filter(holding => holding.holderKey !== owner);
+    const town = issue.holdings.find(holding => holding.holderKey === "town:town");
+    if (town) town.principalVoucherUnits = (town.principalVoucherUnits || 0) + principal;
+    else issue.holdings.push({ holderKey: "town:town", principalVoucherUnits: principal });
+  }
+  return moved;
 }
 
 export function bondOutstandingVoucherUnits(state) {
@@ -280,26 +304,11 @@ export function redeemBondEarly(state, issueId, holderKey, content) {
   return { ok: true, principalVoucherUnits: holding.principalVoucherUnits, interestVoucherUnits: accrued };
 }
 
-// 流拍退款挂账的镇库应付：每日用镇库现有现金尽量补付给银行，绝不透支。
-function settleTownBondPayables(state, bonds, content) {
-  const owed = bonds.townOwesBankVoucherUnits || 0;
-  if (owed <= 0) return;
-  const pay = Math.min(owed, Math.max(0, townCashUnits(state)));
-  if (pay <= 0) return;
-  addTownCashUnits(state, -pay);
-  const bank = ensureBankState(state);
-  bank.cashVoucherUnits = (bank.cashVoucherUnits || 0) + pay;
-  bonds.townOwesBankVoucherUnits = owed - pay;
-  recordEvent(state, `镇库补付国债流拍退款${pay}券给银行。`, content);
-}
-
 export function settleBondsDay(state, content) {
   if (!bondAvailable(state)) return null;
   const bonds = ensureBondState(state);
   const daysPerYear = content.rules.daysPerYear || 360;
   const dayIndex = (state.year - 1) * daysPerYear + state.day;
-  // 镇库欠银行/住户的流拍退款：镇库有钱就优先补付（家庭侧由 shops 结算的 townOwes 一并处理）。
-  settleTownBondPayables(state, bonds, content);
   for (const issue of bonds.issues) {
     if (issue.status === "active") {
       if (dayIndex - issue.lastCouponDayIndex >= daysPerYear) {

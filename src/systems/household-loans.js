@@ -269,7 +269,11 @@ export function settleHouseholdLoanRepayDay(state, content) {
       const paid = repayFromHousehold(state, content, loan.borrowerId, due, true);
       applyLoanRepayment(state, content, loan, paid);
       repaidTotal += paid;
-      if (loan.status === "active") loan.missedInstalments = paid >= due ? 0 : loan.missedInstalments + 1;
+      // 欠期按实际未还期数重算：应还 = 本期 + 原欠期（共 missed+1 期），已还的整期从中扣掉。
+      if (loan.status === "active") {
+        const wholePaid = instalment > 0 ? Math.floor(paid / instalment) : 0;
+        loan.missedInstalments = paid >= due ? 0 : Math.max(0, (loan.missedInstalments || 0) + 1 - wholePaid);
+      }
       loan.nextDueDayIndex += REPAY_INTERVAL_DAYS;
     }
     // 有欠期：每天检查一次，有富余就补还，直到欠期清零（部分补还按整期折减欠期数）。

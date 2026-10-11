@@ -23,7 +23,7 @@ import { daysUntilHarvest, householdGrossWealthUnits } from "./household-budget.
 import { householdLoanBalanceMap } from "../economy/loan-balance.js";
 import { settleHouseholdLoansAtEscheat } from "./household-loans.js";
 import { wholesalePrice } from "./wholesale-price.js";
-import { householdBondPrincipalMap } from "./bonds.js";
+import { householdBondPrincipalMap, transferBondHoldingsToTown } from "./bonds.js";
 import { buildingOwner, ownershipWatch, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
 import { transferWageClaimsToTown, wageBook } from "./employer.js";
 import { jobKeyForBuilding } from "../selectors/labor.js";
@@ -274,6 +274,8 @@ function householdHasEscheatableAssets(state, household) {
   if ((state.bank?.loans || []).some(loan => loan.borrowerKind === "household" && loan.status === "active" && loan.borrowerId === household.id)) return true;
   // 店铺在等业主更替（无人接手时也算，直到有人接手或店铺关闭）。
   if (shopsAwaitingSuccession(state, household.id).length > 0) return true;
+  // 名下国债持仓：整户无人时转为镇库自持（见 escheatHousehold）。
+  if ((householdBondPrincipalMap(state).get(household.id) || 0) > 0) return true;
   return ownedPrivateBuildings(state, household.id).length > 0;
 }
 
@@ -286,12 +288,14 @@ function escheatHousehold(state, household, content) {
   const totals = { voucherUnits: 0, inventoryValueUnits: 0, shareCount: 0, buildingCount: 0, villaCount: 0 };
   // 0. 民间贷款：先用手头与存款还一部分，剩余核销（留存利润减少）。须先于下面的家产划转。
   settleHouseholdLoansAtEscheat(state, household, content);
+  // 0b. 国债持仓 → 镇库自持（不动现金，只改持仓归属；之后付息、还本都在镇库内部流转）。
+  const bondMoved = transferBondHoldingsToTown(state, id);
 
   // 1. 存款：银行现金不够时镇库可垫付（记为银行欠镇库），两者都不够才取不回；取不回的留在存款台账，之后每日再试。
   const deposit = Math.max(0, state.bank?.deposits?.[id] || 0);
   const takeable = Math.min(deposit, depositWithdrawableUnits(state, owner));
   // 只剩取不回的存款：这一次什么也动不了，不记事件，等银行有现金再办。
-  const movable = takeable > 0 || (household.voucherUnits || 0) > 0 || ownedPrivateBuildings(state, id).length > 0
+  const movable = bondMoved > 0 || takeable > 0 || (household.voucherUnits || 0) > 0 || ownedPrivateBuildings(state, id).length > 0
     || Object.values(household.inventory || {}).some(units => units > 0)
     || Object.values(household.shares || {}).some(count => count > 0);
   // 别墅与店铺不取决于现金：即使其余家产动不了，也要交接（店铺）或空置（别墅）。
