@@ -37,7 +37,7 @@ test("茶叶内容合并：物品、茶园建筑、规则、外镇收茶价（�
   assert.equal(content.buildings.tea_garden.industryTier, 0);
   assert.equal(content.recipes.tea_picking.kind, "gather");
   assert.equal(content.rules.marketPricesVoucherPerUnit.salt, CONTENT.rules.marketPricesVoucherPerUnit.salt, "核心价格不被覆盖");
-  assert.ok(content.rules.householdGoods.tea_leaf && content.rules.householdGoods.wine);
+  assert.ok(content.rules.householdGoods.tea_leaf && content.rules.householdGoods.baijiu);
   assert.ok(content.rules.shopTypes.general.itemIds.includes("tea_leaf"));
   const minzhenPrice = content.outsideTowns.minzhen.goods.tea_leaf.basePrice;
   const wangzhenPrice = content.outsideTowns.wangzhen.goods.tea_leaf.basePrice;

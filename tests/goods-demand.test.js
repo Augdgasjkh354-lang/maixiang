@@ -12,8 +12,8 @@ import { isIndustryType, industryTypeIds } from "../src/content/buildings.js";
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 
-test("新产业由建筑定义推导：酒坊、棉田、织坊与原四产业同等可民营/成立公司", () => {
-  for (const typeId of ["mill", "bakery", "lumberyard", "saltworks", "winery", "cotton_field", "weaving_mill"]) {
+test("新产业由建筑定义推导：四种酒坊、棉田、织坊与原四产业同等可民营/成立公司", () => {
+  for (const typeId of ["mill", "bakery", "lumberyard", "saltworks", "brewery", "craft_brewery", "winery", "premium_winery", "cotton_field", "weaving_mill"]) {
     assert.ok(isIndustryType(CONTENT, typeId), typeId);
   }
   const order = industryTypeIds(CONTENT);
@@ -37,11 +37,11 @@ test("日用品需求跟家底走：没家底的不买，越宽裕买得越多�
   accrueGoodsDemand(state, 0, CONTENT);
   for (const h of [poor, normal, rich]) for (const itemId of Object.keys(CONTENT.rules.householdGoods)) h.inventory[itemId] = 1000 * I;
   consumeGoods(state, CONTENT);
-  const cfg = CONTENT.rules.householdGoods.wine;
+  const cfg = CONTENT.rules.householdGoods.baijiu;
   const standard = h => standardDailyUnits(householdPopulation(h), cfg, CONTENT);
-  assert.equal(poor.life?.day?.wineConsumedUnits || 0, 0, "没家底不喝酒");
-  assert.equal(normal.life.day.wineConsumedUnits, Math.floor(standard(normal)));
-  assert.ok(Math.abs(rich.life.day.wineConsumedUnits - Math.floor(standard(rich) * Math.pow(3, cfg.incomeElasticity))) <= 1, "富户按 3^弹性 倍消费");
+  assert.equal(poor.life?.day?.baijiuConsumedUnits || 0, 0, "没家底不喝酒");
+  assert.equal(normal.life.day.baijiuConsumedUnits, Math.floor(standard(normal)));
+  assert.ok(Math.abs(rich.life.day.baijiuConsumedUnits - Math.floor(standard(rich) * Math.pow(3, cfg.incomeElasticity))) <= 1, "富户按 3^弹性 倍消费");
 
   const max = Object.values(CONTENT.rules.householdGoods).reduce((sum, row) => sum + row.comfortMaximum, 0);
   assert.equal(goodsComfortPoints(state, poor, householdPopulation(poor), poor.life?.day || {}, CONTENT), 0, "没有日用品不加分也不扣分");
@@ -96,7 +96,7 @@ test("镇营酒坊用镇库小麦酿酒，棉田产棉，织坊用棉织布", ()
   simulation.setEmployment(state, `wholesale_market-t::${CONTENT.buildings.wholesale_market.jobs[0].id}`, 1);
   simulation.advanceDays(state, 5);
   const stock = itemId => (state.accounts.town[itemId] || 0) + (state.wholesaleMarket?.inventory?.[itemId] || 0);
-  assert.ok(stock("wine") > 0, "应产出酒");
+  assert.ok(stock("baijiu") > 0, "应产出酒");
   assert.ok(stock("cloth") > 0, "应产出布");
   assert.equal(simulation.validateState(state).valid, true, simulation.validateState(state).errors.join("；"));
 });

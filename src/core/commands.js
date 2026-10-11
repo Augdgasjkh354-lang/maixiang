@@ -275,8 +275,8 @@ export function removeCompanyOperatingLevel(state, companyId, content) { return 
 export function liquidateCompany(state, companyId, content) { return liquidateCompanyToTown(state, companyId, content); }
 export function buybackCompanyShares(state, companyId, options, content) { return executeTownBuyback(state, companyId, options, content); }
 
-export function configureDividend(state, companyId, percent) {
-  return setCompanyDividendPercent(state, companyId, percent);
+export function configureDividend(state, companyId, percent, content) {
+  return setCompanyDividendPercent(state, companyId, percent, content);
 }
 
 export function configureIntermediatePrice(state, itemId, price, content) {
@@ -360,6 +360,18 @@ export function setStallKeeperLimit(state, people) {
   if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "允许摆摊人数须为非负整数" };
   state.policy.stallKeeperLimit = value;
   return { ok: true, value };
+}
+
+// 印花税率（%，0—rules.stampDutyMaximumPercent，两位小数）：二级市场卖方承担，交镇库。
+export function setStampDuty(state, percent, content) {
+  const value = Number(percent);
+  const max = content.rules.stampDutyMaximumPercent ?? 5;
+  if (percent === null || percent === undefined || (typeof percent === "string" && percent.trim() === "") || !Number.isFinite(value) || value < 0 || value > max) {
+    return { ok: false, reason: `印花税须为0%—${max}%之间的有限数` };
+  }
+  state.policy ||= {};
+  state.policy.stampDutyPercent = Math.round(value * 100) / 100;
+  return { ok: true, value: state.policy.stampDutyPercent };
 }
 
 export function setShopProfitTax(state, percent, content) {

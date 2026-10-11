@@ -159,8 +159,40 @@ function voucherOnlyObligation(valueUnits) {
   return { valueUnits, wheatValueUnits: 0, voucherValueUnits: valueUnits };
 }
 
+// 家庭的可取回存款，同 depositWithdrawableUnits(state, `household:${id}`)；没有存款时不必去算镇库可垫付额。
+function householdWithdrawableUnits(state, householdId) {
+  const bank = state.bank;
+  if (!bank) return 0;
+  const deposit = Math.max(0, bank.deposits?.[householdId] || 0);
+  if (deposit <= 0) return 0;
+  const liquidity = Math.max(0, bank.cashVoucherUnits || 0) + townAdvanceCapacityUnits(state);
+  return liquidity <= 0 ? 0 : Math.min(liquidity, deposit);
+}
+
+// 同 createPaymentCapabilityContext(state, `household:${household.id}`, content, { maxWheatUnits })，直接用家庭对象，
+// 省掉账户名解析与重复查询。convertibleUnits：调用方已按默认口粮天数（householdFoodReserveDays）算好的可换小麦，可省一次重算。
+export function createHouseholdPaymentContext(state, household, content, maxWheatUnits = null, convertibleUnits = null) {
+  const withdrawable = householdWithdrawableUnits(state, household.id);
+  const townAdvance = townAdvanceCapacityUnits(state);
+  const convertible = convertibleUnits ?? householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
+  let units = Math.min(convertible, householdExchangeAllowanceUnits(state, household.id, content));
+  if (Number.isSafeInteger(maxWheatUnits)) units = Math.min(units, Math.max(0, maxWheatUnits));
+  const advance = Math.max(0, withdrawable - Math.max(0, state.bank?.cashVoucherUnits || 0));
+  return {
+    content,
+    voucherUnits: Math.max(0, household.voucherUnits || 0) + withdrawable,
+    autoExchangeableWheatUnits: Math.max(0, units),
+    exchangeVoucherPoolUnits: Math.max(0, townAdvance - advance)
+  };
+}
+
 // Short-lived derived data for one synchronous quote search. Never stored on state or carried across a settlement.
 export function createPaymentCapabilityContext(state, owner, content, options = {}) {
+  const parsed = parseOwner(owner);
+  if (parsed.kind === "household") {
+    const household = state.households?.byId?.[parsed.id];
+    if (household) return createHouseholdPaymentContext(state, household, content, options.maxWheatUnits);
+  }
   const withdrawable = depositWithdrawableUnits(state, owner);
   return {
     content,
@@ -168,6 +200,34 @@ export function createPaymentCapabilityContext(state, owner, content, options = 
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, owner, content, options),
     exchangeVoucherPoolUnits: exchangeVoucherPoolUnits(state, owner, withdrawable)
   };
+}
+
+// 同 exactExchangeForVoucherNeed(...).voucherUnits，不建对象（二分查找里每一步都要问）。
+function exchangeVoucherUnitsForNeed(voucherNeedUnits, maxWheatUnits, content) {
+  const need = Math.max(0, Math.floor(voucherNeedUnits));
+  const maxWheat = Math.max(0, Math.floor(maxWheatUnits));
+  if (!need || !maxWheat) return 0;
+  const common = gcd(content.precision.inventoryUnitsPerJin, content.precision.currencyUnitsPerVoucher);
+  const wheatStep = content.precision.inventoryUnitsPerJin / common;
+  const voucherStep = content.precision.currencyUnitsPerVoucher / common;
+  const steps = Math.min(Math.ceil(need / voucherStep), Math.floor(maxWheat / wheatStep));
+  return steps * voucherStep;
+}
+
+// 同 quoteFromCapability(dueValueUnits, capability, content).full，不建报价对象。
+function fullyPayableFromCapability(dueValueUnits, capability, content) {
+  const exchanged = exchangeVoucherUnitsForNeed(
+    Math.min(Math.max(0, dueValueUnits - capability.voucherUnits), capability.exchangeVoucherPoolUnits || 0),
+    capability.autoExchangeableWheatUnits, content
+  );
+  const paid = Math.min(dueValueUnits, capability.voucherUnits + exchanged);
+  return dueValueUnits - paid === 0;
+}
+
+// 同 quotePaymentValueUnitsWithContext(context, valueUnits).full。
+export function canPayFullyWithContext(context, valueUnits) {
+  if (!Number.isSafeInteger(valueUnits) || valueUnits < 0) voucherOnlyObligation(valueUnits);
+  return fullyPayableFromCapability(valueUnits, context, context.content);
 }
 
 function quoteFromCapability(dueValueUnits, capability, content) {
@@ -210,8 +270,7 @@ export function maximumFullyPayableValueUnits(state, owner, limitValueUnits, con
   let high = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(Number(limitValueUnits) || 0)));
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    const quote = quotePaymentValueUnitsWithContext(context, mid);
-    if (quote.full) low = mid; else high = mid - 1;
+    if (canPayFullyWithContext(context, mid)) low = mid; else high = mid - 1;
   }
   return low;
 }
@@ -232,11 +291,16 @@ export function paymentObligationFromLegacyVoucher(valueUnits) {
 // 接受整数（价值）或旧形状的对象；小麦分项并入粮券。
 export function normalizePaymentObligation(value, state = null) {
   void state;
-  if (Number.isSafeInteger(value)) return voucherOnlyObligation(value);
+  return voucherOnlyObligation(normalizedDueUnits(value));
+}
+
+// normalizePaymentObligation(value).valueUnits，但不建对象（热路径：每笔付款都要先规范应付额）。
+function normalizedDueUnits(value) {
+  if (Number.isSafeInteger(value)) return value;
   const wheat = Math.max(0, Math.round(Number(value?.wheatValueUnits) || 0));
   const voucher = Math.max(0, Math.round(Number(value?.voucherValueUnits) || 0));
   const total = Math.max(0, Math.round(Number(value?.valueUnits) || 0));
-  return voucherOnlyObligation(Math.max(total, wheat + voucher));
+  return Math.max(total, wheat + voucher);
 }
 
 export function quoteMonetaryPayment(state, from, dueInput, content, options = {}) {
@@ -245,26 +309,31 @@ export function quoteMonetaryPayment(state, from, dueInput, content, options = {
 }
 
 export function settleMonetaryPayment(state, from, to, dueInput, content, type = "payment", reason = "货币支付", options = {}) {
-  const due = normalizePaymentObligation(dueInput);
-  if (due.valueUnits <= 0) return { ok: true, paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-    remainingValueUnits: 0, remainingComposition: due, transactionId: null };
-  if (options.requireFull !== false) {
-    const preflight = quoteMonetaryPayment(state, from, due, content, options);
+  const dueUnits = normalizedDueUnits(dueInput);
+  // 与 normalizePaymentObligation 同样的校验（负数、非整数抛 RangeError），但成功路径不建对象。
+  if (!Number.isSafeInteger(dueUnits) || dueUnits < 0) voucherOnlyObligation(dueUnits);
+  if (dueUnits <= 0) return { ok: true, paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
+    remainingValueUnits: 0, remainingComposition: voucherOnlyObligation(dueUnits), transactionId: null };
+  // 手头粮券够付时报价必然全额（可用粮券 ≥ 手头粮券），不必建支付能力上下文。
+  const beforeVoucher = voucherBalance(state, from);
+  if (options.requireFull !== false && beforeVoucher < dueUnits) {
+    const preflight = quoteMonetaryPayment(state, from, dueUnits, content, options);
     if (!preflight.full) {
       return { ok: false, reason: "粮券不足", paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-        remainingValueUnits: due.valueUnits, remainingComposition: due,
+        remainingValueUnits: dueUnits, remainingComposition: voucherOnlyObligation(dueUnits),
         voucherShortfallValueUnits: preflight.voucherShortfallValueUnits || 0 };
     }
   }
   // 付款顺序：手头粮券 → 存款取回（银行现金不足由镇库垫付）→ 以粮换券（镇库券池封顶）。
-  const beforeVoucher = voucherBalance(state, from);
-  withdrawDepositsForPayment(state, from, Math.max(0, due.valueUnits - beforeVoucher), content);
-  autoExchangeForPayment(state, from, Math.max(0, due.valueUnits - voucherBalance(state, from)), content, options);
-  const voucherPaid = Math.min(due.valueUnits, voucherBalance(state, from));
-  const remaining = due.valueUnits - voucherPaid;
+  if (beforeVoucher < dueUnits) {
+    withdrawDepositsForPayment(state, from, dueUnits - beforeVoucher, content);
+    autoExchangeForPayment(state, from, Math.max(0, dueUnits - voucherBalance(state, from)), content, options);
+  }
+  const voucherPaid = beforeVoucher >= dueUnits ? dueUnits : Math.min(dueUnits, voucherBalance(state, from));
+  const remaining = dueUnits - voucherPaid;
   if (options.requireFull !== false && remaining > 0) {
     return { ok: false, reason: "粮券不足", paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-      remainingValueUnits: due.valueUnits, remainingComposition: due, voucherShortfallValueUnits: remaining };
+      remainingValueUnits: dueUnits, remainingComposition: voucherOnlyObligation(dueUnits), voucherShortfallValueUnits: remaining };
   }
   const transactionId = makeTransactionId(state);
   if (voucherPaid > 0) {

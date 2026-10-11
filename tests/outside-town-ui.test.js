@@ -44,7 +44,7 @@ test("外贸视图：每个外镇一份，选中哪个就带哪个的数据，�
   assert.equal(simulation.selectDashboard(state, { panel: "business", outsideTownId: "nowhere" }).outsideTown.id, "minzhen");
 });
 
-test("外贸面板：顶部切换条列出全部外镇，选中项高亮，两镇的货品都有酒和布", () => {
+test("外贸面板：顶部切换条列出全部外镇，选中项高亮，两镇的货品都有四种酒和布", () => {
   const state = tradingState(5102);
   const html = renderOutsideTown(viewFor(state, "wangzhen"));
   assert.match(html, /data-outside-town="minzhen"[^>]*aria-pressed="false"/);
@@ -57,7 +57,7 @@ test("外贸面板：顶部切换条列出全部外镇，选中项高亮，两�
 
   for (const townId of TOWN_IDS) {
     const page = renderOutsideTown(viewFor(state, townId));
-    assert.match(page, /<span class="label">酒<\/span>/, `${townId} 应有酒`);
+    for (const name of ["普通啤酒", "高档啤酒", "普通白酒", "高档白酒"]) assert.match(page, new RegExp(`<span class="label">${name}<\\/span>`), `${townId} 应有${name}`);
     assert.match(page, /<span class="label">布<\/span>/, `${townId} 应有布`);
     assert.doesNotMatch(page, /undefined|NaN|Infinity/, `${townId} 不应出现 undefined/NaN`);
     // 动作按钮都带城镇 id，数量草稿键也带城镇 id。

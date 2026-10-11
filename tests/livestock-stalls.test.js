@@ -86,7 +86,7 @@ function collective(state) {
 
 test("时代广场：一个集体集市，只卖日用品和肉、与商店同价、每人每日最多 25 斤、按摊交租", () => {
   const { state, plaza } = town(6104);
-  state.wholesaleMarket.inventory.wine = 2000 * I;
+  state.wholesaleMarket.inventory.baijiu = 2000 * I;
   assert.ok(!simulation.openResidentShop(state, plaza, "general").ok, "时代广场不能开综合商店");
   simulation.advanceDays(state, 2);
   const stalls = Object.values(state.shops).filter(s => s.typeId === "stall");
@@ -94,8 +94,8 @@ test("时代广场：一个集体集市，只卖日用品和肉、与商店同�
   const market = stalls[0];
   assert.equal(market.collective, true);
   assert.equal(state.policy.stallRentVoucher, 2);
-  const stallPrice = shopTradePrices(state, "stall", CONTENT, "wine", market).retailVoucherPerUnit;
-  const storePrice = shopTradePrices(state, "general", CONTENT, "wine", Object.values(state.shops).find(s => s.typeId === "general")).retailVoucherPerUnit;
+  const stallPrice = shopTradePrices(state, "stall", CONTENT, "baijiu", market).retailVoucherPerUnit;
+  const storePrice = shopTradePrices(state, "general", CONTENT, "baijiu", Object.values(state.shops).find(s => s.typeId === "general")).retailVoucherPerUnit;
   assert.equal(stallPrice, storePrice, `集市价 ${stallPrice} 应与商店价 ${storePrice} 相同（stallUndercutPercent 为 0）`);
   for (let day = 0; day < 15; day++) {
     const keepers = keepersOf(state, market); // 摊租按早上在摊的人数收
@@ -105,13 +105,13 @@ test("时代广场：一个集体集市，只卖日用品和肉、与商店同�
     assert.ok(Object.keys(market.accounts.day.soldUnits || {}).every(itemId => stallItemIds(CONTENT).includes(itemId)), "只卖日用品和肉");
     assert.equal(market.accounts.day.rentExpenseVoucherUnits || 0, Math.ceil(keepers / 2) * 2 * V, "按占用摊位交租，每摊 2");
   }
-  assert.ok((market.accounts.cumulative.soldUnits?.wine || 0) > 0, "集市卖出了酒");
+  assert.ok((market.accounts.cumulative.soldUnits?.baijiu || 0) > 0, "集市卖出了酒");
   valid(state);
 });
 
 test("集市利润按人头 ×0.8—1.2 随机分给摆摊家庭；摆摊人数不超过允许人数", () => {
   const { state } = town(6105);
-  state.wholesaleMarket.inventory.wine = 50000 * I;
+  state.wholesaleMarket.inventory.baijiu = 50000 * I;
   state.wholesaleMarket.inventory.cloth = 500 * I;
   assert.equal(simulation.setStallKeeperLimit(state, 6).ok, true);
   const before = new Map(Object.values(state.households.byId).map(h => [h.id, h.voucherUnits || 0]));
@@ -140,7 +140,7 @@ test("集市利润按人头 ×0.8—1.2 随机分给摆摊家庭；摆摊人数�
 
 test("旧档里按户开的摊位读档后收摊清算，换成集体集市", () => {
   const { state, plaza } = town(6107);
-  state.wholesaleMarket.inventory.wine = 2000 * I;
+  state.wholesaleMarket.inventory.baijiu = 2000 * I;
   const household = Object.values(state.households.byId).find(h => (h.voucherUnits || 0) > 500 * V);
   const legacyId = "shop-legacy";
   state.shops[legacyId] = { ...structuredClone(state.shops[Object.keys(state.shops)[0]]), id: legacyId, name: "旧摊", typeId: "stall", buildingId: plaza,
@@ -179,7 +179,7 @@ test("肉是主食：四种肉不再是日用品，都在综合商店货架上�
 
 test("拆除时代广场：集市自动结束，余钱和货不凭空消失，状态合法", () => {
   const { state, plaza } = town(6108);
-  state.wholesaleMarket.inventory.wine = 2000 * I;
+  state.wholesaleMarket.inventory.baijiu = 2000 * I;
   simulation.advanceDays(state, 10);
   assert.ok(collective(state));
   const preview = simulation.selectDemolitionPreview ? simulation.selectDemolitionPreview(state, plaza) : null;
@@ -195,7 +195,7 @@ test("拆除时代广场：集市自动结束，余钱和货不凭空消失，�
 
 test("集市免租：三个月/半年/一年/三年，免租期内不交摊租，到期恢复；只能选这四档", () => {
   const { state } = town(6109);
-  state.wholesaleMarket.inventory.wine = 3000 * I;
+  state.wholesaleMarket.inventory.baijiu = 3000 * I;
   assert.equal(simulation.setStallRentFree(state, 45).ok, false);
   assert.equal(simulation.setStallRentFree(state, 90).ok, true);
   simulation.advanceDays(state, 10);
@@ -211,16 +211,16 @@ test("集市免租：三个月/半年/一年/三年，免租期内不交摊租�
 
 test("集市批发特价三档：进价每斤少 0.1/0.2/0.4，差价记为补贴；售价与综合商店同价、不低于进价", () => {
   const { state } = town(6110);
-  state.wholesaleMarket.inventory.wine = 3000 * I;
+  state.wholesaleMarket.inventory.baijiu = 3000 * I;
   simulation.advanceDays(state, 2);
   const market = collective(state);
   const store = Object.values(state.shops).find(s => s.typeId === "general");
-  const list = shopTradePrices(state, "stall", CONTENT, "wine", market).listWholesaleVoucherPerUnit;
+  const list = shopTradePrices(state, "stall", CONTENT, "baijiu", market).listWholesaleVoucherPerUnit;
   for (const [tier, cut] of [[0, 0], [1, 0.1], [2, 0.2], [3, 0.4]]) {
     assert.equal(simulation.setStallDiscountTier(state, tier).ok, true);
-    const prices = shopTradePrices(state, "stall", CONTENT, "wine", market);
+    const prices = shopTradePrices(state, "stall", CONTENT, "baijiu", market);
     assert.ok(Math.abs(prices.wholesaleVoucherPerUnit - (list - cut)) < 1e-9, `第${tier}档进价`);
-    const storePrice = shopTradePrices(state, "general", CONTENT, "wine", store).retailVoucherPerUnit;
+    const storePrice = shopTradePrices(state, "general", CONTENT, "baijiu", store).retailVoucherPerUnit;
     // 集市售价跟综合商店同价（stallUndercutPercent 为 0），特价再低也不低于进价。
     assert.ok(Math.abs(prices.retailVoucherPerUnit - storePrice) < 1e-9, `第${tier}档售价 ${prices.retailVoucherPerUnit} 应与商店价 ${storePrice} 相同`);
     assert.ok(prices.retailVoucherPerUnit >= prices.wholesaleVoucherPerUnit);

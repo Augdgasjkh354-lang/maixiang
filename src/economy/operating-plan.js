@@ -29,6 +29,24 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
   if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
   const wholesale = currentUnitPrice(state, productId, content);
   if (def.kind === "stall") return stallTradePrices(state, def, content, productId, wholesale);
+  return { ...def, itemId: productId, retailVoucherPerUnit: retailPriceOf(state, def, content, productId, wholesale, shop), wholesaleVoucherPerUnit: wholesale };
+}
+
+// 只要零售价时用（热路径：每笔买卖、每家店每种商品都要问价，不必展开整个店型定义对象）。
+// 返回值与 shopTradePrices(...)?.retailVoucherPerUnit 完全一致，只是没有价格行时返回 null 而不是 undefined。
+export function shopRetailPrice(state, typeId, content, itemId = null, shop = null) {
+  const raw = content.rules.shopTypes?.[typeId];
+  if (!raw) return null;
+  const def = raw.aliasOf ? content.rules.shopTypes?.[raw.aliasOf] : raw;
+  if (!def || def.kind === "service") return null;
+  const productId = itemId || raw.itemId || def.itemId || def.itemIds?.[0];
+  if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
+  const wholesale = currentUnitPrice(state, productId, content);
+  if (def.kind === "stall") return stallPriceOf(state, def, content, productId, wholesale).retail;
+  return retailPriceOf(state, def, content, productId, wholesale, shop);
+}
+
+function retailPriceOf(state, def, content, productId, wholesale, shop) {
   const markup = def.id === "general" ? policyShopMarginPercent(state, content) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
   let retail = wholesale * (1 + markup);
   if (def.id === "general" && shop) {
@@ -41,22 +59,34 @@ export function shopTradePrices(state, typeId, content, itemId = null, shop = nu
     const floor = retailFloorOf(shop.pricing, productId, wholesale, content.rules.priceAdjust);
     retail = Math.max(floor, base * priceFactorOf(shop.pricing, productId));
   }
-  return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: wholesale };
+  return retail;
 }
 
 // 集市：进价 = 批发价减特价补贴；售价跟镇上最便宜的综合商店看齐（stallUndercutPercent 默认 0，同价时居民轮流在两边买），没有商店时按批发价加成，且不低于进价。
-function stallTradePrices(state, def, content, productId, wholesale) {
+function stallPriceOf(state, def, content, productId, wholesale) {
   const tiers = content.rules.stallWholesaleDiscountTiers || [0];
   const tier = Math.max(0, Math.min(tiers.length - 1, Math.floor(state.policy?.stallDiscountTier || 0)));
   const cost = Math.max(wholesale * 0.1, wholesale - (tiers[tier] || 0));
-  const storePrices = Object.values(state.shops || {})
-    .filter(shop => shop.status === "open" && shop.typeId === "general")
-    .map(shop => shopTradePrices(state, "general", content, productId, shop)?.retailVoucherPerUnit)
-    .filter(price => price > 0);
-  const reference = storePrices.length
-    ? Math.min(...storePrices) * (1 - Math.max(0, content.rules.stallUndercutPercent ?? 3) / 100)
+  // 营业中综合商店里的最低售价（只取 > 0 的），不建中间数组。
+  let lowestStorePrice = 0;
+  const shops = state.shops;
+  if (shops) {
+    for (const key in shops) {
+      const shop = shops[key];
+      if (shop.status !== "open" || shop.typeId !== "general") continue;
+      const price = shopRetailPrice(state, "general", content, productId, shop);
+      if (price > 0 && (lowestStorePrice === 0 || price < lowestStorePrice)) lowestStorePrice = price;
+    }
+  }
+  const reference = lowestStorePrice > 0
+    ? lowestStorePrice * (1 - Math.max(0, content.rules.stallUndercutPercent ?? 3) / 100)
     : wholesale * (1 + Math.max(0, def.markupPercent ?? 10) / 100);
-  return { ...def, itemId: productId, retailVoucherPerUnit: Math.max(cost, reference), wholesaleVoucherPerUnit: cost, listWholesaleVoucherPerUnit: wholesale };
+  return { cost, retail: Math.max(cost, reference) };
+}
+
+function stallTradePrices(state, def, content, productId, wholesale) {
+  const { cost, retail } = stallPriceOf(state, def, content, productId, wholesale);
+  return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: cost, listWholesaleVoucherPerUnit: wholesale };
 }
 
 // 居民实际面对的综合商店零售价：营业中综合商店里最便宜的一家（与集市参考价同口径）；没有综合商店时按批发价加成。
@@ -64,7 +94,7 @@ function stallTradePrices(state, def, content, productId, wholesale) {
 function generalStoreReferenceRetail(state, itemId, content) {
   const prices = Object.values(state.shops || {})
     .filter(shop => shop.status === "open" && shop.typeId === "general")
-    .map(shop => shopTradePrices(state, "general", content, itemId, shop)?.retailVoucherPerUnit)
+    .map(shop => shopRetailPrice(state, "general", content, itemId, shop))
     .filter(price => price > 0);
   if (prices.length) return Math.min(...prices);
   return currentUnitPrice(state, itemId, content) * (1 + policyShopMarginPercent(state, content) / 100);

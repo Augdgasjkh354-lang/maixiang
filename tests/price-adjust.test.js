@@ -43,7 +43,7 @@ function town(seed) {
   transferVouchers(state, "town", `shop:${store.shopId}`, 5000 * V, CONTENT, "test", "测试商店资金");
   simulation.configureShopClerks(state, store.shopId, 0);
   const shop = state.shops[store.shopId];
-  for (const itemId of ["salt", "flour", "wine", "pork"]) shop.inventory[itemId] = 1000 * I;
+  for (const itemId of ["salt", "flour", "baijiu", "pork"]) shop.inventory[itemId] = 1000 * I;
   return { state, shopId: store.shopId, shop };
 }
 

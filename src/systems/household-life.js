@@ -68,24 +68,38 @@ export const BUDGET_COST_TYPES = new Set(["wholesale_sale", "private_wage_paymen
 
 const WAGE_TYPES = new Set(["wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment", "enterprise_wage_payment", "private_wage_payment", "shop_wage_payment"]);
 
-export function recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits = [], householdCredits = [] }, content) {
-  const debitRows = householdDebits.length ? householdDebits : (householdIdFromOwner(from) ? [{ householdId: householdIdFromOwner(from), units: voucherUnits }] : []);
-  const creditRows = householdCredits.length ? householdCredits : (householdIdFromOwner(to) ? [{ householdId: householdIdFromOwner(to), units: voucherUnits }] : []);
-  for (const row of debitRows) {
-    const household = state.households?.byId?.[row.householdId];
-    if (!household) continue;
-    if (BUDGET_COST_TYPES.has(type)) add(household, "budgetCostVoucherUnits", row.units, content);
-    if (INVESTMENT_TYPES.has(type)) add(household, "investmentVoucherUnits", row.units, content);
-    else if (LIFE_EXPENSE_TYPES.has(type)) { add(household, "expenseVoucherUnits", row.units, content); add(household, "lifeExpenseVoucherUnits", row.units, content); if (type === "shop_service_sale") add(household, "serviceExpenseVoucherUnits", row.units, content); }
-    else add(household, "expenseVoucherUnits", row.units, content);
+function recordVoucherDebit(state, householdId, units, type, content) {
+  const household = state.households?.byId?.[householdId];
+  if (!household) return;
+  if (BUDGET_COST_TYPES.has(type)) add(household, "budgetCostVoucherUnits", units, content);
+  if (INVESTMENT_TYPES.has(type)) add(household, "investmentVoucherUnits", units, content);
+  else if (LIFE_EXPENSE_TYPES.has(type)) { add(household, "expenseVoucherUnits", units, content); add(household, "lifeExpenseVoucherUnits", units, content); if (type === "shop_service_sale") add(household, "serviceExpenseVoucherUnits", units, content); }
+  else add(household, "expenseVoucherUnits", units, content);
+}
+
+function recordVoucherCredit(state, householdId, units, type, content) {
+  const household = state.households?.byId?.[householdId];
+  if (!household) return;
+  if (CAPITAL_RETURN_TYPES.has(type)) add(household, "capitalReturnVoucherUnits", units, content);
+  else if (INCOME_TYPES.has(type)) add(household, "incomeVoucherUnits", units, content);
+  if (WAGE_TYPES.has(type)) add(household, "wagePaidVoucherUnits", units, content);
+  if (BUDGET_INCOME_TYPES.has(type)) add(household, "budgetIncomeVoucherUnits", units, content);
+}
+
+// 没有逐户明细时（单户对单户的付款，最常见）直接按账户名定位那一户，不再临时拼行数组。
+// fromHouseholdId / toHouseholdId：调用方已解析过账户名时直接给（household id 或 null），省掉再解析。
+export function recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits = [], householdCredits = [], fromHouseholdId, toHouseholdId }, content) {
+  if (householdDebits.length) {
+    for (const row of householdDebits) recordVoucherDebit(state, row.householdId, row.units, type, content);
+  } else {
+    const fromId = fromHouseholdId !== undefined ? fromHouseholdId : householdIdFromOwner(from);
+    if (fromId) recordVoucherDebit(state, fromId, voucherUnits, type, content);
   }
-  for (const row of creditRows) {
-    const household = state.households?.byId?.[row.householdId];
-    if (!household) continue;
-    if (CAPITAL_RETURN_TYPES.has(type)) add(household, "capitalReturnVoucherUnits", row.units, content);
-    else if (INCOME_TYPES.has(type)) add(household, "incomeVoucherUnits", row.units, content);
-    if (WAGE_TYPES.has(type)) add(household, "wagePaidVoucherUnits", row.units, content);
-    if (BUDGET_INCOME_TYPES.has(type)) add(household, "budgetIncomeVoucherUnits", row.units, content);
+  if (householdCredits.length) {
+    for (const row of householdCredits) recordVoucherCredit(state, row.householdId, row.units, type, content);
+  } else {
+    const toId = toHouseholdId !== undefined ? toHouseholdId : householdIdFromOwner(to);
+    if (toId) recordVoucherCredit(state, toId, voucherUnits, type, content);
   }
 }
 
@@ -154,9 +168,10 @@ export function finalizeHouseholdLifeDay(state, content) {
     life.recent.push(row);
     if (life.recent.length > limit) life.recent.splice(0, life.recent.length - limit);
     const obs = life.observation; obs.rows.push(row);
-    for (const [key, value] of Object.entries(life.day)) if (value) obs.totals[key] = (obs.totals[key] || 0) + value;
+    const day = life.day;
+    for (const key in day) { const value = day[key]; if (value) obs.totals[key] = (obs.totals[key] || 0) + value; }
     const obsLimit = content.rules.satisfactionObservationDays || 14;
-    while (obs.rows.length > obsLimit) { const removed = obs.rows.shift(); for (const [key, value] of Object.entries(removed)) if (key !== "year" && key !== "day" && value) obs.totals[key] = (obs.totals[key] || 0) - value; }
+    while (obs.rows.length > obsLimit) { const removed = obs.rows.shift(); for (const key in removed) { const value = removed[key]; if (key !== "year" && key !== "day" && value) obs.totals[key] = (obs.totals[key] || 0) - value; } }
   }
 }
 

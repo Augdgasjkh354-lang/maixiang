@@ -71,20 +71,69 @@ export const BUILDINGS = Object.freeze({
     upgrade: Object.freeze({ maxLevel: 20, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
 
-  winery: Object.freeze({
-    id: "winery", name: "酒坊", icon: "🍶",
-    description: "小麦酿酒 · 用镇库小麦",
+  // 四种酒各一栋（一栋建筑只能跑一个配方）：啤酒坊、精酿坊（高档啤酒）、酒坊（普通白酒）、窖坊（高档白酒）。
+  brewery: Object.freeze({
+    id: "brewery", name: "啤酒坊", icon: "🍺",
+    description: "小麦酿普通啤酒 · 1 斤麦出 5 斤啤酒",
     industryTier: 1,
     maxInstances: 12,
-    recipeId: "winery_wine",
+    recipeId: "brewery_beer",
+    productionRoleId: "beer_brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "beer_brewers", name: "酿酒工", slots: 8, wagePerWorkerDay: 5,
+      note: "每人每日用30斤麦酿50斤啤酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 400 }]),
+    construction: Object.freeze({ workDays: 360, recommendedWorkers: 8 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 360, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 400 }]) })
+  }),
+  craft_brewery: Object.freeze({
+    id: "craft_brewery", name: "精酿坊", icon: "🍻",
+    description: "小麦陈酿高档啤酒 · 工时是啤酒坊的三分之一",
+    industryTier: 1,
+    maxInstances: 6,
+    recipeId: "craft_brewery_beer",
+    productionRoleId: "craft_brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "craft_brewers", name: "精酿师", slots: 6, wagePerWorkerDay: 5,
+      note: "每人每日用10斤麦酿50斤高档啤酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 6 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+  }),
+  winery: Object.freeze({
+    id: "winery", name: "酒坊", icon: "🍶",
+    description: "小麦酿普通白酒 · 1 斤麦出 1 斤白酒",
+    industryTier: 1,
+    maxInstances: 12,
+    recipeId: "winery_baijiu",
     productionRoleId: "brewers",
     accountingSector: "brewing",
     jobs: Object.freeze([Object.freeze({
       id: "brewers", name: "酿酒工", slots: 8, wagePerWorkerDay: 5,
-      note: "每人每日用30斤麦酿12斤酒", releasePriority: 40
+      note: "每人每日用30斤麦酿30斤白酒", releasePriority: 40
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
     construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+  }),
+  premium_winery: Object.freeze({
+    id: "premium_winery", name: "窖坊", icon: "🏺",
+    description: "窖藏陈酿高档白酒 · 工时是酒坊的三分之一",
+    industryTier: 1,
+    maxInstances: 6,
+    recipeId: "premium_winery_baijiu",
+    productionRoleId: "cellar_brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "cellar_brewers", name: "窖工", slots: 6, wagePerWorkerDay: 5,
+      note: "每人每日用10斤麦酿10斤高档白酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 6 }),
     upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
   }),
   cotton_field: Object.freeze({

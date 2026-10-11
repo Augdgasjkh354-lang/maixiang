@@ -1,5 +1,6 @@
 import { currencyScale } from "../economy/currency.js";
-import { createPaymentCapabilityContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } from "../economy/payment.js";
+import { createHouseholdPaymentContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } from "../economy/payment.js";
+import { householdOwner } from "../economy/accounts.js";
 import { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, withDeferredHouseholdSync } from "./households.js";
 import { ensureHouseholdLife } from "./household-life.js";
 import { householdBudgets } from "./household-budget.js";
@@ -89,12 +90,13 @@ export function accrueServiceDemand(state, content) {
   const elapsedDays = Math.max(1, 1 + serviceState.latentDays);
   serviceState.latentDays = 0;
   const activeIds = new Set();
+  const defList = Object.values(defs);
   for (const household of householdList(state).filter(isActiveHousehold)) {
     activeIds.add(household.id);
     const demand = serviceState.demandByHousehold[household.id] ||= {};
     const carry = serviceState.carryByHousehold[household.id] ||= {};
     const affluence = householdAffluenceFor(state, household, content);
-    for (const def of Object.values(defs)) {
+    for (const def of defList) {
       // 不够门槛的家庭不产生这项需求（清零，不留旧账）。
       if (!serviceOpenToAffluence(def, affluence)) {
         demand[def.id] = 0;
@@ -124,11 +126,12 @@ export function accrueServiceDemand(state, content) {
 function householdDailyServiceBudget(state, household, content) {
   const budget = householdBudgets(state, content).get(household.id)?.serviceBudgetUnits || 0;
   if (budget <= 0) return 0;
-  const owner = `household:${household.id}`;
+  const owner = householdOwner(household.id);
   const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-  const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits });
+  // maxWheatUnits 正是默认口粮天数下的可换小麦，带不带这个上限算出的支付能力完全相同，所以两处共用同一个上下文。
+  const paymentContext = createHouseholdPaymentContext(state, household, content, maxWheatUnits, maxWheatUnits);
   const payable = maximumFullyPayableValueUnits(state, owner,
-    maximumPayableValueUnits(state, owner, content), content, { maxWheatUnits, paymentContext });
+    maximumPayableValueUnits(state, owner, content, { paymentContext }), content, { maxWheatUnits, paymentContext });
   return Math.max(0, Math.min(budget, payable, Number.MAX_SAFE_INTEGER));
 }
 

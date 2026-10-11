@@ -30,14 +30,14 @@ import { accrueSaltNeed, buySaltForResidents, consumeDailySalt, finishSaltGraceD
 import { adjustPrivateWages } from "./private-wage.js";
 import { arrangePrivateWorkers, processPrivateIndustries, resetPrivateDaily, resetPrivateYear, payPrivateIndustryWages } from "./private-industry.js";
 import { emptyFinancialFlowPeriod } from "../economy/financial-flows.js";
-import { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } from "./companies.js";
+import { arrangeListedWorkers, payListedCompanyWages, payListedDividends, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } from "./companies.js";
 import { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } from "./shops.js";
 import { settleTradingHouses } from "./trading-houses.js";
 import { refreshOperatingPlan, recordConsumerDay } from "../economy/operating-plan.js";
 import { archiveHouseholdLifeYear, finalizeHouseholdIncomeDay, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } from "./household-life.js";
 import { settleBankDay } from "./bank.js";
 import { settleBondsDay } from "./bonds.js";
-import { settleStockMarketDay, settleHouseholdStockBuying } from "./stock-exchange.js";
+import { settleStockMarketDay, settleDailyShareMarket } from "./stock-exchange.js";
 import { settleLiquidityDay } from "./liquidity.js";
 import { fillMissingHouseholdLastHarvestIncome, maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
@@ -74,6 +74,7 @@ function resetDayBooks(state, content) {
   resetPrivateDaily(state);
   resetRedistributionDay(state);
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
+  if (state.stampDuty) state.stampDuty.day = {};
   if (state.agriculture?.reclaim) state.agriculture.reclaim.day = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
 }
 
@@ -101,6 +102,7 @@ function resetYearBooks(state, content) {
   resetRedistributionYear(state);
   state.financialFlows.year = emptyFinancialFlowPeriod();
   if (state.fiscal) state.fiscal.year = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
+  if (state.stampDuty) state.stampDuty.year = {};
   if (state.agriculture?.reclaim) state.agriculture.reclaim.year = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
   if (state.salt) state.salt.year = { demandUnits: 0, satisfiedUnits: 0, purchasedUnits: 0, paidWheatUnits: 0 };
   resetYearHouseholdIncome(state);
@@ -233,8 +235,10 @@ export const CORE_DAILY_STEPS = [
     settleLiquidityDay(state, content);
     settleBankDay(state, content);
     settleBondsDay(state, content);
+    // 股市（docs/STOCK.md）：季度分红先于行情（除权日价先下调，再随当日行情波动）；居民卖单与买入在行情之后撮合，净流量次日生效。
+    payListedDividends(state, content);
     settleStockMarketDay(state, content);
-    settleHouseholdStockBuying(state, content);
+    settleDailyShareMarket(state, content);
   } },
   // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天一次（金融之后，家底已结算）；家产归公每日再扫一遍，补取不回的存款。
   { id: "wealthTax", when: isWealthTaxDay, run: settleWealthTax },

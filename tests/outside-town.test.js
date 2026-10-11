@@ -199,7 +199,7 @@ test("价格因子逐日靠拢：单日相对变动不超过 priceEasePerDay，�
   const { priceEasePerDay: ease, minBuyPriceFactor: floor } = CONTENT.rules.outsideTrade;
   assert.equal(ease, 0.01);
   assert.equal(floor, 0.9);
-  const importIds = ["salt", "wood", "wine", "cloth"];
+  const importIds = ["salt", "wood", "baijiu", "beer", "cloth"];
   // 进口品存货堆到 10 年用量、繁荣度拉满：目标因子（库存因子 0.4 × 紧迫系数 1）远低于下限，因子应逐日下降并停在下限。
   town.prosperity = 100;
   let prev = Object.fromEntries(importIds.map(id => [id, town.priceFactor[id]]));

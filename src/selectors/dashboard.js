@@ -646,6 +646,12 @@ export function selectDashboard(state, content, selection) {
       lastDay: state.policy?.lastDay || null,
       villa: state.policy?.villa || { priceWheatJin: 10000, taxRatePercent: 0.5 },
       villaStats: selectVillaStats(state, content),
+      // 印花税收入（粮券，只读）：当日 / 本年 / 累计，口径见 systems/stock-exchange.js 的 payStampDuty。
+      stampDutyVoucher: {
+        day: (state.stampDuty?.day?.stampDutyUnits || 0) / voucherScale,
+        year: (state.stampDuty?.year?.stampDutyUnits || 0) / voucherScale,
+        cumulative: (state.stampDuty?.cumulative?.stampDutyUnits || 0) / voucherScale
+      },
       wageControl: state.policy?.wageControl || { civil: 1.0, industry: 1.0 },
       wageLastDay: state.payroll?.lastDay || null,
       // 银行统计（金融扩展二期）：只读，不初始化 state.bank

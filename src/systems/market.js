@@ -57,24 +57,26 @@ function buyStapleItem(state, content, itemId, familyTargetQeq) {
   const householdNeedsUnits = {};
   let targetQeq = 0;
   let targetUnits = 0;
-  for (const [householdId, qeq] of familyTargetQeq) {
+  const byId = state.households?.byId;
+  // Map.forEach 不为每一项分配 [键, 值] 数组，遍历顺序与 for-of 相同。
+  familyTargetQeq.forEach((qeq, householdId) => {
     targetQeq += qeq;
-    const household = state.households?.byId?.[householdId];
+    const household = byId?.[householdId];
     const hasQeq = Math.floor((household?.inventory?.[itemId] || 0) * perUnitQeq);
     const units = perUnitQeq > 0 ? Math.max(0, Math.floor((qeq - hasQeq) / perUnitQeq)) : 0;
     if (units > 0) { householdNeedsUnits[householdId] = units; targetUnits += units; }
-  }
+  });
   const townBefore = state.accounts.town[itemId] || 0;
   const result = targetUnits > 0
     ? purchaseItemForResidents(state, itemId, targetUnits, price, content, `居民以粮券购买${item?.name || itemId}`, { householdNeedsUnits })
     : { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: null };
   // 买完后每户还差多少（口粮当量），留给下一种主食替代。
   const shortfallQeq = new Map();
-  for (const [householdId, qeq] of familyTargetQeq) {
+  familyTargetQeq.forEach((qeq, householdId) => {
     const household = state.households?.byId?.[householdId];
     const has = Math.floor((household?.inventory?.[itemId] || 0) * perUnitQeq);
     if (qeq > has) shortfallQeq.set(householdId, qeq - has);
-  }
+  });
   return {
     itemId,
     targetQeq,
@@ -121,7 +123,7 @@ export function buyStaplesForResidents(state, population, content) {
   for (const [itemId] of meats) {
     const row = buyStapleItem(state, content, itemId, meatPlan.get(itemId));
     rows.push(row);
-    for (const [id, qeq] of row.shortfallQeq) meatShort.set(id, (meatShort.get(id) || 0) + qeq);
+    row.shortfallQeq.forEach((qeq, id) => meatShort.set(id, (meatShort.get(id) || 0) + qeq));
   }
   let upgradeShareSum = 0;
   let people = 0;
@@ -140,10 +142,10 @@ export function buyStaplesForResidents(state, population, content) {
   }
   const breadRow = buyStapleItem(state, content, "bread", plan.bread);
   rows.push(breadRow);
-  for (const [id, qeq] of breadRow.shortfallQeq) plan.flour.set(id, (plan.flour.get(id) || 0) + qeq);
+  breadRow.shortfallQeq.forEach((qeq, id) => plan.flour.set(id, (plan.flour.get(id) || 0) + qeq));
   const flourRow = buyStapleItem(state, content, "flour", plan.flour);
   rows.push(flourRow);
-  for (const [id, qeq] of flourRow.shortfallQeq) plan.wheat.set(id, (plan.wheat.get(id) || 0) + qeq);
+  flourRow.shortfallQeq.forEach((qeq, id) => plan.wheat.set(id, (plan.wheat.get(id) || 0) + qeq));
   rows.push(buyStapleItem(state, content, "wheat", plan.wheat));
   const order = ["wheat", "flour", "bread", ...meats.map(([itemId]) => itemId)];
   rows.sort((a, b) => order.indexOf(a.itemId) - order.indexOf(b.itemId));

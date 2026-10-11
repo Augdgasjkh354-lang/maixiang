@@ -816,20 +816,69 @@ const BUILDINGS = Object.freeze({
     upgrade: Object.freeze({ maxLevel: 20, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
 
-  winery: Object.freeze({
-    id: "winery", name: "酒坊", icon: "🍶",
-    description: "小麦酿酒 · 用镇库小麦",
+  // 四种酒各一栋（一栋建筑只能跑一个配方）：啤酒坊、精酿坊（高档啤酒）、酒坊（普通白酒）、窖坊（高档白酒）。
+  brewery: Object.freeze({
+    id: "brewery", name: "啤酒坊", icon: "🍺",
+    description: "小麦酿普通啤酒 · 1 斤麦出 5 斤啤酒",
     industryTier: 1,
     maxInstances: 12,
-    recipeId: "winery_wine",
+    recipeId: "brewery_beer",
+    productionRoleId: "beer_brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "beer_brewers", name: "酿酒工", slots: 8, wagePerWorkerDay: 5,
+      note: "每人每日用30斤麦酿50斤啤酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 400 }]),
+    construction: Object.freeze({ workDays: 360, recommendedWorkers: 8 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 360, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 400 }]) })
+  }),
+  craft_brewery: Object.freeze({
+    id: "craft_brewery", name: "精酿坊", icon: "🍻",
+    description: "小麦陈酿高档啤酒 · 工时是啤酒坊的三分之一",
+    industryTier: 1,
+    maxInstances: 6,
+    recipeId: "craft_brewery_beer",
+    productionRoleId: "craft_brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "craft_brewers", name: "精酿师", slots: 6, wagePerWorkerDay: 5,
+      note: "每人每日用10斤麦酿50斤高档啤酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 6 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+  }),
+  winery: Object.freeze({
+    id: "winery", name: "酒坊", icon: "🍶",
+    description: "小麦酿普通白酒 · 1 斤麦出 1 斤白酒",
+    industryTier: 1,
+    maxInstances: 12,
+    recipeId: "winery_baijiu",
     productionRoleId: "brewers",
     accountingSector: "brewing",
     jobs: Object.freeze([Object.freeze({
       id: "brewers", name: "酿酒工", slots: 8, wagePerWorkerDay: 5,
-      note: "每人每日用30斤麦酿12斤酒", releasePriority: 40
+      note: "每人每日用30斤麦酿30斤白酒", releasePriority: 40
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
     construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
+    upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
+  }),
+  premium_winery: Object.freeze({
+    id: "premium_winery", name: "窖坊", icon: "🏺",
+    description: "窖藏陈酿高档白酒 · 工时是酒坊的三分之一",
+    industryTier: 1,
+    maxInstances: 6,
+    recipeId: "premium_winery_baijiu",
+    productionRoleId: "cellar_brewers",
+    accountingSector: "brewing",
+    jobs: Object.freeze([Object.freeze({
+      id: "cellar_brewers", name: "窖工", slots: 6, wagePerWorkerDay: 5,
+      note: "每人每日用10斤麦酿10斤高档白酒", releasePriority: 40
+    })]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
+    construction: Object.freeze({ workDays: 400, recommendedWorkers: 6 }),
     upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]) })
   }),
   cotton_field: Object.freeze({
@@ -1144,7 +1193,9 @@ const THEATER_MIN_AFFLUENCE = 1.5;
   shareFoodReserveDays: 90,
   shareLivingVoucherReserveDays: 30,
   sharesPerListedLevel: 1000,
-  defaultDividendPercent: 50, // Legacy company save/API compatibility only; 0.1.7 annual settlement does not use this ratio.
+  // 股市（docs/STOCK.md）：印花税（卖方承担，归镇库；政策 policy.stampDutyPercent 可调）；分红比例（占近一季净利润，民营默认 60%，镇库控股可调）；分红每 90 天一次。
+  stampDutyDefaultPercent: 0.1, stampDutyMaximumPercent: 5,
+  sharePayoutDefaultPercent: 60, sharePayoutMaximumPercent: 100, shareDividendIntervalDays: 90, shareExRightsRecoverDays: 90,
   companyOperatingReserveDays: 360,
   sharePerformanceObservationDays: 30,
   shareTargetAnnualYieldPercent: 8,
@@ -1287,7 +1338,11 @@ const THEATER_MIN_AFFLUENCE = 1.5;
   // comfortMaximum 是用到标准量时的舒心值加成，多用边际递减（最多 1.5 倍）。
   householdGoods: Object.freeze({
     cloth: Object.freeze({ annualPerPerson: 1, incomeElasticity: 0.6, comfortMaximum: 3 }),
-    wine: Object.freeze({ annualPerPerson: 6, incomeElasticity: 1.2, comfortMaximum: 2 })
+    // 四种酒（啤酒/白酒 × 普通/高档，见 CHANGELOG「未发布」）：普通款面向所有人；高档款收入弹性 2，只有宽裕人家的量明显。
+    beer: Object.freeze({ annualPerPerson: 12, incomeElasticity: 1, comfortMaximum: 0.8 }),
+    beer_premium: Object.freeze({ annualPerPerson: 2, incomeElasticity: 2, comfortMaximum: 0.3 }),
+    baijiu: Object.freeze({ annualPerPerson: 3, incomeElasticity: 1.2, comfortMaximum: 0.6 }),
+    baijiu_premium: Object.freeze({ annualPerPerson: 1, incomeElasticity: 2, comfortMaximum: 0.3 })
   }),
   // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/fullAffluence)^exponent（封顶 maxShare），
   // fullAffluence 是肉占比达到 maxShare 的宽裕度（不再跟 householdBudget.maxAffluence 挂钩：那已是渐近上限 4，会让肉的曲线整体漂移）；
@@ -1323,7 +1378,7 @@ const THEATER_MIN_AFFLUENCE = 1.5;
   // 民间贷款（systems/household-loans.js，规格 docs/LENDING.md）：净家底口径下的负债上限、月供占近 30 天收入上限、单户余额上限（斤）、期限（月）。
   lending: Object.freeze({ maxDebtToWealthShare: 0.6, maxServiceShareOfIncome: 0.3, maxPerHouseholdJin: 20000, shopTermMonths: 24, villaTermMonths: 60 }),
   shopTypes: Object.freeze({
-    general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
+    general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "beer", "beer_premium", "baijiu", "baijiu_premium", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
@@ -1352,11 +1407,11 @@ const THEATER_MIN_AFFLUENCE = 1.5;
     town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 0.45, beer_premium: 1.2, baijiu: 2.5, baijiu_premium: 6.7, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 0.5, beer_premium: 1.35, baijiu: 2.8, baijiu_premium: 7.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 0.4, beer_premium: 1.05, baijiu: 2.2, baijiu_premium: 5.9, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
@@ -1445,10 +1500,26 @@ const __mxmod4 = (() => {
     id: "salt", name: "食盐", unit: "斤", category: "household",
     edible: false, qeq: null, openingCostWheatPerJin: 0
   }),
-  // 酒：享受品，不算口粮。棉花：织布原料。布：日用必需品（按匹）。
-  wine: Object.freeze({
+  // 酒：享受品，不算口粮，四种（啤酒/白酒 × 普通/高档）。普通款面向所有人，高档款只有宽裕人家买（见 rules.householdGoods）。
+  // 高档款的工时是普通款的 1/3（陈酿），单价约 2.7 倍。棉花：织布原料。布：日用必需品（按匹）。
+  beer: Object.freeze({
     wholesale: true, retail: true, storeOnly: true,
-    id: "wine", name: "酒", unit: "斤", category: "household",
+    id: "beer", name: "普通啤酒", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  beer_premium: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true,
+    id: "beer_premium", name: "高档啤酒", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  baijiu: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true,
+    id: "baijiu", name: "普通白酒", unit: "斤", category: "household",
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+  }),
+  baijiu_premium: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true,
+    id: "baijiu_premium", name: "高档白酒", unit: "斤", category: "household",
     edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
   }),
   cotton: Object.freeze({
@@ -1538,12 +1609,34 @@ const RECIPES = Object.freeze({
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
   }),
-  winery_wine: Object.freeze({
-    id: "winery_wine", name: "酿酒",
+  // 四种酒：无损耗。普通款每工日 3 批（30 斤麦）；高档款陈酿，每工日 1 批（普通的 1/3 工时），出粮比与普通款相同。
+  brewery_beer: Object.freeze({
+    id: "brewery_beer", name: "酿啤酒",
     inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
-    outputs: Object.freeze([{ itemId: "wine", quantity: 4 }]),
-    losses: Object.freeze([{ itemId: "wheat", quantity: 6 }]),
+    outputs: Object.freeze([{ itemId: "beer", quantity: 50 }]),
+    losses: Object.freeze([]),
     batchesPerWorkerDay: 3
+  }),
+  craft_brewery_beer: Object.freeze({
+    id: "craft_brewery_beer", name: "酿高档啤酒",
+    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
+    outputs: Object.freeze([{ itemId: "beer_premium", quantity: 50 }]),
+    losses: Object.freeze([]),
+    batchesPerWorkerDay: 1
+  }),
+  winery_baijiu: Object.freeze({
+    id: "winery_baijiu", name: "酿普通白酒",
+    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
+    outputs: Object.freeze([{ itemId: "baijiu", quantity: 10 }]),
+    losses: Object.freeze([]),
+    batchesPerWorkerDay: 3
+  }),
+  premium_winery_baijiu: Object.freeze({
+    id: "premium_winery_baijiu", name: "窖藏高档白酒",
+    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
+    outputs: Object.freeze([{ itemId: "baijiu_premium", quantity: 10 }]),
+    losses: Object.freeze([]),
+    batchesPerWorkerDay: 1
   }),
   cotton_growing: Object.freeze({
     id: "cotton_growing", name: "种棉",
@@ -1662,8 +1755,11 @@ const exportPrice = price => price * EXPORT_PRICE_FACTOR;
       wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 27428, sellsToUs: false, supplyWeight: 0.2 }),
       flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 108000, sellsToUs: true, supplyWeight: 0 }),
       bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
-      // 民镇自己酿一些酒、织一些布，不够的部分从外面买。
-      wine: Object.freeze({ basePrice: exportPrice(P.wine), needPerPersonDay: 6 / 365, producePerPersonDay: 4 / 365, targetDays: 90, stock: 17828, sellsToUs: false, supplyWeight: 0.05 }),
+      // 民镇自己酿一些酒、织一些布，不够的部分从外面买。酒按四种拆：年人均需求合计 6 斤、自产合计 4 斤（原 wine 的口径）。
+      beer: Object.freeze({ basePrice: exportPrice(P.beer), needPerPersonDay: 4 / 365, producePerPersonDay: 3 / 365, targetDays: 90, stock: 11836, sellsToUs: false, supplyWeight: 0.03 }),
+      beer_premium: Object.freeze({ basePrice: exportPrice(P.beer_premium), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
+      baijiu: Object.freeze({ basePrice: exportPrice(P.baijiu), needPerPersonDay: 1.6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 4734, sellsToUs: false, supplyWeight: 0.02 }),
+      baijiu_premium: Object.freeze({ basePrice: exportPrice(P.baijiu_premium), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
       cloth: Object.freeze({ basePrice: exportPrice(P.cloth), needPerPersonDay: 1 / 365, producePerPersonDay: 0.55 / 365, targetDays: 180, stock: 5828, sellsToUs: false, supplyWeight: 0.1 })
     })
   }),
@@ -1687,7 +1783,11 @@ const exportPrice = price => price * EXPORT_PRICE_FACTOR;
       wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 27428, sellsToUs: false, supplyWeight: 0.15 }),
       flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 108000, sellsToUs: true, supplyWeight: 0 }),
       bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
-      wine: Object.freeze({ basePrice: exportPrice(P.wine * 1.2), needPerPersonDay: 10 / 365, producePerPersonDay: 2 / 365, targetDays: 90, stock: 20572, sellsToUs: false, supplyWeight: 0.1 }),
+      // 王镇讲究饮酒：酒按四种拆，年人均需求合计 10 斤（原 wine 口径），自产合计 2 斤；酒价 × 1.2。
+      beer: Object.freeze({ basePrice: exportPrice(P.beer * 1.2), needPerPersonDay: 6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 17753, sellsToUs: false, supplyWeight: 0.04 }),
+      beer_premium: Object.freeze({ basePrice: exportPrice(P.beer_premium * 1.2), needPerPersonDay: 1.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 3551, sellsToUs: false, supplyWeight: 0.02 }),
+      baijiu: Object.freeze({ basePrice: exportPrice(P.baijiu * 1.2), needPerPersonDay: 2.6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 7693, sellsToUs: false, supplyWeight: 0.03 }),
+      baijiu_premium: Object.freeze({ basePrice: exportPrice(P.baijiu_premium * 1.2), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
       cloth: Object.freeze({ basePrice: exportPrice(P.cloth * 1.2), needPerPersonDay: 1.5 / 365, producePerPersonDay: 0.1 / 365, targetDays: 180, stock: 5142, sellsToUs: false, supplyWeight: 0.2 })
     })
   })
@@ -1988,6 +2088,30 @@ const PARSED_OWNER_CACHE_LIMIT = 20000;
   return parsed;
 }
 
+// 家庭账户名 `household:<id>`：同一个 id 总返回同一个字符串对象（热路径每笔付款都要拼，拼出来的新串还要重新算哈希才能查 parseOwner 缓存）。
+const householdOwnerNames = new Map();
+       function householdOwner(householdId) {
+  let name = householdOwnerNames.get(householdId);
+  if (name === undefined) {
+    name = "household:" + householdId;
+    if (householdOwnerNames.size >= PARSED_OWNER_CACHE_LIMIT) householdOwnerNames.clear();
+    householdOwnerNames.set(householdId, name);
+  }
+  return name;
+}
+
+// 店铺账户名 `shop:<id>`，同理。
+const shopOwnerNames = new Map();
+       function shopOwner(shopId) {
+  let name = shopOwnerNames.get(shopId);
+  if (name === undefined) {
+    name = "shop:" + shopId;
+    if (shopOwnerNames.size >= PARSED_OWNER_CACHE_LIMIT) shopOwnerNames.clear();
+    shopOwnerNames.set(shopId, name);
+  }
+  return name;
+}
+
 function entityOf(state, kind, id) {
   if (kind === "household") return state.households?.byId?.[id] || null;
   if (kind === "company") return state.companies?.[id] || null;
@@ -2036,6 +2160,16 @@ function entityOf(state, kind, id) {
   return { holder: entity, key: kind === "household" ? "voucherUnits" : "cashVoucherUnits" };
 }
 
+// 同 readSlot(voucherSlot(state, owner))（不含对 state.currency 的补建），不建 slot 对象；热路径读余额用。
+       function readVoucherBalance(state, parsed) {
+  const { kind, id } = parsed;
+  if (kind === "town" || kind === "residents") return state.currency?.balances?.[kind] || 0;
+  if (kind === "bank") return state.bank?.cashVoucherUnits || 0;
+  const entity = entityOf(state, kind, id);
+  if (!entity) return 0;
+  return (kind === "household" ? entity.voucherUnits : entity.cashVoucherUnits) || 0;
+}
+
 // 付款用小麦存放位置 { holder, key }：只有镇库、居民、家庭有（库存里的小麦，用于以粮换券）；公司、店铺、社保基金、银行没有。
        function paymentWheatSlot(state, owner) {
   const { kind, id } = parseOwner(owner);
@@ -2048,7 +2182,7 @@ function entityOf(state, kind, id) {
        function readSlot(slot) {
   return slot ? (slot.holder[slot.key] || 0) : 0;
 }
-return { parseOwner, accountExists, isHouseholdOwner, householdIdOf, accountInventory, voucherSlot, paymentWheatSlot, readSlot };
+return { parseOwner, householdOwner, shopOwner, accountExists, isHouseholdOwner, householdIdOf, accountInventory, voucherSlot, readVoucherBalance, paymentWheatSlot, readSlot };
 })();
 
 // ===== economy/financial-flows.js =====
@@ -2121,7 +2255,9 @@ const ledgerBatches = new WeakMap();
 // 已有批次时返回 false（调用方不应关闭别人的批次）。close 没有批次时什么也不做。
        function openLedgerBatch(state) {
   if (ledgerBatches.has(state)) return false;
-  ledgerBatches.set(state, { rows: new Map(), currency: new Map() });
+  // rows / currency：按首次出现顺序排列的待写入行（写入顺序与合并前后的账一致）；
+  // rowIndex / currencyIndex：合并用的查找表。查找用嵌套 Map（付款方 → 收款方 → 类型），不再每笔拼一个长字符串再算哈希。
+  ledgerBatches.set(state, { rows: [], rowIndex: new Map(), currency: [], currencyIndex: new Map() });
   return true;
 }
 
@@ -2129,8 +2265,22 @@ const ledgerBatches = new WeakMap();
   const batch = ledgerBatches.get(state);
   if (!batch) return;
   ledgerBatches.delete(state);
-  for (const row of batch.rows.values()) writeLedgerRow(state, row, content);
-  for (const entry of batch.currency.values()) entry.flush();
+  for (const row of batch.rows) writeLedgerRow(state, row, content);
+  for (const entry of batch.currency) entry.flush();
+}
+
+// 把键分量规范成字符串，与原先 `${...}` 拼键时的转换一致（undefined → "undefined"，数字 → 数字串）。
+function keyPart(value) { return typeof value === "string" ? value : String(value); }
+
+// 在 a → b → c 三层嵌套 Map 里取（或建）叶子数组。
+function leafList(index, a, b, c) {
+  let level2 = index.get(a);
+  if (level2 === undefined) { level2 = new Map(); index.set(a, level2); }
+  let level3 = level2.get(b);
+  if (level3 === undefined) { level3 = new Map(); level2.set(b, level3); }
+  let leaf = level3.get(c);
+  if (leaf === undefined) { leaf = []; level3.set(c, leaf); }
+  return leaf;
 }
 
        function withLedgerBatch(state, content, fn) {
@@ -2144,7 +2294,32 @@ const ledgerBatches = new WeakMap();
 
 // 粮券账本（currency.js）用：批次中返回当前批次的合并表，否则 null。
        function currencyLedgerBatch(state) {
-  return ledgerBatches.get(state)?.currency || null;
+  return ledgerBatches.get(state) || null;
+}
+
+// 粮券流水批次合并：同类型、同 owner、同付款方、同收款方的流水合并成一行。
+// 返回已有的合并项（调用方累加），没有则返回 null；addCurrencyBatchEntry 登记新项。
+       function findCurrencyBatchEntry(batch, type, owner, from, to) {
+  const t = keyPart(type);
+  const o = keyPart(owner ?? "");
+  const f = keyPart(from ?? "");
+  const d = keyPart(to ?? "");
+  // 付款方为空的流水（铸币、换券，owner 才是主体）以 owner 作第一层键。
+  const leaf = leafList(batch.currencyIndex, f !== "" ? f : o, d, t);
+  for (let i = 0; i < leaf.length; i += 1) {
+    const item = leaf[i];
+    if (item.owner === o && item.from === f) return item.entry;
+  }
+  return null;
+}
+
+       function addCurrencyBatchEntry(batch, type, owner, from, to, entry) {
+  const t = keyPart(type);
+  const o = keyPart(owner ?? "");
+  const f = keyPart(from ?? "");
+  const d = keyPart(to ?? "");
+  leafList(batch.currencyIndex, f !== "" ? f : o, d, t).push({ owner: o, from: f, entry });
+  batch.currency.push(entry);
 }
 
 function writeLedgerRow(state, row, content) {
@@ -2158,24 +2333,31 @@ function writeLedgerRow(state, row, content) {
 }
 
        function recordLedger(state, entry, content, options = {}) {
-  const date = {
-    year: options.year ?? state.year,
-    day: Math.max(1, Math.min(content.rules.daysPerYear, options.day ?? (state.day + 1)))
-  };
+  const year = options.year ?? state.year;
+  const day = Math.max(1, Math.min(content.rules.daysPerYear, options.day ?? (state.day + 1)));
   const batch = ledgerBatches.get(state);
   if (batch) {
-    const key = `${entry.type}|${entry.source}|${entry.destination}|${entry.itemId}|${date.year}|${date.day}`;
-    const merged = batch.rows.get(key);
-    if (merged) {
-      merged.quantityUnits = (merged.quantityUnits || 0) + (entry.quantityUnits || 0);
-      merged.qeqUnits = (merged.qeqUnits || 0) + (entry.qeqUnits || 0);
-      merged.count += 1;
-    } else batch.rows.set(key, { id: 0, ...date, ...entry, count: 1 });
+    // 同类型、同付款方、同收款方、同物品、同日的账合并成一行。
+    const itemId = keyPart(entry.itemId);
+    const leaf = leafList(batch.rowIndex, keyPart(entry.source), keyPart(entry.destination), keyPart(entry.type));
+    for (let i = 0; i < leaf.length; i += 1) {
+      const item = leaf[i];
+      if (item.itemId === itemId && item.year === year && item.day === day) {
+        const merged = item.row;
+        merged.quantityUnits = (merged.quantityUnits || 0) + (entry.quantityUnits || 0);
+        merged.qeqUnits = (merged.qeqUnits || 0) + (entry.qeqUnits || 0);
+        merged.count += 1;
+        return;
+      }
+    }
+    const row = { id: 0, year, day, ...entry, count: 1 };
+    leaf.push({ itemId, year, day, row });
+    batch.rows.push(row);
     return;
   }
   state.ledgerSequence += 1;
   // 同一行对象给账本和资金流统计（recordFinancialFlow 只读），省一次对象展开。
-  const row = { id: state.ledgerSequence, ...date, ...entry };
+  const row = { id: state.ledgerSequence, year, day, ...entry };
   state.ledger.unshift(row);
   recordFinancialFlow(state, row);
   if (state.ledger.length > content.rules.ledgerLimit) {
@@ -2240,7 +2422,7 @@ function writeLedgerRow(state, row, content) {
     wageArrearsQeq: 0
   };
 }
-return { openLedgerBatch, closeLedgerBatch, withLedgerBatch, currencyLedgerBatch, recordLedger, recordEvent, makeTransactionId, emptyYearTotals };
+return { openLedgerBatch, closeLedgerBatch, withLedgerBatch, currencyLedgerBatch, findCurrencyBatchEntry, addCurrencyBatchEntry, recordLedger, recordEvent, makeTransactionId, emptyYearTotals };
 })();
 
 // ===== core/allocation.js =====
@@ -2910,7 +3092,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod20 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-b140005";
+       const BUILD_ID = "0203-9000199";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -2937,19 +3119,25 @@ const __mxmod22 = (() => {
 
 // 三段同时累加一个数值字段。
        function bookAdd(holder, key, amount) {
-  for (const period of PERIODS) {
-    const row = (holder[period] ||= {});
-    row[key] = (row[key] || 0) + (amount || 0);
-  }
+  // PERIODS 展开成三段直写（热路径：每笔买卖都要记好几处账），顺序与建键次序同 PERIODS。
+  const delta = amount || 0;
+  let row = (holder.day ||= {});
+  row[key] = (row[key] || 0) + delta;
+  row = (holder.year ||= {});
+  row[key] = (row[key] || 0) + delta;
+  row = (holder.cumulative ||= {});
+  row[key] = (row[key] || 0) + delta;
 }
 
 // 三段同时累加一个按物品（或任意子键）细分的字段。
        function bookAddMap(holder, key, itemId, amount) {
-  for (const period of PERIODS) {
-    const row = (holder[period] ||= {});
-    const map = (row[key] ||= {});
-    map[itemId] = (map[itemId] || 0) + (amount || 0);
-  }
+  const delta = amount || 0;
+  let map = ((holder.day ||= {})[key] ||= {});
+  map[itemId] = (map[itemId] || 0) + delta;
+  map = ((holder.year ||= {})[key] ||= {});
+  map[itemId] = (map[itemId] || 0) + delta;
+  map = ((holder.cumulative ||= {})[key] ||= {});
+  map[itemId] = (map[itemId] || 0) + delta;
 }
 
 // 一次累加多个字段：bookAddAll(holder, { acres: 3, workDays: 10 })。
@@ -3138,7 +3326,7 @@ return { quoteTownCostRemoval, applyTownCostRemoval, removeTownInventoryWithCost
 // ===== systems/households.js =====
 const __mxmod24 = (() => {
 const { RULES } = __mxmod3;
-const { qeqUnitsForInventoryUnits } = __mxmod18;
+const { itemQeqUnitsPerInventoryUnit, qeqUnitsForInventoryUnits } = __mxmod18;
 const { allocateIntegerByWeight } = __mxmod17;
 function emptyInventory(content) {
   return Object.fromEntries(Object.keys(content.items).map(itemId => [itemId, 0]));
@@ -3186,7 +3374,10 @@ function emptyHousehold(index, content) {
 }
 
        function householdEmploymentCount(household) {
-  return Object.values(household?.jobs || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+  const jobs = household?.jobs;
+  let sum = 0;
+  if (jobs) for (const key in jobs) sum += Math.max(0, Number(jobs[key]) || 0);
+  return sum;
 }
 
        function householdIdleWorkers(household) {
@@ -3585,9 +3776,12 @@ function addBirths(state, count) {
   state.accounts ||= {};
   const itemIds = Object.keys(content.items);
   const count = itemIds.length;
-  const totals = new Array(count).fill(0);
+  // Float64Array：逐户累加不再给每个中间和分配堆数字（求和结果与普通数组完全相同）。
+  const totals = new Float64Array(count);
   let voucherUnits = 0;
-  for (const household of householdList(state)) {
+  const households = householdList(state);
+  for (let h = 0; h < households.length; h += 1) {
+    const household = households[h];
     voucherUnits += household.voucherUnits || 0;
     const inventory = household.inventory;
     if (!inventory) continue;
@@ -3643,17 +3837,33 @@ function residentAggregatesReady(state, content) {
 const itemEntriesCache = new WeakMap();
 function itemEntries(content) {
   let cached = itemEntriesCache.get(content.items);
-  if (!cached) {
+  if (!cached || cached.precision !== content.precision) {
     const all = Object.entries(content.items);
-    cached = { all, otherFood: all.filter(([itemId, item]) => itemId !== "wheat" && item.edible && item.qeq) };
+    const otherFood = all.filter(([itemId, item]) => itemId !== "wheat" && item.edible && item.qeq);
+    // 每个有口粮当量的物品：id 与“每库存单位的口粮当量”（当量为 0 的物品对合计恒贡献 0，不入表）。热路径里用下标循环，不再解构。
+    // 首次用到时才算（与原先每次调用时才算同样的时机，物品当量不合法时同样在用到处抛错）。
+    cached = { precision: content.precision, all, otherFood, foodRatios: null, otherFoodRatios: null, wheatQeqPerUnit: null };
     itemEntriesCache.set(content.items, cached);
   }
   return cached;
 }
 
+function qeqRatioRows(rows, content) {
+  const ids = [];
+  const ratios = [];
+  for (const [itemId, item] of rows) {
+    const ratio = itemQeqUnitsPerInventoryUnit(item, content);
+    if (ratio !== 0) { ids.push(itemId); ratios.push(ratio); }
+  }
+  return { ids, ratios };
+}
+
        function householdFoodQeqUnits(state, household, content) {
+  const entries = itemEntries(content);
+  const { ids, ratios } = entries.foodRatios ||= qeqRatioRows(entries.all, content);
+  const inventory = household.inventory;
   let total = 0;
-  for (const [itemId, item] of itemEntries(content).all) total += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
+  for (let i = 0; i < ids.length; i += 1) total += ratios[i] * (inventory?.[ids[i]] || 0);
   return total;
 }
 
@@ -3666,11 +3876,12 @@ function itemEntries(content) {
   const wheat = household.inventory?.wheat || 0;
   if (wheat <= 0) return 0;
   const reserve = householdReserveQeqUnits(state, household, content, reserveDays);
+  const entries = itemEntries(content);
+  const { ids, ratios } = entries.otherFoodRatios ||= qeqRatioRows(entries.otherFood, content);
+  const inventory = household.inventory;
   let otherFoodQeq = 0;
-  for (const [itemId, item] of itemEntries(content).otherFood) {
-    otherFoodQeq += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
-  }
-  const wheatQeqPerUnit = qeqUnitsForInventoryUnits(content.items.wheat, 1, content);
+  for (let i = 0; i < ids.length; i += 1) otherFoodQeq += ratios[i] * (inventory?.[ids[i]] || 0);
+  const wheatQeqPerUnit = entries.wheatQeqPerUnit ??= qeqUnitsForInventoryUnits(content.items.wheat, 1, content);
   const requiredWheatUnits = Math.max(0, Math.ceil((reserve - otherFoodQeq) / Math.max(1, wheatQeqPerUnit)));
   return Math.max(0, wheat - requiredWheatUnits);
 }
@@ -3681,6 +3892,14 @@ function itemEntries(content) {
   const base = content.rules.householdFoodReserveDays ?? 30;
   if (!household || reserveDays === base) return {};
   return { maxWheatUnits: householdConvertibleWheatUnits(state, household, content, reserveDays) };
+}
+
+// reserveWheatPaymentOptions 加上 requireFull: true（买东西必须付全款）；没有额外上限时返回共享的只读对象，省掉每笔付款建两个对象。
+const REQUIRE_FULL_PAYMENT = Object.freeze({ requireFull: true });
+       function reserveWheatFullPaymentOptions(state, household, content, reserveDays) {
+  const base = content.rules.householdFoodReserveDays ?? 30;
+  if (!household || reserveDays === base) return REQUIRE_FULL_PAYMENT;
+  return { requireFull: true, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, reserveDays) };
 }
 
        function householdExchangeAllowanceUnits(state, householdId, content) {
@@ -3915,7 +4134,7 @@ function itemEntries(content) {
   for (const row of rows) counts[row.tier] = (counts[row.tier] || 0) + 1;
   return { rows, counts, thresholds };
 }
-return { createHousehold, householdPopulation, householdWorkingAge, householdEmploymentCount, householdIdleWorkers, isActiveHousehold, createInitialHouseholds, hasHouseholds, householdList, activeHouseholds, totalHouseholdAgeBands, jobAssignments, jobCount, ensureEmploymentExchangeDay, touchHouseholdEmploymentEligibility, jobTenureDays, setHouseholdJobCount, setJobCount, releaseJobFromHousehold, jobReleaseRank, releaseExcessHouseholdEmployment, applyHouseholdDemography, withDeferredHouseholdSync, syncResidentAggregates, setForceFullResidentSync, applyResidentAggregateDelta, residentInventoryUnits, residentVoucherUnits, householdFoodQeqUnits, householdReserveQeqUnits, householdConvertibleWheatUnits, reserveWheatPaymentOptions, householdExchangeAllowanceUnits, consumeHouseholdExchangeAllowance, maximumResidentExchangeWheatUnits, debitHouseholdInventory, creditHouseholdInventory, takeResidentInventory, distributeResidentInventory, creditHouseholdVouchers, debitHouseholdVouchers, takeResidentVouchers, distributeResidentVouchers, clearDailyHouseholdIncome, resetYearHouseholdIncome, occupationCounts, householdLivingSummary };
+return { createHousehold, householdPopulation, householdWorkingAge, householdEmploymentCount, householdIdleWorkers, isActiveHousehold, createInitialHouseholds, hasHouseholds, householdList, activeHouseholds, totalHouseholdAgeBands, jobAssignments, jobCount, ensureEmploymentExchangeDay, touchHouseholdEmploymentEligibility, jobTenureDays, setHouseholdJobCount, setJobCount, releaseJobFromHousehold, jobReleaseRank, releaseExcessHouseholdEmployment, applyHouseholdDemography, withDeferredHouseholdSync, syncResidentAggregates, setForceFullResidentSync, applyResidentAggregateDelta, residentInventoryUnits, residentVoucherUnits, householdFoodQeqUnits, householdReserveQeqUnits, householdConvertibleWheatUnits, reserveWheatPaymentOptions, reserveWheatFullPaymentOptions, householdExchangeAllowanceUnits, consumeHouseholdExchangeAllowance, maximumResidentExchangeWheatUnits, debitHouseholdInventory, creditHouseholdInventory, takeResidentInventory, distributeResidentInventory, creditHouseholdVouchers, debitHouseholdVouchers, takeResidentVouchers, distributeResidentVouchers, clearDailyHouseholdIncome, resetYearHouseholdIncome, occupationCounts, householdLivingSummary };
 })();
 
 // ===== systems/household-life.js =====
@@ -3989,24 +4208,38 @@ const CAPITAL_RETURN_TYPES = new Set(["shop_capital_refund", "shop_close_distrib
 
 const WAGE_TYPES = new Set(["wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment", "enterprise_wage_payment", "private_wage_payment", "shop_wage_payment"]);
 
-       function recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits = [], householdCredits = [] }, content) {
-  const debitRows = householdDebits.length ? householdDebits : (householdIdFromOwner(from) ? [{ householdId: householdIdFromOwner(from), units: voucherUnits }] : []);
-  const creditRows = householdCredits.length ? householdCredits : (householdIdFromOwner(to) ? [{ householdId: householdIdFromOwner(to), units: voucherUnits }] : []);
-  for (const row of debitRows) {
-    const household = state.households?.byId?.[row.householdId];
-    if (!household) continue;
-    if (BUDGET_COST_TYPES.has(type)) add(household, "budgetCostVoucherUnits", row.units, content);
-    if (INVESTMENT_TYPES.has(type)) add(household, "investmentVoucherUnits", row.units, content);
-    else if (LIFE_EXPENSE_TYPES.has(type)) { add(household, "expenseVoucherUnits", row.units, content); add(household, "lifeExpenseVoucherUnits", row.units, content); if (type === "shop_service_sale") add(household, "serviceExpenseVoucherUnits", row.units, content); }
-    else add(household, "expenseVoucherUnits", row.units, content);
+function recordVoucherDebit(state, householdId, units, type, content) {
+  const household = state.households?.byId?.[householdId];
+  if (!household) return;
+  if (BUDGET_COST_TYPES.has(type)) add(household, "budgetCostVoucherUnits", units, content);
+  if (INVESTMENT_TYPES.has(type)) add(household, "investmentVoucherUnits", units, content);
+  else if (LIFE_EXPENSE_TYPES.has(type)) { add(household, "expenseVoucherUnits", units, content); add(household, "lifeExpenseVoucherUnits", units, content); if (type === "shop_service_sale") add(household, "serviceExpenseVoucherUnits", units, content); }
+  else add(household, "expenseVoucherUnits", units, content);
+}
+
+function recordVoucherCredit(state, householdId, units, type, content) {
+  const household = state.households?.byId?.[householdId];
+  if (!household) return;
+  if (CAPITAL_RETURN_TYPES.has(type)) add(household, "capitalReturnVoucherUnits", units, content);
+  else if (INCOME_TYPES.has(type)) add(household, "incomeVoucherUnits", units, content);
+  if (WAGE_TYPES.has(type)) add(household, "wagePaidVoucherUnits", units, content);
+  if (BUDGET_INCOME_TYPES.has(type)) add(household, "budgetIncomeVoucherUnits", units, content);
+}
+
+// 没有逐户明细时（单户对单户的付款，最常见）直接按账户名定位那一户，不再临时拼行数组。
+// fromHouseholdId / toHouseholdId：调用方已解析过账户名时直接给（household id 或 null），省掉再解析。
+       function recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits = [], householdCredits = [], fromHouseholdId, toHouseholdId }, content) {
+  if (householdDebits.length) {
+    for (const row of householdDebits) recordVoucherDebit(state, row.householdId, row.units, type, content);
+  } else {
+    const fromId = fromHouseholdId !== undefined ? fromHouseholdId : householdIdFromOwner(from);
+    if (fromId) recordVoucherDebit(state, fromId, voucherUnits, type, content);
   }
-  for (const row of creditRows) {
-    const household = state.households?.byId?.[row.householdId];
-    if (!household) continue;
-    if (CAPITAL_RETURN_TYPES.has(type)) add(household, "capitalReturnVoucherUnits", row.units, content);
-    else if (INCOME_TYPES.has(type)) add(household, "incomeVoucherUnits", row.units, content);
-    if (WAGE_TYPES.has(type)) add(household, "wagePaidVoucherUnits", row.units, content);
-    if (BUDGET_INCOME_TYPES.has(type)) add(household, "budgetIncomeVoucherUnits", row.units, content);
+  if (householdCredits.length) {
+    for (const row of householdCredits) recordVoucherCredit(state, row.householdId, row.units, type, content);
+  } else {
+    const toId = toHouseholdId !== undefined ? toHouseholdId : householdIdFromOwner(to);
+    if (toId) recordVoucherCredit(state, toId, voucherUnits, type, content);
   }
 }
 
@@ -4075,9 +4308,10 @@ const WAGE_TYPES = new Set(["wage_payment", "construction_wage_payment", "wage_a
     life.recent.push(row);
     if (life.recent.length > limit) life.recent.splice(0, life.recent.length - limit);
     const obs = life.observation; obs.rows.push(row);
-    for (const [key, value] of Object.entries(life.day)) if (value) obs.totals[key] = (obs.totals[key] || 0) + value;
+    const day = life.day;
+    for (const key in day) { const value = day[key]; if (value) obs.totals[key] = (obs.totals[key] || 0) + value; }
     const obsLimit = content.rules.satisfactionObservationDays || 14;
-    while (obs.rows.length > obsLimit) { const removed = obs.rows.shift(); for (const [key, value] of Object.entries(removed)) if (key !== "year" && key !== "day" && value) obs.totals[key] = (obs.totals[key] || 0) - value; }
+    while (obs.rows.length > obsLimit) { const removed = obs.rows.shift(); for (const key in removed) { const value = removed[key]; if (key !== "year" && key !== "day" && value) obs.totals[key] = (obs.totals[key] || 0) - value; } }
   }
 }
 
@@ -4172,8 +4406,8 @@ return { voucherUnitsForWheatUnits, wheatUnitsForVoucherUnits, voucherAmountToUn
 
 // ===== economy/currency.js =====
 const __mxmod27 = (() => {
-const { currencyLedgerBatch, makeTransactionId, recordLedger } = __mxmod16;
-const { householdIdOf, isHouseholdOwner, parseOwner, readSlot, voucherSlot } = __mxmod14;
+const { addCurrencyBatchEntry, currencyLedgerBatch, findCurrencyBatchEntry, makeTransactionId, recordLedger } = __mxmod16;
+const { householdIdOf, isHouseholdOwner, parseOwner, readSlot, readVoucherBalance, voucherSlot } = __mxmod14;
 const { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } = __mxmod23;
 const { hasHouseholds, householdList, residentVoucherUnits, syncResidentAggregates, applyResidentAggregateDelta, takeResidentVouchers, distributeResidentVouchers, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, consumeHouseholdExchangeAllowance, maximumResidentExchangeWheatUnits } = __mxmod24;
 const { recordHouseholdAssetExchange, recordHouseholdVoucherTransfer } = __mxmod25;
@@ -4219,19 +4453,33 @@ function currencyScale(content) {
 }
 
        function voucherBalance(state, owner) {
+  return voucherBalanceOf(state, owner, parseOwner(owner));
+}
+
+// 同 voucherBalance，账户名已解析过时直接传解析结果（转账路径上同一个账户名要读写好几次）。
+function voucherBalanceOf(state, owner, parsed) {
   ensureCurrencyState(state);
   if (owner === "residents" && hasHouseholds(state)) return residentVoucherUnits(state);
-  const { kind, id } = parseOwner(owner);
+  const { kind, id } = parsed;
   if (!kind) throw new Error("未知粮券账户：" + owner);
   // 家庭直接读（最常见，省去建 slot 对象）；与 readSlot(voucherSlot(...)) 同口径。
   if (kind === "household") return state.households?.byId?.[id]?.voucherUnits || 0;
-  return readSlot(voucherSlot(state, owner));
+  return readVoucherBalance(state, parsed);
 }
 
-function setVoucherBalance(state, owner, value, content = null) {
+function setVoucherBalance(state, owner, value, content = null, parsed = parseOwner(owner)) {
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError("粮券余额无效");
   ensureCurrencyState(state);
   if (owner === "residents" && hasHouseholds(state)) throw new Error("居民汇总粮券账户为只读；应落到具体家庭");
+  // 家庭账户（最常见）直接写家庭对象，省掉建 slot；与下面的通用路径同义。
+  if (parsed.kind === "household") {
+    const household = state.households?.byId?.[parsed.id];
+    if (!household) throw new Error("粮券账户不存在：" + owner);
+    const previous = household.voucherUnits || 0;
+    household.voucherUnits = value;
+    if (content) applyResidentAggregateDelta(state, content, value - previous);
+    return;
+  }
   const slot = voucherSlot(state, owner);
   if (!slot) throw new Error("粮券账户不存在：" + owner);
   const before = readSlot(slot);
@@ -4243,8 +4491,7 @@ function currencyLedger(state, row, content) {
   // 日结批次中：同类型、同账户对的粮券流水合并成一行，批次结束时写入（见 ledger.js withLedgerBatch）。
   const batch = currencyLedgerBatch(state);
   if (batch) {
-    const key = `${row.type}|${row.owner ?? ""}|${row.from ?? ""}|${row.to ?? ""}`;
-    const merged = batch.get(key);
+    const merged = findCurrencyBatchEntry(batch, row.type, row.owner, row.from, row.to);
     if (merged) {
       merged.row.voucherUnits = (merged.row.voucherUnits || 0) + (row.voucherUnits || 0);
       if (row.wheatUnits) merged.row.wheatUnits = (merged.row.wheatUnits || 0) + row.wheatUnits;
@@ -4252,7 +4499,7 @@ function currencyLedger(state, row, content) {
     } else {
       const entry = { row: { ...row, count: 1 } };
       entry.flush = () => writeCurrencyLedgerRow(state, entry.row, content);
-      batch.set(key, entry);
+      addCurrencyBatchEntry(batch, row.type, row.owner, row.from, row.to, entry);
     }
     return row;
   }
@@ -4462,16 +4709,21 @@ function currencyAccessCheck(state, owner) {
        function transferVouchers(state, from, to, voucherUnits, content, type = "voucher_transfer", reason = "粮券转账", options = {}) {
   if (!Number.isSafeInteger(voucherUnits) || voucherUnits < 0) return { ok: false, reason: "粮券数量无效" };
   if (voucherUnits === 0) return { ok: true, voucherUnits: 0, transactionId: null, householdDebits: [], householdCredits: [] };
-  if (voucherBalance(state, from) < voucherUnits) return { ok: false, reason: "粮券余额不足" };
-  if (!Number.isSafeInteger(voucherBalance(state, to) + voucherUnits)) return { ok: false, reason: "数值超过安全范围" };
+  const fromParsed = parseOwner(from);
+  const toParsed = parseOwner(to);
+  const fromBefore = voucherBalanceOf(state, from, fromParsed);
+  if (fromBefore < voucherUnits) return { ok: false, reason: "粮券余额不足" };
+  const toBefore = voucherBalanceOf(state, to, toParsed);
+  if (!Number.isSafeInteger(toBefore + voucherUnits)) return { ok: false, reason: "数值超过安全范围" };
 
   let householdDebits = [];
   let householdCredits = [];
-  if (hasHouseholds(state) && from === "residents") {
+  const fromResidents = hasHouseholds(state) && from === "residents";
+  if (fromResidents) {
     const result = takeResidentVouchers(state, voucherUnits, content, options.fromResidents || {});
     if (!result.ok) return result;
     householdDebits = result.rows;
-  } else setVoucherBalance(state, from, voucherBalance(state, from) - voucherUnits, content);
+  } else setVoucherBalance(state, from, fromBefore - voucherUnits, content, fromParsed);
 
   if (hasHouseholds(state) && to === "residents") {
     const result = distributeResidentVouchers(state, voucherUnits, content, options.toResidents || {});
@@ -4482,11 +4734,16 @@ function currencyAccessCheck(state, owner) {
       return result;
     }
     householdCredits = result.rows;
-  } else setVoucherBalance(state, to, voucherBalance(state, to) + voucherUnits, content);
+  } else {
+    // 付款方不是居民汇总时，收款方余额在扣款后只可能因“自己付给自己”而变化，不必再查一遍。
+    const toNow = fromResidents ? voucherBalance(state, to) : (from === to ? fromBefore - voucherUnits : toBefore);
+    setVoucherBalance(state, to, toNow + voucherUnits, content, toParsed);
+  }
 
   const transactionId = options.transactionId || makeTransactionId(state);
   currencyLedger(state, { type, transactionId, from, to, voucherUnits, householdDebits, householdCredits, reason }, content);
-  recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits, householdCredits }, content);
+  recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits, householdCredits,
+    fromHouseholdId: fromParsed.kind === "household" ? fromParsed.id : null, toHouseholdId: toParsed.kind === "household" ? toParsed.id : null }, content);
   recordLedger(state, { type, transactionId, source: from, destination: to, itemId: "grain_voucher",
     quantityUnits: voucherUnits, qeqUnits: 0, reason }, content);
   return { ok: true, transactionId, voucherUnits, householdDebits, householdCredits };
@@ -4761,8 +5018,40 @@ function voucherOnlyObligation(valueUnits) {
   return { valueUnits, wheatValueUnits: 0, voucherValueUnits: valueUnits };
 }
 
+// 家庭的可取回存款，同 depositWithdrawableUnits(state, `household:${id}`)；没有存款时不必去算镇库可垫付额。
+function householdWithdrawableUnits(state, householdId) {
+  const bank = state.bank;
+  if (!bank) return 0;
+  const deposit = Math.max(0, bank.deposits?.[householdId] || 0);
+  if (deposit <= 0) return 0;
+  const liquidity = Math.max(0, bank.cashVoucherUnits || 0) + townAdvanceCapacityUnits(state);
+  return liquidity <= 0 ? 0 : Math.min(liquidity, deposit);
+}
+
+// 同 createPaymentCapabilityContext(state, `household:${household.id}`, content, { maxWheatUnits })，直接用家庭对象，
+// 省掉账户名解析与重复查询。convertibleUnits：调用方已按默认口粮天数（householdFoodReserveDays）算好的可换小麦，可省一次重算。
+       function createHouseholdPaymentContext(state, household, content, maxWheatUnits = null, convertibleUnits = null) {
+  const withdrawable = householdWithdrawableUnits(state, household.id);
+  const townAdvance = townAdvanceCapacityUnits(state);
+  const convertible = convertibleUnits ?? householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
+  let units = Math.min(convertible, householdExchangeAllowanceUnits(state, household.id, content));
+  if (Number.isSafeInteger(maxWheatUnits)) units = Math.min(units, Math.max(0, maxWheatUnits));
+  const advance = Math.max(0, withdrawable - Math.max(0, state.bank?.cashVoucherUnits || 0));
+  return {
+    content,
+    voucherUnits: Math.max(0, household.voucherUnits || 0) + withdrawable,
+    autoExchangeableWheatUnits: Math.max(0, units),
+    exchangeVoucherPoolUnits: Math.max(0, townAdvance - advance)
+  };
+}
+
 // Short-lived derived data for one synchronous quote search. Never stored on state or carried across a settlement.
        function createPaymentCapabilityContext(state, owner, content, options = {}) {
+  const parsed = parseOwner(owner);
+  if (parsed.kind === "household") {
+    const household = state.households?.byId?.[parsed.id];
+    if (household) return createHouseholdPaymentContext(state, household, content, options.maxWheatUnits);
+  }
   const withdrawable = depositWithdrawableUnits(state, owner);
   return {
     content,
@@ -4770,6 +5059,34 @@ function voucherOnlyObligation(valueUnits) {
     autoExchangeableWheatUnits: autoExchangeableWheatUnits(state, owner, content, options),
     exchangeVoucherPoolUnits: exchangeVoucherPoolUnits(state, owner, withdrawable)
   };
+}
+
+// 同 exactExchangeForVoucherNeed(...).voucherUnits，不建对象（二分查找里每一步都要问）。
+function exchangeVoucherUnitsForNeed(voucherNeedUnits, maxWheatUnits, content) {
+  const need = Math.max(0, Math.floor(voucherNeedUnits));
+  const maxWheat = Math.max(0, Math.floor(maxWheatUnits));
+  if (!need || !maxWheat) return 0;
+  const common = gcd(content.precision.inventoryUnitsPerJin, content.precision.currencyUnitsPerVoucher);
+  const wheatStep = content.precision.inventoryUnitsPerJin / common;
+  const voucherStep = content.precision.currencyUnitsPerVoucher / common;
+  const steps = Math.min(Math.ceil(need / voucherStep), Math.floor(maxWheat / wheatStep));
+  return steps * voucherStep;
+}
+
+// 同 quoteFromCapability(dueValueUnits, capability, content).full，不建报价对象。
+function fullyPayableFromCapability(dueValueUnits, capability, content) {
+  const exchanged = exchangeVoucherUnitsForNeed(
+    Math.min(Math.max(0, dueValueUnits - capability.voucherUnits), capability.exchangeVoucherPoolUnits || 0),
+    capability.autoExchangeableWheatUnits, content
+  );
+  const paid = Math.min(dueValueUnits, capability.voucherUnits + exchanged);
+  return dueValueUnits - paid === 0;
+}
+
+// 同 quotePaymentValueUnitsWithContext(context, valueUnits).full。
+       function canPayFullyWithContext(context, valueUnits) {
+  if (!Number.isSafeInteger(valueUnits) || valueUnits < 0) voucherOnlyObligation(valueUnits);
+  return fullyPayableFromCapability(valueUnits, context, context.content);
 }
 
 function quoteFromCapability(dueValueUnits, capability, content) {
@@ -4812,8 +5129,7 @@ function maximumPayableValueUnitsFromContext(context) {
   let high = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(Number(limitValueUnits) || 0)));
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    const quote = quotePaymentValueUnitsWithContext(context, mid);
-    if (quote.full) low = mid; else high = mid - 1;
+    if (canPayFullyWithContext(context, mid)) low = mid; else high = mid - 1;
   }
   return low;
 }
@@ -4834,11 +5150,16 @@ function maximumPayableValueUnitsFromContext(context) {
 // 接受整数（价值）或旧形状的对象；小麦分项并入粮券。
        function normalizePaymentObligation(value, state = null) {
   void state;
-  if (Number.isSafeInteger(value)) return voucherOnlyObligation(value);
+  return voucherOnlyObligation(normalizedDueUnits(value));
+}
+
+// normalizePaymentObligation(value).valueUnits，但不建对象（热路径：每笔付款都要先规范应付额）。
+function normalizedDueUnits(value) {
+  if (Number.isSafeInteger(value)) return value;
   const wheat = Math.max(0, Math.round(Number(value?.wheatValueUnits) || 0));
   const voucher = Math.max(0, Math.round(Number(value?.voucherValueUnits) || 0));
   const total = Math.max(0, Math.round(Number(value?.valueUnits) || 0));
-  return voucherOnlyObligation(Math.max(total, wheat + voucher));
+  return Math.max(total, wheat + voucher);
 }
 
        function quoteMonetaryPayment(state, from, dueInput, content, options = {}) {
@@ -4847,26 +5168,31 @@ function maximumPayableValueUnitsFromContext(context) {
 }
 
        function settleMonetaryPayment(state, from, to, dueInput, content, type = "payment", reason = "货币支付", options = {}) {
-  const due = normalizePaymentObligation(dueInput);
-  if (due.valueUnits <= 0) return { ok: true, paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-    remainingValueUnits: 0, remainingComposition: due, transactionId: null };
-  if (options.requireFull !== false) {
-    const preflight = quoteMonetaryPayment(state, from, due, content, options);
+  const dueUnits = normalizedDueUnits(dueInput);
+  // 与 normalizePaymentObligation 同样的校验（负数、非整数抛 RangeError），但成功路径不建对象。
+  if (!Number.isSafeInteger(dueUnits) || dueUnits < 0) voucherOnlyObligation(dueUnits);
+  if (dueUnits <= 0) return { ok: true, paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
+    remainingValueUnits: 0, remainingComposition: voucherOnlyObligation(dueUnits), transactionId: null };
+  // 手头粮券够付时报价必然全额（可用粮券 ≥ 手头粮券），不必建支付能力上下文。
+  const beforeVoucher = voucherBalance(state, from);
+  if (options.requireFull !== false && beforeVoucher < dueUnits) {
+    const preflight = quoteMonetaryPayment(state, from, dueUnits, content, options);
     if (!preflight.full) {
       return { ok: false, reason: "粮券不足", paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-        remainingValueUnits: due.valueUnits, remainingComposition: due,
+        remainingValueUnits: dueUnits, remainingComposition: voucherOnlyObligation(dueUnits),
         voucherShortfallValueUnits: preflight.voucherShortfallValueUnits || 0 };
     }
   }
   // 付款顺序：手头粮券 → 存款取回（银行现金不足由镇库垫付）→ 以粮换券（镇库券池封顶）。
-  const beforeVoucher = voucherBalance(state, from);
-  withdrawDepositsForPayment(state, from, Math.max(0, due.valueUnits - beforeVoucher), content);
-  autoExchangeForPayment(state, from, Math.max(0, due.valueUnits - voucherBalance(state, from)), content, options);
-  const voucherPaid = Math.min(due.valueUnits, voucherBalance(state, from));
-  const remaining = due.valueUnits - voucherPaid;
+  if (beforeVoucher < dueUnits) {
+    withdrawDepositsForPayment(state, from, dueUnits - beforeVoucher, content);
+    autoExchangeForPayment(state, from, Math.max(0, dueUnits - voucherBalance(state, from)), content, options);
+  }
+  const voucherPaid = beforeVoucher >= dueUnits ? dueUnits : Math.min(dueUnits, voucherBalance(state, from));
+  const remaining = dueUnits - voucherPaid;
   if (options.requireFull !== false && remaining > 0) {
     return { ok: false, reason: "粮券不足", paidValueUnits: 0, voucherPaidValueUnits: 0, wheatPaidValueUnits: 0,
-      remainingValueUnits: due.valueUnits, remainingComposition: due, voucherShortfallValueUnits: remaining };
+      remainingValueUnits: dueUnits, remainingComposition: voucherOnlyObligation(dueUnits), voucherShortfallValueUnits: remaining };
   }
   const transactionId = makeTransactionId(state);
   if (voucherPaid > 0) {
@@ -4886,7 +5212,7 @@ function maximumPayableValueUnitsFromContext(context) {
     remainingComposition: voucherOnlyObligation(remaining)
   };
 }
-return { ensureMonetaryReform, hasCompletedBank, hasBankAccess, depositWithdrawableUnits, householdSpendableVoucherUnits, spendableVoucherUnits, createPaymentCapabilityContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment };
+return { ensureMonetaryReform, hasCompletedBank, hasBankAccess, depositWithdrawableUnits, householdSpendableVoucherUnits, spendableVoucherUnits, createHouseholdPaymentContext, createPaymentCapabilityContext, canPayFullyWithContext, quoteMonetaryPaymentWithContext, quotePaymentValueUnitsWithContext, maximumPayableValueUnits, maximumFullyPayableValueUnits, currentPaymentComposition, addPaymentObligation, paymentObligationFromLegacyVoucher, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment };
 })();
 
 // ===== systems/employer.js =====
@@ -7396,6 +7722,8 @@ function issueOpeningVouchers(state, content) {
         Object.keys(content.buildings).map(typeId => [typeId, content.rules.privateProductionTaxDefaultPercent ?? 10])
       ),
       // 利润率政策（0—200，一位小数）：综合商店全局目标利润率；贸易行出口 / 进口利润门槛。
+      // 印花税（%）：二级市场每笔成交按成交额由卖方承担，交镇库；镇库自己卖出不征（economy 在 systems/stock-exchange.js）。
+      stampDutyPercent: content.rules.stampDutyDefaultPercent ?? 0.1,
       shopMarginPercent: content.rules.generalStoreMarkupPercent ?? 20,
       tradeMarginPercent: content.rules.tradeHouseTargetMarginPercent ?? 20,
       tradeImportMarginPercent: content.rules.tradeHouseImportMarginPercent ?? 25,
@@ -7471,6 +7799,8 @@ function issueOpeningVouchers(state, content) {
     ipoApplications: {},
     ipoCooldowns: {},
     stockExchange: { legacyAccess: false, rotation: 0 },
+    // 印花税账（粮券，三段记账）：二级市场卖方交给镇库的税额，年报里看 annualReports[].stampDuty。
+    stampDuty: { day: {}, year: {}, cumulative: {} },
     shops: {},
     nextShopNumber: 1,
     services: {
@@ -10793,6 +11123,24 @@ function daySerial(state, content) {
   if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
   const wholesale = currentUnitPrice(state, productId, content);
   if (def.kind === "stall") return stallTradePrices(state, def, content, productId, wholesale);
+  return { ...def, itemId: productId, retailVoucherPerUnit: retailPriceOf(state, def, content, productId, wholesale, shop), wholesaleVoucherPerUnit: wholesale };
+}
+
+// 只要零售价时用（热路径：每笔买卖、每家店每种商品都要问价，不必展开整个店型定义对象）。
+// 返回值与 shopTradePrices(...)?.retailVoucherPerUnit 完全一致，只是没有价格行时返回 null 而不是 undefined。
+       function shopRetailPrice(state, typeId, content, itemId = null, shop = null) {
+  const raw = content.rules.shopTypes?.[typeId];
+  if (!raw) return null;
+  const def = raw.aliasOf ? content.rules.shopTypes?.[raw.aliasOf] : raw;
+  if (!def || def.kind === "service") return null;
+  const productId = itemId || raw.itemId || def.itemId || def.itemIds?.[0];
+  if (!productId || (def.itemIds && !def.itemIds.includes(productId))) return null;
+  const wholesale = currentUnitPrice(state, productId, content);
+  if (def.kind === "stall") return stallPriceOf(state, def, content, productId, wholesale).retail;
+  return retailPriceOf(state, def, content, productId, wholesale, shop);
+}
+
+function retailPriceOf(state, def, content, productId, wholesale, shop) {
   const markup = def.id === "general" ? policyShopMarginPercent(state, content) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
   let retail = wholesale * (1 + markup);
   if (def.id === "general" && shop) {
@@ -10805,22 +11153,34 @@ function daySerial(state, content) {
     const floor = retailFloorOf(shop.pricing, productId, wholesale, content.rules.priceAdjust);
     retail = Math.max(floor, base * priceFactorOf(shop.pricing, productId));
   }
-  return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: wholesale };
+  return retail;
 }
 
 // 集市：进价 = 批发价减特价补贴；售价跟镇上最便宜的综合商店看齐（stallUndercutPercent 默认 0，同价时居民轮流在两边买），没有商店时按批发价加成，且不低于进价。
-function stallTradePrices(state, def, content, productId, wholesale) {
+function stallPriceOf(state, def, content, productId, wholesale) {
   const tiers = content.rules.stallWholesaleDiscountTiers || [0];
   const tier = Math.max(0, Math.min(tiers.length - 1, Math.floor(state.policy?.stallDiscountTier || 0)));
   const cost = Math.max(wholesale * 0.1, wholesale - (tiers[tier] || 0));
-  const storePrices = Object.values(state.shops || {})
-    .filter(shop => shop.status === "open" && shop.typeId === "general")
-    .map(shop => shopTradePrices(state, "general", content, productId, shop)?.retailVoucherPerUnit)
-    .filter(price => price > 0);
-  const reference = storePrices.length
-    ? Math.min(...storePrices) * (1 - Math.max(0, content.rules.stallUndercutPercent ?? 3) / 100)
+  // 营业中综合商店里的最低售价（只取 > 0 的），不建中间数组。
+  let lowestStorePrice = 0;
+  const shops = state.shops;
+  if (shops) {
+    for (const key in shops) {
+      const shop = shops[key];
+      if (shop.status !== "open" || shop.typeId !== "general") continue;
+      const price = shopRetailPrice(state, "general", content, productId, shop);
+      if (price > 0 && (lowestStorePrice === 0 || price < lowestStorePrice)) lowestStorePrice = price;
+    }
+  }
+  const reference = lowestStorePrice > 0
+    ? lowestStorePrice * (1 - Math.max(0, content.rules.stallUndercutPercent ?? 3) / 100)
     : wholesale * (1 + Math.max(0, def.markupPercent ?? 10) / 100);
-  return { ...def, itemId: productId, retailVoucherPerUnit: Math.max(cost, reference), wholesaleVoucherPerUnit: cost, listWholesaleVoucherPerUnit: wholesale };
+  return { cost, retail: Math.max(cost, reference) };
+}
+
+function stallTradePrices(state, def, content, productId, wholesale) {
+  const { cost, retail } = stallPriceOf(state, def, content, productId, wholesale);
+  return { ...def, itemId: productId, retailVoucherPerUnit: retail, wholesaleVoucherPerUnit: cost, listWholesaleVoucherPerUnit: wholesale };
 }
 
 // 居民实际面对的综合商店零售价：营业中综合商店里最便宜的一家（与集市参考价同口径）；没有综合商店时按批发价加成。
@@ -10828,7 +11188,7 @@ function stallTradePrices(state, def, content, productId, wholesale) {
 function generalStoreReferenceRetail(state, itemId, content) {
   const prices = Object.values(state.shops || {})
     .filter(shop => shop.status === "open" && shop.typeId === "general")
-    .map(shop => shopTradePrices(state, "general", content, itemId, shop)?.retailVoucherPerUnit)
+    .map(shop => shopRetailPrice(state, "general", content, itemId, shop))
     .filter(price => price > 0);
   if (prices.length) return Math.min(...prices);
   return currentUnitPrice(state, itemId, content) * (1 + policyShopMarginPercent(state, content) / 100);
@@ -11210,7 +11570,7 @@ function refreshOperatingPlanNow(state, content, force = false) {
        function recentAverage(rows, key, content) {
   return rollingAverage(rows, key, content.rules.operatingObservationDays || 7);
 }
-return { shopTradePrices, ensureOperatingPlanState, refreshOperatingPlan, plannedBatchesForProducer, plannedWorkersForProducer, recordConsumerDay, recentAverage };
+return { shopTradePrices, shopRetailPrice, ensureOperatingPlanState, refreshOperatingPlan, plannedBatchesForProducer, plannedWorkersForProducer, recordConsumerDay, recentAverage };
 })();
 
 // ===== systems/companies.js =====
@@ -11224,7 +11584,7 @@ const { householdIdOf } = __mxmod14;
 const { putStock, sellCompanyGoods, takeStock } = __mxmod33;
 const { PERIODS, bookAdd, bookAddMap, ensureBook } = __mxmod22;
 const { recordFundDividend } = __mxmod43;
-const { currencyScale, roundToShareTick, voucherBalance } = __mxmod27;
+const { currencyScale, roundToShareTick, shareTick, voucherBalance } = __mxmod27;
 const { createPaymentViewState } = __mxmod57;
 const { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } = __mxmod29;
 const { voucherUnitsForWheatUnits } = __mxmod26;
@@ -11594,14 +11954,28 @@ function closeCompanyToTown(state, company, building, content) {
   return { ok: true, companyId, arrearsBeforeUnits: arrearsBefore, inKindValueUnits, townAdvanceUnits, transferredClaimsUnits, cancelledResidentShares, cancelledFundShares, levelsReturned: levels };
 }
 
-// v14/v15 command/save compatibility only. 0.1.7 annual settlement and share valuation do not multiply by this field.
-       function setCompanyDividendPercent(state, companyId, percent) {
+// 分红比例（占近一季净利润的百分比，docs/STOCK.md）：镇库控股（镇库持股过半）的公司由镇长设置；
+// 民营上市公司按公司自身策略，缺省 rules.sharePayoutDefaultPercent（60%），镇长不能改。
+       function companyPayoutPercent(company, content) {
+  if (company.payoutPercent == null) return content.rules.sharePayoutDefaultPercent ?? 60;
+  const value = Number(company.payoutPercent);
+  return Number.isFinite(value) ? value : (content.rules.sharePayoutDefaultPercent ?? 60);
+}
+
+       function townControlsCompany(company) {
+  return company.totalShares > 0 && (company.townShares || 0) * 2 > company.totalShares;
+}
+
+       function setCompanyDividendPercent(state, companyId, percent, content = null) {
   const company = state.companies?.[companyId];
   const value = Number(percent);
   if (!company) return { ok: false, reason: "企业不存在" };
-  if (!Number.isFinite(value) || value < 0 || value > 100) return { ok: false, reason: "分红比例须为0%—100%" };
-  company.dividendPercent = Math.round(value * 100) / 100;
-  return { ok: true, value: company.dividendPercent };
+  if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
+  if (!townControlsCompany(company)) return { ok: false, reason: "民营上市公司的分红比例由公司自定，镇长只能设置镇库控股公司的分红比例" };
+  const maximum = content?.rules?.sharePayoutMaximumPercent ?? 100;
+  if (!Number.isFinite(value) || value < 0 || value > maximum) return { ok: false, reason: `分红比例须为0%—${maximum}%` };
+  company.payoutPercent = Math.round(value * 100) / 100;
+  return { ok: true, value: company.payoutPercent };
 }
 
        function setIntermediatePrice(state, itemId, price, content) {
@@ -12109,6 +12483,107 @@ function planTaxUnits(state, company, outputItemId, outputUnits, content) {
 
        const settleAnnualCompanyDividends = settleAnnualCompanyProfits;
 
+// ---------------------------------------------------------------- 季度分红与除权（docs/STOCK.md）
+
+// 分红日：每 shareDividendIntervalDays 天（默认 90，即第 90/180/270/360 天）一次。
+       function isDividendDay(state, content) {
+  const interval = content.rules.shareDividendIntervalDays || 90;
+  return interval > 0 && (state.day + 1) % interval === 0;
+}
+
+// 除权后业绩锚的下移额（每股，单位内部粮券）：除权日整额，之后按线性回升到 0（rules.shareExRightsRecoverDays，默认 90 天）。
+// 业绩锚来自利润，分红只是把现金搬走，利润不变；不下移锚，股价会被均值回归“补回”分红，等于重复计价。
+       function exRightsOffsetUnits(market, absDay, content) {
+  const ex = market?.exRights;
+  if (!ex || !(ex.offsetUnits > 0)) return 0;
+  const days = Math.max(1, content.rules.shareExRightsRecoverDays || 90);
+  const elapsed = absDay - ex.startAbsDay;
+  if (elapsed >= days) return 0;
+  return Math.round(ex.offsetUnits * (1 - Math.max(0, elapsed) / days));
+}
+
+// 每季分红：近一季（分红间隔内）净利润 × 分红比例，封顶于未分配利润与可自由支配现金（扣工作营运资金），按持股比例入账。
+// 付款：居民户（enterprise_dividend）、社保基金（recordFundDividend）、镇库（townShares）。分红后股价按每股分红额下调（≥1 档，不受单日涨跌幅限制），业绩锚同额下移并逐日回升。
+// 欠薪中的公司不分红；本季没有利润或可分配额不足一股时不分红（不记除权）。
+       function payListedDividends(state, content) {
+  if (!isDividendDay(state, content)) return [];
+  const absDay = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
+  const rows = [];
+  for (const company of Object.values(state.companies || {})) {
+    if (!company.listing?.listed || !(company.totalShares > 0)) continue;
+    const row = payCompanyDividend(state, company, content, absDay);
+    if (row) rows.push({ companyId: company.id, ...row });
+  }
+  return rows;
+}
+
+function payCompanyDividend(state, company, content, absDay) {
+  ensureCompanyBooks(company);
+  if ((company.payroll?.arrearsVoucherUnits || 0) > 0) return null;
+  const owner = "company:" + company.id;
+  const interval = content.rules.shareDividendIntervalDays || 90;
+  const quarter = companyActualProfitValuation(state, company, content, interval);
+  const profitUnits = Math.max(0, quarter.actualProfitVoucherUnits || 0);
+  const payoutPercent = companyPayoutPercent(company, content);
+  const targetUnits = Math.floor(profitUnits * payoutPercent / 100);
+  if (targetUnits <= 0) return null;
+  const retainedUnits = Math.max(0, company.retainedEarningsVoucherUnits || 0);
+  const reserveUnits = companyWorkingCapitalReserve(company, state, content);
+  const freeCashUnits = Math.max(0, maximumPayableValueUnits(state, owner, content) - reserveUnits);
+  let distributable = Math.min(targetUnits, retainedUnits, freeCashUnits);
+  distributable = maximumFullyPayableValueUnits(state, owner, distributable, content);
+  const perShareUnits = Math.floor(distributable / company.totalShares);
+  if (perShareUnits <= 0) return null;
+  const label = `${company.name}第${state.year}年${state.day + 1}日季度分红`;
+  let residentUnits = 0;
+  for (const [householdId, shares] of Object.entries(company.householdShares || {})) {
+    const amount = perShareUnits * Math.max(0, shares || 0);
+    if (amount <= 0) continue;
+    const result = settleMonetaryPayment(state, owner, `household:${householdId}`, currentPaymentComposition(state, amount), content,
+      "enterprise_dividend", label, { requireFull: true });
+    if (!result.ok) throw new Error("企业季度分红转账失败");
+    residentUnits += amount;
+  }
+  let fundUnits = 0;
+  if ((company.fundShares || 0) > 0) {
+    const amount = perShareUnits * company.fundShares;
+    const result = settleMonetaryPayment(state, owner, "social", currentPaymentComposition(state, amount), content,
+      "enterprise_dividend", label, { requireFull: true });
+    if (!result.ok) throw new Error("企业社保基金季度分红转账失败");
+    recordFundDividend(state, amount);
+    fundUnits = amount;
+  }
+  let townUnits = 0;
+  if ((company.townShares || 0) > 0) {
+    const amount = perShareUnits * company.townShares;
+    const result = settleMonetaryPayment(state, owner, "town", currentPaymentComposition(state, amount), content,
+      "enterprise_dividend", label, { requireFull: true });
+    if (!result.ok) throw new Error("企业镇库季度分红转账失败");
+    townUnits = amount;
+  }
+  const paidUnits = residentUnits + fundUnits + townUnits;
+  company.retainedEarningsVoucherUnits = (company.retainedEarningsVoucherUnits || 0) - paidUnits;
+  // 除权：股价下调一股分红额（至少一档），业绩锚同额下移（叠加尚未回升的旧余额）。
+  const tick = shareTick(content);
+  const dropUnits = Math.max(tick, roundToShareTick(perShareUnits, content));
+  const market = company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: company.sharePriceVoucherUnits || tick };
+  const remainingOffset = exRightsOffsetUnits(market, absDay, content);
+  market.exRights = { offsetUnits: remainingOffset + dropUnits, startAbsDay: absDay };
+  const priceBefore = roundToShareTick(company.sharePriceVoucherUnits || 0, content);
+  company.sharePriceVoucherUnits = Math.max(tick, priceBefore - dropUnits);
+  const row = {
+    year: state.year, day: state.day + 1, payoutPercent, profitVoucherUnits: profitUnits, targetVoucherUnits: targetUnits,
+    capped: distributable < targetUnits, totalVoucherUnits: paidUnits, perShareVoucherUnits: perShareUnits,
+    residentVoucherUnits: residentUnits, fundVoucherUnits: fundUnits, townVoucherUnits: townUnits,
+    exDropVoucherUnits: dropUnits, priceBeforeVoucherUnits: priceBefore, priceAfterVoucherUnits: company.sharePriceVoucherUnits
+  };
+  company.quarterlyDividends ||= [];
+  company.quarterlyDividends.push(row);
+  if (company.quarterlyDividends.length > 8) company.quarterlyDividends.splice(0, company.quarterlyDividends.length - 8);
+  recordEvent(state, `${company.name}（${company.listing.ticker || "---"}）分红每股${(perShareUnits / currencyScale(content)).toFixed(2)}粮券，股价除权下调${(dropUnits / currencyScale(content)).toFixed(2)}粮券。`, content, { day: state.day + 1 });
+  return row;
+}
+
        function companyActualProfitValuation(state, company, content, horizonDays = null) {
   const horizon = horizonDays || content.rules.operatingRightValuationDays || 365;
   const serialNow = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
@@ -12195,6 +12670,7 @@ function archiveCompanyDay(state, company, content) {
   const epsUnits = company.totalShares > 0 ? annualizedProfitUnits / company.totalShares : 0;
   const sharePrice = company.shareSale?.sharePriceVoucherUnits || 0;
   const referenceYield = sharePrice > 0 ? Math.max(0, epsUnits) / sharePrice : 0;
+  const lastDividend = (company.quarterlyDividends || []).at(-1) || null;
   const definition = content.buildings[company.typeId];
   const job = definition?.jobs?.[0];
   const workers = job ? readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id)) : 0;
@@ -12242,11 +12718,15 @@ function archiveCompanyDay(state, company, content) {
     annualizedProfitVoucher: annualizedProfitUnits / scale,
     epsVoucher: epsUnits / scale,
     referenceDividendYield: referenceYield,
+    payoutPercent: companyPayoutPercent(company, content),
+    payoutControllable: townControlsCompany(company),
+    lastDividend: lastDividend ? { year: lastDividend.year, day: lastDividend.day, perShareVoucher: lastDividend.perShareVoucherUnits / scale, totalVoucher: lastDividend.totalVoucherUnits / scale, exDropVoucher: lastDividend.exDropVoucherUnits / scale } : null,
+    dividendYieldPercent: (company.sharePriceVoucherUnits || 0) > 0 && lastDividend ? (lastDividend.perShareVoucherUnits * (content.rules.daysPerYear / (content.rules.shareDividendIntervalDays || 90))) / company.sharePriceVoucherUnits * 100 : 0,
     townSharePercent: company.totalShares ? company.townShares / company.totalShares : 0,
     residentSharePercent: company.totalShares ? company.residentShares / company.totalShares : 0
   };
 }
-return { ensureCompanies, buyInputForCompany, createIndependentCompany, createListedCompany, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice, companySalePrice, previewCompanyLevelChange, addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown, liquidateCompanyForArrears, setCompanyDividendPercent, setIntermediatePrice, offerSeller, sellerHoldingShares, offeredPoolShares, setShareOffer, previewShareSubscription, executeShareSubscription, injectCompanyCapital, arrangeListedWorkers, payListedCompanyWages, processListedCompany, processListedCompanies, sellCompanyProduct, sellCompanyOutputsToWholesale, companyWorkingCapitalReserve, settleAnnualCompanyProfits, settleAnnualCompanyDividends, companyActualProfitValuation, stockFairValueUnits, resetCompanyDaily, resetCompanyYear, companySummary };
+return { ensureCompanies, buyInputForCompany, createIndependentCompany, createListedCompany, setCompanyWage, setCompanyTargetWorkers, setCompanySalePrice, companySalePrice, previewCompanyLevelChange, addCompanyLevel, removeCompanyLevel, liquidateCompanyToTown, liquidateCompanyForArrears, companyPayoutPercent, townControlsCompany, setCompanyDividendPercent, setIntermediatePrice, offerSeller, sellerHoldingShares, offeredPoolShares, setShareOffer, previewShareSubscription, executeShareSubscription, injectCompanyCapital, arrangeListedWorkers, payListedCompanyWages, processListedCompany, processListedCompanies, sellCompanyProduct, sellCompanyOutputsToWholesale, companyWorkingCapitalReserve, settleAnnualCompanyProfits, settleAnnualCompanyDividends, isDividendDay, exRightsOffsetUnits, payListedDividends, companyActualProfitValuation, stockFairValueUnits, resetCompanyDaily, resetCompanyYear, companySummary };
 })();
 
 // ===== systems/bank.js =====
@@ -13754,7 +14234,7 @@ const { inOpeningPeriod } = __mxmod31;
 const { cancelHouseholdLoan, householdLiquidValueUnits, issueHouseholdLoan, quoteHouseholdLoan } = __mxmod65;
 const { payDayFor } = __mxmod42;
 const { currencyScale, voucherBalance } = __mxmod27;
-const { householdIdOf } = __mxmod14;
+const { householdIdOf, householdOwner, shopOwner } = __mxmod14;
 const { PERIODS, bookAdd, bookAddMap, ensureBook } = __mxmod22;
 const { addPaymentObligation, currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, normalizePaymentObligation, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } = __mxmod29;
 const { voucherUnitsForWheatUnits } = __mxmod26;
@@ -13762,8 +14242,8 @@ const { makeTransactionId, recordEvent, recordLedger } = __mxmod16;
 const { addTownCostBasis, removeTownInventoryWithCost } = __mxmod23;
 const { putStock, takeStock } = __mxmod33;
 const { nextRandom } = __mxmod32;
-const { householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold, householdWorkingAge, jobReleaseRank, releaseJobFromHousehold, syncResidentAggregates, setHouseholdJobCount, setJobCount, jobCount, jobAssignments, reserveWheatPaymentOptions } = __mxmod24;
-const { shopTradePrices, recentAverage } = __mxmod61;
+const { householdConvertibleWheatUnits, householdList, householdPopulation, householdIdleWorkers, isActiveHousehold, householdWorkingAge, jobReleaseRank, releaseJobFromHousehold, syncResidentAggregates, setHouseholdJobCount, setJobCount, jobCount, jobAssignments, reserveWheatFullPaymentOptions } = __mxmod24;
+const { shopTradePrices, shopRetailPrice, recentAverage } = __mxmod61;
 const { shopEffectiveMarginPercent } = __mxmod60;
 const { currentUnitPrice } = __mxmod35;
 const { accrueWages, payWages, pendingWages, wageArrears, wageBook } = __mxmod30;
@@ -13829,9 +14309,12 @@ const ensuredShops = new WeakMap();
        function ensureShops(state, content) {
   state.shops ||= {};
   state.nextShopNumber ||= 1;
-  const stamp = `${state.year}:${state.day}:${Object.keys(state.shops).length}:${state.nextShopNumber}`;
-  if (ensuredShops.get(state.shops) === stamp) return state.shops;
-  ensuredShops.set(state.shops, stamp);
+  let shopCount = 0;
+  for (const _ in state.shops) shopCount += 1;
+  const stamp = ensuredShops.get(state.shops);
+  // 与原先的 `${year}:${day}:${店数}:${nextShopNumber}` 字符串戳同义（数值逐项比较，省掉每笔买卖拼串与 Object.keys）。
+  if (stamp && stamp.year === state.year && stamp.day === state.day && stamp.count === shopCount && stamp.next === state.nextShopNumber) return state.shops;
+  ensuredShops.set(state.shops, { year: state.year, day: state.day, count: shopCount, next: state.nextShopNumber });
   for (const shop of Object.values(state.shops)) {
     shop.inventory ||= emptyShopInventory(content);
     for (const itemId of Object.keys(content.items)) shop.inventory[itemId] ||= 0;
@@ -13887,6 +14370,36 @@ function activeRetailItemIds(state, shop, content) {
   return [];
 }
 
+// 只读版（不复制数组）：热路径里只做 includes / 遍历的地方用，调用方不得修改返回值。
+const NO_ITEM_IDS = Object.freeze([]);
+       function shopRetailItemIdsView(shop, content) {
+  const def = shopDefinition(content, shop?.typeId);
+  if (def?.kind === "retail") return def.itemIds || NO_ITEM_IDS;
+  if (def?.kind === "stall") return stallItemIdsShared(content);
+  return NO_ITEM_IDS;
+}
+
+// stallItemIds 的共享只读版本：同一份 content 下结果不变，按（日用品配置对象、物品表、日用品条数）核对后复用。
+const stallItemIdsCache = new WeakMap();
+function stallItemIdsShared(content) {
+  const goods = content.rules.householdGoods;
+  let goodsCount = 0;
+  if (goods) for (const _ in goods) goodsCount += 1;
+  const cached = stallItemIdsCache.get(content);
+  if (cached && cached.goods === goods && cached.items === content.items && cached.goodsCount === goodsCount) return cached.ids;
+  const ids = Object.freeze(stallItemIds(content));
+  stallItemIdsCache.set(content, { goods, items: content.items, goodsCount, ids });
+  return ids;
+}
+
+// 店铺当日已售总量（库存单位），同 Object.values(soldUnits).reduce((sum, v) => sum + Math.max(0, v || 0), 0)。
+       function shopSoldTodayUnits(shop) {
+  const sold = shop.accounts?.day?.soldUnits;
+  let total = 0;
+  if (sold) for (const key in sold) total += Math.max(0, sold[key] || 0);
+  return total;
+}
+
 // 集市卖日用品（rules.householdGoods）和肉（像菜市场，肉直接从养殖场进），不卖面粉面包盐。
        function stallItemIds(content) {
   const goods = Object.keys(content.rules.householdGoods || {}).filter(itemId => content.items[itemId]);
@@ -13920,14 +14433,33 @@ function shopOccupiesStreet(shop) {
   return shop.status !== "closed" && shop.status !== "liquidating";
 }
 
-function merchantJobKey(shop) { return `shop:${shop.id}:merchant`; }
-function clerkJobKey(shop) { return `shop:${shop.id}:clerk`; }
+// 岗位键按店铺 id 缓存同一个字符串对象（每笔买卖要查好几次岗位人数，反复拼串再算哈希很浪费）。
+const merchantJobKeys = new Map();
+const clerkJobKeys = new Map();
+function merchantJobKey(shop) {
+  let key = merchantJobKeys.get(shop.id);
+  if (key === undefined) {
+    key = `shop:${shop.id}:merchant`;
+    if (merchantJobKeys.size >= 20000) merchantJobKeys.clear();
+    merchantJobKeys.set(shop.id, key);
+  }
+  return key;
+}
+function clerkJobKey(shop) {
+  let key = clerkJobKeys.get(shop.id);
+  if (key === undefined) {
+    key = `shop:${shop.id}:clerk`;
+    if (clerkJobKeys.size >= 20000) clerkJobKeys.clear();
+    clerkJobKeys.set(shop.id, key);
+  }
+  return key;
+}
 
        function shopMerchantCount(state, shop) { return jobCount(state, merchantJobKey(shop)); }
 
 // 店铺的付款账户名：镇营综合商店没有自己的钱包，收付款一律走镇库（"town"）；其余店铺走 shop:<id>。
        function shopAccountName(shop) {
-  return shop?.town ? "town" : `shop:${shop.id}`;
+  return shop?.town ? "town" : shopOwner(shop.id);
 }
 
 function shopMerchantOnDuty(state, shop) {
@@ -14578,10 +15110,10 @@ function removeShopInventoryCost(shop, itemId, units) {
        function sellShopProduct(state, shopId, buyerOwner, units, content, reason = "店铺零售", itemIdOverride = null) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop || shop.status !== "open") return { ok: false, reason: shop?.status === "paused" ? "商人缺位，店铺已暂停" : "店铺未营业" };
-  const itemIds = shopRetailItemIds(shop, content);
+  const itemIds = shopRetailItemIdsView(shop, content);
   const itemId = itemIdOverride || shop.primaryItemId || itemIds[0];
   if (!itemIds.includes(itemId)) return { ok: false, reason: "该店不经营这种商品" };
-  const prices = shopTradePrices(state, shop.typeId, content, itemId, shop);
+  const retailPrice = shopRetailPrice(state, shop.typeId, content, itemId, shop);
   const quantity = Math.min(Math.max(0, Math.floor(units)), shop.inventory[itemId] || 0);
   if (quantity <= 0) return { ok: false, reason: "店铺缺货" };
   // 客流按家庭计：同一家庭当日在本店无论买几样，只算一个客人。已计入的家庭不受客流上限拦截。
@@ -14597,15 +15129,17 @@ function removeShopInventoryCost(shop, itemId, units) {
     }
     return { ok: false, reason: "今日客流接待能力已满" };
   }
-  const soldToday = Object.values(shop.accounts.day.soldUnits || {}).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
+  const soldToday = shopSoldTodayUnits(shop);
   const remainingGoodsCapacity = Math.max(0, shopSalesCapacityUnits(state, shop, content) - soldToday);
   const actual = Math.min(quantity, remainingGoodsCapacity);
-  if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * prices.retailVoucherPerUnit * currencyScale(content));
+  if (actual <= 0) return { ok: false, reason: "今日接待能力已满" };
+  if (retailPrice === null) throw new TypeError("Cannot read properties of null (reading 'retailVoucherPerUnit')");
+  const paymentUnits = Math.round(actual / content.precision.inventoryUnitsPerJin * retailPrice * currencyScale(content));
   const buyerHousehold = buyerHouseholdId ? state.households?.byId?.[buyerHouseholdId] : null;
-  const wheatOptions = reserveWheatPaymentOptions(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30);
+  const payOptions = reserveWheatFullPaymentOptions(state, buyerHousehold, content, content.rules.basicCommerceFoodReserveDays ?? 30);
   // 镇营店的零售收入直接进镇库（付给 "town"），店里没有自己的钱。
   const payment = settleMonetaryPayment(state, buyerOwner, shopAccountName(shop), currentPaymentComposition(state, paymentUnits), content,
-    "shop_retail_sale", reason, { requireFull: true, ...wheatOptions });
+    "shop_retail_sale", reason, payOptions);
   if (!payment.ok) return payment;
   const cogs = removeShopInventoryCost(shop, itemId, actual);
   const pricingCogs = shop.town ? takePricingBasis(shop, itemId, shop.inventory[itemId] || 0, actual) : cogs;
@@ -14694,7 +15228,7 @@ function removeShopInventoryCost(shop, itemId, units) {
     const need = Math.round(Math.max(0, row.quantity || 0) * content.precision.inventoryUnitsPerJin);
     if ((shop.inventory?.[row.itemId] || 0) < need) return { ok: false, reason: `缺${content.items[row.itemId]?.name || row.itemId}` };
   }
-  const payment = settleMonetaryPayment(state, `household:${householdId}`, `shop:${shopId}`, currentPaymentComposition(state, priceUnits), content,
+  const payment = settleMonetaryPayment(state, householdOwner(householdId), shopOwner(shopId), currentPaymentComposition(state, priceUnits), content,
     "shop_service_sale", `${household.name}购买${service.name}`, { requireFull: true });
   if (!payment.ok) return payment;
   let cogs = 0;
@@ -15806,7 +16340,7 @@ function normalizeShopForSummary(shop, content) {
     };
   });
 }
-return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, farmsHaveStock, shopRetailItemIds, stallItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopMerchantCount, shopAccountName, shopClerkCount, shopClerkLimit, shopJinPerCustomer, shopDailyCustomerCapacity, releaseAllShopClerks, shopsForStreet, streetShopCapacity, syncShopEmployment, releaseShopStaffing, shopMinimumCapitalUnits, topUpShopCapital, reopenTradeHouse, shopsAwaitingSuccession, chooseShopSuccessor, transferShopOwnership, succeedShopsOfHousehold, succeedOrphanShops, openShop, openTownShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerRejectedHouseholds, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, stallRentFreeDaysLeft, stallDiscountPerUnit, collectiveStranded, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
+return { ensureShops, addBookValue, addBookMap, applyProfit, shopDefinition, farmsHaveStock, shopRetailItemIds, shopRetailItemIdsView, shopSoldTodayUnits, stallItemIds, shopKind, shopHostTypeId, shopHostSlots, shopMaxMerchants, shopIsService, shopMerchantCount, shopAccountName, shopClerkCount, shopClerkLimit, shopJinPerCustomer, shopDailyCustomerCapacity, releaseAllShopClerks, shopsForStreet, streetShopCapacity, syncShopEmployment, releaseShopStaffing, shopMinimumCapitalUnits, topUpShopCapital, reopenTradeHouse, shopsAwaitingSuccession, chooseShopSuccessor, transferShopOwnership, succeedShopsOfHousehold, succeedOrphanShops, openShop, openTownShop, setShopMerchants, setShopClerks, shopSalesCapacityUnits, serviceShopCapacityUses, sellShopProduct, registerRejectedCustomers, registerRejectedHouseholds, registerShopStockoutDemand, recordShopServiceSale, procureShopInventory, settleShopTaxAndDistribution, resetShopDaily, openCollectiveShop, stallRentFreeDaysLeft, stallDiscountPerUnit, collectiveStranded, refundCollectiveIfStranded, windUpCollectiveShop, farmWorkers, farmDailyOutputUnits, farmDailyFeedUnits, prepareShopsForDay, finishShopsDay, resetShopYear, closeShop, fundShopLiquidation, shopSummaries, stallSquareSummaries };
 })();
 
 // ===== systems/building-development.js =====
@@ -16462,11 +16996,13 @@ return { sellBuildingToPrivate, sellOperatingLevel, buyBuildingBackFromPrivate }
 // ===== systems/stock-exchange.js =====
 const __mxmod72 = (() => {
 const { currencyScale, shareTick, roundToShareTick } = __mxmod27;
-const { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod29;
+const { currentPaymentComposition, householdSpendableVoucherUnits, maximumPayableValueUnits, settleMonetaryPayment } = __mxmod29;
 const { recordEvent } = __mxmod16;
-const { householdList, isActiveHousehold } = __mxmod24;
+const { bookAdd } = __mxmod22;
+const { householdList, householdPopulation, isActiveHousehold } = __mxmod24;
 const { consumeHouseholdStockBudget } = __mxmod55;
-const { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHoldingShares, stockFairValueUnits } = __mxmod62;
+const { wholesalePrice } = __mxmod53;
+const { companyActualProfitValuation, exRightsOffsetUnits, offerSeller, offeredPoolShares, sellerHoldingShares, stockFairValueUnits } = __mxmod62;
 const { selectOperatingRightPreview } = __mxmod70;
 const { buildingMaterialValueUnits } = __mxmod49;
 const { nextRandom } = __mxmod32;
@@ -16489,7 +17025,16 @@ const { nextRandom } = __mxmod32;
   burstBase: 0.01, burstPerGap: 0.4, burstGapStart: 0.5, // 价格越过业绩锚越多，每天破裂概率越大
   crashDriftMin: 0.02, crashDriftSpan: 0.03, crashNoise: 0.05, // 破裂期日均跌幅 2%—5%，单日可近 20%
   crashMinDays: 8, crashSpanDays: 14,
-  crashEndGap: 0.05        // 跌回业绩锚附近即结束
+  crashEndGap: 0.05,       // 跌回业绩锚附近即结束
+  // 居民买卖对价格的影响（docs/STOCK.md）：当日净买入（买入股数 − 卖出意愿股数）÷ 总股本，次日价格加 flowImpact × 净流量。
+  flowImpact: 0.5,         // 净流量每占股本 1%，次日涨跌 0.5%
+  flowCap: 0.1,            // 净流量折算的上限（±10% 股本，即单日最多 ±5% 股价）
+  // 居民卖出（每户每天抽样判定，候选上限 residentSellCandidateDaily，实际概率低于它的按比例丢弃）。
+  residentSellCandidateDaily: 0.11,
+  residentSellBaseDaily: 0.005,   // 基础换手：每持仓户每天挂卖约 0.5%
+  residentSellCashDaily: 0.04,    // 缺现金（可动用粮券+存款 < 生活储备天数的口粮钱）：额外概率
+  residentSellProfitDaily: 0.03,  // 泡沫期且高出业绩锚：获利了结额外概率（高出 0.5 个对数单位时满额）
+  residentSellPanicDaily: 0.03    // 破裂期：恐慌卖出额外概率
 };
 
                                                                       
@@ -16781,6 +17326,8 @@ function gauss(state) {
   if (market.regime === "bubble") change = market.drift + P.bubbleNoise * draw.gauss();
   else if (market.regime === "crash") change = market.drift + P.crashNoise * draw.gauss();
   else change = -P.reversion * gap + P.momentumCarry * market.momentum + P.sentimentDrift * sentiment + P.noise * draw.gauss();
+  // 居民买卖的净流量（上一日成交写入 market.flow，settleStockMarketDay 用完清零）：买盘推价、卖压压价。
+  change += P.flowImpact * Math.max(-P.flowCap, Math.min(P.flowCap, Number(market.flow) || 0));
   if (market.regime !== "normal") market.daysLeft -= 1;
   // 涨跌幅钳制：不超过 ±20%，价格很低时至少允许一档。
   const maxSteps = Math.max(1, Math.floor(price * SHARE_PRICE_DAILY_LIMIT / tick));
@@ -16790,9 +17337,22 @@ function gauss(state) {
   return next;
 }
 
+// 绝对日序（跨年连续）：除权回升、居民卖出的抽样都按它计时。
+       function absoluteDayOf(state, content) {
+  return (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
+}
+
+// 股价计算用的业绩锚 = 业绩锚基准 − 除权下移额（分红除权后逐日回升，见 companies.js 的 payListedDividends）。
+function effectiveAnchorUnits(company, market, absDay, content) {
+  const tick = shareTick(content);
+  const base = market.anchorUnits > 0 ? market.anchorUnits : (company.sharePriceVoucherUnits || tick);
+  return Math.max(tick, base - exRightsOffsetUnits(market, absDay, content));
+}
+
 // 每日股价结算：AI 做市商 + 市场情绪。
 // 每只上市股票各有自己的行情（常态/泡沫/破裂，见 stepSharePrice）；市场情绪是全市场共有的慢变量，情绪高涨时更容易起泡沫。
 // 用种子随机数保证模拟可复现；没有上市公司时不消耗随机数。
+// 净流量 market.flow 是上一日居民买卖的结果：这里用掉后清零，当日成交会写入新的值。
        function settleStockMarketDay(state, content) {
   if (!hasStockExchange(state)) return null;
   const listed = Object.values(state.companies || {}).filter(company => company.listing?.listed && company.totalShares > 0);
@@ -16800,6 +17360,7 @@ function gauss(state) {
   const exchange = ensureStockExchangeState(state);
   exchange.sentiment = Math.max(-1, Math.min(1, 0.96 * (exchange.sentiment || 0) + 0.12 * gauss(state)));
   const draw = { uniform: () => nextRandom(state), gauss: () => gauss(state) };
+  const absDay = absoluteDayOf(state, content);
   const moved = [];
   for (const company of listed) {
     // 老存档兼容：没有实时股价时用挂牌价起步；旧价不是一档整数倍时取整到一档。
@@ -16812,7 +17373,8 @@ function gauss(state) {
     const reference = performance.referencePerShareVoucherUnits || 0;
     if (reference > 0) market.anchorUnits = reference;
     else if (performance.observedDays >= (content.rules.sharePerformanceObservationDays || 30)) market.anchorUnits = Math.max(shareTick(content), Math.floor((market.anchorUnits || current) * 0.99));
-    const next = stepSharePrice(current, market.anchorUnits > 0 ? market.anchorUnits : current, market, exchange.sentiment, draw, content);
+    const next = stepSharePrice(current, effectiveAnchorUnits(company, market, absDay, content), market, exchange.sentiment, draw, content);
+    market.flow = 0;
     company.sharePriceVoucherUnits = next;
     if (!Array.isArray(company.sharePriceHistory)) company.sharePriceHistory = [];
     company.sharePriceHistory.push(next);
@@ -16822,18 +17384,113 @@ function gauss(state) {
   return moved.length ? { moved } : null;
 }
 
-// 住户日常股票买入：按投资倾向把本日股票预算分散买入发行池（镇长或业主挂出的）股份。
-// - 买入对象：已上市、发行池有股且市价不低于卖方定价的公司，按实时股价成交；镇库未挂出的股份不卖
-// - 预算：household.stockBuyBudgetVoucherUnits（银行分流后写入）或无银行时现算
-// - 付款：住户 → 卖方（镇库或原业主家庭）；付不起就跳过
-// - 股份转移：卖方是镇库则 townShares → residentShares；卖方是家庭则只在居民之间转手
-       function settleHouseholdStockBuying(state, content) {
+// ---------------------------------------------------------------- 印花税
+
+// 印花税率（%）：政策 policy.stampDutyPercent，缺省取 rules.stampDutyDefaultPercent。
+       function stampDutyPercentOf(state, content) {
+  const raw = state.policy?.stampDutyPercent;
+  const value = raw == null ? NaN : Number(raw);
+  return Number.isFinite(value) ? value : (content.rules.stampDutyDefaultPercent ?? 0.1);
+}
+
+// 一笔二级市场成交的印花税（内部粮券单位，取整）。卖方是镇库时调用方不征。
+       function stampDutyUnitsOf(state, content, costUnits) {
+  return Math.round(Math.max(0, costUnits) * stampDutyPercentOf(state, content) / 100);
+}
+
+// 卖方（居民）把印花税付给镇库，走统一支付层；记入 state.stampDuty 三段账。
+function payStampDuty(state, sellerOwner, dutyUnits, content, reason) {
+  if (!(dutyUnits > 0)) return 0;
+  const payment = settleMonetaryPayment(state, sellerOwner, "town", currentPaymentComposition(state, dutyUnits), content, "stamp_duty", reason, { requireFull: true });
+  if (!payment.ok) throw new Error("印花税转账失败：卖方刚收到股款，理应付得起");
+  state.stampDuty ||= { day: {}, year: {}, cumulative: {} };
+  bookAdd(state.stampDuty, "stampDutyUnits", dutyUnits);
+  return dutyUnits;
+}
+
+// ---------------------------------------------------------------- 股份转移
+
+// 股份从卖方转到买方（卖方 = { kind: "town" } 或 { kind: "household", householdId }）。调用前须已校验卖方持股。
+function transferShares(state, company, seller, buyer, shares) {
+  if (seller.kind === "town") {
+    company.townShares -= shares;
+    company.residentShares = (company.residentShares || 0) + shares;
+  } else {
+    company.householdShares ||= {};
+    const left = (company.householdShares[seller.householdId] || 0) - shares;
+    if (left > 0) company.householdShares[seller.householdId] = left;
+    else delete company.householdShares[seller.householdId];
+    const sellerHousehold = state.households.byId[seller.householdId];
+    sellerHousehold.shares ||= {};
+    sellerHousehold.shares[company.id] = Math.max(0, (sellerHousehold.shares[company.id] || 0) - shares);
+    if (sellerHousehold.shares[company.id] <= 0) delete sellerHousehold.shares[company.id];
+  }
+  company.householdShares ||= {};
+  company.householdShares[buyer.id] = (company.householdShares[buyer.id] || 0) + shares;
+  buyer.shares ||= {};
+  buyer.shares[company.id] = (buyer.shares[company.id] || 0) + shares;
+}
+
+// ---------------------------------------------------------------- 居民卖出
+
+// 居民卖出意愿（docs/STOCK.md）：只遍历持有该股的户（company.householdShares），不全员扫描。
+// 抽样：几何跳跃取候选（候选率 residentSellCandidateDaily），候选再按其实际概率接受，等价于每户独立判定一次。
+// 实际概率 = 基础换手 + 缺现金 + 泡沫获利了结 + 破裂恐慌；缺现金指可动用粮券+存款 < 生活储备天数的口粮钱。
+// 卖单只在当日有效：不预先扣股份、不跨日、不进存档；成交时再校验卖方仍持有。
+// 返回 Map(companyId → [{ householdId, shares, remaining }])。
+       function generateResidentSellOrders(state, content) {
+  const orders = new Map();
+  if (!hasStockExchange(state)) return orders;
+  const P = STOCK_MARKET;
+  const scale = currencyScale(content);
+  const absDay = absoluteDayOf(state, content);
+  const wheatPrice = wholesalePrice(state, "wheat", content) || 0;
+  const livingDays = content.rules.shareLivingVoucherReserveDays || 30;
+  const candidate = P.residentSellCandidateDaily;
+  const logMiss = Math.log(1 - candidate);
+  for (const company of Object.values(state.companies || {})) {
+    if (!company.listing?.listed || !(company.totalShares > 0) || !(company.sharePriceVoucherUnits > 0)) continue;
+    const entries = Object.entries(company.householdShares || {});
+    if (!entries.length) continue;
+    const market = company.stockMarket || {};
+    const price = company.sharePriceVoucherUnits;
+    const gap = Math.log(price / effectiveAnchorUnits(company, market, absDay, content));
+    const rows = [];
+    for (let index = -1; ;) {
+      index += 1 + Math.floor(Math.log(1 - nextRandom(state)) / logMiss);
+      if (index >= entries.length) break;
+      const [householdId, holding] = entries[index];
+      const household = state.households?.byId?.[householdId];
+      if (!household || !isActiveHousehold(household) || !(holding > 0)) continue;
+      let probability = P.residentSellBaseDaily;
+      const needUnits = householdPopulation(household) * content.rules.foodPerPersonDay * livingDays * wheatPrice * scale;
+      const shortage = householdSpendableVoucherUnits(state, household) < needUnits;
+      if (shortage) probability += P.residentSellCashDaily;
+      if (market.regime === "bubble") probability += P.residentSellProfitDaily * Math.min(1, Math.max(0, gap) / 0.5);
+      else if (market.regime === "crash") probability += P.residentSellPanicDaily;
+      if (nextRandom(state) * candidate >= probability) continue;
+      const fraction = (shortage ? 0.2 : 0.1) + 0.4 * nextRandom(state);
+      const shares = Math.min(holding, Math.max(1, Math.floor(holding * fraction)));
+      rows.push({ householdId, shares, remaining: shares });
+    }
+    if (rows.length) orders.set(company.id, rows);
+  }
+  return orders;
+}
+
+// ---------------------------------------------------------------- 住户买股
+
+// 住户日常股票买入（docs/STOCK.md）：按投资倾向把本日股票预算分到上市股票。成交顺序：先吃居民卖单（市价），再吃发行池（镇长或业主挂出的限价单）。
+// - 付款：买方 → 卖方（镇库 / 原业主家庭 / 卖单居民）；卖方是居民时卖方另付印花税给镇库，卖方是镇库不征。
+// - 股份：镇库发行池 → residentShares；居民之间只在 householdShares 间转手。
+// - 净流量：(买入股数 − 卖出意愿股数) ÷ 总股本，写入 company.stockMarket.flow，次日股价用（即使无成交也写，卖压无人接也要压价）。
+// sellOrders 缺省为空（只有发行池）；日结用 settleDailyShareMarket。
+       function settleHouseholdStockBuying(state, content, sellOrders = new Map()) {
   if (!hasStockExchange(state)) return null;
+  const priced = company => company.listing?.listed && (company.sharePriceVoucherUnits || 0) > 0 && company.totalShares > 0;
   // 发行池是卖方挂出的限价卖单：市价低于卖方定的每股售价时不成交（成交价按市价，卖方不会卖得比自己定的价低）。
-  const listed = Object.values(state.companies || {}).filter(company =>
-    company.listing?.listed && (company.sharePriceVoucherUnits || 0) > 0 &&
-    company.sharePriceVoucherUnits >= (company.shareSale?.sharePriceVoucherUnits || 0) &&
-    offeredPoolShares(state, company) > 0);
+  const poolOpen = company => company.sharePriceVoucherUnits >= (company.shareSale?.sharePriceVoucherUnits || 0) && offeredPoolShares(state, company) > 0;
+  const listed = Object.values(state.companies || {}).filter(company => priced(company) && (poolOpen(company) || (sellOrders.get(company.id) || []).length > 0));
   if (!listed.length) return null;
   // 追涨：近期涨得多、正处泡沫的股票分到更多买入预算，破裂期的股票少人问津。
   const weights = new Map(listed.map(company => {
@@ -16842,52 +17499,81 @@ function gauss(state) {
     return [company.id, Math.max(0.25, Math.min(3, heat))];
   }));
   const weightTotal = [...weights.values()].reduce((sum, value) => sum + value, 0);
+  const intent = new Map(listed.map(company => [company.id, (sellOrders.get(company.id) || []).reduce((sum, row) => sum + row.shares, 0)]));
+  const bought = new Map(listed.map(company => [company.id, 0]));
   let totalShares = 0;
   let totalSpentUnits = 0;
+  let residentSoldShares = 0;
+  let stampDutyUnits = 0;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
     const budget = consumeHouseholdStockBudget(state, content, household);
     if (budget <= 0) continue;
+    const buyerOwner = `household:${household.id}`;
     for (const company of listed) {
       const perCompany = Math.floor(budget * weights.get(company.id) / weightTotal);
       if (perCompany <= 0) continue;
-      const available = offeredPoolShares(state, company);
-      if (available <= 0) continue;
+      const priceUnits = company.sharePriceVoucherUnits;
+      let left = perCompany;
+      // 1) 居民卖单（同日有效；成交时再校验卖方仍持有）。
+      for (const order of sellOrders.get(company.id) || []) {
+        if (left < priceUnits) break;
+        if (order.remaining <= 0 || order.householdId === household.id) continue;
+        const seller = state.households?.byId?.[order.householdId];
+        if (!seller) continue;
+        const shares = Math.min(order.remaining, company.householdShares?.[seller.id] || 0, Math.floor(left / priceUnits));
+        if (shares <= 0) continue;
+        const cost = shares * priceUnits;
+        const payment = settleMonetaryPayment(state, buyerOwner, `household:${seller.id}`, currentPaymentComposition(state, cost), content,
+          "share_market_buy", `${household.name}二级市场买入${company.name}${shares}股`, { requireFull: true });
+        if (!payment.ok) continue;
+        const duty = stampDutyUnitsOf(state, content, cost);
+        payStampDuty(state, `household:${seller.id}`, duty, content, `${seller.name}卖出${company.name}${shares}股，缴纳印花税`);
+        transferShares(state, company, { kind: "household", householdId: seller.id }, household, shares);
+        order.remaining -= shares;
+        left -= cost;
+        residentSoldShares += shares;
+        bought.set(company.id, bought.get(company.id) + shares);
+        totalShares += shares;
+        totalSpentUnits += cost;
+        stampDutyUnits += duty;
+      }
+      // 2) 发行池（镇长或业主挂出的限价卖单）。
+      if (!poolOpen(company)) continue;
       const seller = offerSeller(state, company);
       if (!seller || (seller.kind === "household" && seller.householdId === household.id)) continue;
-      const priceUnits = company.sharePriceVoucherUnits;
-      const shares = Math.min(available, Math.floor(perCompany / priceUnits));
+      const shares = Math.min(offeredPoolShares(state, company), Math.floor(left / priceUnits));
       if (shares <= 0) continue;
       const cost = shares * priceUnits;
       const payee = seller.kind === "town" ? "town" : `household:${seller.householdId}`;
-      const payment = settleMonetaryPayment(state, `household:${household.id}`, payee,
-        currentPaymentComposition(state, cost), content, "share_market_buy",
+      const payment = settleMonetaryPayment(state, buyerOwner, payee, currentPaymentComposition(state, cost), content, "share_market_buy",
         `${household.name}二级市场买入${company.name}${shares}股`, { requireFull: true });
       if (!payment.ok) continue;
+      const duty = seller.kind === "household" ? stampDutyUnitsOf(state, content, cost) : 0;
+      if (seller.kind === "household") payStampDuty(state, payee, duty, content, `${state.households.byId[seller.householdId].name}出售${company.name}${shares}股，缴纳印花税`);
       company.shareSale.offeredShares = Math.max(0, (company.shareSale.offeredShares || 0) - shares);
-      if (seller.kind === "town") {
-        company.townShares -= shares;
-        company.residentShares = (company.residentShares || 0) + shares;
-      } else {
-        const sellerId = seller.householdId;
-        company.householdShares[sellerId] = (company.householdShares[sellerId] || 0) - shares;
-        if (company.householdShares[sellerId] <= 0) delete company.householdShares[sellerId];
-        const sellerHousehold = state.households.byId[sellerId];
-        sellerHousehold.shares ||= {};
-        sellerHousehold.shares[company.id] = Math.max(0, (sellerHousehold.shares[company.id] || 0) - shares);
-        if (sellerHousehold.shares[company.id] <= 0) delete sellerHousehold.shares[company.id];
-      }
-      company.householdShares ||= {};
-      company.householdShares[household.id] = (company.householdShares[household.id] || 0) + shares;
-      household.shares ||= {};
-      household.shares[company.id] = (household.shares[company.id] || 0) + shares;
+      transferShares(state, company, seller, household, shares);
+      bought.set(company.id, bought.get(company.id) + shares);
       totalShares += shares;
       totalSpentUnits += cost;
+      stampDutyUnits += duty;
     }
   }
-  return totalShares > 0 ? { shares: totalShares, spentVoucherUnits: totalSpentUnits } : null;
+  // 净流量：买入（含居民间成交）减去卖出意愿，按总股本折算成比例；次日 stepSharePrice 读取。
+  for (const company of listed) {
+    company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: company.sharePriceVoucherUnits };
+    const net = (bought.get(company.id) - intent.get(company.id)) / company.totalShares;
+    company.stockMarket.flow = Math.max(-1, Math.min(1, net));
+  }
+  return totalShares > 0 ? { shares: totalShares, spentVoucherUnits: totalSpentUnits, residentTradedShares: residentSoldShares, stampDutyVoucherUnits: stampDutyUnits, sellIntentShares: [...intent.values()].reduce((sum, value) => sum + value, 0) } : null;
 }
-return { DEFAULT_TOTAL_SHARES, SHARE_PRICE_DAILY_LIMIT, STOCK_MARKET, hasStockExchange, ensureStockExchangeState, nearbyDivisibleShareCounts, listingGate, suggestedSharePriceVoucher, buildingValuationVoucher, freeTicker, resolveListingTerms, applyCompanyListing, listCompanyOnExchange, configureListedShareOffer, stockReference, previewTownBuyback, executeTownBuyback, stepSharePrice, settleStockMarketDay, settleHouseholdStockBuying, offerSeller, offeredPoolShares, sellerHoldingShares, shareTick, roundToShareTick };
+
+// 日结入口：先生成居民卖单，再撮合买入（卖单优先于发行池）。
+       function settleDailyShareMarket(state, content) {
+  if (!hasStockExchange(state)) return null;
+  return settleHouseholdStockBuying(state, content, generateResidentSellOrders(state, content));
+}
+return { DEFAULT_TOTAL_SHARES, SHARE_PRICE_DAILY_LIMIT, STOCK_MARKET, hasStockExchange, ensureStockExchangeState, nearbyDivisibleShareCounts, listingGate, suggestedSharePriceVoucher, buildingValuationVoucher, freeTicker, resolveListingTerms, applyCompanyListing, listCompanyOnExchange, configureListedShareOffer, stockReference, previewTownBuyback, executeTownBuyback, stepSharePrice, absoluteDayOf, settleStockMarketDay, stampDutyPercentOf, stampDutyUnitsOf, generateResidentSellOrders, settleHouseholdStockBuying, settleDailyShareMarket, offerSeller, offeredPoolShares, sellerHoldingShares, shareTick, roundToShareTick };
 })();
 
 // ===== systems/ipo.js =====
@@ -17106,7 +17792,8 @@ return { defaultTotalShares, listingBlockReason, nextOwnerUpgradeQuote, ownerUpg
 // ===== systems/services.js =====
 const __mxmod74 = (() => {
 const { currencyScale } = __mxmod27;
-const { createPaymentCapabilityContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } = __mxmod29;
+const { createHouseholdPaymentContext, maximumFullyPayableValueUnits, maximumPayableValueUnits } = __mxmod29;
+const { householdOwner } = __mxmod14;
 const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, withDeferredHouseholdSync } = __mxmod24;
 const { ensureHouseholdLife } = __mxmod25;
 const { householdBudgets } = __mxmod64;
@@ -17195,12 +17882,13 @@ function basisCount(household, def) {
   const elapsedDays = Math.max(1, 1 + serviceState.latentDays);
   serviceState.latentDays = 0;
   const activeIds = new Set();
+  const defList = Object.values(defs);
   for (const household of householdList(state).filter(isActiveHousehold)) {
     activeIds.add(household.id);
     const demand = serviceState.demandByHousehold[household.id] ||= {};
     const carry = serviceState.carryByHousehold[household.id] ||= {};
     const affluence = householdAffluenceFor(state, household, content);
-    for (const def of Object.values(defs)) {
+    for (const def of defList) {
       // 不够门槛的家庭不产生这项需求（清零，不留旧账）。
       if (!serviceOpenToAffluence(def, affluence)) {
         demand[def.id] = 0;
@@ -17230,11 +17918,12 @@ function basisCount(household, def) {
 function householdDailyServiceBudget(state, household, content) {
   const budget = householdBudgets(state, content).get(household.id)?.serviceBudgetUnits || 0;
   if (budget <= 0) return 0;
-  const owner = `household:${household.id}`;
+  const owner = householdOwner(household.id);
   const maxWheatUnits = householdConvertibleWheatUnits(state, household, content, content.rules.householdFoodReserveDays ?? 30);
-  const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits });
+  // maxWheatUnits 正是默认口粮天数下的可换小麦，带不带这个上限算出的支付能力完全相同，所以两处共用同一个上下文。
+  const paymentContext = createHouseholdPaymentContext(state, household, content, maxWheatUnits, maxWheatUnits);
   const payable = maximumFullyPayableValueUnits(state, owner,
-    maximumPayableValueUnits(state, owner, content), content, { maxWheatUnits, paymentContext });
+    maximumPayableValueUnits(state, owner, content, { paymentContext }), content, { maxWheatUnits, paymentContext });
   return Math.max(0, Math.min(budget, payable, Number.MAX_SAFE_INTEGER));
 }
 
@@ -18964,8 +19653,8 @@ const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋�
        function liquidateCompany(state, companyId, content) { return liquidateCompanyToTown(state, companyId, content); }
        function buybackCompanyShares(state, companyId, options, content) { return executeTownBuyback(state, companyId, options, content); }
 
-       function configureDividend(state, companyId, percent) {
-  return setCompanyDividendPercent(state, companyId, percent);
+       function configureDividend(state, companyId, percent, content) {
+  return setCompanyDividendPercent(state, companyId, percent, content);
 }
 
        function configureIntermediatePrice(state, itemId, price, content) {
@@ -19049,6 +19738,18 @@ const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋�
   if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "允许摆摊人数须为非负整数" };
   state.policy.stallKeeperLimit = value;
   return { ok: true, value };
+}
+
+// 印花税率（%，0—rules.stampDutyMaximumPercent，两位小数）：二级市场卖方承担，交镇库。
+       function setStampDuty(state, percent, content) {
+  const value = Number(percent);
+  const max = content.rules.stampDutyMaximumPercent ?? 5;
+  if (percent === null || percent === undefined || (typeof percent === "string" && percent.trim() === "") || !Number.isFinite(value) || value < 0 || value > max) {
+    return { ok: false, reason: `印花税须为0%—${max}%之间的有限数` };
+  }
+  state.policy ||= {};
+  state.policy.stampDutyPercent = Math.round(value * 100) / 100;
+  return { ok: true, value: state.policy.stampDutyPercent };
 }
 
        function setShopProfitTax(state, percent, content) {
@@ -19199,7 +19900,7 @@ const FOUNDING_REMOVED_REASON = "已取消单独成立公司：请直接整栋�
        function reclaimFarmland(state, acres, workers, content) {
   return reclaimFarmlandSystem(state, content, { acres, workers });
 }
-return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setEmployerSocialSharePercent, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, repayBankDebtToTown, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setWealthTax, setInheritanceTax, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listBuilding, approveIpoApplication, rejectIpoApplication, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallRentFree, setStallDiscountTier, setStallKeeperLimit, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland };
+return { setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setBankPolicy, issueGovernmentBond, setWageControl, setEmployerSocialSharePercent, setSocialSecurityPolicy, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, repayBankDebtToTown, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, setWealthTax, setInheritanceTax, setAgricultureTax, setAutosaveMonths, setPrivateProductionTax, setOperatingRightPrice, setEmployment, buildAt, upgradeBuilding, setProjectWorkers, demolishAt, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, sellOperatingLevel, toggleAutomaticRelief, issueGrainVouchers, redeemGrainVouchers, createCompany, listCompany, listBuilding, approveIpoApplication, rejectIpoApplication, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, configureDividend, configureIntermediatePrice, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallRentFree, setStallDiscountTier, setStallKeeperLimit, setStampDuty, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, configureWholesaleTownAllocation, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland };
 })();
 
 // ===== mods/api.js =====
@@ -19737,6 +20438,7 @@ function validateState(state, content) {
     if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > (content.rules.tradeTariffMaximumPercent ?? 50))) errors.push("关税设置无效");
   }
   if (!Number.isFinite(state.policy?.shopProfitTaxPercent) || state.policy.shopProfitTaxPercent < 0 || state.policy.shopProfitTaxPercent > (content.rules.shopProfitTaxMaximumPercent || 80)) errors.push("商业利润税设置无效");
+  if (state.policy?.stampDutyPercent !== undefined && (!Number.isFinite(state.policy.stampDutyPercent) || state.policy.stampDutyPercent < 0 || state.policy.stampDutyPercent > (content.rules.stampDutyMaximumPercent ?? 5))) errors.push("印花税率无效");
 
   if (!state.employment || !state.employment.wageRates) {
     errors.push("缺少就业工资设置");
@@ -19884,6 +20586,10 @@ function validateState(state, content) {
       errors.push("公租房财政账无效：" + period);
     }
   }
+  for (const period of PERIODS) {
+    const row = state.stampDuty?.[period];
+    if (row && (!Number.isSafeInteger(row.stampDutyUnits || 0) || (row.stampDutyUnits || 0) < 0)) errors.push("印花税账无效：" + period);
+  }
   const reform = state.monetaryReform;
   if (!reform || typeof reform.legacyBankAccess !== "boolean") {
     errors.push("银行入口状态无效");
@@ -19953,6 +20659,9 @@ function validateState(state, content) {
       }
       if (!Number.isSafeInteger(company.payroll?.arrearsVoucherUnits) || company.payroll.arrearsVoucherUnits < 0) errors.push("企业欠薪无效：" + companyId);
       if (!Number.isSafeInteger(company.retainedEarningsVoucherUnits)) errors.push("企业未分配利润无效：" + companyId);
+      if (company.payoutPercent != null && (!Number.isFinite(company.payoutPercent) || company.payoutPercent < 0 || company.payoutPercent > (content.rules.sharePayoutMaximumPercent ?? 100))) errors.push("企业分红比例无效：" + companyId);
+      if (company.stockMarket?.flow !== undefined && (!Number.isFinite(company.stockMarket.flow) || Math.abs(company.stockMarket.flow) > 1)) errors.push("企业股票净流量无效：" + companyId);
+      if (company.stockMarket?.exRights && (!Number.isFinite(company.stockMarket.exRights.offsetUnits) || company.stockMarket.exRights.offsetUnits < 0 || !Number.isFinite(company.stockMarket.exRights.startAbsDay))) errors.push("企业除权记录无效：" + companyId);
       // 发行池卖方：镇库（缺省）或某户家庭；挂出股数不得超过卖方实际持股（卖方持股含尚未售出的挂牌股份）。
       const shareSeller = company.shareSale?.sellerOwner;
       const sellerIsHousehold = Boolean(shareSeller) && shareSeller !== "town";
@@ -20332,12 +21041,13 @@ return { stallKeeperLimit, manageStalls };
 // ===== systems/consumer-market.js =====
 const __mxmod89 = (() => {
 const { maximumResidentAutoExchangeWheatUnits, currencyScale } = __mxmod27;
-const { createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits, householdSpendableVoucherUnits } = __mxmod29;
+const { createHouseholdPaymentContext, currentPaymentComposition, canPayFullyWithContext, settleMonetaryPayment, spendableVoucherUnits, householdSpendableVoucherUnits } = __mxmod29;
 const { voucherUnitsForWheatUnits } = __mxmod26;
+const { householdOwner } = __mxmod14;
 const { sellCompanyProduct, companySalePrice } = __mxmod62;
-const { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedHouseholds, registerShopStockoutDemand } = __mxmod68;
-const { shopTradePrices } = __mxmod61;
-const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdFoodQeqUnits, householdReserveQeqUnits, creditHouseholdInventory, residentInventoryUnits, syncResidentAggregates, reserveWheatPaymentOptions } = __mxmod24;
+const { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIdsView, shopSoldTodayUnits, registerRejectedHouseholds, registerShopStockoutDemand } = __mxmod68;
+const { shopRetailPrice } = __mxmod61;
+const { householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits, householdFoodQeqUnits, householdReserveQeqUnits, creditHouseholdInventory, residentInventoryUnits, syncResidentAggregates, reserveWheatFullPaymentOptions } = __mxmod24;
 const { qeqUnitsForInventoryUnits } = __mxmod18;
 const { removeTownInventoryWithCost } = __mxmod23;
 const { populationStats } = __mxmod46;
@@ -20375,24 +21085,25 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
     if (shop.status !== "open") continue;
     const def = shopDefinition(content, shop.typeId);
     // 用户 0.1.11：有库存的零售店可出售非经营品类（兜底）。
-    const sellsItem = shopRetailItemIds(shop, content).includes(itemId)
+    const retailItemIds = shopRetailItemIdsView(shop, content);
+    const sellsItem = retailItemIds.includes(itemId)
       || (def?.kind === "retail" && (shop.inventory?.[itemId] || 0) > 0);
     if (!sellsItem) continue;
     // 只经商店卖的商品：综合商店都能卖；摊位只能卖它经营的日用品。
     if (generalStoreOnly && def?.id !== "general" && def?.kind !== "stall") continue;
-    const prices = shopTradePrices(state, shop.typeId, content, itemId, shop);
+    const retailPrice = shopRetailPrice(state, shop.typeId, content, itemId, shop);
     const stock = shop.inventory?.[itemId] || 0;
-    const soldToday = Object.values(shop.accounts?.day?.soldUnits || {}).reduce((sum, units) => sum + Math.max(0, units || 0), 0);
+    const soldToday = shopSoldTodayUnits(shop);
     const remainingCapacity = Math.max(0, shopSalesCapacityUnits(state, shop, content) - soldToday);
     const available = Math.min(stock, remainingCapacity);
-    if (stock > available && capped && def && prices) {
-      capped.push({ shopId: shop.id, cappedUnits: stock - available, price: prices.retailVoucherPerUnit });
+    if (stock > available && capped && def && retailPrice !== null) {
+      capped.push({ shopId: shop.id, cappedUnits: stock - available, price: retailPrice });
     }
     // 断货需求只记在本店经营的品类上（兜底售卖的非经营品不参与进货口径）。
-    const businessItem = shopRetailItemIds(shop, content).includes(itemId);
-    if (stock <= 0 && stockouts && businessItem && def && prices) stockouts.push({ shopId: shop.id, price: prices.retailVoucherPerUnit });
+    const businessItem = retailItemIds.includes(itemId);
+    if (stock <= 0 && stockouts && businessItem && def && retailPrice !== null) stockouts.push({ shopId: shop.id, price: retailPrice });
     // stockLimited：可售量受库存（而非接待能力）限制，售罄即断货。
-    if (available > 0 && def && prices) sellers.push({ id: `shop:${shop.id}`, type: "shop", shopId: shop.id, shopTypeId: def.id, stockUnits: available, price: prices.retailVoucherPerUnit, stockLimited: available === stock && businessItem });
+    if (available > 0 && def && retailPrice !== null) sellers.push({ id: `shop:${shop.id}`, type: "shop", shopId: shop.id, shopTypeId: def.id, stockUnits: available, price: retailPrice, stockLimited: available === stock && businessItem });
   }
   // Snapshot direct household suppliers once, before resident demand is processed.
   // This lets private producers sell without a shop while preventing goods bought
@@ -20409,7 +21120,7 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
       available = Math.min(stock, Math.max(0, Math.floor((food - reserve) / Math.max(1, perUnit))));
     }
     if (available > 0) sellers.push({
-      id: `household:${household.id}`,
+      id: householdOwner(household.id),
       type: "household",
       householdId: household.id,
       stockUnits: available,
@@ -20425,6 +21136,15 @@ function rotationHash(id, serial) {
   let hash = 2166136261 ^ (serial & 0xffffffff);
   for (let i = 0; i < id.length; i += 1) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619) >>> 0;
   return hash >>> 0;
+}
+
+// 同一天内对同一户的轮换序恒定：按日序号缓存，换天整体作废（纯函数结果，不进存档）。
+let tieKeyCache = { serial: null, byId: new Map() };
+function tieKeyOf(id, serial) {
+  if (tieKeyCache.serial !== serial) tieKeyCache = { serial, byId: new Map() };
+  let key = tieKeyCache.byId.get(id);
+  if (key === undefined) { key = rotationHash(id, serial); tieKeyCache.byId.set(id, key); }
+  return key;
 }
 
 function quickAffordableUnits(state, household, price, content, reserveDays, capUnits = Number.POSITIVE_INFINITY) {
@@ -20446,16 +21166,20 @@ function maximumAffordableUnits(state, household, price, content, reserveDays, c
   const scale = currencyScale(content);
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   if (price <= 0) return 0;
-  const owner = `household:${household.id}`;
-  const voucherAvailable = spendableVoucherUnits(state, owner);
+  const voucherAvailable = householdSpendableVoucherUnits(state, household);
+  // 快路径：光靠手头粮券加存款就买得起 cap（上界 = cap，且付得起 cap 的价款），结果必然是 cap，
+  // 不用再算可换小麦和支付上下文。条件不满足一律走下面的完整流程。
+  if (cap > 0 && Number.isFinite(cap) && Math.floor(voucherAvailable * inventoryScale / (price * scale)) >= cap
+    && voucherAvailable >= Math.round(cap / inventoryScale * price * scale)) return cap;
   const wheatUnitsAvailable = householdConvertibleWheatUnits(state, household, content, reserveDays);
   const wheatValueAvailable = voucherUnitsForWheatUnits(wheatUnitsAvailable, content, "floor");
   // 仅作为二分上界；真正可支付性统一交给支付层判断，避免全粮券阶段误回退小麦。
   let high = Math.min(cap, Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale))));
   // 上界为 0 时不必建支付上下文（买不起的户占大多数）。
   if (high <= 0) return 0;
-  const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits: wheatUnitsAvailable });
-  const canPay = valueUnits => quotePaymentValueUnitsWithContext(paymentContext, valueUnits).full;
+  const paymentContext = createHouseholdPaymentContext(state, household, content, wheatUnitsAvailable,
+    reserveDays === (content.rules.householdFoodReserveDays ?? 30) ? wheatUnitsAvailable : null);
+  const canPay = valueUnits => canPayFullyWithContext(paymentContext, valueUnits);
   let low = 0;
   // 常见情况：想买的量本来就付得起，一次报价就够，不用二分。
   if (high > 0 && canPay(Math.round(high / inventoryScale * price * scale))) return high;
@@ -20472,17 +21196,17 @@ function transactSeller(state, seller, household, itemId, units, content, reason
   const scale = currencyScale(content);
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   const cost = Math.round(units / inventoryScale * seller.price * scale);
-  const wheatOptions = reserveWheatPaymentOptions(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
+  const payOptions = reserveWheatFullPaymentOptions(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
   if (seller.type === "town") {
     if ((state.accounts.town?.[itemId] || 0) < units) return { ok: false, reason: "镇库库存不足" };
-    const payment = settleMonetaryPayment(state, `household:${household.id}`, "town", currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
+    const payment = settleMonetaryPayment(state, householdOwner(household.id), "town", currentPaymentComposition(state, cost), content,
+      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, payOptions);
     if (!payment.ok) return payment;
     const removal = removeTownInventoryWithCost(state, itemId, units, content);
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost, paidValueUnits: cost, payment, sellerCostVoucherUnits: removal.costWheatUnits };
   }
   if (seller.type === "company") {
-    const sale = sellCompanyProduct(state, seller.companyId, `household:${household.id}`, itemId, units, seller.price, content,
+    const sale = sellCompanyProduct(state, seller.companyId, householdOwner(household.id), itemId, units, seller.price, content,
       reason || `家庭购买${content.items[itemId]?.name || itemId}`);
     return sale.ok
       ? { ok: true, quantityUnits: sale.quantityUnits, paidVoucherUnits: sale.revenueVoucherUnits }
@@ -20492,13 +21216,13 @@ function transactSeller(state, seller, household, itemId, units, content, reason
     if (seller.householdId === household.id) return { ok: false, reason: "不能购买自己挂牌的商品" };
     const source = state.households?.byId?.[seller.householdId];
     if (!source || (source.inventory?.[itemId] || 0) < units) return { ok: false, reason: "卖方库存不足" };
-    const payment = settleMonetaryPayment(state, `household:${household.id}`, `household:${seller.householdId}`, currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
+    const payment = settleMonetaryPayment(state, householdOwner(household.id), `household:${seller.householdId}`, currentPaymentComposition(state, cost), content,
+      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, payOptions);
     if (!payment.ok) return payment;
     source.inventory[itemId] -= units;
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost };
   }
-  const sale = sellShopProduct(state, seller.shopId, `household:${household.id}`, units, content,
+  const sale = sellShopProduct(state, seller.shopId, householdOwner(household.id), units, content,
     reason || `家庭在店铺购买${content.items[itemId]?.name || itemId}`, itemId);
   return sale.ok
     ? { ok: true, quantityUnits: sale.quantityUnits, paidVoucherUnits: sale.paidVoucherUnits }
@@ -20585,10 +21309,10 @@ function applyRetailElasticity(state, itemId, desiredUnits, content, sellers) {
   for (const shop of Object.values(state.shops || {})) {
     if (shop.status !== "open") continue;
     if (shopDefinition(content, shop.typeId)?.id !== "general") continue;
-    if (!shopRetailItemIds(shop, content).includes(itemId)) continue;
-    const prices = shopTradePrices(state, shop.typeId, content, itemId, shop);
-    if (!prices) continue;
-    const shopMultiplier = priceElasticityDemandMultiplier(state, shop, itemId, prices.retailVoucherPerUnit, content);
+    if (!shopRetailItemIdsView(shop, content).includes(itemId)) continue;
+    const retailPrice = shopRetailPrice(state, shop.typeId, content, itemId, shop);
+    if (retailPrice === null) continue;
+    const shopMultiplier = priceElasticityDemandMultiplier(state, shop, itemId, retailPrice, content);
     multiplier = Math.min(multiplier, shopMultiplier);
   }
   if (multiplier >= 1) return desiredUnits;
@@ -20625,13 +21349,14 @@ function applyRetailElasticity(state, itemId, desiredUnits, content, sellers) {
   // 同等缺货的户之间按"户 id × 日序号"的散列轮换先后：接待能力封顶时每天服务的不是同一批户
   // （原先按 id 字典序，永远是排在前面的那批户被服务，其余户长期买不到）。
   const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 360) + (state.day || 0);
-  const tieKey = new Map();
-  for (const household of householdList(state)) tieKey.set(household.id, rotationHash(household.id, serial));
-  const households = householdList(state).filter(isActiveHousehold).slice().sort((a, b) => {
-    const aPer = (a.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(a));
-    const bPer = (b.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(b));
-    return aPer - bPer || tieKey.get(a.id) - tieKey.get(b.id) || a.id.localeCompare(b.id);
-  });
+  // 排序键（人均存货、轮换散列）先算好再排，比较器里不再反复算；比较规则与原来完全相同（id 唯一，全序）。
+  const keyed = householdList(state).filter(isActiveHousehold).map(household => ({
+    household,
+    per: (household.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(household)),
+    tie: tieKeyOf(household.id, serial)
+  }));
+  keyed.sort((a, b) => a.per - b.per || a.tie - b.tie || a.household.id.localeCompare(b.household.id));
+  const households = keyed.map(row => row.household);
   if (!households.length) return { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: "没有居民家庭" };
   const requestedNeeds = options.householdNeedsUnits || null;
   const allocations = requestedNeeds
@@ -20645,6 +21370,8 @@ function applyRetailElasticity(state, itemId, desiredUnits, content, sellers) {
   const previousDefer = Boolean(state._deferHouseholdSync);
   state._deferHouseholdSync = true;
 
+  // 本次需求只会减少：开局没有需求的户在所有卖家循环里都会被跳过，先剔掉（顺序不变）。
+  const buyers = households.filter(household => (householdNeed.get(household.id) || 0) > 0);
   for (const seller of ordered) {
     if (purchased >= desiredUnits) break;
     let sellerLeft = seller.stockUnits;
@@ -20652,7 +21379,7 @@ function applyRetailElasticity(state, itemId, desiredUnits, content, sellers) {
     let sellerSold = 0;
     let sellerPaid = 0;
     let sellerCost = 0;
-    for (const household of households) {
+    for (const household of buyers) {
       if (sellerLeft <= 0 || purchased >= desiredUnits) break;
       const need = householdNeed.get(household.id) || 0;
       if (need <= 0) continue;
@@ -20759,24 +21486,26 @@ function buyStapleItem(state, content, itemId, familyTargetQeq) {
   const householdNeedsUnits = {};
   let targetQeq = 0;
   let targetUnits = 0;
-  for (const [householdId, qeq] of familyTargetQeq) {
+  const byId = state.households?.byId;
+  // Map.forEach 不为每一项分配 [键, 值] 数组，遍历顺序与 for-of 相同。
+  familyTargetQeq.forEach((qeq, householdId) => {
     targetQeq += qeq;
-    const household = state.households?.byId?.[householdId];
+    const household = byId?.[householdId];
     const hasQeq = Math.floor((household?.inventory?.[itemId] || 0) * perUnitQeq);
     const units = perUnitQeq > 0 ? Math.max(0, Math.floor((qeq - hasQeq) / perUnitQeq)) : 0;
     if (units > 0) { householdNeedsUnits[householdId] = units; targetUnits += units; }
-  }
+  });
   const townBefore = state.accounts.town[itemId] || 0;
   const result = targetUnits > 0
     ? purchaseItemForResidents(state, itemId, targetUnits, price, content, `居民以粮券购买${item?.name || itemId}`, { householdNeedsUnits })
     : { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: null };
   // 买完后每户还差多少（口粮当量），留给下一种主食替代。
   const shortfallQeq = new Map();
-  for (const [householdId, qeq] of familyTargetQeq) {
+  familyTargetQeq.forEach((qeq, householdId) => {
     const household = state.households?.byId?.[householdId];
     const has = Math.floor((household?.inventory?.[itemId] || 0) * perUnitQeq);
     if (qeq > has) shortfallQeq.set(householdId, qeq - has);
-  }
+  });
   return {
     itemId,
     targetQeq,
@@ -20823,7 +21552,7 @@ function buyStapleItem(state, content, itemId, familyTargetQeq) {
   for (const [itemId] of meats) {
     const row = buyStapleItem(state, content, itemId, meatPlan.get(itemId));
     rows.push(row);
-    for (const [id, qeq] of row.shortfallQeq) meatShort.set(id, (meatShort.get(id) || 0) + qeq);
+    row.shortfallQeq.forEach((qeq, id) => meatShort.set(id, (meatShort.get(id) || 0) + qeq));
   }
   let upgradeShareSum = 0;
   let people = 0;
@@ -20842,10 +21571,10 @@ function buyStapleItem(state, content, itemId, familyTargetQeq) {
   }
   const breadRow = buyStapleItem(state, content, "bread", plan.bread);
   rows.push(breadRow);
-  for (const [id, qeq] of breadRow.shortfallQeq) plan.flour.set(id, (plan.flour.get(id) || 0) + qeq);
+  breadRow.shortfallQeq.forEach((qeq, id) => plan.flour.set(id, (plan.flour.get(id) || 0) + qeq));
   const flourRow = buyStapleItem(state, content, "flour", plan.flour);
   rows.push(flourRow);
-  for (const [id, qeq] of flourRow.shortfallQeq) plan.wheat.set(id, (plan.wheat.get(id) || 0) + qeq);
+  flourRow.shortfallQeq.forEach((qeq, id) => plan.wheat.set(id, (plan.wheat.get(id) || 0) + qeq));
   rows.push(buyStapleItem(state, content, "wheat", plan.wheat));
   const order = ["wheat", "flour", "bread", ...meats.map(([itemId]) => itemId)];
   rows.sort((a, b) => order.indexOf(a.itemId) - order.indexOf(b.itemId));
@@ -23089,6 +23818,7 @@ function companyDistributionIndex(state, reports = []) {
     agricultureTax: cloneValue((state.agriculture?.taxHistory || []).filter(row => row.year === state.year)),
     financialFlows: annualPeriod(state.financialFlows),
     fiscal: annualPeriod(state.fiscal),
+    stampDuty: annualPeriod(state.stampDuty),
     salt: annualPeriod(state.salt),
     companies,
     shops,
@@ -23252,14 +23982,14 @@ const { accrueSaltNeed, buySaltForResidents, consumeDailySalt, finishSaltGraceDa
 const { adjustPrivateWages } = __mxmod99;
 const { arrangePrivateWorkers, processPrivateIndustries, resetPrivateDaily, resetPrivateYear, payPrivateIndustryWages } = __mxmod100;
 const { emptyFinancialFlowPeriod } = __mxmod15;
-const { arrangeListedWorkers, payListedCompanyWages, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } = __mxmod62;
+const { arrangeListedWorkers, payListedCompanyWages, payListedDividends, processListedCompanies, resetCompanyDaily, resetCompanyYear, sellCompanyOutputsToWholesale, settleAnnualCompanyDividends } = __mxmod62;
 const { resetShopDaily, prepareShopsForDay, finishShopsDay, resetShopYear, syncShopEmployment } = __mxmod68;
 const { settleTradingHouses } = __mxmod101;
 const { refreshOperatingPlan, recordConsumerDay } = __mxmod61;
 const { archiveHouseholdLifeYear, finalizeHouseholdIncomeDay, finalizeHouseholdLifeDay, resetHouseholdLifeDay, resetHouseholdLifeYear } = __mxmod25;
 const { settleBankDay } = __mxmod63;
 const { settleBondsDay } = __mxmod76;
-const { settleStockMarketDay, settleHouseholdStockBuying } = __mxmod72;
+const { settleStockMarketDay, settleDailyShareMarket } = __mxmod72;
 const { settleLiquidityDay } = __mxmod54;
 const { fillMissingHouseholdLastHarvestIncome, maybeRefreshHouseholdIncomeExpectations } = __mxmod102;
 const { accrueServiceDemand, processServiceDemand } = __mxmod74;
@@ -23293,6 +24023,7 @@ function resetDayBooks(state, content) {
   resetPrivateDaily(state);
   resetRedistributionDay(state);
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
+  if (state.stampDuty) state.stampDuty.day = {};
   if (state.agriculture?.reclaim) state.agriculture.reclaim.day = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
 }
 
@@ -23320,6 +24051,7 @@ function resetYearBooks(state, content) {
   resetRedistributionYear(state);
   state.financialFlows.year = emptyFinancialFlowPeriod();
   if (state.fiscal) state.fiscal.year = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
+  if (state.stampDuty) state.stampDuty.year = {};
   if (state.agriculture?.reclaim) state.agriculture.reclaim.year = { acres: 0, workDays: 0, paidVoucherUnits: 0 };
   if (state.salt) state.salt.year = { demandUnits: 0, satisfiedUnits: 0, purchasedUnits: 0, paidWheatUnits: 0 };
   resetYearHouseholdIncome(state);
@@ -23452,8 +24184,10 @@ const yearEndsToday = (state, content) => state.day + 1 >= content.rules.daysPer
     settleLiquidityDay(state, content);
     settleBankDay(state, content);
     settleBondsDay(state, content);
+    // 股市（docs/STOCK.md）：季度分红先于行情（除权日价先下调，再随当日行情波动）；居民卖单与买入在行情之后撮合，净流量次日生效。
+    payListedDividends(state, content);
     settleStockMarketDay(state, content);
-    settleHouseholdStockBuying(state, content);
+    settleDailyShareMarket(state, content);
   } },
   // 再分配（docs/REDISTRIBUTION.md）：富人税每 30 天一次（金融之后，家底已结算）；家产归公每日再扫一遍，补取不回的存款。
   { id: "wealthTax", when: isWealthTaxDay, run: settleWealthTax },
@@ -24743,6 +25477,12 @@ function selectHeaderVoucher(state, content) {
       lastDay: state.policy?.lastDay || null,
       villa: state.policy?.villa || { priceWheatJin: 10000, taxRatePercent: 0.5 },
       villaStats: selectVillaStats(state, content),
+      // 印花税收入（粮券，只读）：当日 / 本年 / 累计，口径见 systems/stock-exchange.js 的 payStampDuty。
+      stampDutyVoucher: {
+        day: (state.stampDuty?.day?.stampDutyUnits || 0) / voucherScale,
+        year: (state.stampDuty?.year?.stampDutyUnits || 0) / voucherScale,
+        cumulative: (state.stampDuty?.cumulative?.stampDutyUnits || 0) / voucherScale
+      },
       wageControl: state.policy?.wageControl || { civil: 1.0, industry: 1.0 },
       wageLastDay: state.payroll?.lastDay || null,
       // 银行统计（金融扩展二期）：只读，不初始化 state.bank
@@ -24971,7 +25711,7 @@ const { validateContent } = __mxmod19;
 const { createInitialState } = __mxmod40;
 const { settleOneDay, createDayRunner } = __mxmod106;
 const { advanceGameDays: advanceDaysWithClock } = __mxmod21;
-const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, repayBankDebtToTown, issueGovernmentBond, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setWealthTax, setInheritanceTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, listBuilding, approveIpoApplication, rejectIpoApplication, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland } = __mxmod79;
+const { setEmployment, buildAt, toggleAutomaticRelief, setWageRate, setBreadPrice, setUnemploymentPolicy, setVillaPolicy, setWageControl, setBankPolicy, repayBankDebtToTown, issueGovernmentBond, setSocialSecurityPolicy, setEmployerSocialSharePercent, injectSocialSecurity, repaySocialSecurityDebt, socialBuyShares, socialSellShares, tradeWithOutsideTown, issueWheatLoan, signTradeAgreement, terminateTradeAgreement, setAgricultureTax, setWealthTax, setInheritanceTax, setPrivateProductionTax, setOperatingRightPrice, upgradeBuilding, demolishAt, setProjectWorkers, setAutosaveMonths, sellOperatingLevel, sellBuildingToPrivateCommand, buyBuildingBackFromPrivateCommand, issueGrainVouchers, redeemGrainVouchers, listCompany, createCompany, listCompanyShares, configureShareOffer, subscribeShares, addCompanyCapital, configureDividend, configureIntermediatePrice, configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares, listBuilding, approveIpoApplication, rejectIpoApplication, setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices, setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setStampDuty, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation, configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice, reclaimFarmland } = __mxmod79;
 const { selectDemolitionPreview, selectUpgradePreview } = __mxmod69;
 const { validateState } = __mxmod85;
 const { selectDashboard } = __mxmod114;
@@ -25116,7 +25856,7 @@ function createSimulation(content) {
     previewShareSubscription: function (state, companyId) { return previewShareSubscription(state, companyId, definitions); },
     subscribeShares: function (state, companyId) { return subscribeShares(state, companyId, definitions); },
     addCompanyCapital: function (state, companyId, amount) { return addCompanyCapital(state, companyId, amount, definitions); },
-    configureDividend: function (state, companyId, percent) { return configureDividend(state, companyId, percent); },
+    configureDividend: function (state, companyId, percent) { return configureDividend(state, companyId, percent, definitions); },
     configureIntermediatePrice: function (state, itemId, price) { return configureIntermediatePrice(state, itemId, price, definitions); },
     setPublicProcurementIntent: function (state, intent) { return setPublicProcurementIntent(state, intent, definitions); },
     clearPublicProcurementIntent: function (state, itemId) { return clearPublicProcurementIntent(state, itemId); },
@@ -25130,6 +25870,7 @@ function createSimulation(content) {
     setStallRentFree: function (state, days) { return setStallRentFree(state, days, definitions); },
     setStallDiscountTier: function (state, tier) { return setStallDiscountTier(state, tier, definitions); },
     setShopProfitTax: function (state, value) { return setShopProfitTax(state, value, definitions); },
+    setStampDuty: function (state, value) { return setStampDuty(state, value, definitions); },
     setTradeTariff: function (state, patch) { return setTradeTariff(state, patch, definitions); },
     setMarginPolicy: function (state, patch) { return setMarginPolicy(state, patch, definitions); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
@@ -25551,6 +26292,50 @@ function deletePath(object, path) {
   return raw;
 }
 
+// 物品改名（酒改成四种酒）：旧存档里的 wine 并入普通白酒 baijiu，1:1 数量不变。
+// 整棵存档树里：键 wine、以 wine 开头的驼峰键（如 wineConsumedUnits）、值为 "wine" 的字符串（itemId）一律改名。
+// 同名键数值相加，避免覆盖。幂等：没有 wine 时是空操作。
+       const ITEM_RENAMES = Object.freeze({ wine: "baijiu" });
+
+function renamedItemKey(key) {
+  for (const [from, to] of Object.entries(ITEM_RENAMES)) {
+    if (key === from) return to;
+    if (key.startsWith(from) && /^[A-Z]/.test(key.slice(from.length))) return to + key.slice(from.length);
+  }
+  return key;
+}
+
+       function renameItemIds(raw, report = null, path = "") {
+  if (Array.isArray(raw)) {
+    raw.forEach((value, index) => {
+      if (typeof value === "string" && Object.hasOwn(ITEM_RENAMES, value)) { raw[index] = ITEM_RENAMES[value]; report?.renamed.push(`${path}[${index}]`); }
+      else renameItemIds(value, report, `${path}[${index}]`);
+    });
+    return raw;
+  }
+  if (!isPlainObject(raw)) return raw;
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (typeof value === "string" && Object.hasOwn(ITEM_RENAMES, value)) {
+      raw[key] = ITEM_RENAMES[value];
+      report?.renamed.push(`${path}.${key}`);
+    } else if (typeof value === "object" && value !== null) {
+      renameItemIds(value, report, path ? `${path}.${key}` : key);
+    }
+  }
+  for (const key of Object.keys(raw)) {
+    const to = renamedItemKey(key);
+    if (to === key || UNSAFE_KEYS.has(key)) continue;
+    const value = raw[key];
+    const existing = raw[to];
+    if (existing !== undefined && typeof existing === "number" && typeof value === "number") raw[to] = existing + value;
+    else if (existing === undefined) raw[to] = value;
+    delete raw[key];
+    report?.renamed.push(`${path ? path + "." : ""}${key} → ${to}`);
+  }
+  return raw;
+}
+
 function kindOf(value) {
   if (value === null || value === undefined) return "empty";
   if (Array.isArray(value)) return "array";
@@ -25735,7 +26520,7 @@ function tryReplace(holder, key, replacement, validate, errors) {
   if (report.calendar?.length) parts.push(report.calendar.join("；"));
   return parts.length ? `存档来自旧版本，已自动处理（${parts.join("；")}），其余进度保留。` : null;
 }
-return { RENAMES, ENTITY_MAPS, applyRenames, coerceNumber, mergeOntoBase, repairHouseholdTable, sanitizeNumbers, resetFailingSubsystems, emptyLoadReport, describeLoadReport };
+return { RENAMES, ENTITY_MAPS, applyRenames, ITEM_RENAMES, renameItemIds, coerceNumber, mergeOntoBase, repairHouseholdTable, sanitizeNumbers, resetFailingSubsystems, emptyLoadReport, describeLoadReport };
 })();
 
 // ===== persistence/migrations.js =====
@@ -25747,7 +26532,7 @@ const { createInitialState, ensureProjectAccessor } = __mxmod40;
 const { syncShopEmployment } = __mxmod68;
 const { syncResidentAggregates } = __mxmod24;
 const { convertSplitOwnership } = __mxmod116;
-const { ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, repairHouseholdTable, resetFailingSubsystems, sanitizeNumbers } = __mxmod117;
+const { ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, renameItemIds, repairHouseholdTable, resetFailingSubsystems, sanitizeNumbers } = __mxmod117;
 const MIN_SAVE_VERSION = 18;
 
 function cloneJson(value) {
@@ -25784,7 +26569,8 @@ function rehydrate(state, definitions) {
 function migrateCurrentVersion(raw, definitions, current) {
   const report = emptyLoadReport();
   // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
-  const saved = applyRenames(cloneJson(raw), report, definitions.modSave?.renames || []);
+  // 物品改名（wine → baijiu）先于字段改名：存档树里的物品键、值统一换成新 id。
+  const saved = applyRenames(renameItemIds(cloneJson(raw), report), report, definitions.modSave?.renames || []);
   // 家庭表按实体 id 存、不走底板合并：先逐户补齐、丢弃危险键，修不了的抛中文错误。
   repairHouseholdTable(saved, definitions, report);
   const base = createInitialState({ content: definitions });
@@ -26625,7 +27411,8 @@ const BUILDING_ART_CATALOG = Object.freeze({
   bakery:{name:'面包房',connected:true}, lumberyard:{name:'伐木场',connected:true},
   stock_exchange:{name:'交易所',connected:true}, bank:{name:'银行',connected:true},
   saltworks:{name:'盐场',connected:true}, wholesale_market:{name:'批发市场',connected:true},
-  winery:{name:'酒坊',connected:true}, cotton_field:{name:'棉田',connected:true}, weaving_mill:{name:'织坊',connected:true},
+  winery:{name:'酒坊',connected:true}, brewery:{name:'啤酒坊',connected:true}, craft_brewery:{name:'精酿坊',connected:true}, premium_winery:{name:'窖坊',connected:true},
+  cotton_field:{name:'棉田',connected:true}, weaving_mill:{name:'织坊',connected:true},
   commercial_street:{name:'商业街',connected:true}, town_hall:{name:'政务厅',connected:true},
   livestock_base:{name:'养殖基地',connected:true}, times_square:{name:'时代广场',connected:true},
   police_station:{name:'警察局',connected:true}, social_security_office:{name:'社保局',connected:true},
@@ -26721,6 +27508,9 @@ case 'logistics_center':return logisticsCenter(level);
 case 'dock':return dockScene(level);
 case 'trade_center':return tradeCenter(level);
 case 'winery':return house(-8,-6,.92,'酒')+wineJars()+wineFlag();
+case 'brewery':return house(-8,-6,.92,'啤')+wineJars()+wineFlag();
+case 'craft_brewery':return house(-8,-6,.92,'精')+wineJars()+wineFlag();
+case 'premium_winery':return house(-8,-6,.92,'窖')+wineJars()+wineFlag();
 case 'cotton_field':return cottonPlot()+thatchShed(-49,12,.6);
 case 'weaving_mill':return house(-8,-6,.92,'织')+clothRack();
 case 'public_housing': return courtyard()+house(-29,-9,.58)+house(27,7,.58)+house(-9,31,.58);
@@ -26837,7 +27627,7 @@ const SHARED_ART_CARD_TYPES = new Set(["logistics_center", "dock", "trade_center
       <path class="salt-steam" d="M65 56c-8-8 5-9 0-17m9 16c-6-6 4-9 0-15"/>
     </g>`;
   }
-  if (type === "winery") {
+  if (["winery", "brewery", "craft_brewery", "premium_winery"].includes(type)) {
     const jar = (cx, cy) => `<path class="wine-jar" d="M${cx - 4} ${cy - 9}h8l1.5 4q3 3 2.5 7h-14q-.5-4 2.5-7Z"/><path class="wine-mouth" d="M${cx - 4.5} ${cy - 9}h9"/>`;
     return `<g class="${classes}">
       <ellipse class="building-shadow" cx="50" cy="101" rx="39" ry="7"/>
@@ -29084,6 +29874,7 @@ const LABELS = {
   enterprise_capital_injection: "企业营运资金", enterprise_material_contribution: "企业实物投入",
   enterprise_input_payment: "企业原料采购", enterprise_sale: "企业销售", enterprise_dividend: "企业分红", enterprise_annual_distribution: "企业年度利润分配",
   enterprise_production_tax: "企业实物税", operating_right_sale: "经营权交易",
+  stamp_duty: "印花税", share_market_buy: "二级市场买股",
   transfer: "转账", deposit: "入库", withdrawal: "出库", legacy_consume: "旧版消耗",
   legacy_process: "旧版加工", legacy_loss: "旧版损耗", legacy_transfer: "旧版转账"
 };
@@ -29227,6 +30018,7 @@ return { renderAnnualFlows };
 // ===== ui/panel-exchange.js =====
 const __mxmod147 = (() => {
 const { escapeHtml, number, moneyUnit, monthlyWageValue, payDayText } = __mxmod126;
+const { renderNumericInput } = __mxmod136;
 const EXCHANGE_TABS = [
   { id: "listing", name: "挂牌" },
   { id: "applications", name: "民营申请" },
@@ -29452,6 +30244,10 @@ function renderListing(view, company) {
     <div class="subtle">年利润÷现价；4%左右算合理，跌到3%、2%、1%越低泡沫越大。</div>
     <div class="row"><span class="label">现价 / 你定的售价</span><strong class="value">${number(sharePrice, 2)} / ${number(askPrice, 2)}粮券</strong></div>
     <div class="subtle">只有你挂出的股数才会被居民买走，且现价不低于你定的售价才成交（按现价）。${listedShares > 0 && sharePrice < askPrice ? "现价低于售价，暂不成交。" : ""}</div>
+    <div class="row"><span class="label">分红比例（占近一季净利润）</span><strong class="value">${number(company.payoutPercent || 0, 2)}%${company.payoutControllable ? "" : " · 民营公司自定"}</strong></div>
+    ${company.payoutControllable ? `<div class="row"><span class="label">设置分红比例</span><div class="setting-input">${renderNumericInput(view, { key: `payout:${company.id}`, kind: "company-payout", target: company.id, value: company.payoutPercent ?? 60, label: "分红比例", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>` : ""}
+    <div class="row"><span class="label">最近分红 每股 / 股息率</span><strong class="value">${company.lastDividend ? `${number(company.lastDividend.perShareVoucher, 2)}粮券（第${number(company.lastDividend.year)}年${number(company.lastDividend.day)}日）` : "暂无"} · ${number(company.dividendYieldPercent || 0, 2)}%</strong></div>
+    <div class="subtle">每 90 天按近一季净利润 × 分红比例发放，股东按持股收款；分红当日股价按每股分红额下调，之后约 90 天回升。</div>
     <button class="secondary wide" data-share-preview="${escapeHtml(company.id)}">预览居民认购</button>
     ${previewOpen ? `<div class="operation-preview"><strong>本次售股</strong>
       <div class="row"><span class="label">计划收入 / 预计实际收入</span><strong class="value">${number(listedShares * sharePrice, 2)} / ${number(proceeds, 2)}粮券</strong></div>
@@ -29837,6 +30633,18 @@ function marginPolicyCard(view) {
     </div></details>`;
 }
 
+// 印花税（政策 stampDutyPercent，0—5，两位小数）：二级市场每笔成交由卖方承担，交镇库；镇库卖出、一级发行与回购不征。
+function stampDutyCard(view) {
+  const rate = view.policy?.stampDutyPercent ?? CONTENT.rules.stampDutyDefaultPercent ?? 0.1;
+  const revenue = view.policy?.stampDutyVoucher || {};
+  const maximum = CONTENT.rules.stampDutyMaximumPercent ?? 5;
+  return `<details class="detail-block" data-detail-key="policy-stamp-duty"><summary>股市印花税</summary><div class="detail-body">
+      <div class="row"><span class="label">二级市场印花税率</span><div class="setting-input">${renderNumericInput(view, { key: "stamp-duty-rate", kind: "stamp-duty-rate", target: "policy", value: rate, label: "印花税率", minimum: 0, maximum, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">印花税收入 今日 / 本年 / 累计</span><strong class="value">${number(revenue.day || 0, 2)} / ${number(revenue.year || 0, 2)} / ${number(revenue.cumulative || 0, 2)}粮券</strong></div>
+      <div class="subtle">居民之间买卖与居民卖给发行池的成交由卖方按成交额缴纳，交镇库。镇库卖出、一级发行和镇库回购不征。</div>
+    </div></details>`;
+}
+
 // 银行与国债的利率、准备金率、发行控件都在银行建筑面板；政策页只留一行摘要和跳转按钮。
 function bankPolicyCard(view) {
   const stats = view.policy?.bankStats || {};
@@ -29870,6 +30678,7 @@ function bankPolicyCard(view) {
     </div>`;
   return `${reformCard}
     ${marginPolicyCard(view)}
+    ${stampDutyCard(view)}
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
       <div class="row"><span class="label">营业店铺日租</span><div class="setting-input">${renderNumericInput(view, { key: "shop-rent", kind: "shop-rent", target: "shops", value: view.policy.shopRentVoucher ?? 1, label: "每间营业店铺每日租金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       ${hasStall ? `<div class="row"><span class="label">摊位日租</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent", kind: "stall-rent", target: "stalls", value: view.policy.stallRentVoucher ?? 2, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
@@ -31317,6 +32126,13 @@ function guardSimulation(engine, beforeCall) {
     } else if (kind === "stall-rent") {
       result = simulation.setStallRent(state, parsed.value);
       successMessage = `摊租已设为每摊每日${number(parsed.value, 2)}小麦等值。`;
+    } else if (kind === "stamp-duty-rate") {
+      result = simulation.setStampDuty(state, parsed.value);
+      successMessage = `二级市场印花税已设为${number(parsed.value, 2)}%（卖方承担，交镇库）。`;
+    } else if (kind === "company-payout") {
+      // 镇库控股公司的分红比例（占近一季净利润，每 90 天分红一次）。
+      result = simulation.configureDividend(state, input.dataset.draftTarget, parsed.value);
+      successMessage = `分红比例已设为${number(parsed.value, 2)}%（占近一季净利润，每90天发放一次）。`;
     } else if (kind === "shop-profit-tax") {
       result = simulation.setShopProfitTax(state, parsed.value);
       successMessage = `商业利润税已设为${number(parsed.value, 2)}%。`;

@@ -235,6 +235,8 @@ export function createInitialState(options) {
         Object.keys(content.buildings).map(typeId => [typeId, content.rules.privateProductionTaxDefaultPercent ?? 10])
       ),
       // 利润率政策（0—200，一位小数）：综合商店全局目标利润率；贸易行出口 / 进口利润门槛。
+      // 印花税（%）：二级市场每笔成交按成交额由卖方承担，交镇库；镇库自己卖出不征（economy 在 systems/stock-exchange.js）。
+      stampDutyPercent: content.rules.stampDutyDefaultPercent ?? 0.1,
       shopMarginPercent: content.rules.generalStoreMarkupPercent ?? 20,
       tradeMarginPercent: content.rules.tradeHouseTargetMarginPercent ?? 20,
       tradeImportMarginPercent: content.rules.tradeHouseImportMarginPercent ?? 25,
@@ -310,6 +312,8 @@ export function createInitialState(options) {
     ipoApplications: {},
     ipoCooldowns: {},
     stockExchange: { legacyAccess: false, rotation: 0 },
+    // 印花税账（粮券，三段记账）：二级市场卖方交给镇库的税额，年报里看 annualReports[].stampDuty。
+    stampDuty: { day: {}, year: {}, cumulative: {} },
     shops: {},
     nextShopNumber: 1,
     services: {

@@ -204,9 +204,13 @@ test("民营建筑经镇长批准上市：业主家庭保留 51%，卖方是业�
   assert.equal(grantResidentVouchers(state, 300000, CONTENT, buyer.id).ok, true);
   onlyBudget(state, buyer.id, O * 2 * V);
   const ownerBefore = voucherBalance(state, `household:${owner.id}`);
+  const townBefore = voucherBalance(state, "town");
   const trade = settleHouseholdStockBuying(state, CONTENT);
   assert.equal(trade.shares, O);
-  assert.equal(voucherBalance(state, `household:${owner.id}`) - ownerBefore, O * 2 * V, "股款付给业主家庭");
+  // 卖方是居民家庭：股款减去印花税（卖方承担，交镇库）。
+  const duty = Math.round(O * 2 * V * CONTENT.rules.stampDutyDefaultPercent / 100);
+  assert.equal(voucherBalance(state, `household:${owner.id}`) - ownerBefore, O * 2 * V - duty, "股款减印花税付给业主家庭");
+  assert.equal(voucherBalance(state, "town") - townBefore, duty, "印花税归镇库");
   assert.equal(company.householdShares[owner.id], T - O, "业主保留其余");
   assert.equal(owner.shares[company.id], T - O);
   assert.equal(company.residentShares, T, "居民之间转手，居民总持股不变");

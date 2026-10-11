@@ -162,7 +162,7 @@ test("吃肉习惯平滑：宽裕度从 3 突降到 0.2，一天内 meatHabit �
 
 test("集市也卖肉：没有综合商店时，肉直接从养殖场进集市并卖出", () => {
   const { state, base } = town(6201, { store: false });
-  state.wholesaleMarket.inventory.wine = 50000 * I;
+  state.wholesaleMarket.inventory.baijiu = 50000 * I;
   state.wholesaleMarket.inventory.cloth = 500 * I;
   assert.equal(simulation.setStallKeeperLimit(state, 6).ok, true);
   const farm = simulation.openResidentShop(state, base, "pig_farm").shopId;

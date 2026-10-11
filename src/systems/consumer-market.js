@@ -3,17 +3,18 @@ import {
   currencyScale
 } from "../economy/currency.js";
 import {
-  createPaymentCapabilityContext, currentPaymentComposition, quotePaymentValueUnitsWithContext, settleMonetaryPayment, spendableVoucherUnits, householdSpendableVoucherUnits
+  createHouseholdPaymentContext, currentPaymentComposition, canPayFullyWithContext, settleMonetaryPayment, spendableVoucherUnits, householdSpendableVoucherUnits
 } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
+import { householdOwner } from "../economy/accounts.js";
 import { sellCompanyProduct, companySalePrice } from "./companies.js";
-import { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIds, registerRejectedHouseholds, registerShopStockoutDemand } from "./shops.js";
-import { shopTradePrices } from "../economy/operating-plan.js";
+import { sellShopProduct, shopDefinition, shopSalesCapacityUnits, shopRetailItemIdsView, shopSoldTodayUnits, registerRejectedHouseholds, registerShopStockoutDemand } from "./shops.js";
+import { shopRetailPrice } from "../economy/operating-plan.js";
 import {
   householdList, householdPopulation, isActiveHousehold, householdConvertibleWheatUnits, householdExchangeAllowanceUnits,
   householdFoodQeqUnits, householdReserveQeqUnits,
   creditHouseholdInventory, residentInventoryUnits, syncResidentAggregates
-  , reserveWheatPaymentOptions
+  , reserveWheatFullPaymentOptions
 } from "./households.js";
 import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { removeTownInventoryWithCost } from "../economy/business.js";
@@ -53,24 +54,25 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
     if (shop.status !== "open") continue;
     const def = shopDefinition(content, shop.typeId);
     // 用户 0.1.11：有库存的零售店可出售非经营品类（兜底）。
-    const sellsItem = shopRetailItemIds(shop, content).includes(itemId)
+    const retailItemIds = shopRetailItemIdsView(shop, content);
+    const sellsItem = retailItemIds.includes(itemId)
       || (def?.kind === "retail" && (shop.inventory?.[itemId] || 0) > 0);
     if (!sellsItem) continue;
     // 只经商店卖的商品：综合商店都能卖；摊位只能卖它经营的日用品。
     if (generalStoreOnly && def?.id !== "general" && def?.kind !== "stall") continue;
-    const prices = shopTradePrices(state, shop.typeId, content, itemId, shop);
+    const retailPrice = shopRetailPrice(state, shop.typeId, content, itemId, shop);
     const stock = shop.inventory?.[itemId] || 0;
-    const soldToday = Object.values(shop.accounts?.day?.soldUnits || {}).reduce((sum, units) => sum + Math.max(0, units || 0), 0);
+    const soldToday = shopSoldTodayUnits(shop);
     const remainingCapacity = Math.max(0, shopSalesCapacityUnits(state, shop, content) - soldToday);
     const available = Math.min(stock, remainingCapacity);
-    if (stock > available && capped && def && prices) {
-      capped.push({ shopId: shop.id, cappedUnits: stock - available, price: prices.retailVoucherPerUnit });
+    if (stock > available && capped && def && retailPrice !== null) {
+      capped.push({ shopId: shop.id, cappedUnits: stock - available, price: retailPrice });
     }
     // 断货需求只记在本店经营的品类上（兜底售卖的非经营品不参与进货口径）。
-    const businessItem = shopRetailItemIds(shop, content).includes(itemId);
-    if (stock <= 0 && stockouts && businessItem && def && prices) stockouts.push({ shopId: shop.id, price: prices.retailVoucherPerUnit });
+    const businessItem = retailItemIds.includes(itemId);
+    if (stock <= 0 && stockouts && businessItem && def && retailPrice !== null) stockouts.push({ shopId: shop.id, price: retailPrice });
     // stockLimited：可售量受库存（而非接待能力）限制，售罄即断货。
-    if (available > 0 && def && prices) sellers.push({ id: `shop:${shop.id}`, type: "shop", shopId: shop.id, shopTypeId: def.id, stockUnits: available, price: prices.retailVoucherPerUnit, stockLimited: available === stock && businessItem });
+    if (available > 0 && def && retailPrice !== null) sellers.push({ id: `shop:${shop.id}`, type: "shop", shopId: shop.id, shopTypeId: def.id, stockUnits: available, price: retailPrice, stockLimited: available === stock && businessItem });
   }
   // Snapshot direct household suppliers once, before resident demand is processed.
   // This lets private producers sell without a shop while preventing goods bought
@@ -87,7 +89,7 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
       available = Math.min(stock, Math.max(0, Math.floor((food - reserve) / Math.max(1, perUnit))));
     }
     if (available > 0) sellers.push({
-      id: `household:${household.id}`,
+      id: householdOwner(household.id),
       type: "household",
       householdId: household.id,
       stockUnits: available,
@@ -103,6 +105,15 @@ function rotationHash(id, serial) {
   let hash = 2166136261 ^ (serial & 0xffffffff);
   for (let i = 0; i < id.length; i += 1) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619) >>> 0;
   return hash >>> 0;
+}
+
+// 同一天内对同一户的轮换序恒定：按日序号缓存，换天整体作废（纯函数结果，不进存档）。
+let tieKeyCache = { serial: null, byId: new Map() };
+function tieKeyOf(id, serial) {
+  if (tieKeyCache.serial !== serial) tieKeyCache = { serial, byId: new Map() };
+  let key = tieKeyCache.byId.get(id);
+  if (key === undefined) { key = rotationHash(id, serial); tieKeyCache.byId.set(id, key); }
+  return key;
 }
 
 function quickAffordableUnits(state, household, price, content, reserveDays, capUnits = Number.POSITIVE_INFINITY) {
@@ -124,16 +135,20 @@ function maximumAffordableUnits(state, household, price, content, reserveDays, c
   const scale = currencyScale(content);
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   if (price <= 0) return 0;
-  const owner = `household:${household.id}`;
-  const voucherAvailable = spendableVoucherUnits(state, owner);
+  const voucherAvailable = householdSpendableVoucherUnits(state, household);
+  // 快路径：光靠手头粮券加存款就买得起 cap（上界 = cap，且付得起 cap 的价款），结果必然是 cap，
+  // 不用再算可换小麦和支付上下文。条件不满足一律走下面的完整流程。
+  if (cap > 0 && Number.isFinite(cap) && Math.floor(voucherAvailable * inventoryScale / (price * scale)) >= cap
+    && voucherAvailable >= Math.round(cap / inventoryScale * price * scale)) return cap;
   const wheatUnitsAvailable = householdConvertibleWheatUnits(state, household, content, reserveDays);
   const wheatValueAvailable = voucherUnitsForWheatUnits(wheatUnitsAvailable, content, "floor");
   // 仅作为二分上界；真正可支付性统一交给支付层判断，避免全粮券阶段误回退小麦。
   let high = Math.min(cap, Math.max(0, Math.floor((voucherAvailable + wheatValueAvailable) * inventoryScale / (price * scale))));
   // 上界为 0 时不必建支付上下文（买不起的户占大多数）。
   if (high <= 0) return 0;
-  const paymentContext = createPaymentCapabilityContext(state, owner, content, { maxWheatUnits: wheatUnitsAvailable });
-  const canPay = valueUnits => quotePaymentValueUnitsWithContext(paymentContext, valueUnits).full;
+  const paymentContext = createHouseholdPaymentContext(state, household, content, wheatUnitsAvailable,
+    reserveDays === (content.rules.householdFoodReserveDays ?? 30) ? wheatUnitsAvailable : null);
+  const canPay = valueUnits => canPayFullyWithContext(paymentContext, valueUnits);
   let low = 0;
   // 常见情况：想买的量本来就付得起，一次报价就够，不用二分。
   if (high > 0 && canPay(Math.round(high / inventoryScale * price * scale))) return high;
@@ -150,17 +165,17 @@ function transactSeller(state, seller, household, itemId, units, content, reason
   const scale = currencyScale(content);
   const inventoryScale = content.precision.inventoryUnitsPerJin;
   const cost = Math.round(units / inventoryScale * seller.price * scale);
-  const wheatOptions = reserveWheatPaymentOptions(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
+  const payOptions = reserveWheatFullPaymentOptions(state, household, content, content.rules.basicCommerceFoodReserveDays ?? 30);
   if (seller.type === "town") {
     if ((state.accounts.town?.[itemId] || 0) < units) return { ok: false, reason: "镇库库存不足" };
-    const payment = settleMonetaryPayment(state, `household:${household.id}`, "town", currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
+    const payment = settleMonetaryPayment(state, householdOwner(household.id), "town", currentPaymentComposition(state, cost), content,
+      options.paymentType || `${itemId}_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, payOptions);
     if (!payment.ok) return payment;
     const removal = removeTownInventoryWithCost(state, itemId, units, content);
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost, paidValueUnits: cost, payment, sellerCostVoucherUnits: removal.costWheatUnits };
   }
   if (seller.type === "company") {
-    const sale = sellCompanyProduct(state, seller.companyId, `household:${household.id}`, itemId, units, seller.price, content,
+    const sale = sellCompanyProduct(state, seller.companyId, householdOwner(household.id), itemId, units, seller.price, content,
       reason || `家庭购买${content.items[itemId]?.name || itemId}`);
     return sale.ok
       ? { ok: true, quantityUnits: sale.quantityUnits, paidVoucherUnits: sale.revenueVoucherUnits }
@@ -170,13 +185,13 @@ function transactSeller(state, seller, household, itemId, units, content, reason
     if (seller.householdId === household.id) return { ok: false, reason: "不能购买自己挂牌的商品" };
     const source = state.households?.byId?.[seller.householdId];
     if (!source || (source.inventory?.[itemId] || 0) < units) return { ok: false, reason: "卖方库存不足" };
-    const payment = settleMonetaryPayment(state, `household:${household.id}`, `household:${seller.householdId}`, currentPaymentComposition(state, cost), content,
-      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, { requireFull: true, ...wheatOptions });
+    const payment = settleMonetaryPayment(state, householdOwner(household.id), `household:${seller.householdId}`, currentPaymentComposition(state, cost), content,
+      options.paymentType || `${itemId}_direct_trade`, reason || `家庭购买${content.items[itemId]?.name || itemId}`, payOptions);
     if (!payment.ok) return payment;
     source.inventory[itemId] -= units;
     return { ok: true, quantityUnits: units, paidVoucherUnits: cost };
   }
-  const sale = sellShopProduct(state, seller.shopId, `household:${household.id}`, units, content,
+  const sale = sellShopProduct(state, seller.shopId, householdOwner(household.id), units, content,
     reason || `家庭在店铺购买${content.items[itemId]?.name || itemId}`, itemId);
   return sale.ok
     ? { ok: true, quantityUnits: sale.quantityUnits, paidVoucherUnits: sale.paidVoucherUnits }
@@ -263,10 +278,10 @@ function applyRetailElasticity(state, itemId, desiredUnits, content, sellers) {
   for (const shop of Object.values(state.shops || {})) {
     if (shop.status !== "open") continue;
     if (shopDefinition(content, shop.typeId)?.id !== "general") continue;
-    if (!shopRetailItemIds(shop, content).includes(itemId)) continue;
-    const prices = shopTradePrices(state, shop.typeId, content, itemId, shop);
-    if (!prices) continue;
-    const shopMultiplier = priceElasticityDemandMultiplier(state, shop, itemId, prices.retailVoucherPerUnit, content);
+    if (!shopRetailItemIdsView(shop, content).includes(itemId)) continue;
+    const retailPrice = shopRetailPrice(state, shop.typeId, content, itemId, shop);
+    if (retailPrice === null) continue;
+    const shopMultiplier = priceElasticityDemandMultiplier(state, shop, itemId, retailPrice, content);
     multiplier = Math.min(multiplier, shopMultiplier);
   }
   if (multiplier >= 1) return desiredUnits;
@@ -303,13 +318,14 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
   // 同等缺货的户之间按"户 id × 日序号"的散列轮换先后：接待能力封顶时每天服务的不是同一批户
   // （原先按 id 字典序，永远是排在前面的那批户被服务，其余户长期买不到）。
   const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 360) + (state.day || 0);
-  const tieKey = new Map();
-  for (const household of householdList(state)) tieKey.set(household.id, rotationHash(household.id, serial));
-  const households = householdList(state).filter(isActiveHousehold).slice().sort((a, b) => {
-    const aPer = (a.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(a));
-    const bPer = (b.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(b));
-    return aPer - bPer || tieKey.get(a.id) - tieKey.get(b.id) || a.id.localeCompare(b.id);
-  });
+  // 排序键（人均存货、轮换散列）先算好再排，比较器里不再反复算；比较规则与原来完全相同（id 唯一，全序）。
+  const keyed = householdList(state).filter(isActiveHousehold).map(household => ({
+    household,
+    per: (household.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(household)),
+    tie: tieKeyOf(household.id, serial)
+  }));
+  keyed.sort((a, b) => a.per - b.per || a.tie - b.tie || a.household.id.localeCompare(b.household.id));
+  const households = keyed.map(row => row.household);
   if (!households.length) return { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: "没有居民家庭" };
   const requestedNeeds = options.householdNeedsUnits || null;
   const allocations = requestedNeeds
@@ -323,6 +339,8 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
   const previousDefer = Boolean(state._deferHouseholdSync);
   state._deferHouseholdSync = true;
 
+  // 本次需求只会减少：开局没有需求的户在所有卖家循环里都会被跳过，先剔掉（顺序不变）。
+  const buyers = households.filter(household => (householdNeed.get(household.id) || 0) > 0);
   for (const seller of ordered) {
     if (purchased >= desiredUnits) break;
     let sellerLeft = seller.stockUnits;
@@ -330,7 +348,7 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
     let sellerSold = 0;
     let sellerPaid = 0;
     let sellerCost = 0;
-    for (const household of households) {
+    for (const household of buyers) {
       if (sellerLeft <= 0 || purchased >= desiredUnits) break;
       const need = householdNeed.get(household.id) || 0;
       if (need <= 0) continue;

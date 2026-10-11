@@ -13,6 +13,7 @@ const LABELS = {
   enterprise_capital_injection: "企业营运资金", enterprise_material_contribution: "企业实物投入",
   enterprise_input_payment: "企业原料采购", enterprise_sale: "企业销售", enterprise_dividend: "企业分红", enterprise_annual_distribution: "企业年度利润分配",
   enterprise_production_tax: "企业实物税", operating_right_sale: "经营权交易",
+  stamp_duty: "印花税", share_market_buy: "二级市场买股",
   transfer: "转账", deposit: "入库", withdrawal: "出库", legacy_consume: "旧版消耗",
   legacy_process: "旧版加工", legacy_loss: "旧版损耗", legacy_transfer: "旧版转账"
 };

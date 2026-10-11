@@ -10,11 +10,11 @@
 //   - 镇库 50000 斤木材（开局建造用，与 demand-probe 相同）；
 //   - 建筑直接按 2 级（商业街 3 级）建成，不走施工；
 //   - 切到粮券阶段，居民获得 200000 券作为起始资本，综合商店镇库拨 8000 券作为起始流动资金；
-//   - 其余建筑按 demand-probe 的岗位数配人（磨坊/面包房 10，盐场/伐木场 12，酒坊 6，棉田 8，织坊 6）。
+//   - 其余建筑按 demand-probe 的岗位数配人（磨坊/面包房 10，盐场/伐木场 12，啤酒坊 4、精酿坊 2、酒坊 4、窖坊 2，棉田 8，织坊 6）。
 //
 // 玩家策略（每年年初、第 1 天开工前执行一次，确定性，不随机）：
 //   1. 保持镇营生产岗位满员：每个镇营生产建筑（带 industryTier 的 mill/bakery/saltworks/lumberyard/
-//      winery/cotton_field/weaving_mill）的每个岗位都有一个"计划人数"，初始为开局配人数。
+//      brewery/craft_brewery/winery/premium_winery/cotton_field/weaving_mill）的每个岗位都有一个"计划人数"，初始为开局配人数。
 //      每年若在岗人数低于计划人数（且不超过岗位产能），就补到计划人数；从不主动裁员。
 //      若建筑升级后等级提高，计划人数改为升级后的满额产能（新岗位要招满）。
 //   2. 磨坊、面包房每年升一级：若该建筑没有在建工程、未达最高等级（10 级）、且 selectUpgradePreview
@@ -47,9 +47,9 @@ const simulation = householdsArg ? createSimulation(CONTENT) : defaultSimulation
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 const MID_DAY = 180;
-const PRODUCER_TYPES = ["mill", "bakery", "saltworks", "lumberyard", "winery", "cotton_field", "weaving_mill"];
+const PRODUCER_TYPES = ["mill", "bakery", "saltworks", "lumberyard", "brewery", "craft_brewery", "winery", "premium_winery", "cotton_field", "weaving_mill"];
 const UPGRADE_TYPES = ["mill", "bakery"];
-const PRICE_ITEMS = ["flour", "bread", "salt", "wood", "wine", "cloth", "pork"];
+const PRICE_ITEMS = ["flour", "bread", "salt", "wood", "beer", "baijiu", "cloth", "pork"];
 const OUTSIDE_TOWN_IDS = Object.keys(CONTENT.outsideTowns || {});
 
 function parseArgs(argv) {
@@ -92,7 +92,8 @@ function buildTown(seed) {
   staff(add("mill"), 10); staff(add("bakery"), 10);
   staff(add("saltworks", 2, CONTENT.buildings.saltworks.requiredPlotFeature), 12);
   staff(add("lumberyard", 2, CONTENT.buildings.lumberyard.requiredPlotFeature), 12);
-  staff(add("winery"), 6); staff(add("cotton_field"), 8); staff(add("weaving_mill"), 6);
+  staff(add("brewery"), 4); staff(add("craft_brewery"), 2); staff(add("winery"), 4); staff(add("premium_winery"), 2);
+  staff(add("cotton_field"), 8); staff(add("weaving_mill"), 6);
   const base = add("livestock_base", 1);
   add("times_square", 1);
   grantResidentVouchers(state, 200000);
@@ -441,7 +442,7 @@ function printTables(rows, meta) {
   for (const r of rows) L([pad(tag(r), 8), ...items.map(i => pad(r.prices.wholesale[i], 7)), ...items.map(i => pad(r.prices.retail[i], 7))].join(""));
 
   L("\n【四】就业与镇营产业");
-  L([pad("年", 8), pad("就业", 7), pad("闲置", 7), pad("工资", 7), pad("欠薪", 8), pad("生产满员", 9), pad("缺员", 6), pad("停工", 6), pad("收成", 9), pad("面粉", 9), pad("面包", 9), pad("盐", 8), pad("木", 9), pad("酒", 8), pad("布", 8)].join(""));
+  L([pad("年", 8), pad("就业", 7), pad("闲置", 7), pad("工资", 7), pad("欠薪", 8), pad("生产满员", 9), pad("缺员", 6), pad("停工", 6), pad("收成", 9), pad("面粉", 9), pad("面包", 9), pad("盐", 8), pad("木", 9), pad("啤酒", 8), pad("布", 8)].join(""));
   for (const r of rows) {
     const o = r.output;
     const prod = item => {
@@ -451,7 +452,7 @@ function printTables(rows, meta) {
     L([pad(tag(r), 8), pad(r.jobs.employed, 7), pad(r.jobs.idle, 7), pad(r.jobs.avgWageJinPerDay, 7), pad(r.jobs.unpaidWageJin, 8),
       pad(r.producers.full, 9), pad(r.producers.short, 6), pad(r.producers.idle, 6),
       pad(Math.round(r.harvestJin || 0), 9), pad(Math.round(prod("flour")), 9), pad(Math.round(prod("bread")), 9),
-      pad(Math.round(prod("salt")), 8), pad(Math.round(prod("wood")), 9), pad(Math.round(prod("wine")), 8), pad(Math.round(prod("cloth")), 8)].join(""));
+      pad(Math.round(prod("salt")), 8), pad(Math.round(prod("wood")), 9), pad(Math.round(prod("beer") + prod("beer_premium")), 8), pad(Math.round(prod("cloth")), 8)].join(""));
   }
 
   L("\n【五】店铺、养殖、时代广场（利润单位：万券，年末为全年，中途为年初至今）");

@@ -62,6 +62,18 @@ function marginPolicyCard(view) {
     </div></details>`;
 }
 
+// 印花税（政策 stampDutyPercent，0—5，两位小数）：二级市场每笔成交由卖方承担，交镇库；镇库卖出、一级发行与回购不征。
+function stampDutyCard(view) {
+  const rate = view.policy?.stampDutyPercent ?? CONTENT.rules.stampDutyDefaultPercent ?? 0.1;
+  const revenue = view.policy?.stampDutyVoucher || {};
+  const maximum = CONTENT.rules.stampDutyMaximumPercent ?? 5;
+  return `<details class="detail-block" data-detail-key="policy-stamp-duty"><summary>股市印花税</summary><div class="detail-body">
+      <div class="row"><span class="label">二级市场印花税率</span><div class="setting-input">${renderNumericInput(view, { key: "stamp-duty-rate", kind: "stamp-duty-rate", target: "policy", value: rate, label: "印花税率", minimum: 0, maximum, className: "setting-editor" })}<b>%</b></div></div>
+      <div class="row"><span class="label">印花税收入 今日 / 本年 / 累计</span><strong class="value">${number(revenue.day || 0, 2)} / ${number(revenue.year || 0, 2)} / ${number(revenue.cumulative || 0, 2)}粮券</strong></div>
+      <div class="subtle">居民之间买卖与居民卖给发行池的成交由卖方按成交额缴纳，交镇库。镇库卖出、一级发行和镇库回购不征。</div>
+    </div></details>`;
+}
+
 // 银行与国债的利率、准备金率、发行控件都在银行建筑面板；政策页只留一行摘要和跳转按钮。
 function bankPolicyCard(view) {
   const stats = view.policy?.bankStats || {};
@@ -95,6 +107,7 @@ export function renderPolicy(view) {
     </div>`;
   return `${reformCard}
     ${marginPolicyCard(view)}
+    ${stampDutyCard(view)}
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
       <div class="row"><span class="label">营业店铺日租</span><div class="setting-input">${renderNumericInput(view, { key: "shop-rent", kind: "shop-rent", target: "shops", value: view.policy.shopRentVoucher ?? 1, label: "每间营业店铺每日租金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       ${hasStall ? `<div class="row"><span class="label">摊位日租</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent", kind: "stall-rent", target: "stalls", value: view.policy.stallRentVoucher ?? 2, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>

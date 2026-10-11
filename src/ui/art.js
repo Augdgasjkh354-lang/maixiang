@@ -76,7 +76,7 @@ export function buildingSymbol(type, state = "idle", ghost = false) {
       <path class="salt-steam" d="M65 56c-8-8 5-9 0-17m9 16c-6-6 4-9 0-15"/>
     </g>`;
   }
-  if (type === "winery") {
+  if (["winery", "brewery", "craft_brewery", "premium_winery"].includes(type)) {
     const jar = (cx, cy) => `<path class="wine-jar" d="M${cx - 4} ${cy - 9}h8l1.5 4q3 3 2.5 7h-14q-.5-4 2.5-7Z"/><path class="wine-mouth" d="M${cx - 4.5} ${cy - 9}h9"/>`;
     return `<g class="${classes}">
       <ellipse class="building-shadow" cx="50" cy="101" rx="39" ry="7"/>

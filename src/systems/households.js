@@ -1,5 +1,5 @@
 import { RULES } from "../content/rules.js";
-import { qeqUnitsForInventoryUnits } from "../economy/inventory.js";
+import { itemQeqUnitsPerInventoryUnit, qeqUnitsForInventoryUnits } from "../economy/inventory.js";
 import { allocateIntegerByWeight } from "../core/allocation.js";
 
 function emptyInventory(content) {
@@ -48,7 +48,10 @@ export function householdWorkingAge(household) {
 }
 
 export function householdEmploymentCount(household) {
-  return Object.values(household?.jobs || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+  const jobs = household?.jobs;
+  let sum = 0;
+  if (jobs) for (const key in jobs) sum += Math.max(0, Number(jobs[key]) || 0);
+  return sum;
 }
 
 export function householdIdleWorkers(household) {
@@ -447,9 +450,12 @@ export function syncResidentAggregates(state, content) {
   state.accounts ||= {};
   const itemIds = Object.keys(content.items);
   const count = itemIds.length;
-  const totals = new Array(count).fill(0);
+  // Float64Array：逐户累加不再给每个中间和分配堆数字（求和结果与普通数组完全相同）。
+  const totals = new Float64Array(count);
   let voucherUnits = 0;
-  for (const household of householdList(state)) {
+  const households = householdList(state);
+  for (let h = 0; h < households.length; h += 1) {
+    const household = households[h];
     voucherUnits += household.voucherUnits || 0;
     const inventory = household.inventory;
     if (!inventory) continue;
@@ -505,17 +511,33 @@ export function residentVoucherUnits(state) {
 const itemEntriesCache = new WeakMap();
 function itemEntries(content) {
   let cached = itemEntriesCache.get(content.items);
-  if (!cached) {
+  if (!cached || cached.precision !== content.precision) {
     const all = Object.entries(content.items);
-    cached = { all, otherFood: all.filter(([itemId, item]) => itemId !== "wheat" && item.edible && item.qeq) };
+    const otherFood = all.filter(([itemId, item]) => itemId !== "wheat" && item.edible && item.qeq);
+    // 每个有口粮当量的物品：id 与“每库存单位的口粮当量”（当量为 0 的物品对合计恒贡献 0，不入表）。热路径里用下标循环，不再解构。
+    // 首次用到时才算（与原先每次调用时才算同样的时机，物品当量不合法时同样在用到处抛错）。
+    cached = { precision: content.precision, all, otherFood, foodRatios: null, otherFoodRatios: null, wheatQeqPerUnit: null };
     itemEntriesCache.set(content.items, cached);
   }
   return cached;
 }
 
+function qeqRatioRows(rows, content) {
+  const ids = [];
+  const ratios = [];
+  for (const [itemId, item] of rows) {
+    const ratio = itemQeqUnitsPerInventoryUnit(item, content);
+    if (ratio !== 0) { ids.push(itemId); ratios.push(ratio); }
+  }
+  return { ids, ratios };
+}
+
 export function householdFoodQeqUnits(state, household, content) {
+  const entries = itemEntries(content);
+  const { ids, ratios } = entries.foodRatios ||= qeqRatioRows(entries.all, content);
+  const inventory = household.inventory;
   let total = 0;
-  for (const [itemId, item] of itemEntries(content).all) total += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
+  for (let i = 0; i < ids.length; i += 1) total += ratios[i] * (inventory?.[ids[i]] || 0);
   return total;
 }
 
@@ -528,11 +550,12 @@ export function householdConvertibleWheatUnits(state, household, content, reserv
   const wheat = household.inventory?.wheat || 0;
   if (wheat <= 0) return 0;
   const reserve = householdReserveQeqUnits(state, household, content, reserveDays);
+  const entries = itemEntries(content);
+  const { ids, ratios } = entries.otherFoodRatios ||= qeqRatioRows(entries.otherFood, content);
+  const inventory = household.inventory;
   let otherFoodQeq = 0;
-  for (const [itemId, item] of itemEntries(content).otherFood) {
-    otherFoodQeq += qeqUnitsForInventoryUnits(item, household.inventory?.[itemId] || 0, content);
-  }
-  const wheatQeqPerUnit = qeqUnitsForInventoryUnits(content.items.wheat, 1, content);
+  for (let i = 0; i < ids.length; i += 1) otherFoodQeq += ratios[i] * (inventory?.[ids[i]] || 0);
+  const wheatQeqPerUnit = entries.wheatQeqPerUnit ??= qeqUnitsForInventoryUnits(content.items.wheat, 1, content);
   const requiredWheatUnits = Math.max(0, Math.ceil((reserve - otherFoodQeq) / Math.max(1, wheatQeqPerUnit)));
   return Math.max(0, wheat - requiredWheatUnits);
 }
@@ -543,6 +566,14 @@ export function reserveWheatPaymentOptions(state, household, content, reserveDay
   const base = content.rules.householdFoodReserveDays ?? 30;
   if (!household || reserveDays === base) return {};
   return { maxWheatUnits: householdConvertibleWheatUnits(state, household, content, reserveDays) };
+}
+
+// reserveWheatPaymentOptions 加上 requireFull: true（买东西必须付全款）；没有额外上限时返回共享的只读对象，省掉每笔付款建两个对象。
+const REQUIRE_FULL_PAYMENT = Object.freeze({ requireFull: true });
+export function reserveWheatFullPaymentOptions(state, household, content, reserveDays) {
+  const base = content.rules.householdFoodReserveDays ?? 30;
+  if (!household || reserveDays === base) return REQUIRE_FULL_PAYMENT;
+  return { requireFull: true, maxWheatUnits: householdConvertibleWheatUnits(state, household, content, reserveDays) };
 }
 
 export function householdExchangeAllowanceUnits(state, householdId, content) {

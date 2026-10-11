@@ -573,6 +573,13 @@ export function mountGame(root) {
     } else if (kind === "stall-rent") {
       result = simulation.setStallRent(state, parsed.value);
       successMessage = `摊租已设为每摊每日${number(parsed.value, 2)}小麦等值。`;
+    } else if (kind === "stamp-duty-rate") {
+      result = simulation.setStampDuty(state, parsed.value);
+      successMessage = `二级市场印花税已设为${number(parsed.value, 2)}%（卖方承担，交镇库）。`;
+    } else if (kind === "company-payout") {
+      // 镇库控股公司的分红比例（占近一季净利润，每 90 天分红一次）。
+      result = simulation.configureDividend(state, input.dataset.draftTarget, parsed.value);
+      successMessage = `分红比例已设为${number(parsed.value, 2)}%（占近一季净利润，每90天发放一次）。`;
     } else if (kind === "shop-profit-tax") {
       result = simulation.setShopProfitTax(state, parsed.value);
       successMessage = `商业利润税已设为${number(parsed.value, 2)}%。`;

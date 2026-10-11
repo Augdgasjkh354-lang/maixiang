@@ -83,8 +83,8 @@ test("丝绸 mod 内容合并：物品流通标记、桑园（原料产业）、
   assert.ok(content.rules.shopTypes.general.itemIds.includes("silk"), "丝绸进综合商店货架");
   assert.equal(content.rules.marketPricesVoucherPerUnit.silk, 100);
   assert.equal(content.rules.wholesaleDefaultPurchasePrices.silk, 85);
-  assert.equal(content.rules.marketPricesVoucherPerUnit.wine, CONTENT.rules.marketPricesVoucherPerUnit.wine, "核心价格不被覆盖");
-  assert.ok(content.rules.householdGoods.silk && content.rules.householdGoods.wine, "丝绸进日用品表");
+  assert.equal(content.rules.marketPricesVoucherPerUnit.baijiu, CONTENT.rules.marketPricesVoucherPerUnit.baijiu, "核心价格不被覆盖");
+  assert.ok(content.rules.householdGoods.silk && content.rules.householdGoods.baijiu, "丝绸进日用品表");
   assert.equal(content.rules.householdGoods.silk.incomeElasticity, 2.0);
   assert.equal(content.buildings.mulberry_garden.industryTier, 0);
   assert.equal(content.buildings.mulberry_garden.recipeId, "silk_reeling");

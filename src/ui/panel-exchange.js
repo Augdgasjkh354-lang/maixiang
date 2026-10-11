@@ -1,4 +1,5 @@
 import { escapeHtml, number, moneyUnit, monthlyWageValue, payDayText } from "./format.js";
+import { renderNumericInput } from "./numeric-drafts.js";
 
 // 交易所与上市（docs/OWNERSHIP.md）的界面：
 // - 交易所建筑面板：摘要卡 + 四个标签页（挂牌 / 民营申请 / 公司 / 状态）；
@@ -232,6 +233,10 @@ function renderListing(view, company) {
     <div class="subtle">年利润÷现价；4%左右算合理，跌到3%、2%、1%越低泡沫越大。</div>
     <div class="row"><span class="label">现价 / 你定的售价</span><strong class="value">${number(sharePrice, 2)} / ${number(askPrice, 2)}粮券</strong></div>
     <div class="subtle">只有你挂出的股数才会被居民买走，且现价不低于你定的售价才成交（按现价）。${listedShares > 0 && sharePrice < askPrice ? "现价低于售价，暂不成交。" : ""}</div>
+    <div class="row"><span class="label">分红比例（占近一季净利润）</span><strong class="value">${number(company.payoutPercent || 0, 2)}%${company.payoutControllable ? "" : " · 民营公司自定"}</strong></div>
+    ${company.payoutControllable ? `<div class="row"><span class="label">设置分红比例</span><div class="setting-input">${renderNumericInput(view, { key: `payout:${company.id}`, kind: "company-payout", target: company.id, value: company.payoutPercent ?? 60, label: "分红比例", minimum: 0, maximum: 100, className: "setting-editor" })}<b>%</b></div></div>` : ""}
+    <div class="row"><span class="label">最近分红 每股 / 股息率</span><strong class="value">${company.lastDividend ? `${number(company.lastDividend.perShareVoucher, 2)}粮券（第${number(company.lastDividend.year)}年${number(company.lastDividend.day)}日）` : "暂无"} · ${number(company.dividendYieldPercent || 0, 2)}%</strong></div>
+    <div class="subtle">每 90 天按近一季净利润 × 分红比例发放，股东按持股收款；分红当日股价按每股分红额下调，之后约 90 天回升。</div>
     <button class="secondary wide" data-share-preview="${escapeHtml(company.id)}">预览居民认购</button>
     ${previewOpen ? `<div class="operation-preview"><strong>本次售股</strong>
       <div class="row"><span class="label">计划收入 / 预计实际收入</span><strong class="value">${number(listedShares * sharePrice, 2)} / ${number(proceeds, 2)}粮券</strong></div>

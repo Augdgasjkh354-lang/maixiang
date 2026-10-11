@@ -7,7 +7,7 @@ import { householdIdOf } from "../economy/accounts.js";
 import { putStock, sellCompanyGoods, takeStock } from "../economy/trade.js";
 import { PERIODS, bookAdd, bookAddMap, ensureBook } from "../economy/books.js";
 import { recordFundDividend } from "./social-security.js";
-import { currencyScale, roundToShareTick, voucherBalance } from "../economy/currency.js";
+import { currencyScale, roundToShareTick, shareTick, voucherBalance } from "../economy/currency.js";
 import { createPaymentViewState } from "../economy/payment-view-state.js";
 import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
@@ -379,14 +379,28 @@ export function liquidateCompanyForArrears(state, companyId, content) {
   return { ok: true, companyId, arrearsBeforeUnits: arrearsBefore, inKindValueUnits, townAdvanceUnits, transferredClaimsUnits, cancelledResidentShares, cancelledFundShares, levelsReturned: levels };
 }
 
-// v14/v15 command/save compatibility only. 0.1.7 annual settlement and share valuation do not multiply by this field.
-export function setCompanyDividendPercent(state, companyId, percent) {
+// 分红比例（占近一季净利润的百分比，docs/STOCK.md）：镇库控股（镇库持股过半）的公司由镇长设置；
+// 民营上市公司按公司自身策略，缺省 rules.sharePayoutDefaultPercent（60%），镇长不能改。
+export function companyPayoutPercent(company, content) {
+  if (company.payoutPercent == null) return content.rules.sharePayoutDefaultPercent ?? 60;
+  const value = Number(company.payoutPercent);
+  return Number.isFinite(value) ? value : (content.rules.sharePayoutDefaultPercent ?? 60);
+}
+
+export function townControlsCompany(company) {
+  return company.totalShares > 0 && (company.townShares || 0) * 2 > company.totalShares;
+}
+
+export function setCompanyDividendPercent(state, companyId, percent, content = null) {
   const company = state.companies?.[companyId];
   const value = Number(percent);
   if (!company) return { ok: false, reason: "企业不存在" };
-  if (!Number.isFinite(value) || value < 0 || value > 100) return { ok: false, reason: "分红比例须为0%—100%" };
-  company.dividendPercent = Math.round(value * 100) / 100;
-  return { ok: true, value: company.dividendPercent };
+  if (!company.listing?.listed) return { ok: false, reason: "公司尚未上市" };
+  if (!townControlsCompany(company)) return { ok: false, reason: "民营上市公司的分红比例由公司自定，镇长只能设置镇库控股公司的分红比例" };
+  const maximum = content?.rules?.sharePayoutMaximumPercent ?? 100;
+  if (!Number.isFinite(value) || value < 0 || value > maximum) return { ok: false, reason: `分红比例须为0%—${maximum}%` };
+  company.payoutPercent = Math.round(value * 100) / 100;
+  return { ok: true, value: company.payoutPercent };
 }
 
 export function setIntermediatePrice(state, itemId, price, content) {
@@ -894,6 +908,107 @@ export function settleAnnualCompanyProfits(state, endingYear, content) {
 
 export const settleAnnualCompanyDividends = settleAnnualCompanyProfits;
 
+// ---------------------------------------------------------------- 季度分红与除权（docs/STOCK.md）
+
+// 分红日：每 shareDividendIntervalDays 天（默认 90，即第 90/180/270/360 天）一次。
+export function isDividendDay(state, content) {
+  const interval = content.rules.shareDividendIntervalDays || 90;
+  return interval > 0 && (state.day + 1) % interval === 0;
+}
+
+// 除权后业绩锚的下移额（每股，单位内部粮券）：除权日整额，之后按线性回升到 0（rules.shareExRightsRecoverDays，默认 90 天）。
+// 业绩锚来自利润，分红只是把现金搬走，利润不变；不下移锚，股价会被均值回归“补回”分红，等于重复计价。
+export function exRightsOffsetUnits(market, absDay, content) {
+  const ex = market?.exRights;
+  if (!ex || !(ex.offsetUnits > 0)) return 0;
+  const days = Math.max(1, content.rules.shareExRightsRecoverDays || 90);
+  const elapsed = absDay - ex.startAbsDay;
+  if (elapsed >= days) return 0;
+  return Math.round(ex.offsetUnits * (1 - Math.max(0, elapsed) / days));
+}
+
+// 每季分红：近一季（分红间隔内）净利润 × 分红比例，封顶于未分配利润与可自由支配现金（扣工作营运资金），按持股比例入账。
+// 付款：居民户（enterprise_dividend）、社保基金（recordFundDividend）、镇库（townShares）。分红后股价按每股分红额下调（≥1 档，不受单日涨跌幅限制），业绩锚同额下移并逐日回升。
+// 欠薪中的公司不分红；本季没有利润或可分配额不足一股时不分红（不记除权）。
+export function payListedDividends(state, content) {
+  if (!isDividendDay(state, content)) return [];
+  const absDay = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
+  const rows = [];
+  for (const company of Object.values(state.companies || {})) {
+    if (!company.listing?.listed || !(company.totalShares > 0)) continue;
+    const row = payCompanyDividend(state, company, content, absDay);
+    if (row) rows.push({ companyId: company.id, ...row });
+  }
+  return rows;
+}
+
+function payCompanyDividend(state, company, content, absDay) {
+  ensureCompanyBooks(company);
+  if ((company.payroll?.arrearsVoucherUnits || 0) > 0) return null;
+  const owner = "company:" + company.id;
+  const interval = content.rules.shareDividendIntervalDays || 90;
+  const quarter = companyActualProfitValuation(state, company, content, interval);
+  const profitUnits = Math.max(0, quarter.actualProfitVoucherUnits || 0);
+  const payoutPercent = companyPayoutPercent(company, content);
+  const targetUnits = Math.floor(profitUnits * payoutPercent / 100);
+  if (targetUnits <= 0) return null;
+  const retainedUnits = Math.max(0, company.retainedEarningsVoucherUnits || 0);
+  const reserveUnits = companyWorkingCapitalReserve(company, state, content);
+  const freeCashUnits = Math.max(0, maximumPayableValueUnits(state, owner, content) - reserveUnits);
+  let distributable = Math.min(targetUnits, retainedUnits, freeCashUnits);
+  distributable = maximumFullyPayableValueUnits(state, owner, distributable, content);
+  const perShareUnits = Math.floor(distributable / company.totalShares);
+  if (perShareUnits <= 0) return null;
+  const label = `${company.name}第${state.year}年${state.day + 1}日季度分红`;
+  let residentUnits = 0;
+  for (const [householdId, shares] of Object.entries(company.householdShares || {})) {
+    const amount = perShareUnits * Math.max(0, shares || 0);
+    if (amount <= 0) continue;
+    const result = settleMonetaryPayment(state, owner, `household:${householdId}`, currentPaymentComposition(state, amount), content,
+      "enterprise_dividend", label, { requireFull: true });
+    if (!result.ok) throw new Error("企业季度分红转账失败");
+    residentUnits += amount;
+  }
+  let fundUnits = 0;
+  if ((company.fundShares || 0) > 0) {
+    const amount = perShareUnits * company.fundShares;
+    const result = settleMonetaryPayment(state, owner, "social", currentPaymentComposition(state, amount), content,
+      "enterprise_dividend", label, { requireFull: true });
+    if (!result.ok) throw new Error("企业社保基金季度分红转账失败");
+    recordFundDividend(state, amount);
+    fundUnits = amount;
+  }
+  let townUnits = 0;
+  if ((company.townShares || 0) > 0) {
+    const amount = perShareUnits * company.townShares;
+    const result = settleMonetaryPayment(state, owner, "town", currentPaymentComposition(state, amount), content,
+      "enterprise_dividend", label, { requireFull: true });
+    if (!result.ok) throw new Error("企业镇库季度分红转账失败");
+    townUnits = amount;
+  }
+  const paidUnits = residentUnits + fundUnits + townUnits;
+  company.retainedEarningsVoucherUnits = (company.retainedEarningsVoucherUnits || 0) - paidUnits;
+  // 除权：股价下调一股分红额（至少一档），业绩锚同额下移（叠加尚未回升的旧余额）。
+  const tick = shareTick(content);
+  const dropUnits = Math.max(tick, roundToShareTick(perShareUnits, content));
+  const market = company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: company.sharePriceVoucherUnits || tick };
+  const remainingOffset = exRightsOffsetUnits(market, absDay, content);
+  market.exRights = { offsetUnits: remainingOffset + dropUnits, startAbsDay: absDay };
+  const priceBefore = roundToShareTick(company.sharePriceVoucherUnits || 0, content);
+  company.sharePriceVoucherUnits = Math.max(tick, priceBefore - dropUnits);
+  const row = {
+    year: state.year, day: state.day + 1, payoutPercent, profitVoucherUnits: profitUnits, targetVoucherUnits: targetUnits,
+    capped: distributable < targetUnits, totalVoucherUnits: paidUnits, perShareVoucherUnits: perShareUnits,
+    residentVoucherUnits: residentUnits, fundVoucherUnits: fundUnits, townVoucherUnits: townUnits,
+    exDropVoucherUnits: dropUnits, priceBeforeVoucherUnits: priceBefore, priceAfterVoucherUnits: company.sharePriceVoucherUnits
+  };
+  company.quarterlyDividends ||= [];
+  company.quarterlyDividends.push(row);
+  if (company.quarterlyDividends.length > 8) company.quarterlyDividends.splice(0, company.quarterlyDividends.length - 8);
+  recordEvent(state, `${company.name}（${company.listing.ticker || "---"}）分红每股${(perShareUnits / currencyScale(content)).toFixed(2)}粮券，股价除权下调${(dropUnits / currencyScale(content)).toFixed(2)}粮券。`, content, { day: state.day + 1 });
+  return row;
+}
+
 export function companyActualProfitValuation(state, company, content, horizonDays = null) {
   const horizon = horizonDays || content.rules.operatingRightValuationDays || 365;
   const serialNow = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
@@ -980,6 +1095,7 @@ export function companySummary(state, company, content) {
   const epsUnits = company.totalShares > 0 ? annualizedProfitUnits / company.totalShares : 0;
   const sharePrice = company.shareSale?.sharePriceVoucherUnits || 0;
   const referenceYield = sharePrice > 0 ? Math.max(0, epsUnits) / sharePrice : 0;
+  const lastDividend = (company.quarterlyDividends || []).at(-1) || null;
   const definition = content.buildings[company.typeId];
   const job = definition?.jobs?.[0];
   const workers = job ? readJobCount(state, listedJobKeyForBuilding(company.buildingId, job.id)) : 0;
@@ -1027,6 +1143,10 @@ export function companySummary(state, company, content) {
     annualizedProfitVoucher: annualizedProfitUnits / scale,
     epsVoucher: epsUnits / scale,
     referenceDividendYield: referenceYield,
+    payoutPercent: companyPayoutPercent(company, content),
+    payoutControllable: townControlsCompany(company),
+    lastDividend: lastDividend ? { year: lastDividend.year, day: lastDividend.day, perShareVoucher: lastDividend.perShareVoucherUnits / scale, totalVoucher: lastDividend.totalVoucherUnits / scale, exDropVoucher: lastDividend.exDropVoucherUnits / scale } : null,
+    dividendYieldPercent: (company.sharePriceVoucherUnits || 0) > 0 && lastDividend ? (lastDividend.perShareVoucherUnits * (content.rules.daysPerYear / (content.rules.shareDividendIntervalDays || 90))) / company.sharePriceVoucherUnits * 100 : 0,
     townSharePercent: company.totalShares ? company.townShares / company.totalShares : 0,
     residentSharePercent: company.totalShares ? company.residentShares / company.totalShares : 0
   };

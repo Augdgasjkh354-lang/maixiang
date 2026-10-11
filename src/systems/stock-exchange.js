@@ -1,9 +1,11 @@
 import { currencyScale, shareTick, roundToShareTick } from "../economy/currency.js";
-import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
+import { currentPaymentComposition, householdSpendableVoucherUnits, maximumPayableValueUnits, settleMonetaryPayment } from "../economy/payment.js";
 import { recordEvent } from "../economy/ledger.js";
-import { householdList, isActiveHousehold } from "./households.js";
+import { bookAdd } from "../economy/books.js";
+import { householdList, householdPopulation, isActiveHousehold } from "./households.js";
 import { consumeHouseholdStockBudget } from "./investment-preference.js";
-import { companyActualProfitValuation, offerSeller, offeredPoolShares, sellerHoldingShares, stockFairValueUnits } from "./companies.js";
+import { wholesalePrice } from "./wholesale-price.js";
+import { companyActualProfitValuation, exRightsOffsetUnits, offerSeller, offeredPoolShares, sellerHoldingShares, stockFairValueUnits } from "./companies.js";
 import { selectOperatingRightPreview } from "../selectors/operating-rights.js";
 import { buildingMaterialValueUnits } from "./ownership.js";
 import { nextRandom } from "../core/random.js";
@@ -30,7 +32,16 @@ export const STOCK_MARKET = {
   burstBase: 0.01, burstPerGap: 0.4, burstGapStart: 0.5, // 价格越过业绩锚越多，每天破裂概率越大
   crashDriftMin: 0.02, crashDriftSpan: 0.03, crashNoise: 0.05, // 破裂期日均跌幅 2%—5%，单日可近 20%
   crashMinDays: 8, crashSpanDays: 14,
-  crashEndGap: 0.05        // 跌回业绩锚附近即结束
+  crashEndGap: 0.05,       // 跌回业绩锚附近即结束
+  // 居民买卖对价格的影响（docs/STOCK.md）：当日净买入（买入股数 − 卖出意愿股数）÷ 总股本，次日价格加 flowImpact × 净流量。
+  flowImpact: 0.5,         // 净流量每占股本 1%，次日涨跌 0.5%
+  flowCap: 0.1,            // 净流量折算的上限（±10% 股本，即单日最多 ±5% 股价）
+  // 居民卖出（每户每天抽样判定，候选上限 residentSellCandidateDaily，实际概率低于它的按比例丢弃）。
+  residentSellCandidateDaily: 0.11,
+  residentSellBaseDaily: 0.005,   // 基础换手：每持仓户每天挂卖约 0.5%
+  residentSellCashDaily: 0.04,    // 缺现金（可动用粮券+存款 < 生活储备天数的口粮钱）：额外概率
+  residentSellProfitDaily: 0.03,  // 泡沫期且高出业绩锚：获利了结额外概率（高出 0.5 个对数单位时满额）
+  residentSellPanicDaily: 0.03    // 破裂期：恐慌卖出额外概率
 };
 
 // 股价一档 = 0.01 粮券（shareTick / roundToShareTick 在 economy/currency.js）。
@@ -322,6 +333,8 @@ export function stepSharePrice(price, anchorUnits, market, sentiment, draw, cont
   if (market.regime === "bubble") change = market.drift + P.bubbleNoise * draw.gauss();
   else if (market.regime === "crash") change = market.drift + P.crashNoise * draw.gauss();
   else change = -P.reversion * gap + P.momentumCarry * market.momentum + P.sentimentDrift * sentiment + P.noise * draw.gauss();
+  // 居民买卖的净流量（上一日成交写入 market.flow，settleStockMarketDay 用完清零）：买盘推价、卖压压价。
+  change += P.flowImpact * Math.max(-P.flowCap, Math.min(P.flowCap, Number(market.flow) || 0));
   if (market.regime !== "normal") market.daysLeft -= 1;
   // 涨跌幅钳制：不超过 ±20%，价格很低时至少允许一档。
   const maxSteps = Math.max(1, Math.floor(price * SHARE_PRICE_DAILY_LIMIT / tick));
@@ -331,9 +344,22 @@ export function stepSharePrice(price, anchorUnits, market, sentiment, draw, cont
   return next;
 }
 
+// 绝对日序（跨年连续）：除权回升、居民卖出的抽样都按它计时。
+export function absoluteDayOf(state, content) {
+  return (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
+}
+
+// 股价计算用的业绩锚 = 业绩锚基准 − 除权下移额（分红除权后逐日回升，见 companies.js 的 payListedDividends）。
+function effectiveAnchorUnits(company, market, absDay, content) {
+  const tick = shareTick(content);
+  const base = market.anchorUnits > 0 ? market.anchorUnits : (company.sharePriceVoucherUnits || tick);
+  return Math.max(tick, base - exRightsOffsetUnits(market, absDay, content));
+}
+
 // 每日股价结算：AI 做市商 + 市场情绪。
 // 每只上市股票各有自己的行情（常态/泡沫/破裂，见 stepSharePrice）；市场情绪是全市场共有的慢变量，情绪高涨时更容易起泡沫。
 // 用种子随机数保证模拟可复现；没有上市公司时不消耗随机数。
+// 净流量 market.flow 是上一日居民买卖的结果：这里用掉后清零，当日成交会写入新的值。
 export function settleStockMarketDay(state, content) {
   if (!hasStockExchange(state)) return null;
   const listed = Object.values(state.companies || {}).filter(company => company.listing?.listed && company.totalShares > 0);
@@ -341,6 +367,7 @@ export function settleStockMarketDay(state, content) {
   const exchange = ensureStockExchangeState(state);
   exchange.sentiment = Math.max(-1, Math.min(1, 0.96 * (exchange.sentiment || 0) + 0.12 * gauss(state)));
   const draw = { uniform: () => nextRandom(state), gauss: () => gauss(state) };
+  const absDay = absoluteDayOf(state, content);
   const moved = [];
   for (const company of listed) {
     // 老存档兼容：没有实时股价时用挂牌价起步；旧价不是一档整数倍时取整到一档。
@@ -353,7 +380,8 @@ export function settleStockMarketDay(state, content) {
     const reference = performance.referencePerShareVoucherUnits || 0;
     if (reference > 0) market.anchorUnits = reference;
     else if (performance.observedDays >= (content.rules.sharePerformanceObservationDays || 30)) market.anchorUnits = Math.max(shareTick(content), Math.floor((market.anchorUnits || current) * 0.99));
-    const next = stepSharePrice(current, market.anchorUnits > 0 ? market.anchorUnits : current, market, exchange.sentiment, draw, content);
+    const next = stepSharePrice(current, effectiveAnchorUnits(company, market, absDay, content), market, exchange.sentiment, draw, content);
+    market.flow = 0;
     company.sharePriceVoucherUnits = next;
     if (!Array.isArray(company.sharePriceHistory)) company.sharePriceHistory = [];
     company.sharePriceHistory.push(next);
@@ -363,18 +391,113 @@ export function settleStockMarketDay(state, content) {
   return moved.length ? { moved } : null;
 }
 
-// 住户日常股票买入：按投资倾向把本日股票预算分散买入发行池（镇长或业主挂出的）股份。
-// - 买入对象：已上市、发行池有股且市价不低于卖方定价的公司，按实时股价成交；镇库未挂出的股份不卖
-// - 预算：household.stockBuyBudgetVoucherUnits（银行分流后写入）或无银行时现算
-// - 付款：住户 → 卖方（镇库或原业主家庭）；付不起就跳过
-// - 股份转移：卖方是镇库则 townShares → residentShares；卖方是家庭则只在居民之间转手
-export function settleHouseholdStockBuying(state, content) {
+// ---------------------------------------------------------------- 印花税
+
+// 印花税率（%）：政策 policy.stampDutyPercent，缺省取 rules.stampDutyDefaultPercent。
+export function stampDutyPercentOf(state, content) {
+  const raw = state.policy?.stampDutyPercent;
+  const value = raw == null ? NaN : Number(raw);
+  return Number.isFinite(value) ? value : (content.rules.stampDutyDefaultPercent ?? 0.1);
+}
+
+// 一笔二级市场成交的印花税（内部粮券单位，取整）。卖方是镇库时调用方不征。
+export function stampDutyUnitsOf(state, content, costUnits) {
+  return Math.round(Math.max(0, costUnits) * stampDutyPercentOf(state, content) / 100);
+}
+
+// 卖方（居民）把印花税付给镇库，走统一支付层；记入 state.stampDuty 三段账。
+function payStampDuty(state, sellerOwner, dutyUnits, content, reason) {
+  if (!(dutyUnits > 0)) return 0;
+  const payment = settleMonetaryPayment(state, sellerOwner, "town", currentPaymentComposition(state, dutyUnits), content, "stamp_duty", reason, { requireFull: true });
+  if (!payment.ok) throw new Error("印花税转账失败：卖方刚收到股款，理应付得起");
+  state.stampDuty ||= { day: {}, year: {}, cumulative: {} };
+  bookAdd(state.stampDuty, "stampDutyUnits", dutyUnits);
+  return dutyUnits;
+}
+
+// ---------------------------------------------------------------- 股份转移
+
+// 股份从卖方转到买方（卖方 = { kind: "town" } 或 { kind: "household", householdId }）。调用前须已校验卖方持股。
+function transferShares(state, company, seller, buyer, shares) {
+  if (seller.kind === "town") {
+    company.townShares -= shares;
+    company.residentShares = (company.residentShares || 0) + shares;
+  } else {
+    company.householdShares ||= {};
+    const left = (company.householdShares[seller.householdId] || 0) - shares;
+    if (left > 0) company.householdShares[seller.householdId] = left;
+    else delete company.householdShares[seller.householdId];
+    const sellerHousehold = state.households.byId[seller.householdId];
+    sellerHousehold.shares ||= {};
+    sellerHousehold.shares[company.id] = Math.max(0, (sellerHousehold.shares[company.id] || 0) - shares);
+    if (sellerHousehold.shares[company.id] <= 0) delete sellerHousehold.shares[company.id];
+  }
+  company.householdShares ||= {};
+  company.householdShares[buyer.id] = (company.householdShares[buyer.id] || 0) + shares;
+  buyer.shares ||= {};
+  buyer.shares[company.id] = (buyer.shares[company.id] || 0) + shares;
+}
+
+// ---------------------------------------------------------------- 居民卖出
+
+// 居民卖出意愿（docs/STOCK.md）：只遍历持有该股的户（company.householdShares），不全员扫描。
+// 抽样：几何跳跃取候选（候选率 residentSellCandidateDaily），候选再按其实际概率接受，等价于每户独立判定一次。
+// 实际概率 = 基础换手 + 缺现金 + 泡沫获利了结 + 破裂恐慌；缺现金指可动用粮券+存款 < 生活储备天数的口粮钱。
+// 卖单只在当日有效：不预先扣股份、不跨日、不进存档；成交时再校验卖方仍持有。
+// 返回 Map(companyId → [{ householdId, shares, remaining }])。
+export function generateResidentSellOrders(state, content) {
+  const orders = new Map();
+  if (!hasStockExchange(state)) return orders;
+  const P = STOCK_MARKET;
+  const scale = currencyScale(content);
+  const absDay = absoluteDayOf(state, content);
+  const wheatPrice = wholesalePrice(state, "wheat", content) || 0;
+  const livingDays = content.rules.shareLivingVoucherReserveDays || 30;
+  const candidate = P.residentSellCandidateDaily;
+  const logMiss = Math.log(1 - candidate);
+  for (const company of Object.values(state.companies || {})) {
+    if (!company.listing?.listed || !(company.totalShares > 0) || !(company.sharePriceVoucherUnits > 0)) continue;
+    const entries = Object.entries(company.householdShares || {});
+    if (!entries.length) continue;
+    const market = company.stockMarket || {};
+    const price = company.sharePriceVoucherUnits;
+    const gap = Math.log(price / effectiveAnchorUnits(company, market, absDay, content));
+    const rows = [];
+    for (let index = -1; ;) {
+      index += 1 + Math.floor(Math.log(1 - nextRandom(state)) / logMiss);
+      if (index >= entries.length) break;
+      const [householdId, holding] = entries[index];
+      const household = state.households?.byId?.[householdId];
+      if (!household || !isActiveHousehold(household) || !(holding > 0)) continue;
+      let probability = P.residentSellBaseDaily;
+      const needUnits = householdPopulation(household) * content.rules.foodPerPersonDay * livingDays * wheatPrice * scale;
+      const shortage = householdSpendableVoucherUnits(state, household) < needUnits;
+      if (shortage) probability += P.residentSellCashDaily;
+      if (market.regime === "bubble") probability += P.residentSellProfitDaily * Math.min(1, Math.max(0, gap) / 0.5);
+      else if (market.regime === "crash") probability += P.residentSellPanicDaily;
+      if (nextRandom(state) * candidate >= probability) continue;
+      const fraction = (shortage ? 0.2 : 0.1) + 0.4 * nextRandom(state);
+      const shares = Math.min(holding, Math.max(1, Math.floor(holding * fraction)));
+      rows.push({ householdId, shares, remaining: shares });
+    }
+    if (rows.length) orders.set(company.id, rows);
+  }
+  return orders;
+}
+
+// ---------------------------------------------------------------- 住户买股
+
+// 住户日常股票买入（docs/STOCK.md）：按投资倾向把本日股票预算分到上市股票。成交顺序：先吃居民卖单（市价），再吃发行池（镇长或业主挂出的限价单）。
+// - 付款：买方 → 卖方（镇库 / 原业主家庭 / 卖单居民）；卖方是居民时卖方另付印花税给镇库，卖方是镇库不征。
+// - 股份：镇库发行池 → residentShares；居民之间只在 householdShares 间转手。
+// - 净流量：(买入股数 − 卖出意愿股数) ÷ 总股本，写入 company.stockMarket.flow，次日股价用（即使无成交也写，卖压无人接也要压价）。
+// sellOrders 缺省为空（只有发行池）；日结用 settleDailyShareMarket。
+export function settleHouseholdStockBuying(state, content, sellOrders = new Map()) {
   if (!hasStockExchange(state)) return null;
+  const priced = company => company.listing?.listed && (company.sharePriceVoucherUnits || 0) > 0 && company.totalShares > 0;
   // 发行池是卖方挂出的限价卖单：市价低于卖方定的每股售价时不成交（成交价按市价，卖方不会卖得比自己定的价低）。
-  const listed = Object.values(state.companies || {}).filter(company =>
-    company.listing?.listed && (company.sharePriceVoucherUnits || 0) > 0 &&
-    company.sharePriceVoucherUnits >= (company.shareSale?.sharePriceVoucherUnits || 0) &&
-    offeredPoolShares(state, company) > 0);
+  const poolOpen = company => company.sharePriceVoucherUnits >= (company.shareSale?.sharePriceVoucherUnits || 0) && offeredPoolShares(state, company) > 0;
+  const listed = Object.values(state.companies || {}).filter(company => priced(company) && (poolOpen(company) || (sellOrders.get(company.id) || []).length > 0));
   if (!listed.length) return null;
   // 追涨：近期涨得多、正处泡沫的股票分到更多买入预算，破裂期的股票少人问津。
   const weights = new Map(listed.map(company => {
@@ -383,48 +506,77 @@ export function settleHouseholdStockBuying(state, content) {
     return [company.id, Math.max(0.25, Math.min(3, heat))];
   }));
   const weightTotal = [...weights.values()].reduce((sum, value) => sum + value, 0);
+  const intent = new Map(listed.map(company => [company.id, (sellOrders.get(company.id) || []).reduce((sum, row) => sum + row.shares, 0)]));
+  const bought = new Map(listed.map(company => [company.id, 0]));
   let totalShares = 0;
   let totalSpentUnits = 0;
+  let residentSoldShares = 0;
+  let stampDutyUnits = 0;
   for (const household of householdList(state)) {
     if (!isActiveHousehold(household)) continue;
     const budget = consumeHouseholdStockBudget(state, content, household);
     if (budget <= 0) continue;
+    const buyerOwner = `household:${household.id}`;
     for (const company of listed) {
       const perCompany = Math.floor(budget * weights.get(company.id) / weightTotal);
       if (perCompany <= 0) continue;
-      const available = offeredPoolShares(state, company);
-      if (available <= 0) continue;
+      const priceUnits = company.sharePriceVoucherUnits;
+      let left = perCompany;
+      // 1) 居民卖单（同日有效；成交时再校验卖方仍持有）。
+      for (const order of sellOrders.get(company.id) || []) {
+        if (left < priceUnits) break;
+        if (order.remaining <= 0 || order.householdId === household.id) continue;
+        const seller = state.households?.byId?.[order.householdId];
+        if (!seller) continue;
+        const shares = Math.min(order.remaining, company.householdShares?.[seller.id] || 0, Math.floor(left / priceUnits));
+        if (shares <= 0) continue;
+        const cost = shares * priceUnits;
+        const payment = settleMonetaryPayment(state, buyerOwner, `household:${seller.id}`, currentPaymentComposition(state, cost), content,
+          "share_market_buy", `${household.name}二级市场买入${company.name}${shares}股`, { requireFull: true });
+        if (!payment.ok) continue;
+        const duty = stampDutyUnitsOf(state, content, cost);
+        payStampDuty(state, `household:${seller.id}`, duty, content, `${seller.name}卖出${company.name}${shares}股，缴纳印花税`);
+        transferShares(state, company, { kind: "household", householdId: seller.id }, household, shares);
+        order.remaining -= shares;
+        left -= cost;
+        residentSoldShares += shares;
+        bought.set(company.id, bought.get(company.id) + shares);
+        totalShares += shares;
+        totalSpentUnits += cost;
+        stampDutyUnits += duty;
+      }
+      // 2) 发行池（镇长或业主挂出的限价卖单）。
+      if (!poolOpen(company)) continue;
       const seller = offerSeller(state, company);
       if (!seller || (seller.kind === "household" && seller.householdId === household.id)) continue;
-      const priceUnits = company.sharePriceVoucherUnits;
-      const shares = Math.min(available, Math.floor(perCompany / priceUnits));
+      const shares = Math.min(offeredPoolShares(state, company), Math.floor(left / priceUnits));
       if (shares <= 0) continue;
       const cost = shares * priceUnits;
       const payee = seller.kind === "town" ? "town" : `household:${seller.householdId}`;
-      const payment = settleMonetaryPayment(state, `household:${household.id}`, payee,
-        currentPaymentComposition(state, cost), content, "share_market_buy",
+      const payment = settleMonetaryPayment(state, buyerOwner, payee, currentPaymentComposition(state, cost), content, "share_market_buy",
         `${household.name}二级市场买入${company.name}${shares}股`, { requireFull: true });
       if (!payment.ok) continue;
+      const duty = seller.kind === "household" ? stampDutyUnitsOf(state, content, cost) : 0;
+      if (seller.kind === "household") payStampDuty(state, payee, duty, content, `${state.households.byId[seller.householdId].name}出售${company.name}${shares}股，缴纳印花税`);
       company.shareSale.offeredShares = Math.max(0, (company.shareSale.offeredShares || 0) - shares);
-      if (seller.kind === "town") {
-        company.townShares -= shares;
-        company.residentShares = (company.residentShares || 0) + shares;
-      } else {
-        const sellerId = seller.householdId;
-        company.householdShares[sellerId] = (company.householdShares[sellerId] || 0) - shares;
-        if (company.householdShares[sellerId] <= 0) delete company.householdShares[sellerId];
-        const sellerHousehold = state.households.byId[sellerId];
-        sellerHousehold.shares ||= {};
-        sellerHousehold.shares[company.id] = Math.max(0, (sellerHousehold.shares[company.id] || 0) - shares);
-        if (sellerHousehold.shares[company.id] <= 0) delete sellerHousehold.shares[company.id];
-      }
-      company.householdShares ||= {};
-      company.householdShares[household.id] = (company.householdShares[household.id] || 0) + shares;
-      household.shares ||= {};
-      household.shares[company.id] = (household.shares[company.id] || 0) + shares;
+      transferShares(state, company, seller, household, shares);
+      bought.set(company.id, bought.get(company.id) + shares);
       totalShares += shares;
       totalSpentUnits += cost;
+      stampDutyUnits += duty;
     }
   }
-  return totalShares > 0 ? { shares: totalShares, spentVoucherUnits: totalSpentUnits } : null;
+  // 净流量：买入（含居民间成交）减去卖出意愿，按总股本折算成比例；次日 stepSharePrice 读取。
+  for (const company of listed) {
+    company.stockMarket ||= { regime: "normal", daysLeft: 0, drift: 0, momentum: 0, anchorUnits: company.sharePriceVoucherUnits };
+    const net = (bought.get(company.id) - intent.get(company.id)) / company.totalShares;
+    company.stockMarket.flow = Math.max(-1, Math.min(1, net));
+  }
+  return totalShares > 0 ? { shares: totalShares, spentVoucherUnits: totalSpentUnits, residentTradedShares: residentSoldShares, stampDutyVoucherUnits: stampDutyUnits, sellIntentShares: [...intent.values()].reduce((sum, value) => sum + value, 0) } : null;
+}
+
+// 日结入口：先生成居民卖单，再撮合买入（卖单优先于发行池）。
+export function settleDailyShareMarket(state, content) {
+  if (!hasStockExchange(state)) return null;
+  return settleHouseholdStockBuying(state, content, generateResidentSellOrders(state, content));
 }

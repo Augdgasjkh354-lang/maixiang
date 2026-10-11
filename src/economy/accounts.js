@@ -37,6 +37,30 @@ export function parseOwner(owner) {
   return parsed;
 }
 
+// 家庭账户名 `household:<id>`：同一个 id 总返回同一个字符串对象（热路径每笔付款都要拼，拼出来的新串还要重新算哈希才能查 parseOwner 缓存）。
+const householdOwnerNames = new Map();
+export function householdOwner(householdId) {
+  let name = householdOwnerNames.get(householdId);
+  if (name === undefined) {
+    name = "household:" + householdId;
+    if (householdOwnerNames.size >= PARSED_OWNER_CACHE_LIMIT) householdOwnerNames.clear();
+    householdOwnerNames.set(householdId, name);
+  }
+  return name;
+}
+
+// 店铺账户名 `shop:<id>`，同理。
+const shopOwnerNames = new Map();
+export function shopOwner(shopId) {
+  let name = shopOwnerNames.get(shopId);
+  if (name === undefined) {
+    name = "shop:" + shopId;
+    if (shopOwnerNames.size >= PARSED_OWNER_CACHE_LIMIT) shopOwnerNames.clear();
+    shopOwnerNames.set(shopId, name);
+  }
+  return name;
+}
+
 function entityOf(state, kind, id) {
   if (kind === "household") return state.households?.byId?.[id] || null;
   if (kind === "company") return state.companies?.[id] || null;
@@ -83,6 +107,16 @@ export function voucherSlot(state, owner) {
   const entity = entityOf(state, kind, id);
   if (!entity) return null;
   return { holder: entity, key: kind === "household" ? "voucherUnits" : "cashVoucherUnits" };
+}
+
+// 同 readSlot(voucherSlot(state, owner))（不含对 state.currency 的补建），不建 slot 对象；热路径读余额用。
+export function readVoucherBalance(state, parsed) {
+  const { kind, id } = parsed;
+  if (kind === "town" || kind === "residents") return state.currency?.balances?.[kind] || 0;
+  if (kind === "bank") return state.bank?.cashVoucherUnits || 0;
+  const entity = entityOf(state, kind, id);
+  if (!entity) return 0;
+  return (kind === "household" ? entity.voucherUnits : entity.cashVoucherUnits) || 0;
 }
 
 // 付款用小麦存放位置 { holder, key }：只有镇库、居民、家庭有（库存里的小麦，用于以粮换券）；公司、店铺、社保基金、银行没有。

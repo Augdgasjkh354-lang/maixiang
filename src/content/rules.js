@@ -89,7 +89,9 @@ export const RULES = Object.freeze({
   shareFoodReserveDays: 90,
   shareLivingVoucherReserveDays: 30,
   sharesPerListedLevel: 1000,
-  defaultDividendPercent: 50, // Legacy company save/API compatibility only; 0.1.7 annual settlement does not use this ratio.
+  // 股市（docs/STOCK.md）：印花税（卖方承担，归镇库；政策 policy.stampDutyPercent 可调）；分红比例（占近一季净利润，民营默认 60%，镇库控股可调）；分红每 90 天一次。
+  stampDutyDefaultPercent: 0.1, stampDutyMaximumPercent: 5,
+  sharePayoutDefaultPercent: 60, sharePayoutMaximumPercent: 100, shareDividendIntervalDays: 90, shareExRightsRecoverDays: 90,
   companyOperatingReserveDays: 360,
   sharePerformanceObservationDays: 30,
   shareTargetAnnualYieldPercent: 8,
@@ -232,7 +234,11 @@ export const RULES = Object.freeze({
   // comfortMaximum 是用到标准量时的舒心值加成，多用边际递减（最多 1.5 倍）。
   householdGoods: Object.freeze({
     cloth: Object.freeze({ annualPerPerson: 1, incomeElasticity: 0.6, comfortMaximum: 3 }),
-    wine: Object.freeze({ annualPerPerson: 6, incomeElasticity: 1.2, comfortMaximum: 2 })
+    // 四种酒（啤酒/白酒 × 普通/高档，见 CHANGELOG「未发布」）：普通款面向所有人；高档款收入弹性 2，只有宽裕人家的量明显。
+    beer: Object.freeze({ annualPerPerson: 12, incomeElasticity: 1, comfortMaximum: 0.8 }),
+    beer_premium: Object.freeze({ annualPerPerson: 2, incomeElasticity: 2, comfortMaximum: 0.3 }),
+    baijiu: Object.freeze({ annualPerPerson: 3, incomeElasticity: 1.2, comfortMaximum: 0.6 }),
+    baijiu_premium: Object.freeze({ annualPerPerson: 1, incomeElasticity: 2, comfortMaximum: 0.3 })
   }),
   // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/fullAffluence)^exponent（封顶 maxShare），
   // fullAffluence 是肉占比达到 maxShare 的宽裕度（不再跟 householdBudget.maxAffluence 挂钩：那已是渐近上限 4，会让肉的曲线整体漂移）；
@@ -268,7 +274,7 @@ export const RULES = Object.freeze({
   // 民间贷款（systems/household-loans.js，规格 docs/LENDING.md）：净家底口径下的负债上限、月供占近 30 天收入上限、单户余额上限（斤）、期限（月）。
   lending: Object.freeze({ maxDebtToWealthShare: 0.6, maxServiceShareOfIncome: 0.3, maxPerHouseholdJin: 20000, shopTermMonths: 24, villaTermMonths: 60 }),
   shopTypes: Object.freeze({
-    general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "wine", "cloth"]) }),
+    general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "beer", "beer_premium", "baijiu", "baijiu_premium", "cloth"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
@@ -297,11 +303,11 @@ export const RULES = Object.freeze({
     town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, wine: 4, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 0.45, beer_premium: 1.2, baijiu: 2.5, baijiu_premium: 6.7, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, wine: 4.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, wine: 3.5, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 0.5, beer_premium: 1.35, baijiu: 2.8, baijiu_premium: 7.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 0.4, beer_premium: 1.05, baijiu: 2.2, baijiu_premium: 5.9, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货

@@ -95,6 +95,7 @@ export function buildAnnualReport(state, content, { householdLifeYear, peopleBef
     agricultureTax: cloneValue((state.agriculture?.taxHistory || []).filter(row => row.year === state.year)),
     financialFlows: annualPeriod(state.financialFlows),
     fiscal: annualPeriod(state.fiscal),
+    stampDuty: annualPeriod(state.stampDuty),
     salt: annualPeriod(state.salt),
     companies,
     shops,

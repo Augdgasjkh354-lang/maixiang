@@ -41,8 +41,11 @@ export const OUTSIDE_TOWNS = Object.freeze({
       wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 27428, sellsToUs: false, supplyWeight: 0.2 }),
       flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 108000, sellsToUs: true, supplyWeight: 0 }),
       bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
-      // 民镇自己酿一些酒、织一些布，不够的部分从外面买。
-      wine: Object.freeze({ basePrice: exportPrice(P.wine), needPerPersonDay: 6 / 365, producePerPersonDay: 4 / 365, targetDays: 90, stock: 17828, sellsToUs: false, supplyWeight: 0.05 }),
+      // 民镇自己酿一些酒、织一些布，不够的部分从外面买。酒按四种拆：年人均需求合计 6 斤、自产合计 4 斤（原 wine 的口径）。
+      beer: Object.freeze({ basePrice: exportPrice(P.beer), needPerPersonDay: 4 / 365, producePerPersonDay: 3 / 365, targetDays: 90, stock: 11836, sellsToUs: false, supplyWeight: 0.03 }),
+      beer_premium: Object.freeze({ basePrice: exportPrice(P.beer_premium), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
+      baijiu: Object.freeze({ basePrice: exportPrice(P.baijiu), needPerPersonDay: 1.6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 4734, sellsToUs: false, supplyWeight: 0.02 }),
+      baijiu_premium: Object.freeze({ basePrice: exportPrice(P.baijiu_premium), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
       cloth: Object.freeze({ basePrice: exportPrice(P.cloth), needPerPersonDay: 1 / 365, producePerPersonDay: 0.55 / 365, targetDays: 180, stock: 5828, sellsToUs: false, supplyWeight: 0.1 })
     })
   }),
@@ -66,7 +69,11 @@ export const OUTSIDE_TOWNS = Object.freeze({
       wood: Object.freeze({ basePrice: exportPrice(P.wood), needPerPersonDay: 4 / 365, producePerPersonDay: 0, targetDays: 240, stock: 27428, sellsToUs: false, supplyWeight: 0.15 }),
       flour: Object.freeze({ basePrice: P.flour, needPerPersonDay: 0.15, producePerPersonDay: 0.155, targetDays: 60, stock: 108000, sellsToUs: true, supplyWeight: 0 }),
       bread: Object.freeze({ basePrice: P.bread, needPerPersonDay: 0.1, producePerPersonDay: 0.103, targetDays: 45, stock: 54000, sellsToUs: true, supplyWeight: 0 }),
-      wine: Object.freeze({ basePrice: exportPrice(P.wine * 1.2), needPerPersonDay: 10 / 365, producePerPersonDay: 2 / 365, targetDays: 90, stock: 20572, sellsToUs: false, supplyWeight: 0.1 }),
+      // 王镇讲究饮酒：酒按四种拆，年人均需求合计 10 斤（原 wine 口径），自产合计 2 斤；酒价 × 1.2。
+      beer: Object.freeze({ basePrice: exportPrice(P.beer * 1.2), needPerPersonDay: 6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 17753, sellsToUs: false, supplyWeight: 0.04 }),
+      beer_premium: Object.freeze({ basePrice: exportPrice(P.beer_premium * 1.2), needPerPersonDay: 1.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 3551, sellsToUs: false, supplyWeight: 0.02 }),
+      baijiu: Object.freeze({ basePrice: exportPrice(P.baijiu * 1.2), needPerPersonDay: 2.6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 7693, sellsToUs: false, supplyWeight: 0.03 }),
+      baijiu_premium: Object.freeze({ basePrice: exportPrice(P.baijiu_premium * 1.2), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
       cloth: Object.freeze({ basePrice: exportPrice(P.cloth * 1.2), needPerPersonDay: 1.5 / 365, producePerPersonDay: 0.1 / 365, targetDays: 180, stock: 5142, sellsToUs: false, supplyWeight: 0.2 })
     })
   })

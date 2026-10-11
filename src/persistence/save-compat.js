@@ -61,6 +61,50 @@ export function applyRenames(raw, report, extraRenames = []) {
   return raw;
 }
 
+// 物品改名（酒改成四种酒）：旧存档里的 wine 并入普通白酒 baijiu，1:1 数量不变。
+// 整棵存档树里：键 wine、以 wine 开头的驼峰键（如 wineConsumedUnits）、值为 "wine" 的字符串（itemId）一律改名。
+// 同名键数值相加，避免覆盖。幂等：没有 wine 时是空操作。
+export const ITEM_RENAMES = Object.freeze({ wine: "baijiu" });
+
+function renamedItemKey(key) {
+  for (const [from, to] of Object.entries(ITEM_RENAMES)) {
+    if (key === from) return to;
+    if (key.startsWith(from) && /^[A-Z]/.test(key.slice(from.length))) return to + key.slice(from.length);
+  }
+  return key;
+}
+
+export function renameItemIds(raw, report = null, path = "") {
+  if (Array.isArray(raw)) {
+    raw.forEach((value, index) => {
+      if (typeof value === "string" && Object.hasOwn(ITEM_RENAMES, value)) { raw[index] = ITEM_RENAMES[value]; report?.renamed.push(`${path}[${index}]`); }
+      else renameItemIds(value, report, `${path}[${index}]`);
+    });
+    return raw;
+  }
+  if (!isPlainObject(raw)) return raw;
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (typeof value === "string" && Object.hasOwn(ITEM_RENAMES, value)) {
+      raw[key] = ITEM_RENAMES[value];
+      report?.renamed.push(`${path}.${key}`);
+    } else if (typeof value === "object" && value !== null) {
+      renameItemIds(value, report, path ? `${path}.${key}` : key);
+    }
+  }
+  for (const key of Object.keys(raw)) {
+    const to = renamedItemKey(key);
+    if (to === key || UNSAFE_KEYS.has(key)) continue;
+    const value = raw[key];
+    const existing = raw[to];
+    if (existing !== undefined && typeof existing === "number" && typeof value === "number") raw[to] = existing + value;
+    else if (existing === undefined) raw[to] = value;
+    delete raw[key];
+    report?.renamed.push(`${path ? path + "." : ""}${key} → ${to}`);
+  }
+  return raw;
+}
+
 function kindOf(value) {
   if (value === null || value === undefined) return "empty";
   if (Array.isArray(value)) return "array";

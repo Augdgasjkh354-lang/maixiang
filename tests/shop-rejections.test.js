@@ -32,7 +32,7 @@ function town(seed) {
   transferVouchers(state, "town", `shop:${store.shopId}`, 5000 * V, CONTENT, "test", "测试商店资金");
   simulation.configureShopClerks(state, store.shopId, 0);
   const shop = state.shops[store.shopId];
-  for (const itemId of ["salt", "flour", "wine", "pork"]) shop.inventory[itemId] = 1000 * I;
+  for (const itemId of ["salt", "flour", "baijiu", "pork"]) shop.inventory[itemId] = 1000 * I;
   return { state, shopId: store.shopId };
 }
 
@@ -93,10 +93,10 @@ test("同一家庭缺多样商品只记一次拒客", () => {
   const hid = householdList(state).filter(isActiveHousehold)[0].id;
   fund(state, hid);
   sellOutFlour(state, shopId);
-  state.shops[shopId].inventory.wine = 0;
+  state.shops[shopId].inventory.baijiu = 0;
   const before = rejected(state, shopId);
   purchaseItemForResidents(state, "flour", 10 * I, 1, CONTENT, "测试", { householdNeedsUnits: needs(state, { [hid]: 10 * I }) });
-  purchaseItemForResidents(state, "wine", 10 * I, 1, CONTENT, "测试", { householdNeedsUnits: needs(state, { [hid]: 10 * I }) });
+  purchaseItemForResidents(state, "baijiu", 10 * I, 1, CONTENT, "测试", { householdNeedsUnits: needs(state, { [hid]: 10 * I }) });
   assert.equal(rejected(state, shopId) - before, 1);
   valid(state);
 });

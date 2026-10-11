@@ -95,7 +95,9 @@ test("二级市场：卖方是家庭时股款付给该户，股份在居民之�
   assert.equal(company.householdShares[seller.id], 200);
   assert.equal(company.householdShares[buyer.id], 100);
   assert.equal(seller.shares[company.id], 200);
-  assert.equal(voucherBalance(state, `household:${seller.id}`) - sellerBefore, 100 * 2 * V, "股款付给卖方家庭");
+  // 卖方是居民：股款减去印花税（卖方承担，归镇库）。
+  const duty = Math.round(100 * 2 * V * CONTENT.rules.stampDutyDefaultPercent / 100);
+  assert.equal(voucherBalance(state, `household:${seller.id}`) - sellerBefore, 100 * 2 * V - duty, "股款减印花税付给卖方家庭");
   assert.equal(company.shareSale.offeredShares, 0);
 });
 

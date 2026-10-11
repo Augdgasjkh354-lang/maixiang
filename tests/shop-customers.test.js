@@ -30,7 +30,7 @@ function town(seed) {
   transferVouchers(state, "town", `shop:${store.shopId}`, 5000 * V, CONTENT, "test", "测试商店资金");
   simulation.configureShopClerks(state, store.shopId, 0);
   const shop = state.shops[store.shopId];
-  for (const itemId of ["salt", "flour", "wine", "pork"]) shop.inventory[itemId] = 1000 * I;
+  for (const itemId of ["salt", "flour", "baijiu", "pork"]) shop.inventory[itemId] = 1000 * I;
   return { state, shopId: store.shopId, ownerId: shop.ownerHouseholdId };
 }
 
@@ -49,7 +49,7 @@ test("同一家庭当日在综合商店买多样商品，只算一个客人", ()
   const hid = Object.keys(state.households.byId)[0];
   fund(state, hid);
   const shop = state.shops[shopId];
-  for (const itemId of ["salt", "flour", "wine"]) {
+  for (const itemId of ["salt", "flour", "baijiu"]) {
     const sale = sellShopProduct(state, shopId, `household:${hid}`, I, CONTENT, "测试", itemId);
     assert.equal(sale.ok, true, sale.reason);
   }
@@ -111,7 +111,7 @@ test("次日重置后客流从零重算；归档行只存数字，不存家庭�
   const hid = Object.keys(state.households.byId)[0];
   fund(state, hid);
   sellShopProduct(state, shopId, `household:${hid}`, I, CONTENT, "测试", "salt");
-  sellShopProduct(state, shopId, `household:${hid}`, I, CONTENT, "测试", "wine");
+  sellShopProduct(state, shopId, `household:${hid}`, I, CONTENT, "测试", "baijiu");
   assert.ok(shop.accounts.day.customerHouseholds?.[hid]);
 
   state.day += 1;

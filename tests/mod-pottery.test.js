@@ -45,7 +45,7 @@ test("陶器 mod 内容合并：物品流通标记、两座建筑、配方、规
   assert.ok(!content.rules.shopTypes.general.itemIds.includes("clay"));
   assert.equal(content.rules.marketPricesVoucherPerUnit.pottery, 8);
   assert.equal(content.rules.marketPricesVoucherPerUnit.clay, 1.5);
-  assert.equal(content.rules.marketPricesVoucherPerUnit.wine, CONTENT.rules.marketPricesVoucherPerUnit.wine, "核心价格不被覆盖");
+  assert.equal(content.rules.marketPricesVoucherPerUnit.baijiu, CONTENT.rules.marketPricesVoucherPerUnit.baijiu, "核心价格不被覆盖");
   assert.ok(content.rules.householdGoods.pottery && content.rules.householdGoods.cloth, "日用品逐键合并");
   assert.equal(content.buildings.clay_pit.industryTier, 0);
   assert.equal(content.buildings.kiln.industryTier, 1);

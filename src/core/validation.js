@@ -141,6 +141,7 @@ export function validateState(state, content) {
     if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > (content.rules.tradeTariffMaximumPercent ?? 50))) errors.push("关税设置无效");
   }
   if (!Number.isFinite(state.policy?.shopProfitTaxPercent) || state.policy.shopProfitTaxPercent < 0 || state.policy.shopProfitTaxPercent > (content.rules.shopProfitTaxMaximumPercent || 80)) errors.push("商业利润税设置无效");
+  if (state.policy?.stampDutyPercent !== undefined && (!Number.isFinite(state.policy.stampDutyPercent) || state.policy.stampDutyPercent < 0 || state.policy.stampDutyPercent > (content.rules.stampDutyMaximumPercent ?? 5))) errors.push("印花税率无效");
 
   if (!state.employment || !state.employment.wageRates) {
     errors.push("缺少就业工资设置");
@@ -288,6 +289,10 @@ export function validateState(state, content) {
       errors.push("公租房财政账无效：" + period);
     }
   }
+  for (const period of PERIODS) {
+    const row = state.stampDuty?.[period];
+    if (row && (!Number.isSafeInteger(row.stampDutyUnits || 0) || (row.stampDutyUnits || 0) < 0)) errors.push("印花税账无效：" + period);
+  }
   const reform = state.monetaryReform;
   if (!reform || typeof reform.legacyBankAccess !== "boolean") {
     errors.push("银行入口状态无效");
@@ -357,6 +362,9 @@ export function validateState(state, content) {
       }
       if (!Number.isSafeInteger(company.payroll?.arrearsVoucherUnits) || company.payroll.arrearsVoucherUnits < 0) errors.push("企业欠薪无效：" + companyId);
       if (!Number.isSafeInteger(company.retainedEarningsVoucherUnits)) errors.push("企业未分配利润无效：" + companyId);
+      if (company.payoutPercent != null && (!Number.isFinite(company.payoutPercent) || company.payoutPercent < 0 || company.payoutPercent > (content.rules.sharePayoutMaximumPercent ?? 100))) errors.push("企业分红比例无效：" + companyId);
+      if (company.stockMarket?.flow !== undefined && (!Number.isFinite(company.stockMarket.flow) || Math.abs(company.stockMarket.flow) > 1)) errors.push("企业股票净流量无效：" + companyId);
+      if (company.stockMarket?.exRights && (!Number.isFinite(company.stockMarket.exRights.offsetUnits) || company.stockMarket.exRights.offsetUnits < 0 || !Number.isFinite(company.stockMarket.exRights.startAbsDay))) errors.push("企业除权记录无效：" + companyId);
       // 发行池卖方：镇库（缺省）或某户家庭；挂出股数不得超过卖方实际持股（卖方持股含尚未售出的挂牌股份）。
       const shareSeller = company.shareSale?.sellerOwner;
       const sellerIsHousehold = Boolean(shareSeller) && shareSeller !== "town";

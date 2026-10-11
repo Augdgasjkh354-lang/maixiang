@@ -1,5 +1,5 @@
-import { currencyLedgerBatch, makeTransactionId, recordLedger } from "./ledger.js";
-import { householdIdOf, isHouseholdOwner, parseOwner, readSlot, voucherSlot } from "./accounts.js";
+import { addCurrencyBatchEntry, currencyLedgerBatch, findCurrencyBatchEntry, makeTransactionId, recordLedger } from "./ledger.js";
+import { householdIdOf, isHouseholdOwner, parseOwner, readSlot, readVoucherBalance, voucherSlot } from "./accounts.js";
 import { addTownCostBasis, applyTownCostRemoval, quoteTownCostRemoval } from "./business.js";
 import {
   hasHouseholds, householdList, residentVoucherUnits, syncResidentAggregates, applyResidentAggregateDelta,
@@ -51,19 +51,33 @@ export function ensureCurrencyState(state) {
 }
 
 export function voucherBalance(state, owner) {
+  return voucherBalanceOf(state, owner, parseOwner(owner));
+}
+
+// 同 voucherBalance，账户名已解析过时直接传解析结果（转账路径上同一个账户名要读写好几次）。
+function voucherBalanceOf(state, owner, parsed) {
   ensureCurrencyState(state);
   if (owner === "residents" && hasHouseholds(state)) return residentVoucherUnits(state);
-  const { kind, id } = parseOwner(owner);
+  const { kind, id } = parsed;
   if (!kind) throw new Error("未知粮券账户：" + owner);
   // 家庭直接读（最常见，省去建 slot 对象）；与 readSlot(voucherSlot(...)) 同口径。
   if (kind === "household") return state.households?.byId?.[id]?.voucherUnits || 0;
-  return readSlot(voucherSlot(state, owner));
+  return readVoucherBalance(state, parsed);
 }
 
-function setVoucherBalance(state, owner, value, content = null) {
+function setVoucherBalance(state, owner, value, content = null, parsed = parseOwner(owner)) {
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError("粮券余额无效");
   ensureCurrencyState(state);
   if (owner === "residents" && hasHouseholds(state)) throw new Error("居民汇总粮券账户为只读；应落到具体家庭");
+  // 家庭账户（最常见）直接写家庭对象，省掉建 slot；与下面的通用路径同义。
+  if (parsed.kind === "household") {
+    const household = state.households?.byId?.[parsed.id];
+    if (!household) throw new Error("粮券账户不存在：" + owner);
+    const previous = household.voucherUnits || 0;
+    household.voucherUnits = value;
+    if (content) applyResidentAggregateDelta(state, content, value - previous);
+    return;
+  }
   const slot = voucherSlot(state, owner);
   if (!slot) throw new Error("粮券账户不存在：" + owner);
   const before = readSlot(slot);
@@ -75,8 +89,7 @@ function currencyLedger(state, row, content) {
   // 日结批次中：同类型、同账户对的粮券流水合并成一行，批次结束时写入（见 ledger.js withLedgerBatch）。
   const batch = currencyLedgerBatch(state);
   if (batch) {
-    const key = `${row.type}|${row.owner ?? ""}|${row.from ?? ""}|${row.to ?? ""}`;
-    const merged = batch.get(key);
+    const merged = findCurrencyBatchEntry(batch, row.type, row.owner, row.from, row.to);
     if (merged) {
       merged.row.voucherUnits = (merged.row.voucherUnits || 0) + (row.voucherUnits || 0);
       if (row.wheatUnits) merged.row.wheatUnits = (merged.row.wheatUnits || 0) + row.wheatUnits;
@@ -84,7 +97,7 @@ function currencyLedger(state, row, content) {
     } else {
       const entry = { row: { ...row, count: 1 } };
       entry.flush = () => writeCurrencyLedgerRow(state, entry.row, content);
-      batch.set(key, entry);
+      addCurrencyBatchEntry(batch, row.type, row.owner, row.from, row.to, entry);
     }
     return row;
   }
@@ -294,16 +307,21 @@ export function redeemVouchersForWheat(state, owner, voucherUnits, content, reas
 export function transferVouchers(state, from, to, voucherUnits, content, type = "voucher_transfer", reason = "粮券转账", options = {}) {
   if (!Number.isSafeInteger(voucherUnits) || voucherUnits < 0) return { ok: false, reason: "粮券数量无效" };
   if (voucherUnits === 0) return { ok: true, voucherUnits: 0, transactionId: null, householdDebits: [], householdCredits: [] };
-  if (voucherBalance(state, from) < voucherUnits) return { ok: false, reason: "粮券余额不足" };
-  if (!Number.isSafeInteger(voucherBalance(state, to) + voucherUnits)) return { ok: false, reason: "数值超过安全范围" };
+  const fromParsed = parseOwner(from);
+  const toParsed = parseOwner(to);
+  const fromBefore = voucherBalanceOf(state, from, fromParsed);
+  if (fromBefore < voucherUnits) return { ok: false, reason: "粮券余额不足" };
+  const toBefore = voucherBalanceOf(state, to, toParsed);
+  if (!Number.isSafeInteger(toBefore + voucherUnits)) return { ok: false, reason: "数值超过安全范围" };
 
   let householdDebits = [];
   let householdCredits = [];
-  if (hasHouseholds(state) && from === "residents") {
+  const fromResidents = hasHouseholds(state) && from === "residents";
+  if (fromResidents) {
     const result = takeResidentVouchers(state, voucherUnits, content, options.fromResidents || {});
     if (!result.ok) return result;
     householdDebits = result.rows;
-  } else setVoucherBalance(state, from, voucherBalance(state, from) - voucherUnits, content);
+  } else setVoucherBalance(state, from, fromBefore - voucherUnits, content, fromParsed);
 
   if (hasHouseholds(state) && to === "residents") {
     const result = distributeResidentVouchers(state, voucherUnits, content, options.toResidents || {});
@@ -314,11 +332,16 @@ export function transferVouchers(state, from, to, voucherUnits, content, type = 
       return result;
     }
     householdCredits = result.rows;
-  } else setVoucherBalance(state, to, voucherBalance(state, to) + voucherUnits, content);
+  } else {
+    // 付款方不是居民汇总时，收款方余额在扣款后只可能因“自己付给自己”而变化，不必再查一遍。
+    const toNow = fromResidents ? voucherBalance(state, to) : (from === to ? fromBefore - voucherUnits : toBefore);
+    setVoucherBalance(state, to, toNow + voucherUnits, content, toParsed);
+  }
 
   const transactionId = options.transactionId || makeTransactionId(state);
   currencyLedger(state, { type, transactionId, from, to, voucherUnits, householdDebits, householdCredits, reason }, content);
-  recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits, householdCredits }, content);
+  recordHouseholdVoucherTransfer(state, { from, to, type, voucherUnits, householdDebits, householdCredits,
+    fromHouseholdId: fromParsed.kind === "household" ? fromParsed.id : null, toHouseholdId: toParsed.kind === "household" ? toParsed.id : null }, content);
   recordLedger(state, { type, transactionId, source: from, destination: to, itemId: "grain_voucher",
     quantityUnits: voucherUnits, qeqUnits: 0, reason }, content);
   return { ok: true, transactionId, voucherUnits, householdDebits, householdCredits };
