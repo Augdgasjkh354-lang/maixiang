@@ -1,11 +1,11 @@
 import { dismissibleCount, dismissWorkers, minTenureDays } from "./employment-contracts.js";
 import { populationStats, selectJobRows, jobKeyForBuilding, readJobCount, privateJobKeyForBuilding } from "../selectors/labor.js";
 import { setJobCount, releaseExcessHouseholdEmployment, jobCount } from "./households.js";
-import { reclaimedAcres } from "./agriculture.js";
+import { farmerCapacityOf } from "../selectors/farmland.js";
 import { poachWorkers } from "./labor-market.js";
 
 function farmerCapacity(state, content) {
-  return Math.max(0, Math.floor(reclaimedAcres(state, content) / content.agriculture.acresPerFarmer));
+  return Math.max(0, farmerCapacityOf(state, content));
 }
 
 export function agricultureEmploymentTarget(state, content) {

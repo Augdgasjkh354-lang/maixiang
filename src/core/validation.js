@@ -119,6 +119,7 @@ export function validateState(state, content) {
         if (!Number.isInteger(count) || count < 0) errors.push("家庭岗位数量无效：" + household.id + "/" + jobKey);
       }
       if (householdEmploymentCount(household) > householdWorkingAge(household)) errors.push("家庭就业超过劳动年龄人数：" + household.id);
+      if (household.oxGapDays !== undefined && !(Number.isFinite(household.oxGapDays) && household.oxGapDays >= 0)) errors.push("家庭耕牛欠养天数无效：" + household.id);
       for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(household.inventory[itemId] || 0) || (household.inventory[itemId] || 0) < 0) errors.push("家庭库存无效：" + household.id + "/" + itemId);
       if (!isActiveHousehold(household) && householdEmploymentCount(household) > 0) errors.push("无人家庭仍占用岗位：" + household.id);
     }
@@ -205,6 +206,11 @@ export function validateState(state, content) {
   if (!Number.isInteger(state.agriculture?.reclaimedAcres) || state.agriculture.reclaimedAcres < 0 ||
       state.agriculture.reclaimedAcres > (content.agriculture.acresMaximum ?? content.agriculture.acres)) {
     errors.push("已开荒耕地亩数无效");
+  }
+  // 铁犁牛耕改革（金银消费第三期）：改革亩数为非负整数，不超过已开荒耕地。
+  if (!Number.isInteger(state.agriculture?.ironPlowAcres) || state.agriculture.ironPlowAcres < 0 ||
+      state.agriculture.ironPlowAcres > (state.agriculture?.reclaimedAcres ?? 0)) {
+    errors.push("铁犁牛耕改革亩数无效");
   }
   if (!state.rng || state.rng.algorithm !== "lcg32-v1" ||
       !Number.isInteger(state.rng.state) || state.rng.state < 0 || state.rng.state > 4294967295) {
@@ -435,6 +441,11 @@ export function validateState(state, content) {
       if (!content.rules.shopTypes?.[shop.typeId]) errors.push("店铺类型无效：" + shop.id);
       if (!Number.isSafeInteger(shop.cashVoucherUnits) || shop.cashVoucherUnits < 0) errors.push("店铺粮券余额无效：" + shop.id);
       if (!Number.isSafeInteger(shop.retainedEarningsVoucherUnits)) errors.push("店铺未分配利润无效：" + shop.id);
+      // 养牛场的小牛群（金银消费第三期）：头数为非负整数，吃饱天数与成本基础为有限非负数。
+      if (shop.herd !== undefined && (!Array.isArray(shop.herd) || shop.herd.some(row => !Number.isInteger(row.count) || row.count < 0 || !(Number.isFinite(row.fedDays) && row.fedDays >= 0) || !(Number.isFinite(row.costUnits) && row.costUnits >= 0)))) {
+        errors.push("养牛场小牛群无效：" + shop.id);
+      }
+      if (shop.herdCarry !== undefined && !(Number.isFinite(shop.herdCarry) && shop.herdCarry >= 0 && shop.herdCarry <= 1)) errors.push("养牛场开新小牛余数无效：" + shop.id);
       if (!["open", "paused", "liquidating", "closed"].includes(shop.status)) errors.push("店铺状态无效：" + shop.id);
       for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(shop.inventory?.[itemId] || 0) || (shop.inventory?.[itemId] || 0) < 0) errors.push("店铺库存无效：" + shop.id + "/" + itemId);
       for (const key of ["wageVoucherUnits", "rentVoucherUnits", "taxVoucherUnits"]) if (!Number.isSafeInteger(shop.liabilities?.[key] || 0) || (shop.liabilities?.[key] || 0) < 0) errors.push("店铺欠款无效：" + shop.id);

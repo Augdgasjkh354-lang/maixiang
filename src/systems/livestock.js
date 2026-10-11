@@ -7,6 +7,7 @@ import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPaym
 import { putStock, takeStock } from "../economy/trade.js";
 import { addBookMap, addBookValue, applyProfit, ensureShops, farmDailyOutputUnits, shopDefinition } from "./shops.js";
 import { farmOutputRoomUnits, reviewFarmPricing } from "./farm-pricing.js";
+import { produceCattle } from "./cattle.js";
 import { depositWholesalePurchasedInventory, hasWholesaleMarket, wholesaleAvgSoldUnits, wholesaleMarketItemIds, wholesalePurchasePrice } from "./wholesale-market.js";
 
 const SURPLUS_DAYS = 3;
@@ -20,6 +21,8 @@ export function produceLivestock(state, content) {
   for (const farm of openFarms(state, content)) {
     const def = shopDefinition(content, farm.typeId);
     reviewFarmPricing(state, farm, content);
+    // 养牛场（金银消费第三期）：喂小牛、出栏耕牛、新开小牛，自成一套（systems/cattle.js）。
+    if (def.herd) { rows.push(produceCattle(state, farm, content)); continue; }
     const capacity = farmDailyOutputUnits(state, farm, content);
     const feedStock = farm.inventory?.[def.feedItemId] || 0;
     const room = farmOutputRoomUnits(farm, capacity, content);

@@ -62,10 +62,10 @@ function openBreadShopFixture({ grantResidentVouchers: grantVouchers = 5000 } = 
 test("expanded map permits separate same-type buildings and job rosters", () => {
   const game = simulation;
   const state = game.createInitialState();
-  // 地图扩容后：48 个普通地块 + 2 个资源点 + 4 个河岸地块。
-  assert.equal(state.plots.length, 54);
-  assert.equal(new Set(state.plots.map(plot => plot.id)).size, 54);
-  assert.equal(new Set(state.plots.map(plot => plot.x + "," + plot.y)).size, 54);
+  // 地图扩容后：48 个普通地块 + 2 个资源点（伐木、盐）+ 4 个河岸地块 + 6 个矿点（煤、铁各 3）。
+  assert.equal(state.plots.length, 60);
+  assert.equal(new Set(state.plots.map(plot => plot.id)).size, 60);
+  assert.equal(new Set(state.plots.map(plot => plot.x + "," + plot.y)).size, 60);
   // At a 300px-wide mobile map, plot targets and building icons still do not cover neighbors.
   for (let i = 0; i < state.plots.length; i += 1) {
     for (let j = i + 1; j < state.plots.length; j += 1) {

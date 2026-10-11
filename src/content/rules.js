@@ -253,9 +253,19 @@ export const RULES = Object.freeze({
   // 耐用品（systems/durable-goods.js，金银消费第二期 A）：目标持有 = 持有者人数 × perFarmer（件）；每件每日折旧 1/(lifeYears × daysPerYear) 件；
   // 采购只经综合商店，每户每日买入不超过当日可花预算的 durableSpendCapShare（农具作为生产资料优先于日用品）。第三期耕牛复用同一机制。
   durableGoods: Object.freeze({
-    iron_farm_tool: Object.freeze({ holderJobId: "farmers", perFarmer: 1, lifeYears: 5 })
+    iron_farm_tool: Object.freeze({ holderJobId: "farmers", perFarmer: 1, lifeYears: 5 }),
+    // 耕牛（金银消费第三期）：目标持有按耕地亩数 ÷ agriculture.oxAcres 摊到农民户（targetBy "acres"，见 selectors/durable-goods.js）；寿命 6 年。
+    // seller "farm"：不经综合商店，由养牛场直接卖给农户（systems/cattle.js 的 sellOxToHouseholds）。
+    ox: Object.freeze({ holderJobId: "farmers", targetBy: "acres", lifeYears: 6, seller: "farm" })
   }),
   durableSpendCapShare: 0.5,
+  // 耕牛维护费与饲料（systems/cattle.js）：每头在役耕牛每日付 5 券给养牛场（= 每日 5 斤小麦按 1 券/斤），养牛场用这笔钱向镇库买小麦喂牛，小麦被消耗、不回流。
+  // 年费按 360 天的游戏年取整：1800 = 5 × 360，使每日恰为 5 券。无养牛场、付不起、或小麦喂不够的户，欠养（ox gap）按缺口累计（缺喂 1 − 喂饱比例）；
+  // 欠养超过 oxMaintenanceGraceDays 天后，该户耕牛效力按 1 − (欠养天数 − 宽限) ÷ oxEfficiencyRecoveryDays 下降，补上即恢复。
+  oxMaintenancePerOxYearVoucher: 1800,
+  oxFeedPerOxDayJin: 5,
+  oxMaintenanceGraceDays: 30,
+  oxEfficiencyRecoveryDays: 360,
   // 肉当主食（market.js 的 meatStapleShare）：主食里肉的口粮当量占比 = maxShare × (宽裕度/fullAffluence)^exponent（封顶 maxShare），
   // fullAffluence 是肉占比达到 maxShare 的宽裕度（不再跟 householdBudget.maxAffluence 挂钩：那已是渐近上限 4，会让肉的曲线整体漂移）；
   // 宽裕度 1 约 5%、2 约 27%、3 为 75%；肉按 weights 分到鸡鸭鹅猪，没买到的改买面粉。comfortMaximum：肉占口粮 1/4 时的舒心值加成。
@@ -309,6 +319,11 @@ export const RULES = Object.freeze({
     duck_farm: Object.freeze({ id: "duck_farm", name: "养鸭场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "duck", feedItemId: "wheat", feedPerUnit: 4, outputPerWorkerDay: 10 }),
     goose_farm: Object.freeze({ id: "goose_farm", name: "养鹅场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "goose", feedItemId: "wheat", feedPerUnit: 4, outputPerWorkerDay: 10 }),
     pig_farm: Object.freeze({ id: "pig_farm", name: "养猪场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "pork", feedItemId: "wheat", feedPerUnit: 4, outputPerWorkerDay: 10 }),
+    // 养牛场（金银消费第三期，systems/cattle.js）：产品是耕牛（头），直接卖给农民户。
+    // 每头小牛养满 herd.growthDays 天成耕牛；每日每头小牛吃 herd.feedPerCalfDayJin 斤小麦。outputPerWorkerDay 是每名饲养人员每日新开的小牛头数。
+    // feedPerUnit 只用于定价成本口径：一头成牛全程饲料 = 每日饲料 × 养成天数（5 × 360 = 1800 斤）。
+    cattle_farm: Object.freeze({ id: "cattle_farm", name: "养牛场", kind: "farm", hostBuildingTypeId: "livestock_base", productItemId: "ox", feedItemId: "wheat", feedPerUnit: 1800, outputPerWorkerDay: 0.05,
+      herd: Object.freeze({ growthDays: 360, feedPerCalfDayJin: 5, catchUpDays: 60 }) }),
     // 时代广场集市：一座广场一个集体摊位，待业的人自动来摆，人数按销量增减（不超过允许人数）。
     // 从批发市场进少量日用品（不卖主食），每人每日最多卖 25 斤（一摊 2 人 50 斤），按摊交租；每天的利润按人头 ×0.8—1.2 随机分给摆摊家庭。
     stall: Object.freeze({ id: "stall", name: "集市", kind: "stall", hostBuildingTypeId: "times_square", maxClerks: 0,
@@ -328,7 +343,7 @@ export const RULES = Object.freeze({
     jewelry: Object.freeze({ id: "jewelry", name: "金银店", kind: "retail", generalRules: true, jeweler: true, hostBuildingTypeId: "jeweler", maxClerks: 60, itemIds: Object.freeze(["gold_jewelry", "silver_jewelry"]) })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15, ox: 2000 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
   wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 5, beer_premium: 12, baijiu: 20, baijiu_premium: 100, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15 }),
@@ -363,6 +378,12 @@ export const AGRICULTURE = Object.freeze({
   // 铁制农具（金银消费第二期 A）：覆盖率 = 全镇农民持有件数 ÷ 农民人数（封顶 1）；每亩产量 = yieldPerAcre + farmToolYieldBonusPerAcre × 覆盖率（见 selectors/durable-goods.js）。
   farmToolItemId: "iron_farm_tool",
   farmToolYieldBonusPerAcre: 200,
+  // 耕牛（金银消费第三期）：一头牛耕 oxAcres 亩；有牛的农田每亩 + oxYieldBonusPerAcre × 牛耕覆盖率；
+  // 铁犁牛耕改革（systems/iron-plow.js）：被替代的耕地每 plowAcresPerFarmer 亩配 1 名农民（原 acresPerFarmer）。
+  oxItemId: "ox",
+  oxAcres: 50,
+  oxYieldBonusPerAcre: 200,
+  plowAcresPerFarmer: 50,
   cropItemId: "wheat",
   farmerRoleId: "farmers",
   // 每 100 亩开荒需 100 工日，即 1 亩 1 工日。

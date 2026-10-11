@@ -174,8 +174,10 @@ test("集市也卖肉：没有综合商店时，肉直接从养殖场进集市�
   assert.ok(market, "有集体集市");
   assert.ok((market.accounts.cumulative.purchasedUnits?.pork || 0) > 0, "集市从养殖场进了猪肉");
   assert.ok((market.accounts.cumulative.soldUnits?.pork || 0) > 0, "集市卖出了猪肉");
-  // 养殖场卖出的肉全部进了集市（本场景只有集市一个买家）。
-  assert.equal(state.shops[farm].accounts.cumulative.storeSoldUnits?.pork, market.accounts.cumulative.purchasedUnits.pork, "养殖场出货 = 集市进货");
+  // 养殖场直供集市的量 > 0，且不超过集市猪肉进货总量（存货超过 3 天产量的余量会卖给批发市场，集市也可能从批发市场进到猪肉）。
+  const farmToMarket = state.shops[farm].accounts.cumulative.storeSoldUnits?.pork || 0;
+  assert.ok(farmToMarket > 0, "养殖场直供集市");
+  assert.ok(farmToMarket <= market.accounts.cumulative.purchasedUnits.pork, "养殖场直供集市的量不超过集市进货总量");
   valid(state);
 });
 

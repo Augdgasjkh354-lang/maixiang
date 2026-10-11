@@ -22,7 +22,7 @@ import { econMiniSummary, renderEconMini } from "./econ-mini.js";
 import { macroPanelSummary, renderMacroPanel } from "./macro-panel.js";
 import { renderPolicy, WEALTH_TAX_RATE_KEYS, WEALTH_TAX_THRESHOLD_KEYS } from "./panel-policy.js";
 import { CONTENT } from "../content/index.js";
-import { renderSite } from "./panel-site.js";
+import { renderSite, setIronPlowPreview } from "./panel-site.js";
 import { renderSettings } from "./panel-settings.js";
 import { compact, escapeHtml, number, numberMax, moneyUnit } from "./format.js";
 import { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumericPanelRender } from "./numeric-drafts.js";
@@ -1270,6 +1270,37 @@ export function mountGame(root) {
       latestMapModel = null;
       render(true);
       showToast(`已开荒${number(result.acres)}亩，投入${number(result.workers)}人、${number(result.workDays)}工日；镇库支付${number(result.paidVoucher, 2)}${moneyUnit(view)}工资。`, 4200);
+      return;
+    }
+    // 铁犁牛耕改革（金银消费第三期）：预览只读；确认才真正改革（超岗农民转待业，见 systems/iron-plow.js）。
+    if (closest(target, "[data-plow-preview]") && state) {
+      const farmland = buildView().farmland;
+      if (!farmland) return;
+      const acres = readStagedNumber("iron-plow-acres", {
+        label: "铁犁牛耕替代亩数", minimum: 0, maximum: farmland.acres, integer: true
+      });
+      if (acres === null) return;
+      setIronPlowPreview(simulation.previewIronPlowReform(state, acres));
+      render(true);
+      return;
+    }
+    if (closest(target, "[data-plow-submit]") && state) {
+      const farmland = buildView().farmland;
+      if (!farmland) return;
+      const acres = readStagedNumber("iron-plow-acres", {
+        label: "铁犁牛耕替代亩数", minimum: 0, maximum: farmland.acres, integer: true
+      });
+      if (acres === null) return;
+      const result = simulation.setIronPlowReform(state, acres);
+      setIronPlowPreview(null);
+      if (!result.ok) { showToast(result.reason); render(true); return; }
+      numericDrafts.delete("iron-plow-acres");
+      changed(true);
+      renderedMapSignature = "";
+      latestMapModel = null;
+      render(true);
+      showToast(`铁犁牛耕改革：替代 ${number(result.acres)} 亩；农田岗位 ${number(result.capacityBefore)} → ${number(result.capacityAfter)} 人` +
+        (result.released > 0 ? `，${number(result.released)} 名农民转为待业。` : "。"), 4200);
       return;
     }
     if (closest(target, "[data-bank-open]") && state) {

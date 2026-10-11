@@ -256,6 +256,8 @@ export function createInitialState(options) {
         content.agriculture.acres
       )),
       reclaim: emptyReclaimState(),
+      // 铁犁牛耕改革（金银消费第三期）：被替代的耕地亩数，默认 0（systems/iron-plow.js）。
+      ironPlowAcres: 0,
       taxDays: [],
       taxHistory: []
     },

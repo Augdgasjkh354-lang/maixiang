@@ -24,6 +24,7 @@ import { accrueWages, payWages, pendingWages, wageArrears, wageBook } from "./em
 import { allocateInputToTown, buyWholesaleForOwner, hasWholesaleMarket, recordTownInputConsumption, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
 import { farmSalePriceVoucher } from "./farm-pricing.js";
+import { herdFeedPlanUnits, herdHeads } from "./cattle-herd.js";
 import { shopMayStockItem, usesGeneralRules } from "./shop-types.js";
 import { jewelerCapacityPieces, jewelerOwnerFields, jewelerOwnerOf, jewelerStaffCount } from "./jewelers.js";
 import {
@@ -1695,6 +1696,8 @@ export function farmDailyOutputUnits(state, shop, content) {
 
 export function farmDailyFeedUnits(state, shop, content) {
   const def = shopDefinition(content, shop?.typeId);
+  // 养牛场（金银消费第三期）：按存栏小牛 + 明天新开的头数备料，每头每日 feedPerCalfDayJin 斤。
+  if (def?.kind === "farm" && def.herd) return herdFeedPlanUnits(shop, def, farmDailyOutputUnits(state, shop, content) / content.precision.inventoryUnitsPerJin, content);
   return def?.kind === "farm" ? Math.ceil(farmDailyOutputUnits(state, shop, content) * def.feedPerUnit) : 0;
 }
 
@@ -1707,10 +1710,16 @@ function farmTargetHands(state, shop, content, history) {
   // 卖给商店和批发市场（摊位、外贸从那里拿货）都算需求。
   const avgSold = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.soldUnitsByItem?.[def.productItemId] || 0), 0) / history.length : 0;
   const avgUnmet = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.unmetUnitsByItem?.[def.productItemId] || 0), 0) / history.length : 0;
-  const stock = shop.inventory?.[def.productItemId] || 0;
+  // 养牛场的小牛群也算在库存里（头数 × 库存单位），免得存栏够用了还不停开新牛。普通养殖场没有小牛群，结果不变。
+  const stock = (shop.inventory?.[def.productItemId] || 0) + herdHeads(shop) * content.precision.inventoryUnitsPerJin;
   // 按比例排产：目标日产 = 商店日均进货 + 一半缺口 + 存货差（目标 2 天销量）分 5 天补；差 10% 以内不动，每周期最多 +2 / −1。
   const stockGap = avgSold * 2 - stock;
-  const desiredOutput = Math.max(0, avgSold + avgUnmet * 0.5 + stockGap / Math.max(1, content.rules.operatingStockCorrectionDays || 5));
+  let desiredOutput = Math.max(0, avgSold + avgUnmet * 0.5 + stockGap / Math.max(1, content.rules.operatingStockCorrectionDays || 5));
+  // 养牛场：小牛养满 growthDays 才出栏，所以排产按"养满后的日需求"：存栏 + 库存要够 growthDays 天需求，缺口在 catchUpDays 天内补齐。
+  if (def.herd) {
+    const demand = Math.max(avgSold, avgUnmet);
+    desiredOutput = Math.max(0, demand + (demand * def.herd.growthDays - stock) / Math.max(1, def.herd.catchUpDays || 60));
+  }
   const desiredHands = Math.max(0, Math.ceil(desiredOutput / perWorker) - merchants);
   let target = current;
   const output = (merchants + current) * perWorker;
@@ -2199,7 +2208,11 @@ export function shopSummaries(state, content) {
         outputPerWorkerDay: def.outputPerWorkerDay,
         capacityJin: farmDailyOutputUnits(state, source, content) / invScale,
         producedDayJin: (shop.accounts.day.producedUnits?.[def.productItemId] || 0) / invScale,
-        storeSoldDayJin: (shop.accounts.day.storeSoldUnits?.[def.productItemId] || 0) / invScale,
+        // 养牛场没有综合商店这一层，卖出的耕牛记在 soldUnits（直卖农户）。
+        storeSoldDayJin: ((def.herd ? shop.accounts.day.soldUnits?.[def.productItemId] : shop.accounts.day.storeSoldUnits?.[def.productItemId]) || 0) / invScale,
+        // 养牛场（金银消费第三期）：产品单位（耕牛为头）、存栏小牛头数、每日饲料与养成天数。
+        productUnit: content.items[def.productItemId]?.unit || "斤",
+        ...(def.herd ? { herdCalves: herdHeads(shop), feedPerCalfJin: def.herd.feedPerCalfDayJin, growthDays: def.herd.growthDays } : {}),
         soldDayJin: (shop.accounts.day.soldUnits?.[def.productItemId] || 0) / invScale,
         productStockJin: (shop.inventory[def.productItemId] || 0) / invScale,
         feedStockJin: (shop.inventory[def.feedItemId] || 0) / invScale,

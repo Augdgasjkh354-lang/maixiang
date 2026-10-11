@@ -8,7 +8,8 @@ import { householdList, isActiveHousehold, syncResidentAggregates } from "../src
 import { harvest } from "../src/systems/agriculture.js";
 import { wearDurableGoods, buyDurableGoodsForHouseholds, emptyDurablePeriod } from "../src/systems/durable-goods.js";
 import { invalidateHouseholdBudgets, householdBudgets } from "../src/systems/household-budget.js";
-import { selectDurableCoverage, farmYieldPerAcre, durableTargetPieces } from "../src/selectors/durable-goods.js";
+import { selectDurableCoverage, durableTargetPieces } from "../src/selectors/durable-goods.js";
+import { farmYieldPerAcre } from "../src/selectors/farmland.js";
 import { ensureWholesaleMarket, depositWholesalePurchasedInventory } from "../src/systems/wholesale-market.js";
 import { stallItemIds } from "../src/systems/shops.js";
 

@@ -2,6 +2,7 @@
 // - 每日折旧（wearDurableGoods）：每件每日损耗 1/(lifeYears × daysPerYear) 件，按户汇总，只遍历持有该物的户；
 //   户内不足一个库存单位的损耗记在 household.durableWearCarry 里，下日接着累计（库存只存整数单位）。
 // - 每日补货（buyDurableGoodsForHouseholds）：有持有者的户，缺的部分从综合商店买（耐用品只经商店卖）；
+//   seller "farm" 的（耕牛）由养牛场直接卖（systems/cattle.js）；
 //   每户每日买入不超过当日可花预算 × rules.durableSpendCapShare；买不到的记为未满足。排在日用品之前（生产资料优先）。
 import { householdList, isActiveHousehold, syncResidentAggregates } from "./households.js";
 import { purchaseItemForResidents } from "./consumer-market.js";
@@ -10,7 +11,8 @@ import { currentUnitPrice } from "../economy/prices.js";
 import { currencyScale } from "../economy/currency.js";
 import { bookAddMap, ensureBook } from "../economy/books.js";
 import { recordLedger, makeTransactionId } from "../economy/ledger.js";
-import { durableGoodsConfig, durableTargetPieces } from "../selectors/durable-goods.js";
+import { durableGoodsConfig, durableTargetContext, durableTargetPieces } from "../selectors/durable-goods.js";
+import { cattleListPrice, sellOxToHouseholds } from "./cattle.js";
 
 export function emptyDurablePeriod() {
   return { demandUnits: {}, purchasedUnits: {}, paidVoucherUnits: {}, unmetUnits: {}, wornUnits: {} };
@@ -71,13 +73,16 @@ export function buyDurableGoodsForHouseholds(state, content) {
   const results = {};
   for (const itemId of Object.keys(content.rules.durableGoods || {})) {
     const cfg = durableGoodsConfig(content, itemId);
-    const price = currentUnitPrice(state, itemId, content);
+    const fromFarm = cfg.seller === "farm";
+    // 价格：耕牛取养牛场的挂牌价（没有养牛场时用官价，只为算农户的需求）；农具取综合商店的价。
+    const price = fromFarm ? cattleListPrice(state, itemId, content, currentUnitPrice(state, itemId, content)) : currentUnitPrice(state, itemId, content);
+    const ctx = durableTargetContext(state, content, cfg);
     const needs = {};
     // 需求 = 各户今日想买的量：缺口，但不超过当日可花预算的 durableSpendCapShare（预算以外的缺口不算需求，留到以后几天买）。
     let desired = 0;
     let gapUnits = 0;
     for (const household of householdList(state).filter(isActiveHousehold)) {
-      const targetUnits = Math.round(durableTargetPieces(household, cfg) * scale);
+      const targetUnits = Math.round(durableTargetPieces(household, cfg, ctx) * scale);
       const gap = targetUnits - Math.max(0, household.inventory?.[itemId] || 0);
       if (gap <= 0) continue;
       gapUnits += gap;
@@ -89,8 +94,10 @@ export function buyDurableGoodsForHouseholds(state, content) {
       desired += want;
     }
     if (desired <= 0) { results[itemId] = { purchasedUnits: 0, paidVoucherUnits: 0, unmetUnits: 0, gapUnits, reason: gapUnits > 0 ? "预算不够" : "无人需要" }; continue; }
-    const result = purchaseItemForResidents(state, itemId, desired, price, content,
-      `家庭购买${content.items[itemId]?.name || itemId}（耐用品补置）`, { householdNeedsUnits: needs });
+    const result = fromFarm
+      ? sellOxToHouseholds(state, itemId, needs, content)
+      : purchaseItemForResidents(state, itemId, desired, price, content,
+        `家庭购买${content.items[itemId]?.name || itemId}（耐用品补置）`, { householdNeedsUnits: needs });
     const purchased = result.purchasedUnits || 0;
     const paid = result.paidVoucherUnits || 0;
     // 未满足 = 想买但买不到（没有综合商店、店里没货、店铺接待满）。

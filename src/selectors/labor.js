@@ -1,6 +1,6 @@
 import { CORE_ROLES } from "../content/roles.js";
 import { householdList, householdEmploymentCount, householdWorkingAge, jobCount } from "../systems/households.js";
-import { reclaimedAcres } from "../systems/agriculture.js";
+import { farmerCapacityOf } from "./farmland.js";
 import { computePoachable } from "../systems/labor-market.js";
 import { privateWageRate, wageControlFactor } from "../systems/payroll.js";
 import { buildingMaxLevel } from "../content/building-level.js";
@@ -46,7 +46,7 @@ export function selectJobRows(state, content, runtime = null) {
   const rows = [];
   for (const role of Object.values(content.roles || CORE_ROLES)) {
     let capacity = 0;
-    if (role.capacity === "farmland") capacity = Math.floor(reclaimedAcres(state, content) / content.agriculture.acresPerFarmer);
+    if (role.capacity === "farmland") capacity = farmerCapacityOf(state, content);
     // 营造岗位容量即各在建工程投入人数之和；没有工程时容量为 0。
     else if (role.capacity === "project") capacity = (state.projects || []).reduce(function (sum, project) {
       return sum + Math.max(0, Math.floor(project.workers || 0));

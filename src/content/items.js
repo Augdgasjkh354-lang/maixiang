@@ -95,6 +95,11 @@ export const ITEMS = Object.freeze({
     id: "iron_tool", name: "铁制工具", unit: "件", category: "tool",
     edible: false, qeq: null, openingCostWheatPerJin: 0
   }),
+  // 耕牛（金银消费第三期）：养牛场直接卖给农民户（耐用品，seller "farm"），不上批发市场与综合商店货架，不可食用。
+  ox: Object.freeze({
+    id: "ox", name: "耕牛", unit: "头", category: "livestock",
+    edible: false, qeq: null, openingCostWheatPerJin: 0
+  }),
   // 肉：养殖基地产，算主食：1 斤肉顶 2 斤口粮（qeq 2:1），家里有肉先吃肉。越宽裕的人家主食里肉越多（market.js 的 meatStapleShare）。
   // 养殖场直接卖给综合商店，多余的卖给批发市场。
   chicken: Object.freeze({

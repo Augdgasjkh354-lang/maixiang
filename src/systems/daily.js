@@ -44,6 +44,7 @@ import { fillMissingHouseholdLastHarvestIncome, maybeRefreshHouseholdIncomeExpec
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
 import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
 import { buyDurableGoodsForHouseholds, resetDurableDay, resetDurableYear, wearDurableGoods } from "./durable-goods.js";
+import { payOxMaintenanceDay, resetCattleDay, resetCattleYear } from "./cattle.js";
 import { accrueEducationDay, accrueIndustryExperience } from "./productivity.js";
 import { resetWholesaleDay, resetWholesaleYear, reviewWholesaleAutoPricing, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
@@ -75,6 +76,7 @@ function resetDayBooks(state, content) {
   }
   resetPrivateDaily(state);
   resetDurableDay(state);
+  resetCattleDay(state);
   resetRedistributionDay(state);
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
   if (state.stampDuty) state.stampDuty.day = {};
@@ -99,6 +101,7 @@ function resetYearBooks(state, content) {
   }
   resetPrivateYear(state);
   resetDurableYear(state);
+  resetCattleYear(state);
   resetCompanyYear(state, content, state.year - 1);
   resetShopYear(state, content);
   resetWholesaleYear(state, content);
@@ -203,6 +206,8 @@ export const CORE_DAILY_STEPS = [
   { id: "repairWood", run: buyRepairWoodForResidents },
   // 耐用品（铁制农具）：农户补置，排在日用品之前（生产资料优先，每户不超过当日可花预算的一半）。
   { id: "durableTrade", run: buyDurableGoodsForHouseholds },
+  // 耕牛维护费（金银消费第三期）：每户每头在役耕牛每日付一份给养牛场；付不上的户欠养，效力逐步下降（systems/cattle.js）。
+  { id: "oxMaintenance", run: payOxMaintenanceDay },
   { id: "goodsTrade", run: buyGoodsForResidents },
   { id: "services", run: processServiceDemand },
   // 教育：学堂当天实际接待了学生才累计办学天数（服务结算之后，见 economy/productivity.js 的 educationBonus）。

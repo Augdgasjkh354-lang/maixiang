@@ -8,7 +8,8 @@ import { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privat
 import { selectAccounts, selectFoodDays, selectTotalQeq } from "./economy.js";
 import { productionStatus } from "./production.js";
 import { selectHarvestForecast } from "./agriculture.js";
-import { farmYieldPerAcre, selectDurableCoverage } from "./durable-goods.js";
+import { selectDurableCoverage } from "./durable-goods.js";
+import { farmTotalOutputJin, farmYieldPerAcre, farmerCapacityOf, selectFarmland } from "./farmland.js";
 import { toolBoostSpec, toolFactorEstimate, toolWorkerCount } from "../systems/tool-boost.js";
 import { reclaimCostEstimate, reclaimWorkDaysForAcres, reclaimedAcres, reclaimedAcresMaximum } from "../systems/agriculture.js";
 import { qeqUnitsToJin } from "../economy/inventory.js";
@@ -876,12 +877,12 @@ export function selectDashboard(state, content, selection) {
     monthDays: content.rules.monthDays || 30,
     dismissalMinTenureDays: content.rules.dismissalMinTenureDays ?? 30,
     severanceWageDays: content.rules.severanceWageDays ?? 30,
-    farmCapacity: reclaimedAcres(state, content) / content.agriculture.acresPerFarmer,
+    farmCapacity: farmerCapacityOf(state, content, { exact: true }),
     cropWorkUnits: state.agriculture.workUnits,
     farmWorkDays: (needResidents || needSite) ? state.agriculture.workUnits /
-      (reclaimedAcres(state, content) / content.agriculture.acresPerFarmer) : 0,
+      farmerCapacityOf(state, content, { exact: true }) : 0,
     farmWorkPercent: needSite ? Math.min(100, state.agriculture.workUnits /
-      ((reclaimedAcres(state, content) / content.agriculture.acresPerFarmer) *
+      (farmerCapacityOf(state, content, { exact: true }) *
         content.rules.growingDays) * 100) : 0,
     growingDays: (needResidents || needSite) ? content.rules.growingDays : 0,
     automaticReliefTriggerDays: content.rules.automaticReliefTriggerDays,
@@ -889,11 +890,15 @@ export function selectDashboard(state, content, selection) {
     farmAcres: reclaimedAcres(state, content),
     farmAcresMaximum: content.agriculture.acresMaximum ?? content.agriculture.acres,
     acresPerFarmer: content.agriculture.acresPerFarmer,
+    plowAcresPerFarmer: content.agriculture.plowAcresPerFarmer,
+    oxAcres: content.agriculture.oxAcres,
     farmYieldPerAcre: farmYieldPerAcre(state, content),
     farmYieldBaseAcre: content.agriculture.yieldPerAcre,
     farmYieldFullAcre: content.agriculture.yieldPerAcre + (content.agriculture.farmToolYieldBonusPerAcre || 0),
     farmToolCoverage: selectDurableCoverage(state, content, content.agriculture.farmToolItemId),
-    farmMaximumHarvest: reclaimedAcres(state, content) * farmYieldPerAcre(state, content) * educationBonus(state),
+    // 耕牛与铁犁牛耕改革（金银消费第三期）：覆盖率、改革亩数与上限、岗位容量；面板的农田卡用。
+    farmland: needSite || needResidents ? selectFarmland(state, content) : null,
+    farmMaximumHarvest: farmTotalOutputJin(state, content) * educationBonus(state),
     reclaim: needSite || needResidents ? selectReclaimView(state, content) : null,
     ledgerQuantity: function (row) {
       return row.quantityUnits / content.precision.inventoryUnitsPerJin;

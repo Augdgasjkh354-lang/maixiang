@@ -189,6 +189,35 @@ function farmToolRows(view) {
   return `<div class="row"><span class="label">铁制农具覆盖率</span><strong class="value">${number(cov.coverage * 100, 1)}%</strong></div><div class="row"><span class="label">亩产上限</span><strong class="value">${number(view.farmYieldBaseAcre)} → ${number(view.farmYieldFullAcre)}斤/亩（现 ${number(view.farmYieldPerAcre, 1)}）</strong></div><div class="row"><span class="label">全镇持有农具 / 目标</span><strong class="value">${number(cov.heldPieces, 1)} / ${number(cov.targetPieces)}件</strong></div><div class="row"><span class="label">年更新需求件数</span><strong class="value">${number(cov.annualReplacementPieces, 1)}件/年</strong></div>`;
 }
 
+// 耕牛（金银消费第三期）：农田卡的牛耕覆盖率、在役头数、亩产上限。
+function oxRows(view) {
+  const f = view.farmland;
+  if (!f) return "";
+  return `<div class="row"><span class="label">牛耕覆盖率</span><strong class="value">${number(f.oxCoverage * 100, 1)}%</strong></div><div class="row"><span class="label">耕牛在役 / 目标</span><strong class="value">${number(f.oxInService, 1)} / ${number(f.oxTarget)}头</strong></div><div class="row"><span class="label">亩产上限（农具 + 牛）</span><strong class="value">${number(f.baseYield)} → ${number(f.baseYield + f.toolBonus + f.oxBonus)}斤/亩</strong></div>`;
+}
+
+// 铁犁牛耕改革（金银消费第三期）：替代亩数输入、预览（点预览才显示）、确认改革。预览结果由 app.js 经 setIronPlowPreview 写入。
+let ironPlowPreview = null;
+export function setIronPlowPreview(preview) {
+  ironPlowPreview = preview || null;
+}
+
+function ironPlowSection(view) {
+  const f = view.farmland;
+  if (!f) return "";
+  const preview = ironPlowPreview;
+  const previewText = !preview ? "" : preview.ok
+    ? `<div class="subtle">替代 ${number(preview.requested)} 亩：农田岗位 ${number(preview.capacityBefore)} → ${number(preview.capacityAfter)} 人；按当前在岗 ${number(preview.jobs)} 人计，约 ${number(preview.released)} 名农民转为待业（可去其他行业就业）。</div>`
+    : `<div class="input-error visible">${escapeHtml(preview.reason || "不能改革")}</div>`;
+  return `<details class="detail-block" data-detail-key="iron-plow" open><summary>铁犁牛耕改革</summary><div class="detail-body">
+    <div class="row"><span class="label">当前改革</span><strong class="value">已替代 ${number(f.plowEffectiveAcres)} 亩（上限 ${number(f.plowCap)} 亩）</strong></div>
+    <div class="subtle">改革地块每 ${number(view.plowAcresPerFarmer)} 亩 1 名农民（原 ${number(view.acresPerFarmer)} 亩 1 人），每亩满额 ${number(f.baseYield + f.toolBonus + f.oxBonus)} 斤；需要一头牛与一件农具配 ${number(view.oxAcres)} 亩。</div>
+    <div class="setting-input"><label>替代亩数</label>${renderNumericInput(view, { key: "iron-plow-acres", kind: "iron-plow-acres", target: "field", value: f.plowAcres, label: "铁犁牛耕替代亩数", integer: true, minimum: 0, maximum: f.acres, className: "setting-editor" })}<b>亩</b></div>
+    <div class="site-actions"><button class="secondary" data-plow-preview>预览</button><button class="primary" data-plow-submit>确认改革</button></div>
+    ${previewText}
+  </div></details>`;
+}
+
 // 铁制工具（金银消费第二期 B）：建筑卡一行，今日加成与库存。
 function toolBoostRow(tool) {
   if (!tool) return "";
@@ -218,10 +247,13 @@ function reclaimSection(view) {
 }
 
 // 养殖基地：每座养殖场一张卡，结构同商业街店铺卡。
-const FARM_TYPE_IDS = ["chicken_farm", "duck_farm", "goose_farm", "pig_farm"];
+const FARM_TYPE_IDS = ["chicken_farm", "duck_farm", "goose_farm", "pig_farm", "cattle_farm"];
 
 function farmCardMarkup(view, shop, unit) {
   const farm = shop.farm || {};
+  // 养牛场的产品是耕牛（头），其余养殖场是斤；小牛群只养牛场有。
+  const pu = farm.productUnit || "斤";
+  const herd = farm.herdCalves !== undefined;
   const maxOwners = shop.maxMerchants || 4;
   const staffControls = shop.status === "open"
     ? `<div class="site-worker-actions"><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="-1" aria-label="减少养殖户" ${shop.merchants <= 1 ? "disabled" : ""}>−</button><strong>养殖户 ${number(shop.merchants)} / ${number(maxOwners)}</strong><button class="step-btn" data-shop-merchant="${escapeHtml(shop.id)}" data-step="1" aria-label="增加养殖户" ${shop.merchants >= maxOwners || view.labor.idle <= 0 ? "disabled" : ""}>＋</button></div>
@@ -232,13 +264,14 @@ function farmCardMarkup(view, shop, unit) {
     : `<button class="secondary" data-shop-close="${escapeHtml(shop.id)}">停业</button>`;
   return `<div class="cardlet"><div class="row"><strong>${escapeHtml(shop.name)} · ${escapeHtml(shop.typeName)}</strong><span class="badge">${escapeHtml(shop.statusReason)}</span></div>
     <div class="row"><span class="label">今日利润</span><strong class="value">${number(shop.profitDayVoucher, 2)}${escapeHtml(unit)}</strong></div>${staffControls}
-    <div class="row"><span class="label">日产能 / 今日产量</span><strong class="value">${number(farm.capacityJin, 1)} / ${number(farm.producedDayJin, 1)}斤</strong></div>
-    <div class="row"><span class="label">肉存货 / 饲料存量</span><strong class="value">${number(farm.productStockJin, 1)} / ${number(farm.feedStockJin, 1)}斤</strong></div>
-    <div class="row"><span class="label">今日卖给商店</span><strong class="value">${number(farm.storeSoldDayJin, 1)}斤</strong></div>
-    <div class="row"><span class="label">卖给商店价 / 每斤成本</span><strong class="value">${number(farm.salePriceVoucher ?? farm.priceVoucher, 2)} / ${number(farm.unitCostVoucher || 0, 2)}${escapeHtml(unit)}/斤</strong></div>
+    <div class="row"><span class="label">${herd ? "每日可开小牛 / 今日出栏" : "日产能 / 今日产量"}</span><strong class="value">${herd ? `${number(farm.capacityJin, 2)} / ${number(farm.producedDayJin, 2)}头` : `${number(farm.capacityJin, 1)} / ${number(farm.producedDayJin, 1)}${pu}`}</strong></div>
+    ${herd ? `<div class="row"><span class="label">存栏小牛 / 饲料存量</span><strong class="value">${number(farm.herdCalves)}头 / ${number(farm.feedStockJin, 1)}斤</strong></div>` : ""}
+    <div class="row"><span class="label">${herd ? "耕牛库存" : "肉存货 / 饲料存量"}</span><strong class="value">${herd ? `${number(farm.productStockJin, 2)}头` : `${number(farm.productStockJin, 1)}${pu} / ${number(farm.feedStockJin, 1)}斤`}</strong></div>
+    <div class="row"><span class="label">今日卖给商店</span><strong class="value">${number(farm.storeSoldDayJin, 1)}${herd ? "头（直卖农户）" : "斤"}</strong></div>
+    <div class="row"><span class="label">${herd ? "卖给农户价 / 每头成本" : "卖给商店价 / 每斤成本"}</span><strong class="value">${number(farm.salePriceVoucher ?? farm.priceVoucher, 2)} / ${number(farm.unitCostVoucher || 0, 2)}${escapeHtml(unit)}/${escapeHtml(pu)}</strong></div>
     <div class="row"><span class="label">价格系数</span><strong class="value">×${number(farm.priceFactor ?? 1, 2)}${farm.pricingReason ? ` · ${escapeHtml(farm.pricingReason)}` : ""}</strong></div>
     ${farm.outputStatus && farm.outputStatus !== "营业中" ? `<div class="row"><span class="label">产出状态</span><strong class="value">${escapeHtml(farm.outputStatus)}</strong></div>` : ""}
-    <div class="subtle">每名饲养员日产${number(farm.outputPerWorkerDay)}斤${escapeHtml(farm.productName || "")}，每斤耗${number(farm.feedPerUnit, 1)}斤${escapeHtml(farm.feedName || "")}。</div>
+    ${herd ? `<div class="subtle">每名饲养员每日可开${number(farm.outputPerWorkerDay, 2)}头小牛；每头小牛每日吃${number(farm.feedPerCalfJin, 1)}斤小麦，养满${number(farm.growthDays)}天出栏为耕牛，耕牛卖给农户并由养牛场按年收维护费。</div>` : `<div class="subtle">每名饲养员日产${number(farm.outputPerWorkerDay)}斤${escapeHtml(farm.productName || "")}，每斤耗${number(farm.feedPerUnit, 1)}斤${escapeHtml(farm.feedName || "")}。</div>`}
     <details class="detail-block" data-detail-key="shop:${escapeHtml(shop.id)}"><summary>经营详情</summary><div class="detail-body">
       <div class="row"><span class="label">业主</span><strong class="value">${escapeHtml(shop.ownerName || shop.ownerHouseholdId)}</strong></div>
       <div class="row"><span class="label">饲养员工资</span><strong class="value">${escapeHtml(monthlyWageText(view, shop.clerkWageVoucher, 1))}${shop.wageTarget != null ? ` · 行情${number(shop.wageTarget, 1)}` : ""}${shop.wageDiagnosis ? ` · ${escapeHtml(shop.wageDiagnosis)}` : ""}</strong></div>
@@ -328,7 +361,7 @@ export function renderSite(view) {
 
   if (site === "field") {
     const farmers = view.labor.rows.find(row => row.roleId === "farmers");
-    body = `<div class="row"><span class="label">耕地</span><strong class="value">${number(view.farmAcres)}亩</strong></div>${farmToolRows(view)}<div class="row"><span class="label">农人在岗 / 目标</span><strong class="value">${number(farmers?.count || 0)} / ${number(farmers?.targetCount ?? farmers?.count ?? 0)}人</strong></div><div class="row"><span class="label">可耕种人数上限</span><strong class="value">${number(view.farmCapacity)}人</strong></div>${(farmers?.targetShortage || 0) > 0 ? `<div class="shortage-banner visible">农业缺员 ${number(farmers.targetShortage)}人</div>` : ""}<div class="row"><span class="label">今年农事</span><strong class="value">${number(view.farmWorkDays)} / ${number(view.growingDays)}农人日</strong></div><div class="meter"><span style="width:${number(view.farmWorkPercent, 1)}%"></span></div><div class="row"><span class="label">预计净收成</span><strong class="value">${number(view.forecast)}斤</strong></div>${reclaimSection(view)}`;
+    body = `<div class="row"><span class="label">耕地</span><strong class="value">${number(view.farmAcres)}亩</strong></div>${farmToolRows(view)}${oxRows(view)}<div class="row"><span class="label">农人在岗 / 目标</span><strong class="value">${number(farmers?.count || 0)} / ${number(farmers?.targetCount ?? farmers?.count ?? 0)}人</strong></div><div class="row"><span class="label">可耕种人数上限</span><strong class="value">${number(view.farmCapacity)}人</strong></div>${(farmers?.targetShortage || 0) > 0 ? `<div class="shortage-banner visible">农业缺员 ${number(farmers.targetShortage)}人</div>` : ""}<div class="row"><span class="label">今年农事</span><strong class="value">${number(view.farmWorkDays)} / ${number(view.growingDays)}农人日</strong></div><div class="meter"><span style="width:${number(view.farmWorkPercent, 1)}%"></span></div><div class="row"><span class="label">预计净收成</span><strong class="value">${number(view.forecast)}斤</strong></div>${reclaimSection(view)}${ironPlowSection(view)}`;
     actions = `<button class="secondary" data-go="residents">安排农人</button>`;
     title = "麦田";
   } else if (site === "granary") {

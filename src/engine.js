@@ -27,6 +27,7 @@ import {
 import { selectDemolitionPreview, selectUpgradePreview } from "./systems/building-development.js";
 import { validateState } from "./core/validation.js";
 import { selectDashboard } from "./selectors/dashboard.js";
+import { previewIronPlowReform, setIronPlowReform as setIronPlowReformSystem } from "./systems/iron-plow.js";
 import { selectOperatingRightPreview } from "./selectors/operating-rights.js";
 import { populationStats, selectJobRows } from "./selectors/labor.js";
 import { accountQeqUnits, totalQeqUnits } from "./economy/inventory.js";
@@ -210,6 +211,9 @@ export function createSimulation(content) {
     setOutputTarget: function (state, buildingId, quantityJin) { return setOutputTarget(state, buildingId, quantityJin, definitions); },
     configureServicePrice: function (state, serviceId, value) { return configureServicePrice(state, serviceId, value, definitions); },
     reclaimFarmland: function (state, acres, workers) { return reclaimFarmland(state, acres, workers, definitions); },
+    // 铁犁牛耕改革（金银消费第三期）：设定替代亩数（上限 = min(在役耕牛×50, 农具件数×50, 开荒亩数)）；preview 只读。
+    setIronPlowReform: function (state, acres) { return setIronPlowReformSystem(state, definitions, acres); },
+    previewIronPlowReform: function (state, acres) { return previewIronPlowReform(state, definitions, acres); },
     validateCurrencyInvariant: function (state) { return validateCurrencyInvariant(state, definitions); },
     selectDashboard: function (state, selection) {
       return selectDashboard(state, definitions, selection);

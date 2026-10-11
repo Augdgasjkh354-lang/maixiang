@@ -1,6 +1,6 @@
 import { householdList, isActiveHousehold } from "./households.js";
 import { nextRandom } from "../core/random.js";
-import { farmYieldPerAcre } from "../selectors/durable-goods.js";
+import { farmTotalOutputJin } from "../selectors/farmland.js";
 
 // 收入预期（为下一版本打地基）：每户每年期望收入（斤，小麦等值）。
 // - 农民：年分粮 = 亩产 × 耕地 × (1 - 农业税率) / 农民总数（以农业税为基准）
@@ -40,15 +40,14 @@ export function maybeRefreshHouseholdIncomeExpectations(state, content) {
 
 // 每个农民的年分粮（斤）：全镇农田产出扣掉农业税，平均到在岗农民。收入预期的务农部分与秋收初值共用这一口径。
 export function perFarmerShareJin(state, content) {
-  const acres = state.agriculture?.reclaimedAcres || 0;
-  // 每亩产量含铁制农具加成（同秋收口径）。
-  const yieldPerAcre = content.agriculture ? farmYieldPerAcre(state, content) : 0;
+  // 全镇最高产量含铁制农具与耕牛加成（同秋收口径）。
+  const totalJin = content.agriculture ? farmTotalOutputJin(state, content) : 0;
   const taxRate = (state.policy?.agricultureTaxPercent ?? content.rules.agricultureTaxDefaultPercent ?? 50) / 100;
   let totalFarmers = 0;
   for (const household of householdList(state)) {
     if (isActiveHousehold(household)) totalFarmers += household.jobs?.farmers || 0;
   }
-  return totalFarmers > 0 ? acres * yieldPerAcre * (1 - taxRate) / totalFarmers : 0;
+  return totalFarmers > 0 ? totalJin * (1 - taxRate) / totalFarmers : 0;
 }
 
 // 开局（尚无秋收记录）时，每户的 lastHarvestIncomeJin 用收入预期里的务农分粮部分（在岗农民 × 每人年分粮）作初值，
