@@ -1356,8 +1356,8 @@ const THEATER_MIN_AFFLUENCE = 1.5;
     school: Object.freeze({ id: "school", name: "学堂", basis: "child", cycleDays: 1, priceVoucher: 1, adjustablePrice: true, merchantCapacity: 40, clerkCapacity: 40, employeeOnlyCapacity: true, consumables: Object.freeze([]), comfort: 0.4, incomeSensitivity: 0.8 }),
     restaurant: Object.freeze({ id: "restaurant", name: "饭店", basis: "person", cycleDays: 5, priceVoucher: 4, merchantCapacity: 50, clerkCapacity: 50, employeeOnlyCapacity: true, consumables: Object.freeze([{ itemId: "wheat", quantity: 2 }]), mealReplacement: true, comfort: 1.0, incomeSensitivity: 1.0 }),
     // 戏园：富户的消遣。票价 6 券（茶馆的两倍），收入弹性 2.5，实际门槛约 15 券/场（票价 × 弹性，与茶馆同一口径，超出家庭日预算就买不起）；
-    // 人工密集：每个店员只接待 6 人（茶馆 48 人）；舒心值 1.2（茶馆 0.6）。只有宽裕度 ≥ minAffluence 的家庭去。
-    theater: Object.freeze({ id: "theater", name: "戏园", basis: "person", cycleDays: 10, priceVoucher: 6, merchantCapacity: 10, clerkCapacity: 6, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 2.5, minAffluence: THEATER_MIN_AFFLUENCE })
+    // 人工密集：每个店员只接待 12 人（茶馆 48 人；原 6 人，翻倍后）；舒心值 1.2（茶馆 0.6）。只有宽裕度 ≥ minAffluence 的家庭去。
+    theater: Object.freeze({ id: "theater", name: "戏园", basis: "person", cycleDays: 10, priceVoucher: 6, merchantCapacity: 20, clerkCapacity: 12, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 2.5, minAffluence: THEATER_MIN_AFFLUENCE })
   }),
 
   // v0.1.1 operating-plan parameters. Demand planning refreshes in coarse cycles to avoid daily hire/fire churn.
@@ -3094,7 +3094,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod20 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-3b07265";
+       const BUILD_ID = "0203-83ecb98";
 return { APP_VERSION, BUILD_ID };
 })();
 
