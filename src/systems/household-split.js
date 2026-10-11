@@ -4,8 +4,8 @@
 // 规则（与玩家约定）：
 // - 人口：新户拿约一半人口，按年龄段同比例分；两户都至少 1 名劳动力（原户只有 1 名劳动力时不分）。
 // - 钱粮：粮券、银行存款、全部库存按两户人口比例分（取整零头留原户），总量守恒。
-// - 留原户（原户是家主）：股票、国债、名下建筑、开的店（店主与商人岗位）、经营权、别墅、欠薪债权、开店欠款、收入账。
-// - 岗位：原户在自己劳动力范围内尽量保留（商人岗位永远留下），放不下的岗位随人去新户，不释放、不造成失业。
+// - 留原户（原户是家主）：股票、国债、名下建筑、开的店（店主与商人岗位；劳动力放不下时整店随人去新户）、经营权、别墅、欠薪债权、开店欠款、收入账。
+// - 岗位：原户在自己劳动力范围内尽量保留（商人先留），放不下的岗位随人去新户，入职日一起搬；原户名下店铺的商人岗位整组放不下时整店交给新户。不释放、不造成失业。
 // - 新户生活账从零开始，满意度继承原户。
 import { createHousehold, householdList, householdPopulation, householdWorkingAge, jobReleaseRank, releaseExcessHouseholdEmployment, syncResidentAggregates } from "./households.js";
 import { invalidateHouseholdBudgets } from "./household-budget.js";
@@ -45,22 +45,61 @@ function shareOf(units, share) {
   return Math.max(0, Math.floor(Math.max(0, units || 0) * share));
 }
 
-// 岗位：原户按"商人先、越难释放的越先留"保留到自己的劳动力，放不下的给新户。
-function splitJobs(original, newHousehold) {
+// 原户拥有的店铺的商人岗位键（shop:<id>:merchant）对应的店铺；不是原户名下的店铺返回 null。
+function ownedMerchantShop(state, original, jobKey) {
+  const match = /^shop:(.+):merchant$/.exec(jobKey);
+  if (!match) return null;
+  const shop = state.shops?.[match[1]];
+  if (!shop || shop.collective || shop.town || shop.ownerHouseholdId !== original.id) return null;
+  return shop;
+}
+
+// 店铺整体交给新户：业主身份与 shopIds 一起换。商人岗位已随之搬走。
+function handOverShop(shop, original, newHousehold) {
+  shop.ownerHouseholdId = newHousehold.id;
+  original.shopIds = (original.shopIds || []).filter(id => id !== shop.id);
+  newHousehold.shopIds ||= [];
+  if (!newHousehold.shopIds.includes(shop.id)) newHousehold.shopIds.push(shop.id);
+}
+
+// 入职日随人走：原户保留最早的 keep 人（前缀），搬走的是最近入职的 count - keep 人（后缀）。
+// 与 updateJobSince 一样按人数补齐：缺的记录视为早已入职（0）。
+function splitJobSince(original, newHousehold, jobKey, count, keep) {
+  let since = Array.isArray(original.jobSince?.[jobKey]) ? original.jobSince[jobKey].slice(-count) : [];
+  while (since.length < count) since.unshift(0);
+  original.jobSince ||= {};
+  newHousehold.jobSince ||= {};
+  if (keep > 0) original.jobSince[jobKey] = since.slice(0, keep);
+  else delete original.jobSince[jobKey];
+  if (count > keep) newHousehold.jobSince[jobKey] = since.slice(keep);
+}
+
+// 岗位：商人岗位与其余岗位一样，原户按"商人先、越难释放的越先留"保留到自己的劳动力。
+// 放不下的岗位随人去新户，入职日一起搬。原户名下店铺的商人岗位若整组放不下，
+// 且新户劳动力够，则整店交给新户（店铺不停业、店员不动）。
+function splitJobs(state, original, newHousehold) {
   const capacity = householdWorkingAge(original);
+  const newCapacity = householdWorkingAge(newHousehold);
   const keys = Object.keys(original.jobs || {}).filter(key => (original.jobs[key] || 0) > 0)
     .sort((a, b) => jobReleaseRank(a) - jobReleaseRank(b) || a.localeCompare(b));
   let kept = 0;
+  let movedTotal = 0;
   for (const key of keys) {
     const count = original.jobs[key];
-    const keep = key.endsWith(":merchant") ? count : Math.max(0, Math.min(count, capacity - kept));
-    kept += keep;
+    let keep = Math.max(0, Math.min(count, capacity - kept));
+    const shop = ownedMerchantShop(state, original, key);
+    const wholeShop = Boolean(shop) && keep < count && movedTotal + count <= newCapacity;
+    if (wholeShop) keep = 0;
     const move = count - keep;
     if (move > 0) {
-      original.jobs[key] = keep;
+      splitJobSince(original, newHousehold, key, count, keep);
       newHousehold.jobs[key] = move;
-      if (keep === 0) delete original.jobs[key];
+      movedTotal += move;
     }
+    if (keep > 0) original.jobs[key] = keep;
+    else delete original.jobs[key];
+    kept += keep;
+    if (wholeShop) handOverShop(shop, original, newHousehold);
   }
 }
 
@@ -90,7 +129,7 @@ function splitOne(state, original, number, content) {
     const moved = shareOf(deposits[original.id], share);
     if (moved > 0) { deposits[original.id] -= moved; deposits[household.id] = moved; }
   }
-  splitJobs(original, household);
+  splitJobs(state, original, household);
   if (Number.isFinite(original.meatHabit)) household.meatHabit = original.meatHabit;
   // 近期收入按人口比例分：两户人均收入不变（无记录时先把收入预期折成近期日收入再分）。
   const perDayIncome = householdRecentIncomeUnitsPerDay(original, content);
