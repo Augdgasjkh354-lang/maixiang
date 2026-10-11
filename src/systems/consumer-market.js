@@ -98,6 +98,13 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
 }
 
 // 粗估一户按某价能买多少（粮券 + 今日还能换券的小麦）：不走支付层报价，用于需求统计和二分查找的初值。
+// 32 位 FNV-1a：同一天内对同一户恒定，日序号变了就整体换序。
+function rotationHash(id, serial) {
+  let hash = 2166136261 ^ (serial & 0xffffffff);
+  for (let i = 0; i < id.length; i += 1) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619) >>> 0;
+  return hash >>> 0;
+}
+
 function quickAffordableUnits(state, household, price, content, reserveDays, capUnits = Number.POSITIVE_INFINITY) {
   if (!(price > 0)) return 0;
   const spendable = householdSpendableVoucherUnits(state, household);
@@ -293,10 +300,15 @@ export function purchaseItemForResidents(state, itemId, desiredUnits, priceVouch
   // 先按价格选择；同价卖家用轮换游标，避免长期只成交第一家。
   const prices = [...new Set(sellers.map(row => row.price))].sort((a, b) => a - b);
   const ordered = prices.flatMap(price => rotated(sellers.filter(row => row.price === price), rotation));
+  // 同等缺货的户之间按"户 id × 日序号"的散列轮换先后：接待能力封顶时每天服务的不是同一批户
+  // （原先按 id 字典序，永远是排在前面的那批户被服务，其余户长期买不到）。
+  const serial = (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 360) + (state.day || 0);
+  const tieKey = new Map();
+  for (const household of householdList(state)) tieKey.set(household.id, rotationHash(household.id, serial));
   const households = householdList(state).filter(isActiveHousehold).slice().sort((a, b) => {
     const aPer = (a.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(a));
     const bPer = (b.inventory?.[itemId] || 0) / Math.max(1, householdPopulation(b));
-    return aPer - bPer || a.id.localeCompare(b.id);
+    return aPer - bPer || tieKey.get(a.id) - tieKey.get(b.id) || a.id.localeCompare(b.id);
   });
   if (!households.length) return { purchasedUnits: 0, paidVoucherUnits: 0, sellerRows: [], reason: "没有居民家庭" };
   const requestedNeeds = options.householdNeedsUnits || null;
