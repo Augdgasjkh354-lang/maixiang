@@ -10,7 +10,7 @@ export const RULES = Object.freeze({
   monthDays: 30,
   growingDays: 270, // 秋收在 10 月 1 日（第 270 天，0 起算）
   foodPerPersonDay: 2,
-  housingCapacity: 1000,
+  housingCapacity: 2000, // 村里自有住房容量（人）；开局规模翻倍后同步翻倍
   builderSlots: 24,
   dailyDaysPerSecond: 0.45,
   speedChoices: [1, 4, 16],
