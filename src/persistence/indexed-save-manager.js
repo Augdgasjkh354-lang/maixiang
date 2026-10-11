@@ -176,12 +176,15 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
   }
   let catalog = defaultCatalog();
   let slotRecords = new Map();
-  // 已校验过的 primary 元信息缓存（按 id，primary 文本不同则失效），避免每次存档都重新 parse 旧主档。
+  // 已完整解码过的 primary 元信息缓存（按 id，primary 文本不同则失效）。
   const metaCache = new Map();
-  function cachedMeta(id, primary) {
+  // 旧 primary 只有能完整解码（容器校验 + 存档解析 + 数据校验）才允许轮转成 backup；
+  // 仅校验和通过但解不开的主档不能覆盖仍可读的备份。解不开时抛错。
+  function cachedDecodable(id, primary) {
     const cached = metaCache.get(id);
     if (cached && cached.primary === primary) return cached.meta;
-    const meta = inspect(primary, id);
+    const entry = decode(primary, id, content);
+    const meta = { name: entry.name, savedAt: entry.savedAt };
     metaCache.set(id, { primary, meta });
     return meta;
   }
@@ -283,7 +286,12 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
     let oldMeta = null;
     let backup = oldRecord?.backup || null;
     if (oldRecord?.primary) {
-      try { oldMeta = cachedMeta(id, oldRecord.primary); backup = oldRecord.primary; } catch {}
+      try { oldMeta = cachedDecodable(id, oldRecord.primary); backup = oldRecord.primary; }
+      catch {
+        // 旧主档解不开：不轮转，备份保持原样；元信息只为取名字与时间，校验和通过即可。
+        backup = oldRecord.backup || null;
+        try { oldMeta = inspect(oldRecord.primary, id); } catch {}
+      }
     }
     if (!oldMeta && oldRecord?.backup) {
       try { oldMeta = inspect(oldRecord.backup, id); } catch {}
@@ -301,7 +309,8 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
       // 校验通过后改用本地对象（与回读副本逐字相同），两份回读副本随即可回收。
       seedBackupBytes(record, oldRecord, backup);
       slotRecords.set(id, record);
-      metaCache.set(id, { primary, meta: { ...oldMeta, savedAt } });
+      // 新主档尚未解码验证，下次存档时再验（cachedDecodable），这里不预先标记为可用。
+      metaCache.delete(id);
       return { id, name: oldMeta.name, savedAt, state, recovered: false };
     } catch (error) {
       throw decorate(error, "save_current_write_verify", () => byteLength(primary) + byteLength(backup || ""));
