@@ -794,7 +794,8 @@ export function mountGame(root) {
 
   function startTemporaryGame() {
     flushDay();
-    state = createInitialState({ content: simulation.content });
+    // 临时游玩也是新游戏，用标准开局。
+    state = createInitialState({ content: simulation.content, opening: "standard" });
     resetAutosaveClock();
     dashboardViews.clear();
     activeId = null;

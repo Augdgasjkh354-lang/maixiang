@@ -33,7 +33,7 @@ import { wholesaleSummary, wholesaleTrends, hasWholesaleMarket, purchasePriceFee
 import { selectOutsideTownView } from "../systems/outside-town.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { selectTradeAgreementView } from "../systems/trade-agreements.js";
-import { selectLogisticsView } from "../systems/logistics.js";
+import { freightBuildingView, selectLogisticsView } from "../systems/logistics.js";
 import { selectTradeHouseView } from "./trade-houses.js";
 import { householdRecentTotalsReadonly, householdFoodDays } from "../systems/household-life.js";
 import { currentSatisfactionFactorRows, lastHouseholdFactors } from "../systems/satisfaction.js";
@@ -416,7 +416,9 @@ export function selectDashboard(state, content, selection) {
       outputTargetJin: building.outputTargetJin || 0,
       mainOutputItemId: definition?.recipeId ? content.recipes[definition.recipeId]?.outputs?.[0]?.itemId || null : null,
       // 人均产出（劳动生产率）：仅产业建筑有；等级加成与熟练度加成拆开展示。
-      ...productivityView(state, building.typeId, Math.max(1, Math.min(buildingMaxLevel(content, building.typeId), building.level || 1)), content)
+      ...productivityView(state, building.typeId, Math.max(1, Math.min(buildingMaxLevel(content, building.typeId), building.level || 1)), content),
+      // 物流中心 / 码头：等级、熟练度、教育加成后的人均运力（非运力类为 null）。
+      freight: freightBuildingView(state, content, building)
     };
     return result;
   });

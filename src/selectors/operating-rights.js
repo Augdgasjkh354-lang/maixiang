@@ -1,5 +1,6 @@
 import { privateJobKeyForBuilding, listedJobKeyForBuilding, jobKeyForBuilding, populationStats, readJobCount, selectJobRows } from "./labor.js";
 import { isIndustryType } from "../content/buildings.js";
+import { flexOf, flexRoomUnits } from "../systems/flex-recipe.js";
 import { accountQeqUnits } from "../economy/inventory.js";
 import { voucherBalance } from "../economy/currency.js";
 import { currentPaymentComposition, maximumFullyPayableValueUnits, maximumPayableValueUnits, quoteMonetaryPayment, spendableVoucherUnits } from "../economy/payment.js";
@@ -119,18 +120,6 @@ function demandForType(state, typeId, content) {
   return { demandUnits, competitionUnits, opportunityUnits, reason: demandUnits <= 0 ? "暂无需求" : opportunityUnits <= 0 ? "现有库存已覆盖需求" : "存在未满足需求" };
 }
 
-// 联产需求上限（批次/日）：每种产出各算一次（日用品按当日家庭需求，扣掉市面现货），取最紧的一种。
-function jointDemandBatches(state, outputs) {
-  let cap = Number.POSITIVE_INFINITY;
-  for (const row of outputs) {
-    if (row.netUnitsPerBatch <= 0) return 0;
-    const demanded = Math.max(0, state.goodsDemand?.todayDemandUnits?.[row.itemId] || 0);
-    const opportunity = Math.max(0, demanded - outputCompetitionStock(state, row.itemId));
-    cap = Math.min(cap, Math.floor(opportunity / row.netUnitsPerBatch));
-  }
-  return Number.isFinite(cap) ? cap : 0;
-}
-
 // 整栋经营权预览（docs/OWNERSHIP.md 第 1 条）。
 // 价值口径：民营/公司业主实际拿到的是批发收购价减去实物生产税，所以产出按收购价折算；
 // 产出受限于原料能否领到（镇库小麦 / 批发市场现有库存），不假设无限原料。
@@ -161,13 +150,12 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   const availableLabor = Math.min(job.slots * level, publicWorkers + rows.idle);
   const taxKeep = Math.max(0, 1 - taxPercent / 100);
   const netOutputUnitsPerBatch = Math.max(0, Math.floor(Math.round(output.quantity * scale) * taxKeep));
-  // 联产（一批同出几种，如酒坊）：各产出按各自收购价计值；批次数受最紧的一种限制（同经营计划口径）。单产出配方走原路径。
-  const jointOutputs = recipe.outputs.length > 1 ? recipe.outputs.map(row => ({
-    itemId: row.itemId,
-    quantity: row.quantity,
-    priceVoucher: readWholesalePurchasePrice(state, row.itemId, content),
-    netUnitsPerBatch: Math.max(0, Math.floor(Math.round(row.quantity * scale) * taxKeep))
-  })) : null;
+  // 弹性配方（动态酒品）：一批 totalJin 斤，各酒按当前市场缺口占比分配（预览用当前缺口估算），按收购价计值；日批次不超过缺口总量折算。单产出配方走原路径。
+  const flexRecipe = flexOf(recipe);
+  const flexRooms = flexRecipe ? flexRoomUnits(state, recipe, content) : null;
+  const flexRoomTotal = flexRecipe ? Object.values(flexRooms).reduce((sum, room) => sum + room, 0) : 0;
+  const flexShares = flexRecipe ? Object.fromEntries(flexRecipe.itemIds.map(itemId => [itemId,
+    flexRoomTotal > 0 && Number.isFinite(flexRoomTotal) ? flexRooms[itemId] / flexRoomTotal : 1 / flexRecipe.itemIds.length])) : null;
   // 原料可得性：小麦在镇库；其余原料看批发市场现有库存。
   const market = state.wholesaleMarket || {};
   const inputBatchLimits = recipe.inputs.map(row => {
@@ -179,11 +167,14 @@ export function selectOperatingRightPreview(state, buildingId, content, requeste
   });
   const inputBatchCap = inputBatchLimits.length ? Math.min(...inputBatchLimits) : Number.POSITIVE_INFINITY;
   const maxDailyBatchesByLabor = availableLabor * recipe.batchesPerWorkerDay;
-  const maxDailyBatchesByDemand = jointOutputs ? jointDemandBatches(paymentState, jointOutputs)
+  const maxDailyBatchesByDemand = flexRecipe
+    ? (Number.isFinite(flexRoomTotal) ? Math.floor(flexRoomTotal / (flexRecipe.totalJin * scale)) : Number.POSITIVE_INFINITY)
     : netOutputUnitsPerBatch > 0 ? Math.floor(demand.opportunityUnits / netOutputUnitsPerBatch) : 0;
   const maxBatches = Math.max(0, Math.min(maxDailyBatchesByLabor, maxDailyBatchesByDemand, inputBatchCap));
   const effectiveWorkers = maxBatches > 0 ? Math.ceil(maxBatches / recipe.batchesPerWorkerDay) : 0;
-  const batchOutputValue = jointOutputs ? jointOutputs.reduce((sum, row) => sum + row.quantity * row.priceVoucher, 0) : output.quantity * outputPrice;
+  const batchOutputValue = flexRecipe
+    ? flexRecipe.totalJin * flexRecipe.itemIds.reduce((sum, itemId) => sum + flexShares[itemId] * readWholesalePurchasePrice(state, itemId, content), 0)
+    : output.quantity * outputPrice;
   const outputValue = maxBatches * batchOutputValue * (1 - taxPercent / 100);
   const inputCost = recipe.inputs.reduce((sum, row) => sum + maxBatches * row.quantity * currentUnitPrice(state, row.itemId, content), 0);
   const wageRate = state.employment.wageRates?.[job.id] ?? job.wagePerWorkerDay ?? 0;

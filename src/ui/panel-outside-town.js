@@ -1,4 +1,4 @@
-import { escapeHtml, number, moneyUnit } from "./format.js";
+import { escapeHtml, number, numberMax, moneyUnit } from "./format.js";
 import { renderNumericInput } from "./numeric-drafts.js";
 
 // 一样商品的库存状态：库存远低于/远高于目标天数时标出来，方便判断价格走向。
@@ -60,7 +60,12 @@ function agreementRow(agreement) {
 function freightRow(logistics) {
   if (!logistics) return "";
   const src = logistics.capacityBySource || {};
-  return `<div class="row freight-row"><span class="label">运力</span><strong class="value">今日可用 ${number(logistics.poolJin, 0)} 斤 · 日运力 ${number(logistics.dailyCapacityJin, 0)} 斤（外贸房 ${number(src.foreignTradeHouse, 0)} / 物流 ${number(src.logisticsCenter, 0)} / 码头 ${number(src.dock, 0)}）</strong></div>`;
+  // 人均运力 = 基础每人日运力 × 等级 × 熟练度 × 教育加成（systems/logistics.js 的 selectLogisticsView）；运费仍按基础运力算。
+  const prod = logistics.productivity || {};
+  const perWorker = (label, row) => row ? `${label} ${numberMax(row.perWorkerJin, 2)} 斤（×${numberMax(row.productivityFactor, 2)}）` : "";
+  const perWorkerText = [perWorker("脚夫", prod.logisticsCenter), perWorker("码头工", prod.dock)].filter(Boolean).join(" / ");
+  return `<div class="row freight-row"><span class="label">运力</span><strong class="value">今日可用 ${number(logistics.poolJin, 0)} 斤 · 日运力 ${number(logistics.dailyCapacityJin, 0)} 斤（外贸房 ${number(src.foreignTradeHouse, 0)} / 物流 ${number(src.logisticsCenter, 0)} / 码头 ${number(src.dock, 0)}）</strong></div>`
+    + (perWorkerText ? `<div class="row freight-row"><span class="label">人均运力</span><strong class="value">${perWorkerText}（含等级、熟练度、教育加成；运费按基础运力）</strong></div>` : "");
 }
 
 // 贸易行汇总（docs/TRADE.md「贸易中心与贸易行」）：只读 view.tradeHouses 的合计，逐家明细在贸易中心的站点面板。

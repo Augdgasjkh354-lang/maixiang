@@ -8,6 +8,7 @@ import { modArt } from "../mods/api.js";
  * import { renderBuildingArt, BUILDING_ART_CATALOG } from './maixiang-buildings.js';
  * svg.innerHTML = renderBuildingArt('mill', {level: 1, status:'complete'});
  * 选项：level 1..10；scale 0.1..4；status 'empty'|'construction'|'complete'；progress 0..1。
+ * 美术只分 10 档：伐木场、盐场可升到 50 级，11 级及以上一律按 10 级的图画（clamp 在 renderBuildingArt 里）。
  * empty 返回空字符串；construction 仅显示地基与脚手架；complete 显示建筑。
  * 本库只负责外观，不结算产出、就业、住房或银行业务。
  * 新增建筑：在目录加入类型，在 renderComplete 中添加对应分支。

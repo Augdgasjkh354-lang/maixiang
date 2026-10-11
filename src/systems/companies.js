@@ -22,6 +22,7 @@ import { buyWholesaleForOwner, depositProductionTaxToWholesale, depositWholesale
 import { buildingOwner, companyOfBuilding, transferBuildingOwnership, valueUnitsOfGoods } from "./ownership.js";
 import { transferWageClaimsToTown } from "./employer.js";
 import { privateWageRate, townWageRate } from "./payroll.js";
+import { flexPlan, flexRoomUnits } from "./flex-recipe.js";
 
 function blankPeriod() {
   return {
@@ -708,16 +709,28 @@ export function processListedCompany(state, company, content) {
     company.status = maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "缺资金/原料" : "缺原料";
     return { companyId: company.id, status: maximumPayableValueUnits(state, "company:" + company.id, content) <= 0 ? "no_cash_or_materials" : "no_materials", batches: 0 };
   }
+  // 弹性配方（动态酒品）：按市场缺口分配本日产能；小麦只取分配所需，不为没用掉的产能付钱。
+  const scale = content.precision.inventoryUnitsPerJin;
+  const flex = recipe.flex ? flexPlan(recipe, flexRoomUnits(state, recipe, content), batches * recipe.flex.totalJin * scale, company.inventory.wheat || 0, content) : null;
+  if (flex) {
+    if (flex.totalUnits <= 0) {
+      company.status = "市场饱和";
+      return { companyId: company.id, status: "market_capped", workers, batches: 0 };
+    }
+    batches = flex.batchEquiv;
+  }
   company.productivityCarry = nextCarry(laborExact, batches, batches >= capacity);
   if (!company.productivityCarry) delete company.productivityCarry;
   // 仅保留为运营统计/旧档兼容：只统计实际生产日；认购与估值不使用此字段。
   company.operatingDays += 1;
   let totalInputCost = 0;
-  for (const input of recipe.inputs) {
-    const units = Math.round(input.quantity * batches * content.precision.inventoryUnitsPerJin);
-    totalInputCost += removeInventoryWithCost(company, input.itemId, units);
-  }
-  const outputs = recipe.outputs.map(row => ({ itemId: row.itemId, units: Math.round(row.quantity * batches * content.precision.inventoryUnitsPerJin) }));
+  const inputRows = flex
+    ? (flex.wheatUnits > 0 ? [{ itemId: "wheat", units: flex.wheatUnits }] : [])
+    : recipe.inputs.map(input => ({ itemId: input.itemId, units: Math.round(input.quantity * batches * scale) }));
+  for (const row of inputRows) totalInputCost += removeInventoryWithCost(company, row.itemId, row.units);
+  const outputs = flex
+    ? recipe.flex.itemIds.filter(itemId => flex.units[itemId] > 0).map(itemId => ({ itemId, units: flex.units[itemId] }))
+    : recipe.outputs.map(row => ({ itemId: row.itemId, units: Math.round(row.quantity * batches * scale) }));
   const losses = recipe.losses.map(row => ({ itemId: row.itemId, units: Math.round(row.quantity * batches * content.precision.inventoryUnitsPerJin) }));
   const outputWeight = outputs.reduce((sum, row) => sum + row.units, 0);
   const lossWeight = losses.reduce((sum, row) => sum + row.units, 0);

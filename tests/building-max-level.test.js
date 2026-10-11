@@ -14,11 +14,11 @@ function advanceUntilIdle(state, limit = 2000) {
   assert.equal(state.project, null, "upgrade project should finish within the day limit");
 }
 
-test("building level cap is 10 and every upgrade definition agrees with it", () => {
+test("building level cap is 10 (伐木场、盐场 50) and every upgrade definition agrees with it", () => {
   assert.equal(CONTENT.rules.buildingMaxLevel, MAX_LEVEL);
   for (const [id, definition] of Object.entries(CONTENT.buildings)) {
     if (!definition.upgrade) continue;
-    const expected = id === "lumberyard" || id === "saltworks" ? 20 : MAX_LEVEL;
+    const expected = id === "lumberyard" || id === "saltworks" ? 50 : MAX_LEVEL;
     assert.equal(definition.upgrade.maxLevel, expected, `${id} upgrade.maxLevel`);
   }
 });

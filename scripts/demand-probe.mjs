@@ -53,7 +53,7 @@ function buildTown(seed) {
   staff(add("mill"), 10); staff(add("bakery"), 10);
   staff(add("saltworks", 2, CONTENT.buildings.saltworks.requiredPlotFeature), 12);
   staff(add("lumberyard", 2, CONTENT.buildings.lumberyard.requiredPlotFeature), 12);
-  staff(add("winery"), 12);
+  staff(add("winery"), 16); staff(add("winery"), 16);
   staff(add("cotton_field"), 8); staff(add("weaving_mill"), 6);
   const base = add("livestock_base", 1);
   add("times_square", 1);

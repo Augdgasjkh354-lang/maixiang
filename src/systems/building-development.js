@@ -66,7 +66,7 @@ export function selectUpgradePreview(state, buildingId, content) {
   const days = builders > 0 ? Math.ceil(config.workDays / builders) : null;
   return {
     available: true, buildingId, name: definition.name, currentLevel: level,
-    nextLevel: level + 1, workDays: config.workDays,
+    nextLevel: level + 1, maxLevel: config.maxLevel || content.rules.buildingMaxLevel || 10, workDays: config.workDays,
     recommendedWorkers: config.recommendedWorkers || definition.construction.recommendedWorkers,
     estimatedDays: days, estimatedWageJin: days ? days * builders * wage : 0,
     availableBuilders: builders, waitingForWorkers: builders <= 0,

@@ -143,8 +143,6 @@ export function commitProductionAccounting(state, plan) {
   if (!industry) {
     bookAddAll(business, { processingLossWheatUnits: plan.processingLossWheatUnits, rawInputCostWheatUnits: plan.rawInputCostWheatUnits });
   }
-  // 联产超出库存硬上限的部分（滞销酒倒掉/自用）：成本记入加工损耗账。
-  if (plan.excessLossWheatUnits) bookAddAll(business, { processingLossWheatUnits: plan.excessLossWheatUnits });
   return plan;
 }
 

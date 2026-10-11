@@ -311,17 +311,15 @@ export const RULES = Object.freeze({
     town_general: Object.freeze({ id: "town_general", name: "镇营综合商店", kind: "alias", aliasOf: "general", town: true })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 0.45, beer_premium: 1.2, baijiu: 2.5, baijiu_premium: 6.7, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 0.5, beer_premium: 1.35, baijiu: 2.8, baijiu_premium: 7.5, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 0.4, beer_premium: 1.05, baijiu: 2.2, baijiu_premium: 5.9, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 5, beer_premium: 12, baijiu: 20, baijiu_premium: 100, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 4, beer_premium: 9.6, baijiu: 16, baijiu_premium: 80, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5 }),
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
   townOutputStockDays: 360, // 备货天数：目标库存相当于多少天的需求
-  // 联产配方（一批同出几种）每种产出的库存硬上限 = 目标库存 × 本倍数；超出的部分当批不入库，记加工损耗（滞销酒倒掉/自用）。
-  townOutputHardCapMultiple: 2,
   // 个别商品的备货天数覆盖：面包是易囤的成品，备太多会把磨坊有限的面粉全占走，居民买不到面粉（体检：面粉零售 0%、面包库存越堆越多）。
   townOutputStockDaysByItem: Object.freeze({ bread: 30 }),
   // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
@@ -371,5 +369,12 @@ export const INITIAL = Object.freeze({
   satisfaction: 75,
   // 开局即粮券阶段（core/state.js 的 issueOpeningVouchers）：居民每人 1000 斤粮券（按户人口），镇库券池 1340 万斤，合计 2000 万斤。
   openingVoucherPerResidentJin: 1000,
-  openingVoucherTownPoolJin: 13400000
+  openingVoucherTownPoolJin: 13400000,
+  // 标准开局（"新游戏"用，core/state.js 的 createInitialState({ opening: "standard" })）：这些建筑开局即落成，不耗材料、不派工。
+  // 默认空白开局（引擎与脚本用）不放置任何建筑。地块 id 见 content/world.js 的 PLOTS。
+  standardOpeningBuildings: Object.freeze([
+    Object.freeze({ typeId: "lumberyard", plotId: "forest-logging-01", level: 10 }),
+    Object.freeze({ typeId: "saltworks", plotId: "forest-salt-01", level: 10 }),
+    Object.freeze({ typeId: "dock", plotId: "riverside-01", level: 10 })
+  ])
 });

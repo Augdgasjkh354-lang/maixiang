@@ -19,6 +19,7 @@ import { valueUnitsOfGoods, daySerialOf } from "./ownership.js";
 
 import { privateWageRate } from "./payroll.js";
 import { accrueWages, hireToward, payWages, productionTaxUnits, wageArrears, wageBook } from "./employer.js";
+import { flexPlan, flexRoomUnits } from "./flex-recipe.js";
 
 function targetBatches(state, building) {
   return plannedBatchesForProducer(state, `private:${building.id}`);
@@ -197,6 +198,8 @@ export function processPrivateBuilding(state, building, content) {
   const inputPurchases = [];
   const inputShortages = [];
   const ownerEntries = [...ownerLevels.entries()];
+  // 弹性配方：各酒的市场缺口在本栋各业主之间共用，每分配一次就扣减（systems/flex-recipe.js）。
+  const flexRooms = recipe.flex ? flexRoomUnits(state, recipe, content) : null;
   for (let index = 0; index < ownerEntries.length; index += 1) {
     const [ownerHouseholdId, levels] = ownerEntries[index];
     const household = state.households?.byId?.[ownerHouseholdId];
@@ -208,26 +211,39 @@ export function processPrivateBuilding(state, building, content) {
     for (const row of supply.purchases) inputPurchases.push({ ownerHouseholdId, ...row });
     for (const row of supply.shortages) inputShortages.push({ ownerHouseholdId, ...row });
     let batches = ownerPlanned;
-    for (const input of recipe.inputs) {
-      const perBatch = quantityToUnits(input.quantity, content);
-      batches = Math.min(batches, Math.floor(productionAvailableUnits(state, household, input.itemId, content) / perBatch));
+    let flexRow = null;
+    if (recipe.flex) {
+      const capacityUnits = ownerPlanned * recipe.flex.totalJin * content.precision.inventoryUnitsPerJin;
+      flexRow = flexPlan(recipe, flexRooms, capacityUnits, productionAvailableUnits(state, household, "wheat", content), content);
+      if (flexRow.totalUnits <= 0) continue;
+      for (const itemId of recipe.flex.itemIds) flexRooms[itemId] -= flexRow.units[itemId];
+      batches = flexRow.batchEquiv;
+    } else {
+      for (const input of recipe.inputs) {
+        const perBatch = quantityToUnits(input.quantity, content);
+        batches = Math.min(batches, Math.floor(productionAvailableUnits(state, household, input.itemId, content) / perBatch));
+      }
     }
     if (batches <= 0) continue;
     const outputs = [];
     const localTaxRows = [];
     const carryAfter = {};
-    for (const output of recipe.outputs) {
-      const totalUnits = quantityToUnits(output.quantity * batches, content);
-      const carryKey = `${building.typeId}|${building.id}|${ownerHouseholdId}|${output.itemId}`;
+    const outputRows = flexRow
+      ? recipe.flex.itemIds.filter(itemId => flexRow.units[itemId] > 0).map(itemId => ({ itemId, totalUnits: flexRow.units[itemId] }))
+      : recipe.outputs.map(output => ({ itemId: output.itemId, totalUnits: quantityToUnits(output.quantity * batches, content) }));
+    for (const { itemId, totalUnits } of outputRows) {
+      const carryKey = `${building.typeId}|${building.id}|${ownerHouseholdId}|${itemId}`;
       const tax = productionTaxUnits(state, building.typeId, state.privateEconomy.taxRemainders, carryKey, totalUnits, content);
       const taxUnits = tax.taxUnits;
       carryAfter[carryKey] = tax.carryAfter;
       const residentUnits = totalUnits - taxUnits;
-      if (residentUnits > 0) outputs.push({ owner: `household:${ownerHouseholdId}`, itemId: output.itemId, quantityUnits: residentUnits, type: "private_production_output", source: "private_production" });
-      if (taxUnits > 0) outputs.push({ owner: "town", itemId: output.itemId, quantityUnits: taxUnits, type: "private_production_tax", source: "private_production", destination: "town" });
-      localTaxRows.push({ itemId: output.itemId, totalUnits, taxUnits, residentUnits, ownerHouseholdId, carryKey });
+      if (residentUnits > 0) outputs.push({ owner: `household:${ownerHouseholdId}`, itemId, quantityUnits: residentUnits, type: "private_production_output", source: "private_production" });
+      if (taxUnits > 0) outputs.push({ owner: "town", itemId, quantityUnits: taxUnits, type: "private_production_tax", source: "private_production", destination: "town" });
+      localTaxRows.push({ itemId, totalUnits, taxUnits, residentUnits, ownerHouseholdId, carryKey });
     }
-    const inputs = recipe.inputs.map(input => ({ owner: `household:${ownerHouseholdId}`, itemId: input.itemId, quantityUnits: quantityToUnits(input.quantity * batches, content) }));
+    const inputs = flexRow
+      ? (flexRow.wheatUnits > 0 ? [{ owner: `household:${ownerHouseholdId}`, itemId: "wheat", quantityUnits: flexRow.wheatUnits }] : [])
+      : recipe.inputs.map(input => ({ owner: `household:${ownerHouseholdId}`, itemId: input.itemId, quantityUnits: quantityToUnits(input.quantity * batches, content) }));
     const losses = recipe.losses.map(loss => ({ owner: `household:${ownerHouseholdId}`, itemId: loss.itemId, quantityUnits: quantityToUnits(loss.quantity * batches, content) }));
     const transaction = atomicInventoryTransaction(state, {
       inputs, outputs, losses, protectedOwner: `household:${ownerHouseholdId}`, minEndingQeqUnits: qeqReserveForOwner(state, ownerHouseholdId, content),

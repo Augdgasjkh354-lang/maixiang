@@ -7,12 +7,16 @@ export function accrueEducationDay(state) {
   if ((state.services?.day?.servedUses?.school || 0) > 0) state.education.schoolDays = (state.education.schoolDays || 0) + 1;
 }
 
-// 熟练度记账：每天把各产业生产岗位上的在岗人数（镇营 + 民营 + 公司）累加为"工日"。
+// 运输建筑也按工日累计熟练度（码头、物流中心的脚夫 / 码头工，运力随熟练度与等级变化，见 systems/logistics.js）。
+export const EXPERIENCE_EXTRA_TYPE_IDS = Object.freeze(["dock", "logistics_center"]);
+
+// 熟练度记账：每天把各产业生产岗位上的在岗人数（镇营 + 民营 + 公司）累加为"工日"；码头、物流中心同口径。
 // 生产率系数的计算见 economy/productivity.js。
 export function accrueIndustryExperience(state, content) {
   state.industryExperience ||= {};
   const added = {};
-  for (const typeId of industryTypeIds(content)) {
+  const typeIds = [...industryTypeIds(content), ...EXPERIENCE_EXTRA_TYPE_IDS.filter(typeId => content.buildings[typeId])];
+  for (const typeId of typeIds) {
     const roleId = content.buildings[typeId].productionRoleId || content.buildings[typeId].jobs?.[0]?.id;
     let workers = 0;
     for (const building of state.buildings || []) {

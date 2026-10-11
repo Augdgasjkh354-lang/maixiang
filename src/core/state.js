@@ -3,6 +3,7 @@ import { emptyFinancialFlowPeriod } from "../economy/financial-flows.js";
 import { createInitialHouseholds, householdList, householdPopulation, syncResidentAggregates } from "../systems/households.js";
 import { voucherUnitsForWheatUnits } from "../economy/money-units.js";
 import { createOutsideTowns } from "../systems/outside-town.js";
+import { buildingMaxLevel } from "../content/building-level.js";
 
 // 建造工程：state.projects 是权威数组，支持多工程并行。
 // state.project 保留为“单工程兼容访问器”（getter 返回首个工程、setter 整体替换数组），
@@ -193,8 +194,46 @@ function issueOpeningVouchers(state, content) {
   syncResidentAggregates(state, content);
 }
 
+// 开局种类：blank（默认，引擎与脚本用，不放任何建筑）；standard（界面"新游戏"用，放 rules.INITIAL.standardOpeningBuildings）。
+export const OPENING_KINDS = Object.freeze(["blank", "standard"]);
+
+// 标准开局：建筑开局即落成（completed = 开局日），不耗材料、不派工（岗位留空，玩家在就业面板设人数）。
+// 地块、等级与清单都在 content/rules.js 的 INITIAL.standardOpeningBuildings，这里只负责落位。
+function placeStandardOpening(state, content) {
+  const rows = content.initial.standardOpeningBuildings || [];
+  for (const row of rows) {
+    const definition = content.buildings[row.typeId];
+    const plot = state.plots.find(item => item.id === row.plotId);
+    if (!definition || !plot) throw new Error("标准开局配置无效：" + row.typeId + " @ " + row.plotId);
+    if (definition.requiredPlotFeature && plot.feature !== definition.requiredPlotFeature) {
+      throw new Error("标准开局地块不符：" + row.typeId + " @ " + row.plotId);
+    }
+    const level = Math.max(1, Math.min(buildingMaxLevel(content, row.typeId), Math.floor(row.level || 1)));
+    const instanceNumber = state.nextInstanceNumber || 1;
+    state.nextInstanceNumber = instanceNumber + 1;
+    state.buildings.push({
+      id: "building-" + instanceNumber,
+      typeId: row.typeId,
+      level,
+      ownership: { townLevels: level, privateLevels: 0, listedLevels: 0 },
+      materialInvestments: [],
+      plotId: plot.id,
+      x: plot.x,
+      y: plot.y,
+      housingCapacity: definition.housingCapacity || 0,
+      completed: { year: state.year, day: state.day + 1 }
+    });
+  }
+  if (rows.length && state.events?.[0]) {
+    const names = rows.map(row => content.buildings[row.typeId].name).join("、");
+    state.events[0].text += `${names}已建好，开局不派工：记得在就业面板设人数，否则没有产出。`;
+  }
+}
+
 export function createInitialState(options) {
   const settings = options || {};
+  const opening = settings.opening ?? "blank";
+  if (!OPENING_KINDS.includes(opening)) throw new Error("未知开局：" + opening);
   const content = settings.content || CONTENT;
   const state = {
     version: content.rules.saveVersion || 3,
@@ -388,6 +427,7 @@ export function createInitialState(options) {
   };
   createInitialHouseholds(state, content);
   issueOpeningVouchers(state, content);
+  if (opening === "standard") placeStandardOpening(state, content);
   ensureProjectAccessor(state);
   return state;
 }

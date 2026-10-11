@@ -15,7 +15,7 @@
 ```bash
 node --test                                          # 跑全部测试（注意：不要写成 node --test tests/）
 node --test --test-concurrency=4                     # 同上但四路并行（4 核机器全量实测约 190 秒；默认是核数减一即 3 路）；各测试文件是独立进程，互不干扰
-node --test --test-skip-pattern='\[slow\]'           # 日常迭代：跳过标题带 [slow] 的慢测（实测约 95 秒，CPU 约减半）；全量只在“一批改动要提交前”跑一次（见「验证改动」）
+node --test --test-skip-pattern='\[slow\]'           # 日常迭代：跳过标题带 [slow] 的慢测（实测约 95 秒，CPU 约减半）；全量只在“攒了 3—5 次迭代后”跑一次（见「验证改动」）
 node scripts/bundle-single.mjs --out index.html      # 打包成单文件，自带语法检查 + 30 天无界面冒烟
 node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输出每年指标 CSV
 node scripts/health-check.mjs 10                     # 十年经济体检：人口、货币分布、家底、基尼、物价、产业、履约；可加 --wealth-tax 1,3,5 --inheritance 30 --employer-share 100
@@ -130,7 +130,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 | 改参数、文案、小开关 | 相关测试 + 打包（`bundle-single` 自带 30 天无界面冒烟，已够） |
 | 改了经济逻辑 | 再加一次 1 年体检（`node scripts/health-check.mjs 1`，约 2 分钟）：`validateState` 通过、钱粮账平、看几个关键数字 |
 | 改了界面 | 才用浏览器点一遍（见下） |
-| 一批改动要提交前 | 全量 `node --test --test-concurrency=4` **跑一次**（放后台，不要每步都跑，也不要让它卡住提交）；失败按“设计变了就改旧测试，真坏了才修代码”处理 |
+| 攒了 3—5 次迭代后 | 全量 `node --test --test-concurrency=4` **跑一次**（放后台；不要每次提交前都跑，也不要让它卡住提交）；失败按“设计变了就改旧测试，真坏了才修代码”处理。每次迭代的提交说明里写清改了哪些系统，全量报错时好缩小范围 |
 | 想知道某个改动的经济后果（物价、产业、就业连锁） | 才做改前改后的 3 年体检对照；纯参数微调、界面、存档、性能类改动不需要 |
 
 - 测试提速：同一文件里多个用例共用的昂贵夹具（满级建筑、推进数百天的状态）只构造一次，各用例用 `tests/helpers-fixture.js` 的 `cloneFixture` 深拷贝；别直接 `structuredClone`，它会丢掉 `state.project`（不可枚举访问器）。单用例耗时明显的测试标题加 `[slow] ` 前缀（见上方 `--test-skip-pattern`），不要因此删掉或跳过它。

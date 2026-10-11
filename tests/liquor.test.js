@@ -27,30 +27,25 @@ test("四种酒物品：单位斤、household、流通标记齐全，且不再�
   assert.equal(CONTENT.rules.householdGoods.wine, undefined);
 });
 
-test("配方：酒坊只有一个配方 winery_brewing，投入 3.6 斤小麦，一批出四种酒，无损耗，一工日一批", () => {
+test("配方：酒坊只有一个弹性配方 winery_brewing：一工日一批，总产能 12 斤，四种酒按缺口分配，无损耗；名义配比小麦 8.4 斤/批", () => {
   const recipe = CONTENT.recipes.winery_brewing;
   assert.ok(recipe, "winery_brewing 存在");
-  assert.deepEqual(recipe.inputs.map(row => [row.itemId, row.quantity]), [["wheat", 3.6]], "只用 3.6 斤小麦");
-  assert.deepEqual(recipe.outputs.map(row => [row.itemId, row.quantity]), [
-    ["beer", 2], ["beer_premium", 1], ["baijiu", 2], ["baijiu_premium", 1]
-  ], "一批：普通啤酒 2、高档啤酒 1、普通白酒 2、高档白酒 1 斤");
-  assert.deepEqual(recipe.losses, [], "无损耗");
+  assert.deepEqual([...recipe.flex.itemIds], LIQUORS, "四种酒都可分配");
+  assert.equal(recipe.flex.totalJin, 12);
+  assert.deepEqual(recipe.flex.wheatPerJin, { beer: 0.2, beer_premium: 0.2, baijiu: 1, baijiu_premium: 1 });
   assert.equal(recipe.batchesPerWorkerDay, 1, "每工日一批");
-  // 出粮比与原四种配方一致：啤酒 1 斤麦 → 5 斤（2 斤 ÷ 0.4 斤麦），白酒 1 斤麦 → 1 斤（2 斤 ÷ 2 斤麦）。
-  const perWheat = itemId => recipe.outputs.find(row => row.itemId === itemId).quantity / (recipe.inputs[0].quantity * (itemId.startsWith("beer") ? 0.4 : 1) / (itemId.endsWith("premium") ? 1 : 1));
-  assert.ok(perWheat("beer") > 0);
+  assert.deepEqual(recipe.losses, [], "无损耗");
+  assert.ok(Math.abs(recipe.inputs[0].quantity - 8.4) < 1e-9, "名义配比：3 斤/种 × 麦耗 = 8.4 斤");
   for (const id of ["brewery_beer", "craft_brewery_beer", "winery_baijiu", "premium_winery_baijiu"]) assert.equal(CONTENT.recipes[id], undefined, `${id} 已删除`);
 });
 
-test("一工日产值：2×0.5 + 1×1.35 + 2×2.8 + 1×7.5 = 15.45 券（批发默认售价计），投入 3.6 斤麦、日薪 5，利润为正", () => {
+test("一工日产值：四种酒等量（每种 3 斤）时 3 × (5 + 12 + 20 + 100) = 411 券（批发默认售价）；日薪 5", () => {
   const recipe = CONTENT.recipes.winery_brewing;
   const price = id => CONTENT.rules.wholesaleDefaultSalePrices[id];
   const value = recipe.outputs.reduce((sum, row) => sum + row.quantity * price(row.itemId), 0);
-  assert.ok(Math.abs(value - 15.45) < 1e-9, `一工日产值 ${value}`);
+  assert.ok(Math.abs(value - 411) < 1e-9, `名义一工日产值 ${value}`);
   const wage = CONTENT.buildings.winery.jobs[0].wagePerWorkerDay;
   assert.equal(wage, 5);
-  const wheatCost = recipe.inputs[0].quantity * CONTENT.rules.wholesaleDefaultPurchasePrices.wheat;
-  assert.ok(value - wage - wheatCost > 0, "按收购口径扣掉小麦与工资后仍有利润");
 });
 
 test("建筑：酒坊 winery 是唯一的酒类建筑，有 jobs、带 industryTier、岗位 brewers 为产出角色；旧三种建筑已删除", () => {
@@ -74,15 +69,16 @@ test("居民需求：普通款面向所有人（弹性约 1），高档款弹性
   assert.ok(Math.abs(comfort - 2) < 1e-9, `酒的舒心值合计 ${comfort}，应与旧 wine 的 2 持平`);
 });
 
-test("批发价：收购价约为售价的 0.75—0.82，高档约为普通的 2.5—3 倍", () => {
+test("批发价：收购价 = 售价 × 0.8，高档款按新价格的倍数", () => {
   const sale = CONTENT.rules.wholesaleDefaultSalePrices;
   const purchase = CONTENT.rules.wholesaleDefaultPurchasePrices;
   for (const id of LIQUORS) {
     const ratio = purchase[id] / sale[id];
-    assert.ok(ratio >= 0.75 && ratio <= 0.82, `${id} 收购/售价 ${ratio.toFixed(3)}`);
+    assert.ok(Math.abs(ratio - 0.8) < 1e-9, `${id} 收购/售价 ${ratio.toFixed(3)}`);
   }
-  assert.ok(sale.beer_premium / sale.beer >= 2.5 && sale.beer_premium / sale.beer <= 3, "高档啤酒约 2.5—3 倍");
-  assert.ok(sale.baijiu_premium / sale.baijiu >= 2.5 && sale.baijiu_premium / sale.baijiu <= 3, "高档白酒约 2.5—3 倍");
+  assert.ok(Math.abs(sale.beer_premium / sale.beer - 2.4) < 1e-9, "高档啤酒 12 / 普通 5 = 2.4 倍");
+  assert.ok(Math.abs(sale.baijiu_premium / sale.baijiu - 5) < 1e-9, "高档白酒 100 / 普通 20 = 5 倍");
+  assert.deepEqual([sale.beer, sale.beer_premium, sale.baijiu, sale.baijiu_premium], [5, 12, 20, 100], "新批发售价");
 });
 
 test("综合商店进四种酒；外镇各有四种酒，王镇量与价更高，都不卖给我们", () => {
@@ -135,7 +131,7 @@ test("市场闸门取最宽松的产出：高档白酒到顶不停产（其余�
   assert.equal(townOutputMarketBatchCap(state, recipe, CONTENT), 0, "四种酒都到顶即停产");
 });
 
-test("开局新游戏 validateState 通过；酒坊建成派工后一日，四种酒都有产出（每人每日一批：2/1/2/1 斤）", () => {
+test("开局新游戏 validateState 通过；酒坊 2 人建成派工后一日，四种酒按缺口平分 24 斤（每种 6 斤），小麦 = Σ产出 × 麦耗", () => {
   const state = simulation.createInitialState({ seed: 7711 });
   const plots = state.plots.filter(p => !p.feature);
   ["wholesale_market", "winery"].forEach((typeId, i) => {
@@ -148,11 +144,8 @@ test("开局新游戏 validateState 通过；酒坊建成派工后一日，四�
   const wheatBefore = state.accounts.town.wheat;
   simulation.advanceDay(state);
   const made = state.business.buildings["winery-t"].yearOutputUnits;
-  assert.equal(made.beer, 2 * 2 * I, "2 人 × 2 斤啤酒");
-  assert.equal(made.beer_premium, 2 * 1 * I, "2 人 × 1 斤高档啤酒");
-  assert.equal(made.baijiu, 2 * 2 * I, "2 人 × 2 斤白酒");
-  assert.equal(made.baijiu_premium, 2 * 1 * I, "2 人 × 1 斤高档白酒");
-  assert.equal(wheatBefore - state.accounts.town.wheat, Math.round(2 * 3.6 * I), "两人共耗 7.2 斤小麦（镇库直管）");
+  for (const id of LIQUORS) assert.equal(made[id], 6 * I, `${id} 6 斤`);
+  assert.equal(wheatBefore - state.accounts.town.wheat, Math.round(6 * 0.2 * I) * 2 + Math.round(6 * 1 * I) * 2, "小麦 = 啤酒 1.2 + 高档啤酒 1.2 + 白酒 6 + 高档白酒 6（斤）");
   const v = simulation.validateState(state);
   assert.equal(v.valid, true, v.errors.join("；"));
 });

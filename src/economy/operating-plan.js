@@ -8,6 +8,7 @@ import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from
 import { targetBatchCap } from "../systems/production.js";
 import { industryTypeIds } from "../content/buildings.js";
 import { shopMayStockItem, usesGeneralRules } from "../systems/shop-types.js";
+import { flexOf } from "../systems/flex-recipe.js";
 import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
 import { policyShopMarginPercent, shopEffectiveMarginPercent } from "./margin-policy.js";
 
@@ -408,15 +409,22 @@ function refreshOperatingPlanNow(state, content, force = false) {
   // 需求不封顶是关键：否则下游缺料少报需求 → 上游少产 → 下游更缺，一路缩到停产。
   const downstreamUnits = {};
   for (const typeId of order.slice().reverse()) {
-    // 联产配方（一批同出几种）：每种产出各算一次目标，批次数取最宽松的一种（与镇营市场闸门同口径：任一产出还需要就开工，超出硬上限的部分由生产环节记损耗）。
+    // 弹性配方（动态酒品）：各酒缺口合计 ÷ 每批总产能 = 所需批次；计划产出按各酒目标占比分配。单产出配方走原路径。
+    const flexRecipe = flexOf(content.recipes[content.buildings[typeId]?.recipeId]);
     let target = null;
     let totalBatches = 0;
-    for (const output of outputRowsForType(typeId, content)) {
-      const row = productionTargetForType(state, typeId, content, downstreamUnits, output.itemId);
-      const batches = output.perBatch > 0 ? Math.ceil(row.targetUnits / output.perBatch) : 0;
-      if (!target || batches > totalBatches) { target = row; totalBatches = batches; }
+    let shares = null;
+    if (flexRecipe) {
+      const rows = flexRecipe.itemIds.map(itemId => productionTargetForType(state, typeId, content, downstreamUnits, itemId));
+      const positive = rows.reduce((sum, row) => sum + Math.max(0, row.targetUnits), 0);
+      totalBatches = positive > 0 ? Math.ceil(positive / (flexRecipe.totalJin * scale)) : 0;
+      target = rows.reduce((best, row) => (!best || row.targetUnits > best.targetUnits ? row : best), null);
+      shares = Object.fromEntries(rows.map(row => [row.itemId, positive > 0 ? Math.max(0, row.targetUnits) / positive : 0]));
+    } else {
+      target = productionTargetForType(state, typeId, content, downstreamUnits);
+      const perBatch = outputRowsForType(typeId, content)[0]?.perBatch || 0;
+      totalBatches = perBatch > 0 ? Math.ceil(target.targetUnits / perBatch) : 0;
     }
-    if (!target) target = productionTargetForType(state, typeId, content, downstreamUnits);
     const producers = producerRows(state, typeId, content);
     if (totalBatches <= 0 && producers.some(row => row.ageDays < (content.rules.newBusinessTrialDays || 6))) totalBatches = 1;
     const rotation = plan.rotation[typeId] || 0;
@@ -425,11 +433,11 @@ function refreshOperatingPlanNow(state, content, force = false) {
     for (const input of content.recipes[content.buildings[typeId]?.recipeId]?.inputs || []) {
       downstreamUnits[input.itemId] = (downstreamUnits[input.itemId] || 0) + Math.round(demandBatches * input.quantity * scale);
     }
-    drafts[typeId] = { target, totalBatches, producers, rotation, townBatches };
+    drafts[typeId] = { target, totalBatches, producers, rotation, townBatches, shares, flexRecipe };
   }
   // 第二遍，从上游往下游：上游本周期能真正产出多少（受实际能招到的人限制）+ 现货，决定下游最多做多少批。
   for (const typeId of order) {
-    const { target, producers, rotation, townBatches } = drafts[typeId];
+    const { target, producers, rotation, townBatches, shares, flexRecipe } = drafts[typeId];
     let { totalBatches } = drafts[typeId];
     const inputCap = inputBatchCap(state, typeId, content, plan.plannedOutputUnits);
     if (inputCap !== null && inputCap < totalBatches) {
@@ -456,8 +464,14 @@ function refreshOperatingPlanNow(state, content, force = false) {
     }
     plan.demand[typeId] = { ...target, inputLimitedBatches: inputCap, townBatches };
     // 下游能指望的上游日产量：计划批次，但不超过本周期实际能招到的人做得完的量；镇营产出按预计批次计入。
-    for (const output of content.recipes[content.buildings[typeId]?.recipeId]?.outputs || []) {
-      plan.plannedOutputUnits[output.itemId] = (plan.plannedOutputUnits[output.itemId] || 0) + Math.round((effectiveBatches + townBatches) * output.quantity * scale);
+    if (flexRecipe) {
+      for (const [itemId, share] of Object.entries(shares)) {
+        plan.plannedOutputUnits[itemId] = (plan.plannedOutputUnits[itemId] || 0) + Math.round((effectiveBatches + townBatches) * flexRecipe.totalJin * scale * share);
+      }
+    } else {
+      for (const output of content.recipes[content.buildings[typeId]?.recipeId]?.outputs || []) {
+        plan.plannedOutputUnits[output.itemId] = (plan.plannedOutputUnits[output.itemId] || 0) + Math.round((effectiveBatches + townBatches) * output.quantity * scale);
+      }
     }
   }
   return plan;

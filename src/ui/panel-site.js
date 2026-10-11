@@ -573,13 +573,17 @@ function tradeShopCard(view, shop, house, unit) {
     <div class="site-actions">${action}</div></div>`;
 }
 
-// 物流中心 / 码头：本座运力 = 在岗人数 × 每人每日运力（docs/TRADE.md「运力」），计入全镇日运力池。
+// 物流中心 / 码头：本座运力 = 在岗人数 × 每人每日运力 × 生产率系数（等级 × 熟练 × 教育，docs/TRADE.md「运力」），计入全镇日运力池。
+// building.freight 由 selectors/dashboard.js 给出（systems/logistics.js 的 freightBuildingView）；缺省时按基础运力显示。
 function freightSiteMarkup(building) {
-  const perWorker = building.typeId === "dock" ? CONTENT.rules.dockJinPerWorker : CONTENT.rules.logisticsJinPerWorker;
+  const freight = building.freight || null;
+  const perWorker = freight ? freight.perWorkerJin : (building.typeId === "dock" ? CONTENT.rules.dockJinPerWorker : CONTENT.rules.logisticsJinPerWorker);
   const workers = (building.jobs || []).reduce((sum, job) => sum + (job.workers || 0), 0);
   const ready = building.status?.status === "ready";
+  const boostRow = freight ? `<div class="row"><span class="label">人均运力</span><strong class="value">×${number(freight.productivityFactor, 2)}（基础${number(freight.perWorkerBaseJin)}斤；等级 +${numberMax(freight.levelBonusPercent, 0)}% · 熟练 +${numberMax(freight.experiencePercent, 1)}% · 教育 +${numberMax(freight.educationPercent, 1)}%）</strong></div>` : "";
   return `<div class="status-strip"><span class="status-light ${ready ? "working" : "idle"}"></span><strong>${escapeHtml(building.status?.label || "")}</strong></div>`
-    + `<div class="row"><span class="label">本座运力</span><strong class="value">在岗${number(workers)}人 × ${number(perWorker)}斤 = ${number(workers * perWorker)}斤/日</strong></div>`
+    + `<div class="row"><span class="label">本座运力</span><strong class="value">在岗${number(workers)}人 × ${numberMax(perWorker, 2)}斤 = ${numberMax(workers * perWorker, 1)}斤/日</strong></div>`
+    + boostRow
     + `<div class="subtle">运力计入全镇日运力池，外贸交易与长期协定都从池里扣；没有人在岗就没有运力。</div>`;
 }
 
@@ -598,7 +602,7 @@ function developmentMarkup(view, building, development) {
     ? `<div class="subtle">业主自主升级（每30天评估）</div>`
     : view.upgradePreviewId === building.id
     ? `<div class="cardlet"><div class="setting-title">升级至${number(upgrade.nextLevel)}级</div><div class="row"><span class="label">预计工期 / 工资</span><strong class="value">${upgrade.waitingForWorkers ? `等待用工 / 0${escapeHtml(unit)}` : `约${number(upgrade.estimatedDays)}天 / ${number(upgrade.estimatedWageJin)}${escapeHtml(unit)}`}</strong></div><div class="subtle">材料：${upgradeMaterials}。升级期间原建筑继续生产。</div>${!upgrade.materialsAffordable ? `<div class="shortage-banner visible">材料不足</div>` : ""}<div class="settings-actions"><button class="primary" data-upgrade-start="${escapeHtml(building.id)}" ${upgrade.available && upgrade.materialsAffordable ? "" : "disabled"}>确认开工</button><button class="secondary" data-upgrade-cancel>取消</button></div></div>`
-    : `<button class="primary" data-upgrade-preview="${escapeHtml(building.id)}" ${upgrade.available ? "" : "disabled"}>${upgrade.available ? `升级至${number(upgrade.nextLevel)}级` : escapeHtml(upgrade.reason || "不可升级")}</button>`;
+    : `${upgrade.maxLevel ? `<div class="subtle">当前${number(building.level)}级 · 最高${number(upgrade.maxLevel)}级</div>` : ""}<button class="primary" data-upgrade-preview="${escapeHtml(building.id)}" ${upgrade.available ? "" : "disabled"}>${upgrade.available ? `升级至${number(upgrade.nextLevel)}级` : escapeHtml(upgrade.reason || "不可升级")}</button>`;
   const refundText = (demolish.refund || []).map(row => `${escapeHtml(row.name)} ${number(row.quantity)}${escapeHtml(row.unit)}`).join(" · ") || "无材料返还";
   const demolitionCard = view.demolitionPreviewId === building.id
     ? `<div class="cardlet"><div class="setting-title">拆除确认</div><div class="row"><span class="label">返还材料</span><strong class="value">${refundText}</strong></div><div class="row"><span class="label">释放岗位</span><strong class="value">${number(demolish.workers)}人</strong></div>${demolish.housingShortage ? `<div class="shortage-banner visible">拆除后住房缺口 ${number(demolish.housingShortage)}人</div>` : ""}<div class="settings-actions"><button class="primary danger" data-demolish-confirm="${escapeHtml(building.id)}" ${demolish.available ? "" : "disabled"}>确认拆除</button><button class="secondary" data-demolish-cancel>取消</button></div></div>`

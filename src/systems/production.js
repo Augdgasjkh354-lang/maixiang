@@ -1,8 +1,9 @@
 import { atomicInventoryTransaction } from "../economy/inventory.js";
 import { commitProductionAccounting, planProductionAccounting } from "../economy/business.js";
-import { recipeCapacity, townGateCap, townOutputGate } from "../selectors/production.js";
+import { recipeCapacity, townGateCap, townOutputGate, townWheatReserveUnits } from "../selectors/production.js";
+import { flexAccountingRecipe, flexPlan, flexRoomUnits } from "./flex-recipe.js";
 import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
-import { hasWholesaleMarket, procureTownInputFromWholesale, recordTownInputConsumption, townOutputTargetUnits, transferTownToWholesale, wholesaleMonopolyItemIds } from "./wholesale-market.js";
+import { procureTownInputFromWholesale, recordTownInputConsumption, transferTownToWholesale } from "./wholesale-market.js";
 import { laborBatches, nextCarry } from "../economy/productivity.js";
 
 function recipeDeltas(recipe, batches, content) {
@@ -38,6 +39,8 @@ export function processBuilding(state, building, content) {
   const targetCap = targetBatchCap(building, recipeDef);
   const labor = laborBatches(state, building.typeId, building.level, workers, recipeDef?.batchesPerWorkerDay, building.productivityCarry);
   // 镇营产出闸门（用户口径：市场积压、口粮储备）：在领原料之前封顶批次数，免得白领用不掉的小麦/面粉。
+  // 弹性配方（动态酒品）：按各酒的市场缺口分配产能，不走单品闸门（见 systems/flex-recipe.js）。
+  if (recipeDef?.flex) return processFlexBuilding(state, building, definition, recipeDef, labor, targetCap, workers, content);
   const gate = recipeDef && workers > 0 ? townOutputGate(state, recipeDef, Math.min(labor.batches, targetCap), content) : null;
   let wholesaleBatchCap = gate ? gate.batches : Number.POSITIVE_INFINITY;
   const procuredInputs = [];
@@ -83,33 +86,12 @@ export function processBuilding(state, building, content) {
   const recipe = capacity.recipe;
   const prepared = recipeDeltas(recipe, allowedBatches, content);
   const accounting = planProductionAccounting(state, building, recipe, allowedBatches, content);
-  // 联产硬上限（多产出配方）：超出库存硬上限的那部分当批不入库，记为加工损耗；成本从产出的成本基础里扣掉，记入加工损耗账。
-  const excess = jointOutputExcessUnits(state, recipe, allowedBatches, content);
-  const excessTotal = Object.values(excess).reduce((sum, units) => sum + units, 0);
-  if (excessTotal > 0) {
-    prepared.outputs = prepared.outputs.map(row => {
-      const lost = excess[row.itemId] || 0;
-      if (!lost) return row;
-      return { owner: row.owner, itemId: row.itemId, quantityUnits: Math.round(row.quantityJin * content.precision.inventoryUnitsPerJin) - lost };
-    });
-    for (const [itemId, units] of Object.entries(excess)) {
-      if (units > 0) prepared.losses.push({ owner: "town", itemId, quantityUnits: units });
-    }
-    for (const row of accounting.outputs) {
-      const lost = excess[row.itemId] || 0;
-      if (!lost || row.quantityUnits <= 0) continue;
-      const lostCost = Math.round(row.costWheatUnits * lost / row.quantityUnits);
-      row.quantityUnits -= lost;
-      row.costWheatUnits -= lostCost;
-      accounting.excessLossWheatUnits = (accounting.excessLossWheatUnits || 0) + lostCost;
-    }
-  }
   const transaction = atomicInventoryTransaction(state, {
     inputs: prepared.inputs,
     outputs: prepared.outputs,
     losses: prepared.losses,
     reason: definition.name + "生产：" + recipe.name,
-    lossReason: excessTotal > 0 ? recipe.name + "：滞销酒倒掉/自用（超过库存硬上限）" : recipe.name + "加工损耗（未作为口粮）"
+    lossReason: recipe.name + "加工损耗（未作为口粮）"
   }, content);
   if (!transaction.ok) {
     return {
@@ -141,27 +123,43 @@ export function processBuilding(state, building, content) {
   };
 }
 
-// 联产硬上限：多产出配方（一批同出几种）每种批发市场产出，当批可入库的最多量 = 目标库存 × townOutputHardCapMultiple − 现存（市场 + 镇库）。
-// 返回 { 产出物品: 超出的库存单位数 }；单产出配方不设硬上限，返回空对象（行为与原来逐位一致）。
-export function jointOutputExcessUnits(state, recipe, batches, content) {
-  const excess = {};
-  if ((recipe?.outputs || []).length < 2 || !(batches > 0) || !hasWholesaleMarket(state)) return excess;
-  const multiple = Math.max(0, Number(content.rules.townOutputHardCapMultiple ?? 2));
-  const monopoly = wholesaleMonopolyItemIds(content);
-  for (const output of recipe.outputs) {
-    if (!monopoly.includes(output.itemId)) continue;
-    const units = Math.round(output.quantity * batches * content.precision.inventoryUnitsPerJin);
-    const stock = Math.max(0, state.wholesaleMarket?.inventory?.[output.itemId] || 0) + Math.max(0, state.accounts?.town?.[output.itemId] || 0);
-    const hardCap = Math.floor(townOutputTargetUnits(state, output.itemId, content) * multiple);
-    excess[output.itemId] = Math.max(0, units - Math.max(0, hardCap - stock));
+// 弹性配方的镇营一日：产能 = 当日批次 × 每批斤数，按缺口分配；小麦从镇库取，扣口粮储备线。
+function processFlexBuilding(state, building, definition, recipe, labor, targetCap, workers, content) {
+  if (workers <= 0) return { buildingId: building.id, status: "no_workers", batches: 0 };
+  const batchesWanted = Math.min(labor.batches, targetCap);
+  const capacityUnits = batchesWanted * recipe.flex.totalJin * content.precision.inventoryUnitsPerJin;
+  const rooms = flexRoomUnits(state, recipe, content);
+  const wheatCapUnits = Math.max(0, (state.accounts.town.wheat || 0) - townWheatReserveUnits(state, content));
+  const plan = flexPlan(recipe, rooms, capacityUnits, wheatCapUnits, content);
+  if (plan.totalUnits <= 0) {
+    delete building.productivityCarry;
+    const marketFull = Object.values(rooms).every(room => room <= 0);
+    return { buildingId: building.id, status: marketFull ? "market_capped" : "wheat_reserve", batches: 0 };
   }
-  return excess;
+  const accounting = planProductionAccounting(state, building, flexAccountingRecipe(recipe, plan, content), 1, content);
+  const transaction = atomicInventoryTransaction(state, {
+    inputs: plan.wheatUnits > 0 ? [{ owner: "town", itemId: "wheat", quantityUnits: plan.wheatUnits }] : [],
+    outputs: recipe.flex.itemIds.filter(id => plan.units[id] > 0).map(id => ({ owner: "town", itemId: id, quantityUnits: plan.units[id] })),
+    losses: [],
+    reason: definition.name + "生产：" + recipe.name,
+    lossReason: recipe.name + "加工损耗（未作为口粮）"
+  }, content);
+  if (!transaction.ok) return { buildingId: building.id, status: "no_materials", batches: 0, reason: transaction.reason };
+  commitProductionAccounting(state, accounting);
+  const laborLimited = plan.totalUnits >= capacityUnits * 0.999 && batchesWanted >= labor.batches;
+  building.productivityCarry = nextCarry(labor.exact, plan.batchEquiv, laborLimited);
+  if (!building.productivityCarry) delete building.productivityCarry;
+  const status = plan.wheatUnits < wheatCapUnits || plan.totalUnits >= capacityUnits * 0.999 ? (batchesWanted < labor.batches ? "target_capped" : "ready") : "market_capped";
+  return {
+    buildingId: building.id, status, batches: Math.round(plan.batchEquiv * 1000) / 1000, transactionId: transaction.transactionId,
+    outputUnits: Object.fromEntries(accounting.outputs.map(row => [row.itemId, row.quantityUnits]))
+  };
 }
 
 // 用户 0.1.11：镇营目标日产量换算为每日最大批次数。未设置（<=0）或配方无主产出时返回 Infinity（不限）。
 export function targetBatchCap(building, recipeDef) {
   const targetJin = Number(building?.outputTargetJin || 0);
-  const perBatch = recipeDef?.outputs?.[0]?.quantity || 0;
+  const perBatch = recipeDef?.flex ? recipeDef.flex.totalJin : (recipeDef?.outputs?.[0]?.quantity || 0);
   if (!(targetJin > 0) || !(perBatch > 0)) return Number.POSITIVE_INFINITY;
   return Math.ceil(targetJin / perBatch);
 }

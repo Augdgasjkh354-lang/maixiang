@@ -49,7 +49,8 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 200, recommendedWorkers: 10
     }),
-    upgrade: Object.freeze({ maxLevel: 20, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+    // 伐木场最高 50 级（每级岗位 +20，生产率见 economy/productivity.js）；每级材料与工期沿用。
+    upgrade: Object.freeze({ maxLevel: 50, workDays: 200, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
   saltworks: Object.freeze({
     id: "saltworks", name: "盐场", icon: "🧂",
@@ -68,13 +69,14 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({
       workDays: 300, recommendedWorkers: 10
     }),
-    upgrade: Object.freeze({ maxLevel: 20, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
+    // 盐场最高 50 级（同伐木场）。
+    upgrade: Object.freeze({ maxLevel: 50, workDays: 300, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 100 }]) })
   }),
 
   // 酒坊：一座酒坊同时酿四种酒（配方 winery_brewing）。每名酿酒工每日一批：普通啤酒 2、高档啤酒 1、普通白酒 2、高档白酒 1 斤。
   winery: Object.freeze({
     id: "winery", name: "酒坊", icon: "🍶",
-    description: "小麦酿啤酒与白酒 · 每工日酿普通啤酒 2 斤、高档啤酒 1 斤、普通白酒 2 斤、高档白酒 1 斤",
+    description: "小麦酿啤酒与白酒 · 每工日 12 斤酒，四种酒按市场缺口动态分配",
     industryTier: 1,
     maxInstances: 12,
     recipeId: "winery_brewing",
@@ -82,7 +84,7 @@ export const BUILDINGS = Object.freeze({
     accountingSector: "brewing",
     jobs: Object.freeze([Object.freeze({
       id: "brewers", name: "酿酒工", slots: 8, wagePerWorkerDay: 5,
-      note: "每人每日用3.6斤麦酿出普通啤酒2斤、高档啤酒1斤、普通白酒2斤、高档白酒1斤", releasePriority: 40
+      note: "每人每日 12 斤酒（四种酒按缺口分配）；啤酒每斤 0.2 斤麦，白酒每斤 1 斤麦", releasePriority: 40
     })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 500 }]),
     construction: Object.freeze({ workDays: 400, recommendedWorkers: 10 }),
@@ -242,7 +244,7 @@ export const BUILDINGS = Object.freeze({
   // 物流中心：脚夫搬运，每人每日运力 rules.logisticsJinPerWorker；每级 20 个岗位，可建多座。
   logistics_center: Object.freeze({
     id: "logistics_center", name: "物流中心", icon: "🛒",
-    description: "脚夫搬运 · 每级20个脚夫岗位 · 每人每日运力60斤 · 可建多座",
+    description: "脚夫搬运 · 每级20个脚夫岗位 · 每人每日基础运力60斤（等级、熟练、教育加成另计）· 可建多座",
     maxInstances: 6,
     jobs: Object.freeze([Object.freeze({ id: "porters", name: "脚夫", slots: 20, wagePerWorkerDay: 5, note: "每人每日运力60斤", releasePriority: 55 })]),
     materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000 }]),
@@ -252,7 +254,7 @@ export const BUILDINGS = Object.freeze({
   // 码头：只能建在河岸地块；码头工每人每日运力 rules.dockJinPerWorker（脚夫的 2 倍）。
   dock: Object.freeze({
     id: "dock", name: "码头", icon: "⚓",
-    description: "河岸码头 · 每级20个码头工岗位 · 每人每日运力120斤 · 只能建在河岸地块",
+    description: "河岸码头 · 每级20个码头工岗位 · 每人每日基础运力120斤（等级、熟练、教育加成另计）· 只能建在河岸地块",
     maxInstances: 4,
     requiredPlotFeature: "riverside",
     allowedPlotFeatures: Object.freeze(["riverside"]),

@@ -537,7 +537,8 @@ export async function createIndexedSaveManager({ indexedDB: factory = globalThis
     initialize,
     list,
     read,
-    createNew: name => createSlot(createInitialState({ content }), name),
+    // 界面"新游戏"用标准开局（伐木场、盐场、码头开局即建好）；空白开局只给引擎与脚本。
+    createNew: name => createSlot(createInitialState({ content, opening: "standard" }), name),
     saveCurrent,
     saveAs: (state, name) => createSlot(state, name),
     activate,

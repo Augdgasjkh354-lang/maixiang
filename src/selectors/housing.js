@@ -1,5 +1,6 @@
 import { populationStats } from "./labor.js";
 import { householdList, householdPopulation, isActiveHousehold } from "../systems/households.js";
+import { buildingMaxLevel } from "../content/building-level.js";
 
 // 公租房当前日租（斤/人·日）：唯一入口，日结、选择器、界面都读它。
 // 政策缺省（旧档或未设置）回落到 rules.rentPerResidentDayWheatJin；0 = 免租，不做 || 回退。
@@ -16,7 +17,7 @@ export function selectHousing(state, content) {
   for (const building of state.buildings) {
     const definition = content.buildings[building.typeId];
     if (!definition?.housingCapacity) continue;
-    const capacity = definition.housingCapacity * Math.max(1, Math.min(content.rules.buildingMaxLevel || 10, building.level || 1));
+    const capacity = definition.housingCapacity * Math.max(1, Math.min(buildingMaxLevel(content, building.typeId), building.level || 1));
     rentalDefs.push({ buildingId: building.id, plotId: building.plotId, name: definition.name, capacity, occupied: 0 });
   }
   let villageLeft = villageCapacity;

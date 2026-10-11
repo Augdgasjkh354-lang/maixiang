@@ -2,6 +2,7 @@ import { jobKeyForBuilding, populationStats, readJobCount } from "./labor.js";
 import { itemQeqUnitsPerInventoryUnit } from "../economy/inventory.js";
 import { hasWholesaleMarket, townOutputMarketRoomUnits, wholesaleMonopolyItemIds } from "../systems/wholesale-market.js";
 import { laborBatches } from "../economy/productivity.js";
+import { flexRoomUnits } from "../systems/flex-recipe.js";
 
 // 镇营口粮储备（库存单位）：全镇人口 × 日口粮 × 储备天数。镇营磨坊/酒坊不得把镇库小麦压到这条线以下。
 export function townWheatReserveUnits(state, content) {
@@ -9,30 +10,30 @@ export function townWheatReserveUnits(state, content) {
   return Math.round(people * content.rules.foodPerPersonDay * (content.rules.townWheatReserveDays ?? 180) * content.precision.inventoryUnitsPerJin);
 }
 
-// 镇营产出的市场闸门（批次数）：加工配方（有投入）的批发市场产出，按余量折算批次，取最宽松的一种（只要任一产出还有余量就能开工）。
-// 多产出配方（如酒坊一批同出四种酒）是联产：某种产出余量为 0 仍可继续产，超出库存硬上限的部分由 production.js 记为加工损耗，不无限堆货。
-// 单产出配方只有一种产出，最宽松即唯一的那种，结果与原来一致。
+// 镇营产出的市场闸门（批次数）：加工配方（有投入）的批发市场产出，按余量折算批次，取最紧的一种（单产出配方只有一种）。
+// 弹性配方（动态酒品）不走闸门：只要任一酒还有缺口就能开工，实际分配由 systems/flex-recipe.js 决定。
 // 采集类（伐木、采盐、种棉）不设闸门：开局木材库存就高于最低备货，设闸门会让伐木场永久停产、起步路线断掉。
 // 无市场、非统购品时返回 Infinity。
 export function townOutputMarketBatchCap(state, recipe, content) {
   // 采集类默认不设闸门；配方标了 demandGated（如丝绸）的照样按市场余量减产。
   if (!recipe || (!(recipe.inputs || []).length && !recipe.demandGated)) return Number.POSITIVE_INFINITY;
+  if (recipe.flex) return Object.values(flexRoomUnits(state, recipe, content)).some(room => room > 0) ? Number.POSITIVE_INFINITY : 0;
   const monopoly = wholesaleMonopolyItemIds(content);
-  let cap = 0;
-  let any = false;
+  let cap = Number.POSITIVE_INFINITY;
   for (const output of recipe.outputs || []) {
     if (!monopoly.includes(output.itemId)) continue;
     const room = townOutputMarketRoomUnits(state, output.itemId, content);
-    if (!Number.isFinite(room)) return Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(room)) continue;
     const perBatch = Math.max(1, Math.round(output.quantity * content.precision.inventoryUnitsPerJin));
-    cap = Math.max(cap, Math.ceil(room / perBatch));
-    any = true;
+    cap = Math.min(cap, Math.ceil(room / perBatch));
   }
-  return any ? Math.max(0, cap) : Number.POSITIVE_INFINITY;
+  return Math.max(0, cap);
 }
 
 // 镇营小麦投入的口粮储备上限（批次数）：只有镇库小麦超出储备的部分能用；没有小麦投入时 Infinity。
 export function townWheatReserveBatchCap(state, recipe, content) {
+  // 弹性配方的小麦上限在分配时扣口粮储备（按比例缩减各酒），这里不再按名义配比封顶。
+  if (recipe?.flex) return Number.POSITIVE_INFINITY;
   const wheat = (recipe?.inputs || []).find(input => input.itemId === "wheat");
   if (!wheat) return Number.POSITIVE_INFINITY;
   const perBatch = Math.max(1, Math.round(wheat.quantity * content.precision.inventoryUnitsPerJin));

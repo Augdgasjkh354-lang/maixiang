@@ -6,6 +6,7 @@ import {
   isActiveHousehold, syncResidentAggregates
 } from "./households.js";
 import { cancelHouseholdLoan, householdLiquidValueUnits, issueHouseholdLoan, quoteHouseholdLoan } from "./household-loans.js";
+import { buildingMaxLevel } from "../content/building-level.js";
 
 // 别墅群系统：富人购房（购房款全额进入镇库）、年度房产税（1月1日征收）。
 // 购房款经统一支付层 household -> town 流转，不破坏粮券发行恒等式。
@@ -38,10 +39,10 @@ function villaComplexes(state) {
   return (state.buildings || []).filter(building => building.typeId === "villa_complex");
 }
 
-// 别墅容量随等级增长：每级 villaCapacity 栋（定义在 content/buildings.js），等级封顶 rules.buildingMaxLevel。
+// 别墅容量随等级增长：每级 villaCapacity 栋（定义在 content/buildings.js），等级封顶按建筑类型（buildingMaxLevel）。
 export function villaCapacityOf(building, content) {
   const perLevel = Number(content.buildings.villa_complex?.villaCapacity) || 20;
-  const cap = content.rules.buildingMaxLevel || 10;
+  const cap = buildingMaxLevel(content, building.typeId);
   const level = Math.max(1, Math.min(cap, Math.floor(building.level || 1)));
   return perLevel * level;
 }

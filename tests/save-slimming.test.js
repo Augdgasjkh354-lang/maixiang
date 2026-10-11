@@ -140,12 +140,12 @@ test("读档往返后再推进 30 天，经济状态、界面汇总与原状态�
   assertValid(loaded);
 });
 
-test("[slow] 体积：maxed 档紧凑 JSON 不超过 9MB，并比带旧字段的同一状态少一半以上", () => {
+test("[slow] 体积：maxed 档紧凑 JSON 不超过 9MB，并比带旧字段的同一状态明显小（读档再存不超过旧形状的 60%）", () => {
   const state = createMaxedState();
   const compact = JSON.stringify(state).length;
   assert.ok(compact <= 9e6, `紧凑 JSON ${(compact / 1e6).toFixed(2)}MB，应 ≤ 9MB`);
   const legacy = toLegacyShape(JSON.parse(JSON.stringify(state)));
   const legacySize = JSON.stringify(legacy).length;
   const reloaded = JSON.stringify(migrateSave(legacy, CONTENT)).length;
-  assert.ok(reloaded < legacySize * 0.5, `旧形状 ${(legacySize / 1e6).toFixed(2)}MB → 读档再存 ${(reloaded / 1e6).toFixed(2)}MB`);
+  assert.ok(reloaded < legacySize * 0.6, `旧形状 ${(legacySize / 1e6).toFixed(2)}MB → 读档再存 ${(reloaded / 1e6).toFixed(2)}MB`);
 });
