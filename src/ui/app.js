@@ -615,6 +615,10 @@ export function mountGame(root) {
     } else if (kind === "output-target") {
       result = simulation.setOutputTarget(state, input.dataset.draftTarget, parsed.value);
       successMessage = parsed.value > 0 ? `目标日产量已设为${number(parsed.value, 2)}。` : "已取消目标日产量，按人手满产。";
+    } else if (kind === "arena-policy") {
+      // 斗兽场政策：每日抓兽、每日搏斗、押注抽成、存栏上限（命令校验范围）。
+      result = simulation.setArenaPolicy(state, { [input.dataset.draftTarget]: parsed.value });
+      successMessage = `斗兽场${{ dailyCaptureTarget: "每日抓兽", dailyFights: "每日搏斗", rakePercent: "押注抽成" }[input.dataset.draftTarget] || "政策"}已设为${number(parsed.value, 1)}。`;
     } else if (kind === "service-price") {
       result = simulation.configureServicePrice(state, input.dataset.draftTarget, parsed.value);
       successMessage = `服务价格已设为${number(parsed.value, 3)}小麦等值。`;

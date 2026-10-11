@@ -125,5 +125,13 @@ export const ITEMS = Object.freeze({
     id: "pork", name: "猪肉", unit: "斤", category: "food",
     edible: true, qeq: Object.freeze({ numerator: 2, denominator: 1 }),
     consumptionPriority: 5, transferPriority: 5, openingCostWheatPerJin: 2, optionalRetail: true
+  }),
+  // 野味（巨型斗兽场，systems/arena.js）：斗兽搏斗的产出，批发市场统购统销，综合商店与集市都卖；不是养殖场产品（无 livestock 标记，不向养殖场进货）。
+  // stallRetail：集市也卖（集市的货单 stallItemIds 只认 livestock 与 householdGoods，这一标记把野味加进去）。
+  wild_game: Object.freeze({
+    wholesale: true, retail: true, storeOnly: true, optionalRetail: true, stallRetail: true, meat: true,
+    id: "wild_game", name: "野味", unit: "斤", category: "food",
+    edible: true, qeq: Object.freeze({ numerator: 2, denominator: 1 }),
+    consumptionPriority: 5, transferPriority: 5, openingCostWheatPerJin: 0
   })
 });

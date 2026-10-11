@@ -54,6 +54,8 @@ export const RULES = Object.freeze({
   // 贸易中心 / 贸易行（docs/TRADE.md「贸易中心与贸易行」）：贸易行每天按店员数定成交量，另受当日运力的份额限制。
   // 贸易行只要有钱赚就该做：利润率只是防亏损的下限，不是目标。下限 tradeHouseMarginFloorPercent 以下一律不做；政策页的出口/进口门槛可以调高，但不能低于下限。
   tradeHouseMarginFloorPercent: 5,
+  // 商品级出口利润门槛（%）：野味易坏、价低，出口门槛定为 5%（下限）；不随政策页的全局出口门槛。
+  tradeHouseMarginPercentByItem: Object.freeze({ wild_game: 5 }),
   tradeHouseTargetMarginPercent: 5, // 出口利润率门槛的开局默认（政策页 policy.tradeMarginPercent 可调 5—200%）：单斤利润率（卖价 − 买价 − 运费 − 关税）达到这个百分比（相对买价+运费）才做
   tradeHouseImportMarginPercent: 5, // 进口利润率门槛的开局默认（政策 policy.tradeImportMarginPercent 可调；不得低于出口门槛）
   tradeHouseExportPriority: 1.5, // 排序时出口的每斤净利润乘这个系数，同等条件先做出口（运力与店员日额度的单位是斤，按每斤净赚排序）
@@ -270,7 +272,8 @@ export const RULES = Object.freeze({
   // fullAffluence 是肉占比达到 maxShare 的宽裕度（不再跟 householdBudget.maxAffluence 挂钩：那已是渐近上限 4，会让肉的曲线整体漂移）；
   // 宽裕度 1 约 5%、2 约 27%、3 为 75%；肉按 weights 分到鸡鸭鹅猪，没买到的改买面粉。comfortMaximum：肉占口粮 1/4 时的舒心值加成。
   // 这里的宽裕度是"吃肉习惯"：近 habitDays 天宽裕度的平滑值，秋收前后余粮起落时饮食慢慢变。
-  meatStaple: Object.freeze({ maxShare: 0.75, fullAffluence: 3, exponent: 2.5, habitDays: 90, weights: Object.freeze({ chicken: 4, duck: 3, goose: 2, pork: 8 }), comfortMaximum: 4 }),
+  // gatedWeights：只在批发市场、镇库或店铺里有货时才参与肉的分配（野味，巨型斗兽场产出；没有斗兽场的世界权重表与之前逐位一致）。
+  meatStaple: Object.freeze({ maxShare: 0.75, fullAffluence: 3, exponent: 2.5, habitDays: 90, weights: Object.freeze({ chicken: 4, duck: 3, goose: 2, pork: 8 }), gatedWeights: Object.freeze({ wild_game: 6 }), comfortMaximum: 4 }),
   serviceTypes: Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", basis: "person", cycleDays: 20, priceVoucher: 4, merchantCapacity: 24, clerkCapacity: 30, consumables: Object.freeze([]), comfort: 0.8, incomeSensitivity: 0.8 }),
     repair: Object.freeze({ id: "repair", name: "修补铺", basis: "household", cycleDays: 30, priceVoucher: 8, merchantCapacity: 14, clerkCapacity: 18, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 0.7 }),
@@ -279,7 +282,26 @@ export const RULES = Object.freeze({
     restaurant: Object.freeze({ id: "restaurant", name: "饭店", basis: "person", cycleDays: 5, priceVoucher: 4, merchantCapacity: 50, clerkCapacity: 50, employeeOnlyCapacity: true, consumables: Object.freeze([{ itemId: "wheat", quantity: 2 }]), mealReplacement: true, comfort: 1.0, incomeSensitivity: 1.0 }),
     // 戏园：富户的消遣。票价 6 券（茶馆的两倍），收入弹性 2.5，实际门槛约 15 券/场（票价 × 弹性，与茶馆同一口径，超出家庭日预算就买不起）；
     // 人工密集：每个店员只接待 12 人（茶馆 48 人；原 6 人，翻倍后）；舒心值 1.2（茶馆 0.6）。只有宽裕度 ≥ minAffluence 的家庭去。
-    theater: Object.freeze({ id: "theater", name: "戏园", basis: "person", cycleDays: 10, priceVoucher: 6, merchantCapacity: 20, clerkCapacity: 12, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 2.5, minAffluence: THEATER_MIN_AFFLUENCE })
+    theater: Object.freeze({ id: "theater", name: "戏园", basis: "person", cycleDays: 10, priceVoucher: 6, merchantCapacity: 20, clerkCapacity: 12, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 2.5, minAffluence: THEATER_MIN_AFFLUENCE }),
+    // 斗兽场观赛（巨型斗兽场，systems/arena.js）：票价可调（默认 1 券）；容量 = 在岗场务 × 40，封顶 maxCapacity（每日 2000 游客）。
+    // requiresShop：只有开着的斗兽场店才累计需求（没有斗兽场的世界不累计，保持逐位一致）；wagerable：出席者按户记入当日押注名单；
+    // demandModifier：出席意愿随存栏（excitement）轻度变化，见 arena.js 的 arenaAttendanceFactor。
+    arena: Object.freeze({ id: "arena", name: "斗兽场观赛", basis: "person", cycleDays: 10, priceVoucher: 1, adjustablePrice: true, merchantCapacity: 1, clerkCapacity: 40,
+      employeeOnlyCapacity: true, maxCapacity: 2000, consumables: Object.freeze([]), comfort: 1.0, incomeSensitivity: 1.8, minAffluence: 0.8,
+      requiresShop: true, wagerable: true, demandModifier: "arenaExcitement", ledgerType: "arena_ticket" })
+  }),
+
+  // 巨型斗兽场（systems/arena.js，金银消费第四期）：存栏兽每天吃小麦、搏斗死亡、产野味；观众买票、按户押注，抽成归镇库。
+  // openingBeasts：开场存栏（建成首日一次性放入，不耗工）；baseStakeVoucher：每张票每场的基础押注（券），乘以 excitement；
+  // beastsPerExcitement：存栏 ÷ 此数 = excitement，夹在 excitementMin—excitementMax；winnerShare：出席户中赢家的比例（随机）；
+  // attendanceSwing：出席意愿摆幅（存栏满额 1.0 时无影响，偏离 1.0 时按此比例修正出席需求）。
+  // ranges：政策项的允许范围（state.policy.arena，界面与命令校验共用）。
+  arena: Object.freeze({
+    openingBeasts: 1000, capturePerHunterDay: 10, feedPerBeastDayJin: 10, gamePerBeastJin: 10,
+    baseStakeVoucher: 2, beastsPerExcitement: 1000, excitementMin: 0.5, excitementMax: 1.5,
+    winnerShare: 0.45, attendanceSwing: 0.2, seatCapacityPerStaff: 40, maxSeats: 2000,
+    defaults: Object.freeze({ dailyCaptureTarget: 100, dailyFights: 100, rakePercent: 10, beastCapacity: 2000 }),
+    ranges: Object.freeze({ dailyCaptureTarget: [0, 1000], dailyFights: [0, 500], rakePercent: [0, 30], beastCapacity: [100, 10000] })
   }),
 
   // v0.1.1 operating-plan parameters. Demand planning refreshes in coarse cycles to avoid daily hire/fire churn.
@@ -311,6 +333,8 @@ export const RULES = Object.freeze({
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
     theater: Object.freeze({ id: "theater", name: "戏园", kind: "service", serviceId: "theater" }),
+    // 斗兽场（巨型斗兽场）：建筑内置的镇营观赛店（arena 标记，见 systems/shops.js 的 syncArenaShops）；不在商业街开店。
+    arena: Object.freeze({ id: "arena", name: "斗兽场", kind: "service", serviceId: "arena", arena: true, hostBuildingTypeId: "arena", maxClerks: 60 }),
     school: Object.freeze({ id: "school", name: "学堂", kind: "service", serviceId: "school" }),
     restaurant: Object.freeze({ id: "restaurant", name: "饭店", kind: "service", serviceId: "restaurant" }),
     // 养殖场：开在养殖基地。商人和饲养员一起养，每人每日出 outputPerWorkerDay 斤肉，每斤肉吃 feedPerUnit 斤小麦。
@@ -343,17 +367,18 @@ export const RULES = Object.freeze({
     jewelry: Object.freeze({ id: "jewelry", name: "金银店", kind: "retail", generalRules: true, jeweler: true, hostBuildingTypeId: "jeweler", maxClerks: 60, itemIds: Object.freeze(["gold_jewelry", "silver_jewelry"]) })
   }),
 
-  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15, ox: 2000 }),
+  marketPricesVoucherPerUnit: Object.freeze({ wheat: 1, flour: 1.8, bread: 2, wood: 15, salt: 10, beer: 4.5, beer_premium: 10.67, baijiu: 17.86, baijiu_premium: 89.33, cotton: 2.5, cloth: 18, chicken: 5, duck: 5, goose: 6, pork: 6, wild_game: 6.6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15, ox: 2000 }),
   // 0.2.3 流通改革：批发市场做市商默认挂价（小麦斤等价）。
   // 售价 = 卖给综合商店/生产者的价；收购价 = 向公司/民营收购的价。可在批发市场面板调整。
-  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 5, beer_premium: 12, baijiu: 20, baijiu_premium: 100, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15 }),
-  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 4, beer_premium: 9.6, baijiu: 16, baijiu_premium: 80, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5, coal: 4.8, iron_ore: 6.4, iron_farm_tool: 96, iron_tool: 32, gold_jewelry: 120, silver_jewelry: 12 }),
+  wholesaleDefaultSalePrices: Object.freeze({ wheat: 1, flour: 1.8, bread: 2.6, wood: 16, salt: 12, beer: 5, beer_premium: 12, baijiu: 20, baijiu_premium: 100, cotton: 2.8, cloth: 20, chicken: 5.5, duck: 5.5, goose: 6.6, pork: 6.6, wild_game: 6.6, coal: 6, iron_ore: 8, iron_farm_tool: 120, iron_tool: 40, gold_jewelry: 150, silver_jewelry: 15 }),
+  wholesaleDefaultPurchasePrices: Object.freeze({ wheat: 0.8, flour: 1.6, bread: 2, wood: 12, salt: 8, beer: 4, beer_premium: 9.6, baijiu: 16, baijiu_premium: 80, cotton: 2.2, cloth: 16, chicken: 4.6, duck: 4.6, goose: 5, pork: 5, wild_game: 5, coal: 4.8, iron_ore: 6.4, iron_farm_tool: 96, iron_tool: 32, gold_jewelry: 120, silver_jewelry: 12 }),
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
   townOutputStockDays: 360, // 备货天数：目标库存相当于多少天的需求
   // 个别商品的备货天数覆盖：面包是易囤的成品，备太多会把磨坊有限的面粉全占走，居民买不到面粉（体检：面粉零售 0%、面包库存越堆越多）。
-  townOutputStockDaysByItem: Object.freeze({ bread: 30 }),
+  // 野味易坏：备货 90 天（比面包长，给贸易行留货出口），不按全镇 360 天备货口径无限囤积（systems/arena.js 的野味入市闸门）。
+  townOutputStockDaysByItem: Object.freeze({ bread: 30, wild_game: 90 }),
   // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
   townWheatReserveDays: 180,
   // 外贸稳定性（docs/TRADE.md「外镇价格与贸易行暂停」）。

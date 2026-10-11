@@ -17,7 +17,7 @@
 // 每天的候选按入口利润率排序，贪心执行，直到运力、店员额度、资金、外镇库存或小麦用完。
 // 复杂度：O(贸易行 × 外镇 × 商品)（一天一次，没有逐户循环）。
 import { currencyScale } from "../economy/currency.js";
-import { policyTradeMarginPercent } from "../economy/margin-policy.js";
+import { policyTradeMarginPercent, tradeMarginFloorPercent } from "../economy/margin-policy.js";
 import { addPaymentObligation, currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { putStock, takeStock, valueOf } from "../economy/trade.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
@@ -34,7 +34,7 @@ import {
 } from "./wholesale-market.js";
 import {
   buildingOperational, deliverToOutsideTown, ensureOutsideTowns, goodOf, outsideTownProfile,
-  quoteValue, recordTradeStats, sellableStock, unitPrice, affordableSellQuantity
+  quoteValue, recordTradeStats, sellableStock, unitPrice, affordableSellQuantity, goodActive
 } from "./outside-town.js";
 import { dailyCapacityJin, freightPoolJin, freightVoucherPerJin, takeFreightCapacity } from "./logistics.js";
 
@@ -155,7 +155,10 @@ function freightUnitsOf(qJin, freight, content) {
 }
 
 // 利润门槛乘数：1 + 政策利润率（policy.tradeMarginPercent / tradeImportMarginPercent，缺省取 rules）。
-export function tradeMarginTarget(state, content, direction = "export") {
+// 商品级出口门槛（rules.tradeHouseMarginPercentByItem，如野味 5%，易坏的货不能卡在全局 20% 门槛上）；不低于利润下限。
+export function tradeMarginTarget(state, content, direction = "export", itemId = null) {
+  const override = direction === "export" && itemId ? content.rules.tradeHouseMarginPercentByItem?.[itemId] : undefined;
+  if (Number.isFinite(override)) return 1 + Math.max(tradeMarginFloorPercent(content), override) / 100;
   return 1 + policyTradeMarginPercent(state, content, direction) / 100;
 }
 
@@ -182,7 +185,7 @@ function candidatesFor(state, content) {
       // 贸易行不做的商品（银条、金条，tradeHouseExcluded）只走镇长手动外贸。
       if (content.items[itemId]?.tradeHouseExcluded) continue;
       const good = goodOf(profile, itemId);
-      if (!good) continue;
+      if (!good || !goodActive(town, itemId, good)) continue;
       out.push({ town, profile, itemId, good, direction: "export" });
       if (good.sellsToUs) out.push({ town, profile, itemId, good, direction: "import" });
     }
@@ -227,7 +230,7 @@ function planExport(state, content, run, cand) {
   const freight = freightVoucherPerJin(state, content);
   const cost = price + freight;
   const keep = 1 - tradeTariffRate(state, "export");
-  const minSell = cost * tradeMarginTarget(state, content, "export");
+  const minSell = cost * tradeMarginTarget(state, content, "export", itemId);
   if (unitPrice(town, good, "sell") * keep < minSell) return null;
   const market = ensureWholesaleMarket(state, content);
   const stockJin = nonNegative(market.inventory?.[itemId]) / scale;
@@ -417,7 +420,7 @@ function rankCandidates(state, content) {
   const exportPriority = content.rules.tradeHouseExportPriority ?? 1;
   return candidatesFor(state, content)
     .map(cand => ({ cand, ratio: quickMarginRatio(state, content, cand) }))
-    .filter(row => row.ratio !== null && row.ratio + 1 >= tradeMarginTarget(state, content, row.cand.direction) - 1e-9)
+    .filter(row => row.ratio !== null && row.ratio + 1 >= tradeMarginTarget(state, content, row.cand.direction, row.cand.itemId) - 1e-9)
     .map(row => {
       const perJin = quickProfitPerJin(state, content, row.cand);
       return { ...row, perJin, rank: row.cand.direction === "export" ? perJin * exportPriority : perJin };

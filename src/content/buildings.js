@@ -154,6 +154,19 @@ export const BUILDINGS = Object.freeze({
     construction: Object.freeze({ workDays: 400, recommendedWorkers: 6 }),
     upgrade: Object.freeze({ maxLevel: 10, workDays: 400, materialRequirements: Object.freeze([{ itemId: "wood", quantity: 600 }]) })
   }),
+  // 斗兽场（金银消费第四期，巨型，systems/arena.js）：镇营单级建筑（不设升级、不做所有制转换）。内置一个镇营观赛店（店型 arena，shop.arena 标记），
+  // 场务在岗才开门（每人接待 40 人，每日最多 2000 游客）；猎手每人每日抓 10 只兽；存栏兽每天吃 10 斤小麦，搏斗死亡产野味。
+  arena: Object.freeze({
+    id: "arena", name: "斗兽场", icon: "🏟️",
+    description: "观看斗兽与押注 · 每日容纳2000游客（每40名场务一人接待）· 猎手抓兽 · 兽每日吃10斤小麦 · 搏斗产野味",
+    maxInstances: 1,
+    jobs: Object.freeze([
+      Object.freeze({ id: "hunters", name: "猎手", slots: 40, wagePerWorkerDay: 5, note: "每人每日抓10只兽（抓兽目标与存栏空位封顶）", releasePriority: 40 }),
+      Object.freeze({ id: "arena_staff", name: "场务", slots: 60, wagePerWorkerDay: 5, note: "每人每日接待40名游客，全场最多2000人", releasePriority: 40 })
+    ]),
+    materialRequirements: Object.freeze([{ itemId: "wood", quantity: 1000000 }]),
+    construction: Object.freeze({ workDays: 3000, recommendedWorkers: 40 })
+  }),
   // 酒坊：一座酒坊同时酿四种酒（配方 winery_brewing）。每名酿酒工每日一批：普通啤酒 2、高档啤酒 1、普通白酒 2、高档白酒 1 斤。
   winery: Object.freeze({
     id: "winery", name: "酒坊", icon: "🍶",

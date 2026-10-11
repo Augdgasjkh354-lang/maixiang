@@ -152,6 +152,24 @@ export function validateState(state, content) {
     const vb = state.policy.voucherBuyback;
     if (typeof vb.enabled !== "boolean" || !Number.isFinite(vb.dailyWheatJin) || vb.dailyWheatJin < 0 || !Number.isFinite(vb.wheatPerVoucher) || vb.wheatPerVoucher < 0.5 || vb.wheatPerVoucher > 2) errors.push("粮券收购政策无效");
   }
+  // 斗兽场（金银消费第四期，systems/arena.js）：存栏为非负整数，饿死余数在 [0,1)；政策在允许范围内；账册为非负有限数。
+  if (state.arena !== undefined) {
+    const arena = state.arena;
+    if (!Number.isSafeInteger(arena.beasts) || arena.beasts < 0) errors.push("斗兽场存栏无效");
+    if (!(Number.isFinite(arena.beastCarry) && arena.beastCarry >= 0 && arena.beastCarry < 1)) errors.push("斗兽场饿死余数无效");
+    for (const period of ["day", "year", "cumulative"]) {
+      for (const [key, value] of Object.entries(arena[period] || {})) {
+        if (!Number.isFinite(value) || value < 0) errors.push(`斗兽场账无效：${period}.${key}`);
+      }
+    }
+  }
+  if (state.policy?.arena !== undefined) {
+    const ranges = content.rules.arena?.ranges || {};
+    for (const [key, [min, max]] of Object.entries(ranges)) {
+      const value = state.policy.arena[key];
+      if (!Number.isFinite(value) || value < min || value > max) errors.push(`斗兽场政策无效：${key}`);
+    }
+  }
   if (state.voucherBuyback !== undefined) {
     for (const period of ["day", "year", "cumulative"]) {
       for (const [key, value] of Object.entries(state.voucherBuyback[period] || {})) {
@@ -456,6 +474,8 @@ export function validateState(state, content) {
       if (!shop.collective && !shop.town && merchantCount > (shopTypeDef?.maxMerchants ?? content.rules.shopMaxMerchants ?? 4)) errors.push("商人超过上限：" + shop.id);
       if (shop.town && merchantCount > 0) errors.push("镇营店不应有商人：" + shop.id);
       if (shop.jeweler && (merchantCount > 0 || clerkCount > 0)) errors.push("金银店不设商人或店员岗位（岗位归建筑业主）：" + shop.id);
+      // 斗兽场观赛店（金银消费第四期）：店员 = 场务岗位（归建筑），店上不设商人或店员岗位。
+      if (shop.arena && (merchantCount > 0 || clerkCount > 0)) errors.push("斗兽场观赛店不设商人或店员岗位（岗位归建筑）：" + shop.id);
       const shopClerkMax = Number.isFinite(shopTypeDef?.maxClerks) ? shopTypeDef.maxClerks
         : usesGeneralRules(shopTypeDef) ? (content.rules.generalStoreMaxClerks || 50) : (content.rules.shopMaxClerks || 20);
       if (clerkCount > shopClerkMax) errors.push("店员超过上限：" + shop.id);

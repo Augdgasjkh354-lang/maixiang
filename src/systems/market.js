@@ -42,11 +42,21 @@ export function updateMeatHabit(household, affluence, content) {
   return household.meatHabit;
 }
 
-function meatWeights(content) {
-  const weights = content.rules.meatStaple?.weights || {};
+// 肉的分配权重：weights 恒在；gatedWeights（野味）只在有货时加入（批发市场、镇库或店铺里有存货）。
+function meatWeights(content, state = null) {
+  const weights = { ...(content.rules.meatStaple?.weights || {}) };
+  for (const [itemId, weight] of Object.entries(content.rules.meatStaple?.gatedWeights || {})) {
+    if (state && itemStocked(state, itemId)) weights[itemId] = weight;
+  }
   const rows = Object.entries(weights).filter(([itemId, weight]) => content.items[itemId]?.edible && weight > 0);
   const total = rows.reduce((sum, [, weight]) => sum + weight, 0);
   return total > 0 ? rows.map(([itemId, weight]) => [itemId, weight / total]) : [];
+}
+
+// 物品在全镇有货（批发市场、镇库或开着的店铺）。
+function itemStocked(state, itemId) {
+  if ((state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (state.accounts?.town?.[itemId] || 0) > 0) return true;
+  return Object.values(state.shops || {}).some(shop => shop.status === "open" && (shop.inventory?.[itemId] || 0) > 0);
 }
 
 // 单项主食按"每户缺口"购买：每户目标口粮当量减去自家已有的，缺多少买多少。
@@ -101,7 +111,7 @@ export function buyStaplesForResidents(state, population, content) {
   const shares = stapleDemandShares(content);
   const maxUpgrade = content.rules.householdBudget?.stapleUpgradeMax ?? 1.5;
   const dailyQeqPerPerson = content.rules.foodPerPersonDay * content.precision.qeqUnitsPerJin;
-  const meats = meatWeights(content);
+  const meats = meatWeights(content, state);
   const plan = { bread: new Map(), flour: new Map(), wheat: new Map() };
   const meatPlan = new Map(meats.map(([itemId]) => [itemId, new Map()]));
   const rows = [];
@@ -118,12 +128,46 @@ export function buyStaplesForResidents(state, population, content) {
     }
     meatTarget.set(household.id, meat);
   }
-  // 先买肉；没买到的部分算回其余口粮，按面粉面包的正常比例吃（没肉的镇子不会因此少吃面包）。
-  const meatShort = new Map();
-  for (const [itemId] of meats) {
+  // 先买肉。门控肉（rules.meatStaple.gatedWeights，如野味）买不到的份额，先按其余肉（无门控的鸡鸭鹅猪）的权重分给它们再买；
+  // 还不够的部分才算回其余口粮，按面粉面包的正常比例吃。没有门控肉时与原先逐位一致（只买一轮）。
+  const gatedIds = new Set(Object.keys(content.rules.meatStaple?.gatedWeights || {}));
+  const gatedMeats = meats.filter(([itemId]) => gatedIds.has(itemId));
+  const openMeats = meats.filter(([itemId]) => !gatedIds.has(itemId));
+  const gatedShort = new Map();
+  for (const [itemId] of gatedMeats) {
     const row = buyStapleItem(state, content, itemId, meatPlan.get(itemId));
     rows.push(row);
-    row.shortfallQeq.forEach((qeq, id) => meatShort.set(id, (meatShort.get(id) || 0) + qeq));
+    row.shortfallQeq.forEach((qeq, id) => gatedShort.set(id, (gatedShort.get(id) || 0) + qeq));
+  }
+  const openWeightSum = openMeats.reduce((sum, [, weight]) => sum + weight, 0);
+  if (gatedShort.size > 0 && openMeats.length > 0 && openWeightSum > 0) {
+    gatedShort.forEach((qeq, householdId) => {
+      for (const [itemId, weight] of openMeats) {
+        const add = Math.floor(qeq * weight / openWeightSum);
+        if (add <= 0) continue;
+        const plan = meatPlan.get(itemId);
+        plan.set(householdId, (plan.get(householdId) || 0) + add);
+      }
+    });
+  }
+  for (const [itemId] of openMeats) {
+    const row = buyStapleItem(state, content, itemId, meatPlan.get(itemId));
+    rows.push(row);
+  }
+  // 没买到的肉：每户按各肉实际可用量（不超过计划，计划含再分配）数出吃到的肉，缺口 = 肉目标 − 吃到的。
+  const meatShort = new Map();
+  for (const household of active) {
+    const target = meatTarget.get(household.id) || 0;
+    let got = 0;
+    for (const [itemId] of meats) {
+      const planned = meatPlan.get(itemId).get(household.id) || 0;
+      if (planned <= 0) continue;
+      const perUnitQeq = itemQeqUnitsPerInventoryUnit(content.items[itemId], content);
+      const has = Math.floor((household.inventory?.[itemId] || 0) * perUnitQeq);
+      got += Math.min(planned, has);
+    }
+    const short = Math.max(0, target - Math.min(target, got));
+    if (short > 0) meatShort.set(household.id, short);
   }
   let upgradeShareSum = 0;
   let people = 0;

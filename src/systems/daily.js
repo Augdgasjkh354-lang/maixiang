@@ -42,6 +42,7 @@ import { settleStockMarketDay, settleDailyShareMarket } from "./stock-exchange.j
 import { settleLiquidityDay } from "./liquidity.js";
 import { fillMissingHouseholdLastHarvestIncome, maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
+import { resetArenaDay, resetArenaYear, settleArenaDay, syncArena } from "./arena.js";
 import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
 import { buyDurableGoodsForHouseholds, resetDurableDay, resetDurableYear, wearDurableGoods } from "./durable-goods.js";
 import { payOxMaintenanceDay, resetCattleDay, resetCattleYear } from "./cattle.js";
@@ -77,6 +78,7 @@ function resetDayBooks(state, content) {
   resetPrivateDaily(state);
   resetDurableDay(state);
   resetCattleDay(state);
+  resetArenaDay(state);
   resetRedistributionDay(state);
   if (state.fiscal) state.fiscal.day = { dueWheatUnits: 0, collectedWheatUnits: 0, waivedWheatUnits: 0 };
   if (state.stampDuty) state.stampDuty.day = {};
@@ -102,6 +104,7 @@ function resetYearBooks(state, content) {
   resetPrivateYear(state);
   resetDurableYear(state);
   resetCattleYear(state);
+  resetArenaYear(state);
   resetCompanyYear(state, content, state.year - 1);
   resetShopYear(state, content);
   resetWholesaleYear(state, content);
@@ -198,6 +201,8 @@ export const CORE_DAILY_STEPS = [
   { id: "industryExperience", run: accrueIndustryExperience },
 
   // ── 商业与居民购买：店铺计提并补货 → 房租 → 别墅 → 盐 → 主食 → 修缮木材 → 酒与布 → 服务
+  // 斗兽场（金银消费第四期）：建筑在则观赛店在，首日放入开场存栏；先于店铺准备，服务步骤就能看到这家店。
+  { id: "arenaSync", run: syncArena },
   { id: "shopPreparation", run: prepareShopsForDay },
   { id: "rent", run: (state, content, day) => settleHousingRent(state, day.housingAtStart, content) },
   { id: "villaSales", run: settleVillaPurchases },
@@ -210,6 +215,8 @@ export const CORE_DAILY_STEPS = [
   { id: "oxMaintenance", run: payOxMaintenanceDay },
   { id: "goodsTrade", run: buyGoodsForResidents },
   { id: "services", run: processServiceDemand },
+  // 斗兽场（金银消费第四期，systems/arena.js）：抓兽、喂养、搏斗、野味入市、押注结算（出席名单来自上一步的服务结算）。
+  { id: "arena", run: settleArenaDay },
   // 教育：学堂当天实际接待了学生才累计办学天数（服务结算之后，见 economy/productivity.js 的 educationBonus）。
   { id: "education", run: accrueEducationDay },
   // 贸易行：店主与店员每天自己做外镇买卖（docs/TRADE.md）；在居民买完之后、外镇日结之前，用剩下的运力与批发存货。

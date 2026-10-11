@@ -30,6 +30,7 @@ import { tradeWithOutsideTown as tradeWithOutsideTownSystem, issueWheatLoan as i
 import { signTradeAgreement as signTradeAgreementSystem, terminateTradeAgreement as terminateTradeAgreementSystem } from "../systems/trade-agreements.js";
 import { setWealthTaxPolicy, setInheritanceTaxPolicy } from "../systems/redistribution.js";
 import { setVoucherBuybackPolicy } from "../systems/voucher-buyback.js";
+import { setArenaPolicy } from "../systems/arena.js";
 
 export function setWageRate(state, roleId, dailyJin, content) {
   const value = Number(dailyJin);
@@ -116,6 +117,11 @@ export function repayBankDebtToTown(state, amountJin, content) {
 // 粮券收购（政策页）：patch = { enabled?, dailyWheatJin?, wheatPerVoucher? }，开启需已建成银行。
 export function setVoucherBuyback(state, patch, content) {
   return setVoucherBuybackPolicy(state, patch || {}, content);
+}
+
+// 斗兽场政策（金银消费第四期）：每日抓兽目标、每日搏斗数、押注抽成（%）、存栏上限；票价走 configureServicePrice("arena", 价格)。
+export function setArenaPolicyCommand(state, patch, content) {
+  return setArenaPolicy(state, patch || {}, content);
 }
 
 export function injectSocialSecurity(state, amountJin, content) {

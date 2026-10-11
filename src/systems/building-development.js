@@ -7,6 +7,7 @@ import { procureTownMaterial, previewTownMaterialProcurement, clearPublicProcure
 import { householdList, releaseJobFromHousehold } from "./households.js";
 import { staffProject } from "./construction.js";
 import { windUpCollectiveShop, windUpJewelerShop } from "./shops.js";
+import { windUpArena } from "./arena.js";
 import { currentPaymentComposition, maximumPayableValueUnits, quoteMonetaryPayment, settleMonetaryPayment } from "../economy/payment.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { allocateInputToTown } from "./wholesale-market.js";
@@ -287,6 +288,7 @@ export function demolishBuilding(state, buildingId, content) {
   }
   for (const shop of Object.values(state.shops || {})) if (shop.buildingId === buildingId && shop.collective) windUpCollectiveShop(state, shop, content);
   for (const shop of Object.values(state.shops || {})) if (shop.buildingId === buildingId && shop.jeweler) windUpJewelerShop(state, shop, content);
+  if (building.typeId === "arena") windUpArena(state);
   state.buildings = state.buildings.filter(row => row.id !== buildingId);
   recordEvent(state, `${preview.name}已拆除，${preview.workers}名工人转为待业；工资、欠薪与经营历史继续保留。`, content, { day: state.day + 1 });
   return { ok: true, preview };

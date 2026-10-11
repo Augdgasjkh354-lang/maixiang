@@ -27,6 +27,7 @@ import { farmSalePriceVoucher } from "./farm-pricing.js";
 import { herdFeedPlanUnits, herdHeads } from "./cattle-herd.js";
 import { shopMayStockItem, usesGeneralRules } from "./shop-types.js";
 import { jewelerCapacityPieces, jewelerOwnerFields, jewelerOwnerOf, jewelerStaffCount } from "./jewelers.js";
+import { jobKeyForBuilding, readJobCount } from "../selectors/labor.js";
 import {
   ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory,
   updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop
@@ -188,7 +189,9 @@ export function shopSoldTodayUnits(shop) {
 export function stallItemIds(content) {
   const goods = Object.keys(content.rules.householdGoods || {}).filter(itemId => content.items[itemId] && !content.items[itemId].retailShopTypeIds);
   const meats = Object.keys(content.items).filter(itemId => content.items[itemId]?.livestock && !goods.includes(itemId));
-  return [...goods, ...meats];
+  // 野味（stallRetail）：从批发市场进货，集市也卖（与肉同一规则）。
+  const game = Object.keys(content.items).filter(itemId => content.items[itemId]?.stallRetail && !goods.includes(itemId) && !meats.includes(itemId));
+  return [...goods, ...meats, ...game];
 }
 
 export function shopKind(shop, content) {
@@ -255,7 +258,12 @@ function shopMerchantOnDuty(state, shop) {
   return Boolean(owner && isActiveHousehold(owner) && (owner.jobs?.[merchantJobKey(shop)] || 0) >= 1 && shopMerchantCount(state, shop) > 0);
 }
 
-export function shopClerkCount(state, shop) { return shop.jeweler ? jewelerStaffCount(state, shop) : jobCount(state, clerkJobKey(shop)); }
+// 店员人数：金银店 = 首饰匠岗位；斗兽场 = 场务岗位（建筑岗位，归镇营）；其余店铺 = 店员岗位。
+export function shopClerkCount(state, shop) {
+  if (shop.jeweler) return jewelerStaffCount(state, shop);
+  if (shop.arena) return readJobCount(state, jobKeyForBuilding(shop.buildingId, "arena_staff"));
+  return jobCount(state, clerkJobKey(shop));
+}
 
 function shopSerial(state, content) {
   return (Math.max(1, state.year || 1) - 1) * (content.rules.daysPerYear || 365) + (state.day || 0);
@@ -806,6 +814,28 @@ export function setShopClerks(state, shopId, requested, content) {
   return { ok: true, assigned: shopClerkCount(state, shop), severanceVoucherUnits };
 }
 
+// 斗兽场（金银消费第四期，systems/arena.js）：建筑内置的镇营观赛店（店型 arena，shop.arena 标记）。
+// 收入直接进镇库，店员 = 场务岗位（归镇营建筑），没有商人、不交店租、不自动关店（建筑在则店在）。
+export function openArenaShop(state, building, content) {
+  ensureShops(state, content);
+  const shopId = `shop-${state.nextShopNumber++}`;
+  const shop = {
+    id: shopId, name: content.buildings[building.typeId]?.name || "斗兽场", buildingId: building.id, typeId: "arena",
+    arena: true, town: true, collective: false, jeweler: false, ownerHouseholdId: null, companyId: null,
+    primaryItemId: null, itemId: null, itemIds: [], serviceId: "arena",
+    cashVoucherUnits: 0, inventory: emptyShopInventory(content), inventoryCostVoucherUnits: {},
+    status: "open", statusReason: "准备营业", openedYear: state.year, openedDay: state.day + 1, badDays: 0,
+    accounts: { day: blankShopPeriod(), year: blankShopPeriod(), cumulative: blankShopPeriod() },
+    liabilities: { wageVoucherUnits: 0, rentVoucherUnits: 0, taxVoucherUnits: 0, claimsVoucherUnits: {} },
+    settlement: { days: 0, profitVoucherUnits: 0, lossCarryVoucherUnits: 0, lastTaxVoucherUnits: 0, lastSettlementYear: 0, lastSettlementDay: 0 },
+    retainedEarningsVoucherUnits: 0, townAdvanceVoucherUnits: 0,
+    initialCapital: { valueUnits: 0, voucherValueUnits: 0 }
+  };
+  state.shops[shopId] = shop;
+  ensureShopBooks(shop, content);
+  return shop;
+}
+
 export function shopSalesCapacityUnits(state, shop, content) {
   if (!shop || shop.status !== "open" || !shopMerchantOnDuty(state, shop) || shopIsService(shop, content)) return 0;
   const kind = shopKind(shop, content);
@@ -1003,7 +1033,8 @@ export function registerShopStockoutDemand(state, shopId, itemId, units, content
   return count;
 }
 
-export function recordShopServiceSale(state, shopId, householdId, serviceId, content) {
+// 服务售出：票款付给店铺的付款账户（镇营店为镇库）；options.ledgerType 指定账本类型（斗兽场用 arena_ticket）。
+export function recordShopServiceSale(state, shopId, householdId, serviceId, content, options = {}) {
   const shop = ensureShops(state, content)[shopId];
   const def = shopDefinition(content, shop?.typeId);
   if (!shop || shop.status !== "open" || def?.kind !== "service" || def.serviceId !== serviceId) return { ok: false, reason: "服务店当前不可用" };
@@ -1020,8 +1051,8 @@ export function recordShopServiceSale(state, shopId, householdId, serviceId, con
     const need = Math.round(Math.max(0, row.quantity || 0) * content.precision.inventoryUnitsPerJin);
     if ((shop.inventory?.[row.itemId] || 0) < need) return { ok: false, reason: `缺${content.items[row.itemId]?.name || row.itemId}` };
   }
-  const payment = settleMonetaryPayment(state, householdOwner(householdId), shopOwner(shopId), currentPaymentComposition(state, priceUnits), content,
-    "shop_service_sale", `${household.name}购买${service.name}`, { requireFull: true });
+  const payment = settleMonetaryPayment(state, householdOwner(householdId), shopAccountName(shop), currentPaymentComposition(state, priceUnits), content,
+    options.ledgerType || "shop_service_sale", `${household.name}购买${service.name}`, { requireFull: true });
   if (!payment.ok) return payment;
   let cogs = 0;
   for (const row of consumables) {
@@ -1930,7 +1961,7 @@ export function finishShopsDay(state, content, forceSettlement = false) {
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
     else if (maximumPayableValueUnits(state, shopAccountName(shop), content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
-    else if ((shop.town || shop.jeweler) && shopClerkCount(state, shop) <= 0) shop.statusReason = shop.jeweler ? "无首饰匠" : "无店员";
+    else if ((shop.town || shop.jeweler) && shopClerkCount(state, shop) <= 0) shop.statusReason = shop.jeweler ? "无首饰匠" : shop.arena ? "无场务" : "无店员";
     else if (shopKind(shop, content) === "trade") shop.statusReason = activity > 0 ? "营业中" : "暂无可做的买卖";
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";

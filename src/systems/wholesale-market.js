@@ -492,7 +492,7 @@ function buyTownDirectForOwner(state, buyerOwner, itemId, requestedUnits, conten
 // ---------------------------------------------------------------- 销售（做市商卖出）
 
 // options.discountPerUnit：镇里给的特价补贴（每单位少收多少斤），差价由镇库承担，记在返回的 subsidyVoucherUnits。
-function townWheatSaleReserveUnits(state, content) {
+export function townWheatSaleReserveUnits(state, content) {
   const people = householdList(state).reduce((sum, household) => sum + householdPopulation(household), 0);
   return Math.round(people * content.rules.foodPerPersonDay * (content.rules.townWheatSaleReserveDays ?? 60) * content.precision.inventoryUnitsPerJin);
 }

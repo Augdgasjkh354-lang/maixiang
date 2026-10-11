@@ -49,7 +49,9 @@ export const OUTSIDE_TOWNS = Object.freeze({
       beer_premium: Object.freeze({ basePrice: exportPrice(P.beer_premium), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
       baijiu: Object.freeze({ basePrice: exportPrice(P.baijiu), needPerPersonDay: 1.6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 4734, sellsToUs: false, supplyWeight: 0.02 }),
       baijiu_premium: Object.freeze({ basePrice: exportPrice(P.baijiu_premium), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
-      cloth: Object.freeze({ basePrice: exportPrice(P.cloth), needPerPersonDay: 1 / 365, producePerPersonDay: 0.55 / 365, targetDays: 180, stock: 5828, sellsToUs: false, supplyWeight: 0.1 })
+      cloth: Object.freeze({ basePrice: exportPrice(P.cloth), needPerPersonDay: 1 / 365, producePerPersonDay: 0.55 / 365, targetDays: 180, stock: 5828, sellsToUs: false, supplyWeight: 0.1 }),
+      // 野味（斗兽场产出，金银消费第四期）：外镇每人每年吃约 25 斤，自产 0；我们有野味（批发市场入过货）之后才激活（activeWhenStocked）。
+      wild_game: Object.freeze({ basePrice: exportPrice(P.wild_game), needPerPersonDay: 25 / 365, producePerPersonDay: 0, targetDays: 30, stock: 0, sellsToUs: false, supplyWeight: 0.02, activeWhenStocked: true })
     })
   }),
   // 王镇：规模与民镇相同（待调），但几乎不产布、少酿酒，更看重布和酒——我镇新产业的主要买家。
@@ -77,7 +79,9 @@ export const OUTSIDE_TOWNS = Object.freeze({
       beer_premium: Object.freeze({ basePrice: exportPrice(P.beer_premium * 1.2), needPerPersonDay: 1.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 3551, sellsToUs: false, supplyWeight: 0.02 }),
       baijiu: Object.freeze({ basePrice: exportPrice(P.baijiu * 1.2), needPerPersonDay: 2.6 / 365, producePerPersonDay: 1 / 365, targetDays: 90, stock: 7693, sellsToUs: false, supplyWeight: 0.03 }),
       baijiu_premium: Object.freeze({ basePrice: exportPrice(P.baijiu_premium * 1.2), needPerPersonDay: 0.2 / 365, producePerPersonDay: 0, targetDays: 90, stock: 592, sellsToUs: false, supplyWeight: 0.01 }),
-      cloth: Object.freeze({ basePrice: exportPrice(P.cloth * 1.2), needPerPersonDay: 1.5 / 365, producePerPersonDay: 0.1 / 365, targetDays: 180, stock: 5142, sellsToUs: false, supplyWeight: 0.2 })
+      cloth: Object.freeze({ basePrice: exportPrice(P.cloth * 1.2), needPerPersonDay: 1.5 / 365, producePerPersonDay: 0.1 / 365, targetDays: 180, stock: 5142, sellsToUs: false, supplyWeight: 0.2 }),
+      // 野味：王镇讲究吃用，价 × 1.2（同酒、布的习惯）。
+      wild_game: Object.freeze({ basePrice: exportPrice(P.wild_game * 1.2), needPerPersonDay: 25 / 365, producePerPersonDay: 0, targetDays: 30, stock: 0, sellsToUs: false, supplyWeight: 0.02, activeWhenStocked: true })
     })
   })
 });

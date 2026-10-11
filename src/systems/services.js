@@ -5,8 +5,18 @@ import { householdList, householdPopulation, isActiveHousehold, householdConvert
 import { ensureHouseholdLife } from "./household-life.js";
 import { householdBudgets } from "./household-budget.js";
 import { recordShopServiceSale, serviceShopCapacityUses, shopDefinition } from "./shops.js";
+import { arenaAttendanceFactor } from "./arena.js";
 
 const DEMAND_SCALE = 1000;
+
+// 服务定义的 demandModifier（按名字引用的需求修正系数，返回数值；1 = 不修正）。
+const DEMAND_MODIFIERS = Object.freeze({
+  arenaExcitement: (state, content) => arenaAttendanceFactor(state, content)
+});
+
+function emptyServiceDay() {
+  return { demandedUses: {}, attemptedUses: {}, servedUses: {}, unaffordableUses: {}, capacityUnmetUses: {}, spendingVoucherUnits: 0, wagerAttendees: {} };
+}
 
 function ensureServiceState(state) {
   state.services ||= {};
@@ -16,7 +26,8 @@ function ensureServiceState(state) {
   state.services.mealsByHousehold ||= {};
   state.services.rotation ||= { households: 0, shops: {}, services: 0 };
   state.services.rotation.shops ||= {};
-  state.services.day ||= { demandedUses: {}, attemptedUses: {}, servedUses: {}, unaffordableUses: {}, capacityUnmetUses: {}, spendingVoucherUnits: 0 };
+  state.services.day ||= emptyServiceDay();
+  state.services.day.wagerAttendees ||= {};
   state.services.day.attemptedUses ||= {};
   state.services.day.unaffordableUses ||= {};
   state.services.day.capacityUnmetUses ||= {};
@@ -73,13 +84,17 @@ export function serviceOutstandingUses(state, serviceId) {
 
 export function accrueServiceDemand(state, content) {
   const serviceState = ensureServiceState(state);
-  serviceState.day = { demandedUses: {}, attemptedUses: {}, servedUses: {}, unaffordableUses: {}, capacityUnmetUses: {}, spendingVoucherUnits: 0 };
+  serviceState.day = emptyServiceDay();
   serviceState.mealsByHousehold = {};
   const defs = content.rules.serviceTypes || {};
-  const hasServiceCapacity = Object.values(state.shops || {}).some(shop => {
-    if (["closed", "liquidating"].includes(shop.status)) return false;
-    return Boolean(shopDefinition(content, shop.typeId)?.serviceId);
-  });
+  // 营业中的服务店按服务编号登记（requiresShop 的服务只在有店时累计需求）。
+  const openServiceIds = new Set();
+  for (const shop of Object.values(state.shops || {})) {
+    if (["closed", "liquidating"].includes(shop.status)) continue;
+    const serviceId = shopDefinition(content, shop.typeId)?.serviceId;
+    if (serviceId) openServiceIds.add(serviceId);
+  }
+  const hasServiceCapacity = openServiceIds.size > 0;
   // 没有任何服务店时只累计“潜在经过天数”，避免在多年无商业街模拟中每天扫描全部家庭。
   // 首家服务店出现时一次性按当前家庭规模补记，并受最大两周期上限约束。
   if (!hasServiceCapacity) {
@@ -91,12 +106,20 @@ export function accrueServiceDemand(state, content) {
   serviceState.latentDays = 0;
   const activeIds = new Set();
   const defList = Object.values(defs);
+  // 需求修正系数按服务算一次（全镇同一个值）；没有修正的服务为 1。
+  const factorOf = new Map(defList.map(def => [def.id, def.demandModifier ? (DEMAND_MODIFIERS[def.demandModifier]?.(state, content) ?? 1) : 1]));
   for (const household of householdList(state).filter(isActiveHousehold)) {
     activeIds.add(household.id);
     const demand = serviceState.demandByHousehold[household.id] ||= {};
     const carry = serviceState.carryByHousehold[household.id] ||= {};
     const affluence = householdAffluenceFor(state, household, content);
     for (const def of defList) {
+      // 需要店但全镇没有营业的店（如斗兽场）：不累计需求，也不留旧账（不写表，没有斗兽场的世界表与之前逐位一致）。
+      if (def.requiresShop && !openServiceIds.has(def.id)) {
+        if (demand[def.id]) demand[def.id] = 0;
+        if (carry[def.id]) carry[def.id] = 0;
+        continue;
+      }
       // 不够门槛的家庭不产生这项需求（清零，不留旧账）。
       if (!serviceOpenToAffluence(def, affluence)) {
         demand[def.id] = 0;
@@ -105,7 +128,9 @@ export function accrueServiceDemand(state, content) {
       }
       const basis = basisCount(household, def);
       const denominator = Math.max(1, def.cycleDays);
-      const numerator = Math.max(0, carry[def.id] || 0) + basis * DEMAND_SCALE * elapsedDays;
+      const basisDemand = basis * DEMAND_SCALE * elapsedDays;
+      const factor = factorOf.get(def.id);
+      const numerator = Math.max(0, carry[def.id] || 0) + (factor === 1 ? basisDemand : Math.round(basisDemand * factor));
       const add = Math.floor(numerator / denominator);
       carry[def.id] = numerator % denominator;
       const cap = basis * DEMAND_SCALE * Math.max(1, content.rules.serviceDemandMaximumCycles || 2);
@@ -209,7 +234,7 @@ function processServiceDemandNow(state, content) {
           serviceState.day.capacityUnmetUses[def.id] = (serviceState.day.capacityUnmetUses[def.id] || 0) + wanted;
           break;
         }
-        const result = recordShopServiceSale(state, selected.shop.id, household.id, def.id, content);
+        const result = recordShopServiceSale(state, selected.shop.id, household.id, def.id, content, { ledgerType: def.ledgerType });
         if (!result.ok) {
           serviceState.day.unaffordableUses[def.id] = (serviceState.day.unaffordableUses[def.id] || 0) + wanted;
           break;
@@ -217,6 +242,13 @@ function processServiceDemandNow(state, content) {
         state.services.demandByHousehold[household.id][def.id] = Math.max(0,
           state.services.demandByHousehold[household.id][def.id] - DEMAND_SCALE);
         budgets.set(household.id, Math.max(0, (budgets.get(household.id) || 0) - result.paidValueUnits));
+        // 出席名单（押注用）：按户记张数与买完票后的剩余预算。
+        if (def.wagerable) {
+          const row = (serviceState.day.wagerAttendees[def.id] ||= {});
+          const entry = row[household.id] ||= { tickets: 0, budgetLeftUnits: 0 };
+          entry.tickets += 1;
+          entry.budgetLeftUnits = budgets.get(household.id) || 0;
+        }
         usedByShop.set(selected.shop.id, (usedByShop.get(selected.shop.id) || 0) + 1);
         serviceState.day.servedUses[def.id] = (serviceState.day.servedUses[def.id] || 0) + 1;
         totalSpent += result.paidValueUnits;

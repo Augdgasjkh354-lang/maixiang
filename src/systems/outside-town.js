@@ -58,6 +58,12 @@ function profiles(content) {
   return content?.outsideTowns || OUTSIDE_TOWNS;
 }
 
+// 按需激活的外镇商品（档案 activeWhenStocked，如野味）：我们的批发市场第一次有这种货之后才参与消耗、繁荣度与定价（之后不再停用）。
+// 没有这种货的世界里它不产生任何状态变化，所以不影响没有斗兽场等来源的存档与对照。
+export function goodActive(town, itemId, good) {
+  return !good?.activeWhenStocked || town?.activeGoods?.[itemId] === true;
+}
+
 export function outsideTownProfile(content, townId = DEFAULT_OUTSIDE_TOWN_ID) {
   return profiles(content)[townId] || null;
 }
@@ -201,7 +207,7 @@ function stepPriceFactors(town, profile) {
   town.priceFactor ||= {};
   town.priceStock ||= {};
   for (const [itemId, base] of Object.entries(profile.goods)) {
-    if (base.sellsToUs) continue;
+    if (base.sellsToUs || !goodActive(town, itemId, base)) continue;
     const good = { ...base, id: itemId };
     const now = town.stocks[itemId] || 0;
     const ref = town.priceStock[itemId] ?? now;
@@ -366,6 +372,17 @@ function mineDailyOutput(town, good, stockNow, daysPerYear) {
   return Math.max(0, Math.min(annual / daysPerYear, cap - stockNow));
 }
 
+// 按需激活：我们的批发市场第一次持有该商品，外镇从此把它算进消耗与繁荣度。
+function activateStockedGoods(state, town, profile) {
+  for (const [itemId, base] of Object.entries(profile.goods)) {
+    if (!base.activeWhenStocked || town.activeGoods?.[itemId]) continue;
+    if ((state.wholesaleMarket?.inventory?.[itemId] || 0) > 0) {
+      town.activeGoods ||= {};
+      town.activeGoods[itemId] = true;
+    }
+  }
+}
+
 export function advanceOutsideTownDay(state, content) {
   const towns = ensureOutsideTowns(state, content);
   const staffed = buildingOperational(state, "foreign_trade_house");
@@ -374,9 +391,11 @@ export function advanceOutsideTownDay(state, content) {
   for (const town of Object.values(towns)) {
     const profile = outsideTownProfile(content, town.id);
     if (!profile) continue;
+    activateStockedGoods(state, town, profile);
     let score = 0;
     let weightUsed = 0;
     for (const [itemId, base] of Object.entries(profile.goods)) {
+      if (!goodActive(town, itemId, base)) continue;
       const good = { ...base, id: itemId };
       const need = dailyNeed(town, good);
       let stock = (town.stocks[itemId] || 0) + town.population * good.producePerPersonDay;

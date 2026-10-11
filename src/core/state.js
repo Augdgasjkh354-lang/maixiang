@@ -289,6 +289,8 @@ export function createInitialState(options) {
       shopRentVoucher: content.rules.shopRentDefaultVoucher ?? 1,
       // 粮券收购（systems/voucher-buyback.js，默认关）：开关；每日收购小麦上限（斤）；比价（每 1 粮券给多少斤小麦，0.5—2，一位小数）。
       voucherBuyback: { enabled: false, dailyWheatJin: 50000, wheatPerVoucher: 1 },
+      // 斗兽场政策（systems/arena.js，默认值见 content/rules.js 的 arena.defaults）：每日抓兽目标、每日搏斗数、押注抽成（%）、存栏上限。
+      arena: { dailyCaptureTarget: 100, dailyFights: 100, rakePercent: 10, beastCapacity: 2000 },
       stallRentVoucher: content.rules.stallRentDefaultVoucher ?? 2,
       stallKeeperLimit: content.rules.stallKeeperDefaultLimit ?? 50,
       stallRentFreeUntilSerial: 0,
@@ -361,6 +363,8 @@ export function createInitialState(options) {
     stampDuty: { day: {}, year: {}, cumulative: {} },
     // 粮券收购账（粮券，三段记账；政策在 policy.voucherBuyback）。rotation：每户轮转起点（按户序号）。
     voucherBuyback: { rotation: 0, day: {}, year: {}, cumulative: {} },
+    // 斗兽场（金银消费第四期，systems/arena.js）：beasts 存栏兽数；beastCarry 饿死余数；opened 建成首日已放入开场存栏；三段记账 day/year/cumulative。
+    arena: { beasts: 0, beastCarry: 0, opened: false, day: {}, year: {}, cumulative: {} },
     shops: {},
     nextShopNumber: 1,
     services: {

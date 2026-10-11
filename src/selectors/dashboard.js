@@ -1,4 +1,5 @@
 import { BUILDING_PRESENTATION } from "../content/world.js";
+import { selectArena } from "./arena.js";
 import { MODS } from "../mods/registry.js";
 import { selectModViews } from "../mods/api.js";
 import { industryTypeIds, isIndustryType } from "../content/buildings.js";
@@ -618,6 +619,7 @@ export function selectDashboard(state, content, selection) {
     wholesaleTrends: (needBusiness || needSite) ? wholesaleTrends(state, content) : null,
     ipo: (needBusiness || needSite) ? selectIpoView(state, content) : null,
     servicePricesVoucherPerUse: (needBusiness || needSite) ? { ...(state.services?.pricesVoucherPerUse || {}) } : {},
+    arena: (needBusiness || needSite) ? selectArena(state, content) : null,
     residentFoodDays: selectFoodDays(state, content, false),
     totalFoodDays: needBusiness ? selectFoodDays(state, content, true) : 0,
     dailyNeed,
