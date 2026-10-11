@@ -312,6 +312,8 @@ export const RULES = Object.freeze({
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
   townOutputStockDays: 360, // 备货天数：目标库存相当于多少天的需求
+  // 个别商品的备货天数覆盖：面包是易囤的成品，备太多会把磨坊有限的面粉全占走，居民买不到面粉（体检：面粉零售 0%、面包库存越堆越多）。
+  townOutputStockDaysByItem: Object.freeze({ bread: 30 }),
   // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
   townWheatReserveDays: 180,
   // 外贸稳定性（docs/TRADE.md「外镇价格与贸易行暂停」）。

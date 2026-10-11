@@ -4,7 +4,7 @@
 // 看经济能否自我维持、在哪里崩。只读取模拟状态，不改 src/。
 //
 // 用法：
-//   node scripts/health-check.mjs [years=10] [--seed 91] [--json out.json]
+//   node scripts/health-check.mjs [years=10] [--seed 91] [--json out.json] [--no-fill-capacity]
 //
 // 起点（只在开局发生一次，之后不再注资）：
 //   - 镇库 50000 斤木材（开局建造用，与 demand-probe 相同）；
@@ -13,10 +13,10 @@
 //   - 其余建筑按 demand-probe 的岗位数配人（磨坊/面包房 10，盐场/伐木场 12，啤酒坊 4、精酿坊 2、酒坊 4、窖坊 2，棉田 8，织坊 6）。
 //
 // 玩家策略（每年年初、第 1 天开工前执行一次，确定性，不随机）：
-//   1. 保持镇营生产岗位满员：每个镇营生产建筑（带 industryTier 的 mill/bakery/saltworks/lumberyard/
-//      brewery/craft_brewery/winery/premium_winery/cotton_field/weaving_mill）的每个岗位都有一个"计划人数"，初始为开局配人数。
-//      每年若在岗人数低于计划人数（且不超过岗位产能），就补到计划人数；从不主动裁员。
-//      若建筑升级后等级提高，计划人数改为升级后的满额产能（新岗位要招满）。
+//   1. 保持镇营生产岗位满员（默认；--no-fill-capacity 恢复旧行为：计划人数钉在开局配人数）：
+//      每个镇营生产建筑（带 industryTier 的 mill/bakery/saltworks/lumberyard/
+//      brewery/craft_brewery/winery/premium_winery/cotton_field/weaving_mill）每年年初把岗位补到产能满额，
+//      新招人数受全镇闲置人口限制（不挖别的岗位、不超过可用人口）；从不主动裁员。
 //   2. 磨坊、面包房每年升一级：若该建筑没有在建工程、未达最高等级（10 级）、且 selectUpgradePreview
 //      显示材料可付（镇库木材不足时允许从批发市场采购，由镇库付券），就调用真实的 upgradeBuilding 命令。
 //      其他建筑不升级。
@@ -29,7 +29,10 @@
 //   - 家底：householdWealthUnits（粮券 + 可折算余粮），按人口加权取 p10/p50/p90，单位为人均粮券。
 //   - 年收支：来自年报（report.fiscal / report.financialFlows.year.town）。
 //   - 店铺利润、农场、时代广场：年报里的店铺年账（年末）或实时年账（第 180 天）。
-//   - 日用品履约 = 年内用上量 / 年内需求量；服务履约 = 年内服务人次 / 年内想用人次。
+//   - 日用品履约 = 年内用上量 / 年内需求量；无产业的商品（没有任何建筑产出它）显示「无产业」，不计入履约。
+//   - 服务履约 = 年内服务人次 / 年内新增需求人次（services.day.demandedUses，不含积压重复计数）；
+//     有需求但没有营业中的服务店显示「无店」。旧口径 servedPercent（服务人次 / 想用人次）仍保留在 JSON 里。
+//     每项另记单店日容量、单店容量利用率（服务人次 / 店日容量）、没钱/容量不足的人次。
 
 import { writeFile } from "node:fs/promises";
 import { simulation as defaultSimulation, createSimulation, CONTENT as DEFAULT_CONTENT } from "../src/engine.js";
@@ -38,7 +41,7 @@ import { issueTownVouchers, transferVouchers } from "../src/economy/currency.js"
 import { householdList, householdPopulation, isActiveHousehold, residentVoucherUnits } from "../src/systems/households.js";
 import { householdWealthUnits, householdBudgets } from "../src/systems/household-budget.js";
 import { populationStats, selectJobRows } from "../src/selectors/labor.js";
-import { shopSummaries, stallSquareSummaries } from "../src/systems/shops.js";
+import { shopSummaries, stallSquareSummaries, shopDefinition, serviceShopCapacityUses } from "../src/systems/shops.js";
 
 // --households N：开局户数（默认 250），用于规模与性能测试。
 const householdsArg = (() => { const k = process.argv.indexOf("--households"); return k >= 0 ? Number(process.argv[k + 1]) : null; })();
@@ -53,10 +56,11 @@ const PRICE_ITEMS = ["flour", "bread", "salt", "wood", "beer", "baijiu", "cloth"
 const OUTSIDE_TOWN_IDS = Object.keys(CONTENT.outsideTowns || {});
 
 function parseArgs(argv) {
-  const opts = { years: 10, seed: 91, json: null, wealthTax: null, inheritance: null, employerShare: null };
+  const opts = { years: 10, seed: 91, json: null, wealthTax: null, inheritance: null, employerShare: null, fillCapacity: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--seed") opts.seed = Number(argv[++i]);
+    else if (a === "--no-fill-capacity") opts.fillCapacity = false; // 对照用：生产建筑钉在开局配人数（旧行为）
     else if (a === "--json") opts.json = argv[++i];
     // 再分配政策（docs/REDISTRIBUTION.md）：--wealth-tax 1,3,5（三档年税率%）、--inheritance 30、--employer-share 100
     else if (a === "--wealth-tax") opts.wealthTax = argv[++i].split(",").map(Number);
@@ -124,8 +128,12 @@ function initPlan(state) {
   return plan;
 }
 
-function yearStartPolicy(state, plan, levelSeen) {
-  const log = { upgrades: [], refills: 0, upgradeRejects: [] };
+function yearStartPolicy(state, plan, levelSeen, { fillCapacity = true } = {}) {
+  const log = { upgrades: [], refills: 0, hired: 0, idleLeft: null, upgradeRejects: [] };
+  const isProducerRow = row => {
+    const b = state.buildings.find(x => x.id === row.buildingId);
+    return Boolean(b && isTownProducer(b) && row.scope === "building");
+  };
   // 1) 升级已完成的建筑：计划人数改为满额产能。
   let rows = selectJobRows(state, CONTENT).rows;
   for (const b of state.buildings) {
@@ -136,16 +144,32 @@ function yearStartPolicy(state, plan, levelSeen) {
     }
     levelSeen[b.id] = lvl;
   }
-  // 2) 补员：只补到计划人数（不超过产能），从不裁员。
-  rows = selectJobRows(state, CONTENT).rows;
-  for (const row of rows) {
-    if (!(row.key in plan)) continue;
-    const want = Math.min(row.capacity, plan[row.key]);
-    if (row.count < want) {
-      const r = simulation.setEmployment(state, row.key, want);
-      if (r && r.ok !== false) log.refills++;
+  // 1b) 补到产能（默认）：计划人数 = 满额产能（新建、升级、新增产业一视同仁）。
+  const planToCapacity = rowList => {
+    if (!fillCapacity) return;
+    for (const row of rowList) if (isProducerRow(row)) plan[row.key] = row.capacity;
+  };
+  planToCapacity(rows);
+  // 2) 补员：只补到计划人数（不超过产能），从不裁员。补到产能模式下新招人数受全镇闲置人口限制（只招闲人，不挖别的岗位）。
+  const refill = () => {
+    const labor = selectJobRows(state, CONTENT);
+    let idle = fillCapacity ? labor.idle : Infinity;
+    for (const row of labor.rows) {
+      if (!(row.key in plan)) continue;
+      const want = Math.min(row.capacity, plan[row.key]);
+      if (row.count >= want) continue;
+      const add = Math.min(want - row.count, idle);
+      if (!(add > 0)) continue;
+      const r = simulation.setEmployment(state, row.key, row.count + add);
+      if (r && r.ok !== false) {
+        log.refills++;
+        log.hired += add;
+        if (fillCapacity) idle -= add;
+      }
     }
-  }
+    if (fillCapacity) log.idleLeft = Math.max(0, idle);
+  };
+  refill();
   // 3) 磨坊、面包房升一级（若材料可付且无在建工程）。
   for (const b of state.buildings) {
     if (!UPGRADE_TYPES.includes(b.typeId) || !isTownProducer(b)) continue;
@@ -164,8 +188,33 @@ function newAcc() {
   return {
     days: 0, shortDays: 0, satSum: 0,
     goodsDemand: {}, goodsUsed: {}, goodsBought: {},
-    svcAttempt: {}, svcServed: {}, svcUnaff: {}, svcCap: {}
+    svcAttempt: {}, svcServed: {}, svcUnaff: {}, svcCap: {}, svcDemand: {}, svcCapDays: {}, svcShopDays: {}
   };
+}
+
+// 每种服务的营业店数与店日容量（每天加一次：营业中的服务店按 serviceShopCapacityUses 算当天容量）。
+function serviceShopsToday(state) {
+  const out = {};
+  for (const shop of Object.values(state.shops || {})) {
+    if (shop.status !== "open") continue;
+    const def = shopDefinition(CONTENT, shop.typeId);
+    if (def?.kind !== "service" || !def.serviceId) continue;
+    const row = out[def.serviceId] ||= { shops: 0, capacity: 0 };
+    row.shops++;
+    row.capacity += serviceShopCapacityUses(state, shop, CONTENT);
+  }
+  return out;
+}
+
+// 只读的生产建筑产出表：商品 id -> 产出它的已建建筑数（有任何建筑产出即「有产业」）。
+function producedGoodBuildings(state) {
+  const out = {};
+  for (const b of state.buildings || []) {
+    const recipeId = CONTENT.buildings[b.typeId]?.recipeId;
+    const recipe = recipeId ? CONTENT.recipes?.[recipeId] : null;
+    for (const o of recipe?.outputs || []) out[o.itemId] = (out[o.itemId] || 0) + 1;
+  }
+  return out;
 }
 
 function accumulate(acc, state, ret) {
@@ -179,11 +228,15 @@ function accumulate(acc, state, ret) {
     acc.goodsBought[k] = (acc.goodsBought[k] || 0) + (g?.purchasedUnits?.[k] || 0);
   }
   const s = state.services?.day;
+  const today = serviceShopsToday(state);
   for (const k of Object.keys(CONTENT.rules.serviceTypes)) {
     acc.svcAttempt[k] = (acc.svcAttempt[k] || 0) + (s?.attemptedUses?.[k] || 0);
     acc.svcServed[k] = (acc.svcServed[k] || 0) + (s?.servedUses?.[k] || 0);
     acc.svcUnaff[k] = (acc.svcUnaff[k] || 0) + (s?.unaffordableUses?.[k] || 0);
     acc.svcCap[k] = (acc.svcCap[k] || 0) + (s?.capacityUnmetUses?.[k] || 0);
+    acc.svcDemand[k] = (acc.svcDemand[k] || 0) + (s?.demandedUses?.[k] || 0);
+    acc.svcCapDays[k] = (acc.svcCapDays[k] || 0) + (today[k]?.capacity || 0);
+    acc.svcShopDays[k] = (acc.svcShopDays[k] || 0) + (today[k]?.shops || 0);
   }
 }
 
@@ -378,23 +431,38 @@ function snapshot(state, { year, day, report, acc, label, prevShopStatus, policy
     status: stallShop?.status || null, statusReason: stallShop?.statusReason || null
   } : null;
 
-  // 日用品：年内（或截至当天）用上 / 需求
+  // 日用品：年内（或截至当天）用上 / 需求。无产业的商品（没有任何已建建筑产出它）记「无产业」，不计履约。
+  const goodProducers = producedGoodBuildings(state);
   out.goods = {};
   for (const k of Object.keys(CONTENT.rules.householdGoods)) {
     const d = acc.goodsDemand[k] || 0;
+    const noIndustry = !goodProducers[k];
     out.goods[k] = {
       demandJin: r1(d / I), usedJin: r1((acc.goodsUsed[k] || 0) / I),
-      fulfilPercent: d > 0 ? r1((acc.goodsUsed[k] || 0) / d * 100) : null
+      fulfilPercent: !noIndustry && d > 0 ? r1((acc.goodsUsed[k] || 0) / d * 100) : null,
+      noIndustry, producerBuildings: goodProducers[k] || 0
     };
   }
-  // 服务：年内服务人次 / 想用人次
+  // 服务：年内服务人次 / 年内新增需求人次（demandedUses，不含积压重复计数）。
+  // 旧口径 servedPercent（服务人次 / 想用人次）保留；status: "无店"（有需求无营业店）/ "无需求" / null。
+  const shopsNow = serviceShopsToday(state);
   out.services = {};
   for (const k of Object.keys(CONTENT.rules.serviceTypes)) {
     const att = acc.svcAttempt[k] || 0;
+    const dem = acc.svcDemand[k] || 0;
+    const served = acc.svcServed[k] || 0;
+    const shopCount = shopsNow[k]?.shops || 0;
+    const capDays = acc.svcCapDays[k] || 0;
+    const shopDays = acc.svcShopDays[k] || 0;
     out.services[k] = {
-      attempted: Math.round(att), served: Math.round(acc.svcServed[k] || 0),
+      demanded: Math.round(dem), attempted: Math.round(att), served: Math.round(served),
       unaffordable: Math.round(acc.svcUnaff[k] || 0), capacityUnmet: Math.round(acc.svcCap[k] || 0),
-      servedPercent: att > 0 ? r1((acc.svcServed[k] || 0) / att * 100) : null
+      fulfilPercent: dem > 0 && shopCount > 0 ? r1(served / dem * 100) : null,
+      servedPercent: att > 0 ? r1(served / att * 100) : null,
+      shopsNow: shopCount,
+      capacityPerShopDay: shopDays > 0 ? r1(capDays / shopDays) : null,
+      shopUtilizationPercent: capDays > 0 ? r1(served / capDays * 100) : null,
+      status: shopCount === 0 ? "无店" : (dem <= 0 ? "无需求" : null)
     };
   }
 
@@ -464,10 +532,22 @@ function printTables(rows, meta) {
       pad(r.timesSquare?.keepers ?? "—", 8), pad(wan(r.timesSquare?.profit ?? null), 8), pad(wan(r.timesSquare?.distributedToKeepers ?? null), 9)].join(""));
   }
 
-  L("\n【六】日用品履约（用上/需求，%）与服务履约（%）");
+  L("\n【六】日用品履约（用上/需求，%）与服务履约（服务人次/新增需求人次，%；无店/无需求/无产业如实标出）");
   const goodKeys = Object.keys(CONTENT.rules.householdGoods);
-  L([pad("年", 8), ...goodKeys.map(k => pad(CONTENT.items[k]?.name?.slice(0, 2) || k, 7)), ...Object.keys(CONTENT.rules.serviceTypes).map(k => pad("服" + k.slice(0, 2), 7))].join(""));
-  for (const r of rows) L([pad(tag(r), 8), ...goodKeys.map(k => pad(r.goods[k].fulfilPercent, 7)), ...Object.keys(CONTENT.rules.serviceTypes).map(k => pad(r.services[k].servedPercent, 7))].join(""));
+  const serviceKeys = Object.keys(CONTENT.rules.serviceTypes);
+  const goodCell = g => (g.noIndustry ? "无产业" : g.fulfilPercent);
+  const svcCell = s => (s.status === "无店" ? "无店" : s.status === "无需求" ? "无需求" : s.fulfilPercent);
+  L([pad("年", 8), ...goodKeys.map(k => pad(CONTENT.items[k]?.name?.slice(0, 2) || k, 7)), ...serviceKeys.map(k => pad("服" + CONTENT.rules.serviceTypes[k].name.slice(0, 2), 7))].join(""));
+  for (const r of rows) L([pad(tag(r), 8), ...goodKeys.map(k => pad(goodCell(r.goods[k]), 7)), ...serviceKeys.map(k => pad(svcCell(r.services[k]), 7))].join(""));
+
+  L("\n【六之二】服务明细：需求/服务人次（年），营业店数、单店日容量、单店容量利用率（服务/容量）、没钱与容量不足人次（年）");
+  L([pad("年", 8), pad("服务", 8), pad("需求", 9), pad("服务人次", 10), pad("履约%", 8), pad("店数", 6), pad("店日容量", 10), pad("容量利用%", 11), pad("没钱", 9), pad("容量不足", 10)].join(""));
+  for (const r of rows) for (const k of serviceKeys) {
+    const s = r.services[k];
+    L([pad(tag(r), 8), pad(CONTENT.rules.serviceTypes[k].name.slice(0, 4), 8), pad(s.demanded, 9), pad(s.served, 10),
+      pad(svcCell(s), 8), pad(s.shopsNow, 6), pad(s.capacityPerShopDay, 10), pad(s.shopUtilizationPercent, 11),
+      pad(s.unaffordable, 9), pad(s.capacityUnmet, 10)].join(""));
+  }
 
   L("\n【七】外镇（人口 / 繁荣度）");
   L([pad("年", 8), ...OUTSIDE_TOWN_IDS.map(id => pad(id.slice(0, 4) + "人口", 11)), ...OUTSIDE_TOWN_IDS.map(id => pad(id.slice(0, 4) + "繁荣", 11))].join(""));
@@ -476,7 +556,7 @@ function printTables(rows, meta) {
   L("\n【八】玩家策略日志（年初执行）");
   for (const r of rows.filter(x => !x.mid)) {
     const p = r.policy || {};
-    L(`  ${r.year} 年：补员 ${p.refills ?? 0} 次；升级 ${p.upgrades?.join("、") || "无"}；未升级 ${p.upgradeRejects?.join("；") || "无"}`);
+    L(`  ${r.year} 年：补员 ${p.refills ?? 0} 次（新招 ${p.hired ?? 0} 人${p.idleLeft != null ? `，补员后闲置 ${p.idleLeft} 人` : ""}）；升级 ${p.upgrades?.join("、") || "无"}；未升级 ${p.upgradeRejects?.join("；") || "无"}`);
   }
 }
 
@@ -501,7 +581,7 @@ async function main() {
   let midDone = false;
   // 起点快照（第 0 天）不记录，只记录年末与第 1 年第 180 天。
   for (let y = 1; y <= opts.years; y++) {
-    const policy = yearStartPolicy(state, plan, levelSeen);
+    const policy = yearStartPolicy(state, plan, levelSeen, { fillCapacity: opts.fillCapacity });
     const acc = newAcc();
     while (state.year === y) {
       const ret = simulation.advanceDay(state);

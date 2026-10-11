@@ -690,7 +690,8 @@ export function townOutputMarketRoomUnits(state, itemId, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   const demand = wholesaleAvgDemandUnits(state, itemId, content, 7);
   const minimum = (content.rules.townOutputMinStockJin ?? 200) * scale;
-  const target = Math.max(minimum, demand * (content.rules.townOutputStockDays ?? 30));
+  const stockDays = content.rules.townOutputStockDaysByItem?.[itemId] ?? content.rules.townOutputStockDays ?? 30;
+  const target = Math.max(minimum, demand * stockDays);
   const stock = Math.max(0, state.wholesaleMarket?.inventory?.[itemId] || 0) + Math.max(0, state.accounts?.town?.[itemId] || 0);
   return Math.max(0, target - stock);
 }

@@ -168,7 +168,9 @@ function processServiceDemandNow(state, content) {
     return budgets.get(household.id);
   };
   const households = rotated(householdsBase, serviceState.rotation.households || 0);
-  const services = rotated(defs, serviceState.rotation.services || 0);
+  // 家庭服务预算按“基础优先”分配：收入敏感度低的服务先满足，贫困家庭先保住基础服务、先砍高档消遣；
+  // 固定顺序取代原来的每日轮换（轮换会让靠后的服务隔天饿死，日履约忽高忽低）。
+  const services = [...defs].sort((x, y) => (Number(x.incomeSensitivity) || 1) - (Number(y.incomeSensitivity) || 1) || x.id.localeCompare(y.id));
   let totalSpent = 0;
 
   for (const def of services) {
@@ -187,9 +189,9 @@ function processServiceDemandNow(state, content) {
       serviceState.day.attemptedUses[def.id] = (serviceState.day.attemptedUses[def.id] || 0) + dailyNeed;
       const sensitivity = Math.max(0.25, Number(def.incomeSensitivity) || 1);
       const budget = budgetOf(household) || 0;
-      // 高收入敏感服务（茶馆）需要更宽裕的预算，基础服务更容易被购买。
-      const effectivePrice = Math.ceil(price * sensitivity);
-      const affordableUses = Math.floor(budget / Math.max(price, effectivePrice));
+      // 高收入敏感服务（茶馆、戏园）要预算够“票价 × 敏感度”才肯去（门槛）；过了门槛按实际票价买，剩余预算不再作废。
+      const gatePrice = Math.ceil(price * sensitivity);
+      const affordableUses = budget >= Math.max(price, gatePrice) ? Math.floor(budget / price) : 0;
       let wanted = Math.min(dailyNeed, Math.max(0, affordableUses));
       serviceState.day.unaffordableUses[def.id] = (serviceState.day.unaffordableUses[def.id] || 0) + Math.max(0, dailyNeed - wanted);
       while (wanted > 0) {
@@ -227,7 +229,6 @@ function processServiceDemandNow(state, content) {
     if ((serviceState.day.servedUses[def.id] || 0) > 0) serviceState.rotation.shops[def.id] = (serviceState.rotation.shops[def.id] || 0) + 1;
   }
   serviceState.rotation.households = (serviceState.rotation.households || 0) + 1;
-  serviceState.rotation.services = (serviceState.rotation.services || 0) + 1;
   serviceState.day.spendingVoucherUnits = totalSpent;
   serviceState.history.push({ year: state.year, day: state.day + 1, demandedUses: { ...serviceState.day.demandedUses }, attemptedUses: { ...serviceState.day.attemptedUses }, servedUses: { ...serviceState.day.servedUses }, unaffordableUses: { ...serviceState.day.unaffordableUses }, capacityUnmetUses: { ...serviceState.day.capacityUnmetUses }, spendingVoucherUnits: totalSpent });
   const limit = Math.max(14, (content.rules.operatingObservationDays || 7) * 4);
