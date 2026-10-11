@@ -1086,15 +1086,17 @@ function accrueDailyLiabilities(state, shop, content) {
   const clerkWage = Math.round(clerkAssignments.reduce((sum, row) => sum + row.count, 0) * clerkRate * scale);
   const wage = merchantWage + clerkWage;
   // 负值保护：租金/工资取max(0)，避免负负债（之前无保护）。
-  const rentFree = shop.collective && stallRentFreeDaysLeft(state, content) > 0;
-  const rentVoucher = rentFree ? 0 : shopKind(shop, content) === "stall"
+  const rentVoucher = shopKind(shop, content) === "stall"
     ? (state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2)
     : (state.policy?.shopRentVoucher ?? content.rules.shopRentDefaultVoucher ?? 1);
   // 集体摊位按占用的摊位数交租（每摊最多 2 人）。
   const rentUnits = shop.collective ? Math.ceil(shopMerchantCount(state, shop) / 2) : 1;
   // 镇营综合商店不交店租（镇库自己的店）。
-  const rent = shop.town ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
-  if (rentFree) addBookValue(shop, "rentWaivedVoucherUnits", Math.round((state.policy?.stallRentVoucher ?? content.rules.stallRentDefaultVoucher ?? 2) * rentUnits * scale));
+  const rentDue = shop.town ? 0 : Math.max(0, Math.round(rentVoucher * rentUnits * scale));
+  // 免租期内，或集市断货无钱且持续无成交（见 collectiveStranded）：不累计店租，记入 rentWaivedVoucherUnits。
+  const rentFree = shop.collective && (stallRentFreeDaysLeft(state, content) > 0 || collectiveStranded(state, shop, content));
+  const rent = rentFree ? 0 : rentDue;
+  if (rentFree && rentDue > 0) addBookValue(shop, "rentWaivedVoucherUnits", rentDue);
   // 基线清理：店主本人的商人岗位不产生工资债权（拿利润）。
   if (!shop.collective) accrueWages(state, shop.liabilities, merchantAssignments.filter(row => row.householdId !== shop.ownerHouseholdId), merchantWage, content);
   accrueWages(state, shop.liabilities, clerkAssignments, clerkWage, content);
@@ -1113,7 +1115,9 @@ function payLiability(state, shop, key, destination, content, type, reason) {
   const due = shop.liabilities[key] || 0;
   if (due <= 0) return 0;
   const paymentKey = key === "rentVoucherUnits" ? "rentPaymentClaim" : "taxPaymentClaim";
-  const obligation = normalizePaymentObligation(shop.liabilities[paymentKey] || due, state);
+  // 支付构成与欠款应一致；取较大者，防止 claim 落后于欠款时付款额被压成 0。
+  const claimed = normalizePaymentObligation(shop.liabilities[paymentKey] || due, state);
+  const obligation = currentPaymentComposition(state, Math.max(claimed.valueUnits, due));
   const result = settleMonetaryPayment(state, `shop:${shop.id}`, destination, obligation, content, type, reason,
     { requireFull: false });
   const paid = result.paidValueUnits || 0;
@@ -1410,17 +1414,33 @@ export function stallDiscountPerUnit(state, content) {
   return tiers[tier] || 0;
 }
 
-// 集市没钱也没货、垫款已还清时，镇库再垫一次启动资金，避免永久停摆。
-export function refundCollectiveIfStranded(state, shop, content) {
-  if (!shop?.collective || (shop.townAdvanceVoucherUnits || 0) > 0) return false;
+// 集市断货、无钱（不够一次周转金的四分之一）。
+function collectiveCashStranded(state, shop, content) {
   const stock = shopRetailItemIds(shop, content).reduce((sum, itemId) => sum + (shop.inventory?.[itemId] || 0), 0);
   const cash = maximumPayableValueUnits(state, `shop:${shop.id}`, content);
   const advance = Math.round((shopDefinition(content, shop.typeId)?.startupVoucher ?? 200) * currencyScale(content));
-  if (stock > 0 || cash >= advance / 4) return false;
+  return { stranded: stock <= 0 && cash < advance / 4, advance };
+}
+
+// 集市断货无钱、镇库垫款未还，且连续 N 天没有成交（默认 30 天，rules.stallStrandedWaiverDays）：视为停摆。
+// 停摆期间不再累计店租（记 rentWaivedVoucherUnits），并允许镇库再垫周转金，摆摊/进货恢复后继续。
+export function collectiveStranded(state, shop, content) {
+  if (!shop?.collective) return false;
+  if (!collectiveCashStranded(state, shop, content).stranded) return false;
+  return (shop.idleDays || 0) >= (content.rules.stallStrandedWaiverDays ?? 30);
+}
+
+// 集市没钱也没货时，镇库再垫一次周转金，避免永久停摆。
+// 垫款未还时只有停摆（collectiveStranded）才再垫；垫款累计记在 townAdvanceVoucherUnits 上，卖出后先还镇库。
+export function refundCollectiveIfStranded(state, shop, content) {
+  if (!shop?.collective) return false;
+  const { stranded, advance } = collectiveCashStranded(state, shop, content);
+  if (!stranded) return false;
+  if ((shop.townAdvanceVoucherUnits || 0) > 0 && !collectiveStranded(state, shop, content)) return false;
   const paid = settleMonetaryPayment(state, "town", `shop:${shop.id}`, currentPaymentComposition(state, advance), content,
     "collective_shop_advance", `镇库再次垫付${shop.name}周转金`, { requireFull: false });
-  shop.townAdvanceVoucherUnits = paid.paidValueUnits || 0;
-  return shop.townAdvanceVoucherUnits > 0;
+  shop.townAdvanceVoucherUnits = (shop.townAdvanceVoucherUnits || 0) + (paid.paidValueUnits || 0);
+  return (paid.paidValueUnits || 0) > 0;
 }
 
 // 广场拆除时结束集市：结清欠款、先还镇库垫款、余钱按人头分给摆摊家庭、剩货归镇库，然后删档。
@@ -1711,12 +1731,15 @@ export function finishShopsDay(state, content, forceSettlement = false) {
     const noOperatingAssets = shopIsService(shop, content) ? false : retailStock <= 0;
     // 贸易行不因无生意而累计坏日子：连续 tradeHousePauseDays 天无买卖且亏损由 trading-houses.js 暂停营业，暂停中不进清算。
     // 镇营综合商店不因连续无生意累计坏日子（不自动关店，由玩家关）。
+    // 集市连续无成交天数：断货无钱时据此豁免店租、允许镇库再垫（见 collectiveStranded）。
+    if (shop.collective) shop.idleDays = activity > 0 ? 0 : (shop.idleDays || 0) + 1;
     if (tradeHouse || shop.town) shop.badDays = 0;
     else if (activity <= 0 && (noOperatingAssets || maximumPayableValueUnits(state, `shop:${shop.id}`, content) <= 0 || arrears > 0)) shop.badDays = (shop.badDays || 0) + 1;
     else if (activity > 0 || arrears <= 0) shop.badDays = 0;
     const settlement = settleShopTaxAndDistribution(state, shop, content, forceSettlement);
     if ((shop.liabilities.wageVoucherUnits || 0) > 0) shop.statusReason = "欠薪";
     else if (maximumPayableValueUnits(state, shopAccountName(shop), content) <= 0 && arrears > 0) shop.statusReason = "资金不足";
+    else if (shop.town && shopClerkCount(state, shop) <= 0) shop.statusReason = "无店员";
     else if (shopKind(shop, content) === "trade") shop.statusReason = activity > 0 ? "营业中" : "暂无可做的买卖";
     else if (!shopIsService(shop, content) && retailStock <= 0) shop.statusReason = "缺货";
     else if (activity <= 0) shop.statusReason = shopIsService(shop, content) ? "需求不足" : "销量不足";
@@ -1829,6 +1852,9 @@ export function closeShop(state, shopId, content, automatic = false) {
     shop.liabilities.rentVoucherUnits = 0;
     shop.liabilities.taxVoucherUnits = 0;
     shop.liabilities.claimsVoucherUnits = {};
+    shop.liabilities.claimsPayment = {};
+    shop.liabilities.rentPaymentClaim = currentPaymentComposition(state, 0);
+    shop.liabilities.taxPaymentClaim = currentPaymentComposition(state, 0);
     recordEvent(state, `${shop.name}清算${liquidatingDays}天仍资不抵债，${Math.round(writtenOff / content.precision.currencyUnitsPerVoucher)}券坏账核销，强制关闭。`, content);
   }
   const finalized = finalizeShopLiquidation(state, shop, content);

@@ -42,7 +42,7 @@
 
 ## 关税
 
-- 在贸易中心设进口、出口两个税率（`state.policy.tradeTariff`，默认 0%，上限 `tradeTariffMaximumPercent` 50%），只对贸易行征收：出口按外镇付的货款、进口按付给外镇的货款计，交镇库（账本 `trade_tariff`）。付不起的部分记店铺欠税，之后照常追缴。
+- 在贸易中心设进口、出口两个税率（`state.policy.tradeTariff`，默认 0%，上限 `tradeTariffMaximumPercent` 50%），只对贸易行征收：出口按外镇付的货款、进口按付给外镇的货款计，交镇库（账本 `trade_tariff`）。付不起的部分记店铺欠税，之后照常追缴（欠税与利润税同一笔欠款，同口径登记支付构成，日结按店里现金逐日收回；部分支付按实付额入账，不会既付了又记欠）。
 - 贸易行挑生意时把关税算进成本：税高了利润不够门槛，这条生意就不做。出口税压出口、进口税压进口，用来调本地供应与外贸的取舍。
 - 镇长手动外贸和长期协定是镇里自己的货，不对自己收税。
 - 统计：`state.tradeTariffs.cumulativeVoucherUnits` 与 `byYear[年]`；每家贸易行日志行 `tariffVoucherUnits`。
