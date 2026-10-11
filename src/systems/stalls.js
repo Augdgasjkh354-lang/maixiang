@@ -43,18 +43,24 @@ function collectiveFor(state, square, content) {
   return shops.find(shop => shop.collective && shop.status !== "closed") || openCollectiveShop(state, square, "stall", content);
 }
 
+// 摆摊人数按“人均日分成”自调节（蓄水池）：目标 = max(销量所需人手, 净利润 ÷ 目标人均日分成)。
+// 利润高、人均超出目标 → 更多待业者加入摊薄；利润薄 → 目标人手由销量决定（至少让每个摊主满载 85%），亏损则收摊减人。
+// 偏差在 ±15% 以内不动，单次最多调 20%，防止来回抖动。
 function targetKeepers(state, shop, content, current) {
   const def = shopDefinition(content, shop.typeId);
+  const scale = content.precision.currencyUnitsPerVoucher || 1;
   const perKeeper = (def.perKeeperSalesJin || 25) * content.precision.inventoryUnitsPerJin;
   const history = (shop.history || []).slice(-7);
   if (current <= 0) return goodsAvailable(state, content) ? START_KEEPERS : 0;
   if (history.length < ADJUST_DAYS) return current;
   const sold = average(history, row => row.soldUnits);
   const profit = average(history, row => row.profitVoucherUnits);
-  const utilization = sold / (current * perKeeper);
-  if (profit < 0 || utilization < 0.5) return current - Math.max(1, Math.floor(current * 0.2));
-  if (utilization >= 0.85 && profit > 0) return current + Math.max(2, Math.ceil(current * 0.2));
-  return current;
+  if (profit < 0) return current - Math.max(1, Math.floor(current * 0.2));
+  const targetIncome = Math.max(1, content.rules.stallTargetIncomeVoucher ?? 25) * scale;
+  const wanted = Math.max(Math.ceil(sold / (perKeeper * 0.85)), Math.round(profit * 0.9 / targetIncome), START_KEEPERS);
+  if (Math.abs(wanted - current) <= Math.max(1, current * 0.15)) return current;
+  const step = Math.max(1, Math.ceil(current * 0.2));
+  return wanted > current ? Math.min(wanted, current + step) : Math.max(wanted, current - step);
 }
 
 export function manageStalls(state, content) {

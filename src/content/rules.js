@@ -129,6 +129,7 @@ export const RULES = Object.freeze({
   stallRentDefaultVoucher: 2,
   // 时代广场集市：默认允许摆摊人数。
   stallKeeperDefaultLimit: 50,
+  stallTargetIncomeVoucher: 25, // 集市摆摊人数的自调节目标：摊主人均日分成（券）；利润高于它就吸纳更多待业者摊薄，见 stalls.js 的 targetKeepers
   // 集市补贴：免租时长（天，三个月/半年/一年/三年）；批发特价三档，每斤少收 0.1/0.2/0.4 斤小麦（第 0 档不打折）。
   stallRentFreeOptionsDays: Object.freeze([90, 180, 360, 1080]),
   stallWholesaleDiscountTiers: Object.freeze([0, 0.1, 0.2, 0.4]),
