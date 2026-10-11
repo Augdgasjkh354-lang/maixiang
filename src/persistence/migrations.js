@@ -10,7 +10,7 @@ import { syncShopEmployment } from "../systems/shops.js";
 import { syncResidentAggregates } from "../systems/households.js";
 import { convertSplitOwnership } from "../systems/ownership-migrate.js";
 import {
-  ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, resetFailingSubsystems, sanitizeNumbers
+  ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, repairHouseholdTable, resetFailingSubsystems, sanitizeNumbers
 } from "./save-compat.js";
 
 export const MIN_SAVE_VERSION = 18;
@@ -35,10 +35,23 @@ export function migrateSave(raw, content) {
   const stored = Math.max(Number(raw.schemaVersion) || 0, Number(raw.version) || 0);
   if (stored > current) throw new Error("该存档来自更新版本，当前版本无法读取。");
   if (stored < MIN_SAVE_VERSION) throw new Error("旧版存档不兼容，请开始新游戏。");
+  try {
+    return migrateCurrentVersion(raw, definitions, current);
+  } catch (error) {
+    // 结构坏到内部访问报 TypeError/RangeError 时，给玩家一句中文说明（原始错误留作 cause）。
+    if (error instanceof TypeError || error instanceof RangeError) {
+      throw new Error("存档数据结构损坏，无法读取：" + error.message, { cause: error });
+    }
+    throw error;
+  }
+}
 
+function migrateCurrentVersion(raw, definitions, current) {
   const report = emptyLoadReport();
   // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
   const saved = applyRenames(cloneJson(raw), report, definitions.modSave?.renames || []);
+  // 家庭表按实体 id 存、不走底板合并：先逐户补齐、丢弃危险键，修不了的抛中文错误。
+  repairHouseholdTable(saved, definitions, report);
   const base = createInitialState({ content: definitions });
   const entityMaps = new Set([...ENTITY_MAPS, ...(definitions.modSave?.entityMaps || [])]);
   const state = mergeOntoBase(cloneJson(base), saved, "", report, entityMaps);

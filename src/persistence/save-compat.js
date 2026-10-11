@@ -1,3 +1,5 @@
+import { createHousehold } from "../systems/households.js";
+
 // 存档兼容：让存档跨版本一直能读。三层兜底：
 //
 // 1. 补默认值：用当前版本的新开局状态当底板，把存档逐项盖上去。存档里没有的新字段自动取新默认值，
@@ -18,6 +20,8 @@ export const RENAMES = Object.freeze([
 export const ENTITY_MAPS = new Set(["households.byId"]);
 // 存档里出现这些键一律丢弃，防止原型污染。
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+// 一户家庭的必备字段（与 systems/households.js 的 createHousehold 一致），读档缺失时以新开局户补齐。
+const HOUSEHOLD_FIELDS = ["id", "name", "ageBands", "jobs", "inventory", "voucherUnits", "shares", "shopIds", "operatingRights", "income", "agricultureWorkUnits"];
 const FROM_CONTENT = new Set(["plots"]);
 // 校验失败时不允许单独重置的顶层键：它们和整体进度/货币恒等式绑在一起，重置反而会破坏一致性。
 const NEVER_RESET = new Set(["version", "schemaVersion", "year", "day", "accounts", "currency", "households", "cohorts", "buildings", "plots", "rng"]);
@@ -63,11 +67,28 @@ function kindOf(value) {
   return typeof value;
 }
 
-// 类型对不上（比如该是对象却存成了字符串、该是数字却是 null）时用新版本的默认值，并记一笔修复。
+// 能转成有限数字就转（数字字符串），否则返回 null。JSON 存不下 NaN/∞，它们在存档里就是 null。
+export function coerceNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  return null;
+}
+
+// 类型对不上（比如该是对象却存成了字符串）时用新版本的默认值，并记一笔修复。
+// 数值字段例外：读到 null、非有限数、数字字符串时，能转就转，否则归零，绝不取底板默认值
+// （库存、账户余额取底板默认会凭空变出货币和粮食）。
 export function mergeOntoBase(base, saved, path = "", report = null, entityMaps = ENTITY_MAPS) {
   if (FROM_CONTENT.has(path)) return base;
   if (saved === undefined) return base;
   const baseKind = kindOf(base);
+  if (baseKind === "number") {
+    if (typeof saved === "number" && Number.isFinite(saved)) return saved;
+    report?.repaired.push(path);
+    return coerceNumber(saved) ?? 0;
+  }
   if (baseKind !== "empty" && kindOf(saved) !== baseKind) {
     report?.repaired.push(path);
     return base;
@@ -80,6 +101,85 @@ export function mergeOntoBase(base, saved, path = "", report = null, entityMaps 
     result[key] = key in base ? mergeOntoBase(base[key], value, childPath, report, entityMaps) : value;
   }
   return result;
+}
+
+// 家庭表读档修复（家庭按实体 id 存，不走底板合并，所以在这里逐户补齐）：
+// - 键是危险键（__proto__ 等）：丢弃；值不是对象：丢弃该户（人口对不上时校验会给出中文错误）。
+// - id 与键不一致：以键为准。缺字段：以新开局户模板补齐。
+// - 数值 null / 数字字符串：能转就转，否则归零；库存 null 归零。
+// 每一处修复都写进读档报告。修不了的由后续校验抛中文错误。
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function numberInPlace(holder, key, path, report) {
+  const value = holder[key];
+  if (value === undefined || isFiniteNumber(value)) return;
+  holder[key] = coerceNumber(value) ?? 0;
+  report.repaired.push(`${path}.${key}`);
+}
+
+function safeKeys(object, path, report) {
+  return Object.keys(object).filter(key => {
+    if (!UNSAFE_KEYS.has(key)) return true;
+    report.repaired.push(`${path}.${key}`);
+    return false;
+  });
+}
+
+export function repairHouseholdTable(saved, content, report) {
+  const table = saved?.households;
+  if (!isPlainObject(table) || table.byId === undefined) return;
+  if (!isPlainObject(table.byId)) throw new Error("家庭数据损坏：家庭表不是对象，无法读取。");
+  const template = createHousehold(0, content);
+  const byId = {};
+  for (const key of safeKeys(table.byId, "households.byId", report)) {
+    const path = `households.byId.${key}`;
+    const entry = table.byId[key];
+    if (!isPlainObject(entry)) { report.repaired.push(path); continue; }
+    const household = { ...entry };
+    if (household.id !== key) { household.id = key; report.repaired.push(`${path}.id`); }
+    for (const field of HOUSEHOLD_FIELDS) {
+      if (household[field] === undefined) { household[field] = structuredClone(template[field]); report.repaired.push(`${path}.${field}`); }
+    }
+    if (!isPlainObject(household.ageBands)) { household.ageBands = structuredClone(template.ageBands); report.repaired.push(`${path}.ageBands`); }
+    for (const band of ["children", "workers", "elders"]) {
+      if (household.ageBands[band] === undefined) { household.ageBands[band] = 0; report.repaired.push(`${path}.ageBands.${band}`); }
+      else numberInPlace(household.ageBands, band, `${path}.ageBands`, report);
+    }
+    if (!isPlainObject(household.inventory)) { household.inventory = structuredClone(template.inventory); report.repaired.push(`${path}.inventory`); }
+    else {
+      const inventory = {};
+      for (const itemId of safeKeys(household.inventory, `${path}.inventory`, report)) {
+        const value = household.inventory[itemId];
+        if (value === undefined || isFiniteNumber(value)) { inventory[itemId] = value; continue; }
+        inventory[itemId] = coerceNumber(value) ?? 0;
+        report.repaired.push(`${path}.inventory.${itemId}`);
+      }
+      household.inventory = inventory;
+    }
+    if (!isPlainObject(household.jobs)) { household.jobs = {}; report.repaired.push(`${path}.jobs`); }
+    else {
+      const jobs = {};
+      for (const jobKey of safeKeys(household.jobs, `${path}.jobs`, report)) {
+        const value = household.jobs[jobKey];
+        if (isFiniteNumber(value)) { jobs[jobKey] = value; continue; }
+        jobs[jobKey] = coerceNumber(value) ?? 0;
+        report.repaired.push(`${path}.jobs.${jobKey}`);
+      }
+      household.jobs = jobs;
+    }
+    numberInPlace(household, "voucherUnits", path, report);
+    numberInPlace(household, "agricultureWorkUnits", path, report);
+    for (const field of ["shares", "income"]) {
+      if (!isPlainObject(household[field])) { household[field] = structuredClone(template[field]); report.repaired.push(`${path}.${field}`); }
+    }
+    for (const field of ["shopIds", "operatingRights"]) {
+      if (!Array.isArray(household[field])) { household[field] = structuredClone(template[field]); report.repaired.push(`${path}.${field}`); }
+    }
+    byId[key] = household;
+  }
+  table.byId = byId;
 }
 
 // 把 NaN / ±Infinity 归零，记录路径。

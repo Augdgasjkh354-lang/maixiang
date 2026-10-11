@@ -119,12 +119,17 @@ export function validateState(state, content) {
       if (!isActiveHousehold(household) && householdEmploymentCount(household) > 0) errors.push("无人家庭仍占用岗位：" + household.id);
     }
     for (const itemId of Object.keys(content.items)) {
-      const sum = households.reduce((total, h) => total + (h.inventory[itemId] || 0), 0);
+      const sum = households.reduce((total, h) => total + (h.inventory?.[itemId] || 0), 0);
       if (sum !== (state.accounts?.residents?.[itemId] || 0)) errors.push("居民汇总库存与家庭不一致：" + itemId);
     }
   }
   if (!Number.isFinite(state.policy?.employmentExchangeJin) || state.policy.employmentExchangeJin < (content.rules.employmentExchangeMinimumJin ?? 0) || state.policy.employmentExchangeJin > (content.rules.employmentExchangeMaximumJin ?? 50)) errors.push("就业换券额度无效");
   if (!Number.isFinite(state.policy?.shopRentVoucher) || state.policy.shopRentVoucher < 0) errors.push("店租设置无效");
+  // 利润率政策：0—200（一位小数由命令层保证）；缺省时由代码取 rules 默认值，所以只校验已设置的值。
+  for (const key of ["shopMarginPercent", "tradeMarginPercent", "tradeImportMarginPercent"]) {
+    const value = state.policy?.[key];
+    if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 200)) errors.push("利润率政策无效：" + key);
+  }
   {
     const rent = state.policy?.publicHousingRentPerResidentDayJin;
     const min = content.rules.publicHousingRentMinimumJin ?? 0;

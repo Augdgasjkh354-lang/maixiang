@@ -163,10 +163,11 @@ test("mergeOntoBase deep-merges objects, takes arrays and entity maps from the s
   );
 });
 
-test("mergeOntoBase records type mismatches and keeps the base value", () => {
+test("mergeOntoBase records type mismatches; non-object mismatches keep the base value, numeric nulls become 0", () => {
   const report = emptyLoadReport();
+  // 数值字段读到 null（原 NaN）不再取底板默认值（否则库存会凭空变回新开局数），改为 0 并记入报告。
   const merged = mergeOntoBase({ a: { b: 1 }, n: 2 }, { a: "text", n: null }, "", report);
-  assert.deepEqual(merged, { a: { b: 1 }, n: 2 });
+  assert.deepEqual(merged, { a: { b: 1 }, n: 0 });
   assert.deepEqual(report.repaired, ["a", "n"]);
 });
 
