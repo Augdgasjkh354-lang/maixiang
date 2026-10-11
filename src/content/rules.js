@@ -249,7 +249,7 @@ export const RULES = Object.freeze({
     haircut: Object.freeze({ id: "haircut", name: "理发店", basis: "person", cycleDays: 20, priceVoucher: 4, merchantCapacity: 24, clerkCapacity: 30, consumables: Object.freeze([]), comfort: 0.8, incomeSensitivity: 0.8 }),
     repair: Object.freeze({ id: "repair", name: "修补铺", basis: "household", cycleDays: 30, priceVoucher: 8, merchantCapacity: 14, clerkCapacity: 18, consumables: Object.freeze([]), comfort: 1.2, incomeSensitivity: 0.7 }),
     tea: Object.freeze({ id: "tea", name: "茶馆", basis: "person", cycleDays: 5, priceVoucher: 3, merchantCapacity: 40, clerkCapacity: 48, consumables: Object.freeze([]), comfort: 0.6, incomeSensitivity: 1.6 }),
-    school: Object.freeze({ id: "school", name: "学堂", basis: "child", cycleDays: 1, priceVoucher: 1, adjustablePrice: true, merchantCapacity: 50, clerkCapacity: 50, maxCapacity: 100, employeeOnlyCapacity: true, consumables: Object.freeze([]), comfort: 0.4, incomeSensitivity: 0.8 }),
+    school: Object.freeze({ id: "school", name: "学堂", basis: "child", cycleDays: 1, priceVoucher: 1, adjustablePrice: true, merchantCapacity: 40, clerkCapacity: 40, employeeOnlyCapacity: true, consumables: Object.freeze([]), comfort: 0.4, incomeSensitivity: 0.8 }),
     restaurant: Object.freeze({ id: "restaurant", name: "饭店", basis: "person", cycleDays: 5, priceVoucher: 4, merchantCapacity: 50, clerkCapacity: 50, employeeOnlyCapacity: true, consumables: Object.freeze([{ itemId: "wheat", quantity: 2 }]), mealReplacement: true, comfort: 1.0, incomeSensitivity: 1.0 }),
     // 戏园：富户的消遣。票价 6 券（茶馆的两倍），收入弹性 2.5，实际门槛约 15 券/场（票价 × 弹性，与茶馆同一口径，超出家庭日预算就买不起）；
     // 人工密集：每个店员只接待 6 人（茶馆 48 人）；舒心值 1.2（茶馆 0.6）。只有宽裕度 ≥ minAffluence 的家庭去。

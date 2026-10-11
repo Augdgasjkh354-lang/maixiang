@@ -92,7 +92,7 @@ test("镇营磨坊直接用镇库小麦生产，产出进入批发市场", () =>
   assert.ok(outputIntake.intakeUnits.flour > 0);
 });
 
-test("学堂100儿童上限且学费可调；饭店每餐耗2斤小麦并抵1人当日口粮", () => {
+test("学堂每位教员最多教40名学生、无单店上限且学费可调；饭店每餐耗2斤小麦并抵1人当日口粮", () => {
   const schoolState = legacyVoucherState({ seed: 110804 });
   const schoolStreet = addBuilding(schoolState, "commercial_street", "r08-school-street");
   const schoolOwner = fundedOwner(schoolState);
@@ -101,9 +101,11 @@ test("学堂100儿童上限且学费可调；饭店每餐耗2斤小麦并抵1人
   const school = schoolState.shops[schoolOpen.shopId];
   assert.equal(serviceShopCapacityUses(schoolState, school, CONTENT), 0);
   assert.equal(simulation.configureShopClerks(schoolState, school.id, 1).ok, true);
-  assert.equal(serviceShopCapacityUses(schoolState, school, CONTENT), 50);
+  assert.equal(serviceShopCapacityUses(schoolState, school, CONTENT), 40);
   assert.equal(simulation.configureShopClerks(schoolState, school.id, 2).ok, true);
-  assert.equal(serviceShopCapacityUses(schoolState, school, CONTENT), 100, "school capacity stays capped at 100 children");
+  assert.equal(serviceShopCapacityUses(schoolState, school, CONTENT), 80, "school capacity is 40 children per teacher, no per-shop cap");
+  assert.equal(simulation.configureShopClerks(schoolState, school.id, 5).ok, true);
+  assert.equal(serviceShopCapacityUses(schoolState, school, CONTENT), 200);
   assert.equal(simulation.configureServicePrice(schoolState, "school", 1.5).ok, true);
   assert.equal(schoolState.services.pricesVoucherPerUse.school, 1.5);
 
