@@ -106,6 +106,58 @@ export function renameItemIds(raw, report = null, path = "") {
   return raw;
 }
 
+// 酒坊整合（四种酒一座酒坊）：旧存档的啤酒坊 / 精酿坊 / 窖坊改成酒坊 winery，旧配方与旧岗位角色改成新的。
+// 建筑 id 保持不变（岗位键按"建筑 id::角色"拼接，改 id 会断开人手）；只改类型、配方、角色段。
+// 整棵存档树里：值恰等于旧类型 / 旧配方 / 旧角色 id 的改名；键或值里 "::<旧角色>"（其后可接 ::private / ::listed）的角色段改名；
+// 键恰等于旧类型或旧角色 id 的并入新 id（industryExperience 工日相加，其余取酒坊已有的值）。幂等：没有旧 id 时是空操作。
+export const BUILDING_TYPE_RENAMES = Object.freeze({ brewery: "winery", craft_brewery: "winery", premium_winery: "winery" });
+export const RECIPE_RENAMES = Object.freeze({ brewery_beer: "winery_brewing", craft_brewery_beer: "winery_brewing", winery_baijiu: "winery_brewing", premium_winery_baijiu: "winery_brewing" });
+export const JOB_ROLE_RENAMES = Object.freeze({ beer_brewers: "brewers", craft_brewers: "brewers", cellar_brewers: "brewers" });
+const LIQUOR_JOB_SEGMENT = /::(beer_brewers|craft_brewers|cellar_brewers)(?=::|$)/g;
+
+function renameLiquorText(text) {
+  if (Object.hasOwn(BUILDING_TYPE_RENAMES, text)) return BUILDING_TYPE_RENAMES[text];
+  if (Object.hasOwn(RECIPE_RENAMES, text)) return RECIPE_RENAMES[text];
+  if (Object.hasOwn(JOB_ROLE_RENAMES, text)) return JOB_ROLE_RENAMES[text];
+  return text.includes("::") ? text.replace(LIQUOR_JOB_SEGMENT, (_, role) => "::" + JOB_ROLE_RENAMES[role]) : text;
+}
+
+export function renameLiquorBuildings(raw, report = null, path = "") {
+  if (Array.isArray(raw)) {
+    raw.forEach((value, index) => {
+      if (typeof value === "string") {
+        const next = renameLiquorText(value);
+        if (next !== value) { raw[index] = next; report?.renamed.push(`${path}[${index}]`); }
+      } else renameLiquorBuildings(value, report, `${path}[${index}]`);
+    });
+    return raw;
+  }
+  if (!isPlainObject(raw)) return raw;
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (typeof value === "string") {
+      const next = renameLiquorText(value);
+      if (next !== value) { raw[key] = next; report?.renamed.push(`${path ? path + "." : ""}${key}`); }
+    } else if (typeof value === "object" && value !== null) {
+      renameLiquorBuildings(value, report, path ? `${path}.${key}` : key);
+    }
+  }
+  for (const key of Object.keys(raw)) {
+    if (UNSAFE_KEYS.has(key)) continue;
+    const to = Object.hasOwn(BUILDING_TYPE_RENAMES, key) ? BUILDING_TYPE_RENAMES[key]
+      : Object.hasOwn(JOB_ROLE_RENAMES, key) ? JOB_ROLE_RENAMES[key]
+      : key.includes("::") ? key.replace(LIQUOR_JOB_SEGMENT, (_, role) => "::" + JOB_ROLE_RENAMES[role]) : key;
+    if (to === key) continue;
+    const value = raw[key];
+    const existing = raw[to];
+    if (existing === undefined) raw[to] = value;
+    else if (typeof existing === "number" && typeof value === "number" && (path === "industryExperience" || path.endsWith(".industryExperience"))) raw[to] = existing + value;
+    delete raw[key];
+    report?.renamed.push(`${path ? path + "." : ""}${key} → ${to}`);
+  }
+  return raw;
+}
+
 function kindOf(value) {
   if (value === null || value === undefined) return "empty";
   if (Array.isArray(value)) return "array";

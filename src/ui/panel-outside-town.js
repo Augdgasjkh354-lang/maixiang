@@ -138,7 +138,8 @@ export function renderOutsideTown(view) {
     ? ta.agreements.map(agreementRow).join("")
     : `<div class="subtle">暂无长期协定。外贸房有人值守即可签约。</div>`;
   const signDisabled = !ot.foreignTradeOperational ? "disabled" : "";
-  const agreementItems = goods.map(good => `<option value="${escapeHtml(good.itemId)}">${escapeHtml(good.name)}（${escapeHtml(good.unit)}）</option>`).join("");
+  // 长协只限批发市场经营的商品（矿产等只走手动外贸，不进长协品类）。
+  const agreementItems = goods.filter(good => good.wholesale).map(good => `<option value="${escapeHtml(good.itemId)}">${escapeHtml(good.name)}（${escapeHtml(good.unit)}）</option>`).join("");
 
   return `${townSwitch(view, townId)}
     <h2>外贸 · ${escapeHtml(ot.name)}</h2>

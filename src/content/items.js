@@ -28,27 +28,28 @@ export const ITEMS = Object.freeze({
     id: "salt", name: "食盐", unit: "斤", category: "household",
     edible: false, qeq: null, openingCostWheatPerJin: 0
   }),
-  // 酒：享受品，不算口粮，四种（啤酒/白酒 × 普通/高档）。普通款面向所有人，高档款只有宽裕人家买（见 rules.householdGoods）。
-  // 高档款的工时是普通款的 1/3（陈酿），单价约 2.7 倍。棉花：织布原料。布：日用必需品（按匹）。
+  // 酒：享受品，不算口粮，四种（啤酒/白酒 × 普通/高档），由酒坊一座同时酿出。普通款面向所有人，高档款只有宽裕人家买（见 rules.householdGoods）。
+  // liquor 标记：酒类专售令（policy.liquorMonopoly）开启后，综合商店与时代广场停售，居民只向酒馆买。
+  // 棉花：织布原料。布：日用必需品（按匹）。
   beer: Object.freeze({
     wholesale: true, retail: true, storeOnly: true,
     id: "beer", name: "普通啤酒", unit: "斤", category: "household",
-    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true, liquor: true
   }),
   beer_premium: Object.freeze({
     wholesale: true, retail: true, storeOnly: true,
     id: "beer_premium", name: "高档啤酒", unit: "斤", category: "household",
-    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true, liquor: true
   }),
   baijiu: Object.freeze({
     wholesale: true, retail: true, storeOnly: true,
     id: "baijiu", name: "普通白酒", unit: "斤", category: "household",
-    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true, liquor: true
   }),
   baijiu_premium: Object.freeze({
     wholesale: true, retail: true, storeOnly: true,
     id: "baijiu_premium", name: "高档白酒", unit: "斤", category: "household",
-    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true
+    edible: false, qeq: null, openingCostWheatPerJin: 0, optionalRetail: true, liquor: true
   }),
   cotton: Object.freeze({
     wholesale: true,

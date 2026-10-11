@@ -56,7 +56,7 @@ function targetKeepers(state, shop, content, current) {
   const sold = average(history, row => row.soldUnits);
   const profit = average(history, row => row.profitVoucherUnits);
   if (profit < 0) return current - Math.max(1, Math.floor(current * 0.2));
-  const targetIncome = Math.max(1, content.rules.stallTargetIncomeVoucher ?? 25) * scale;
+  const targetIncome = Math.max(1, content.rules.stallTargetIncomeVoucher ?? 10) * scale;
   const wanted = Math.max(Math.ceil(sold / (perKeeper * 0.85)), Math.round(profit * 0.9 / targetIncome), START_KEEPERS);
   if (Math.abs(wanted - current) <= Math.max(1, current * 0.15)) return current;
   const step = Math.max(1, Math.ceil(current * 0.2));

@@ -81,11 +81,20 @@ export function suggestedSharePriceVoucher(valuationVoucher, totalShares) {
   return Math.max(0.01, Math.round(perShare * 100) / 100);
 }
 
-// 整栋估值（粮券）：与经营权选择器同一口径。
+// 挂牌估值倍数 = 业绩锚市盈率（100 ÷ stockFairYieldPercent）÷ 经营权估值的回本年数（5）。
+export const OPERATING_RIGHT_VALUATION_YEARS = 5;
+export function listingValuationMultiple(content) {
+  const yieldPercent = Number(content.rules.stockFairYieldPercent) || 4;
+  return Math.max(1, (100 / yieldPercent) / OPERATING_RIGHT_VALUATION_YEARS);
+}
+
+// 整栋估值（粮券）：经营权选择器的估值乘以挂牌倍数（有业绩/理论利润时），无利润信息的新建筑按建造材料价值。
 export function buildingValuationVoucher(state, buildingId, content) {
   if (!buildingId) return 0;
   const value = Number(selectOperatingRightPreview(state, buildingId, content).valuationWheatJin);
-  if (Number.isFinite(value) && value > 0) return value;
+  // 经营权估值是 5 年利润（回本 5 年），股价业绩锚是年利润 ÷ 4%（市盈率 25）。挂牌建议价按业绩锚的口径，乘以 倍数 = 25 ÷ 5，
+  // 否则首个有业绩日股价会被重估近 10 倍，而镇库/业主卖股只得公允价的约 1/10。
+  if (Number.isFinite(value) && value > 0) return value * listingValuationMultiple(content);
   // 新建筑还没有经营记录、估值为 0 时，按建造与升级材料的当前价值估，避免挂牌价落到最低一档。
   const building = (state.buildings || []).find(row => row.id === buildingId);
   return building ? buildingMaterialValueUnits(state, building, content) / currencyScale(content) : 0;

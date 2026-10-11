@@ -1828,6 +1828,18 @@ export function mountGame(root) {
       showToast(enabled ? `已开启自动调价，锚定价${number(result.anchorVoucherPerUnit, 3)}。` : "已关闭自动调价，售价保持当前水平。");
       return;
     }
+    // 酒类专售令开关：没有营业中的酒馆时开启先确认（命令返回 needsConfirm）。
+    const liquorButton = closest(target, "[data-liquor-monopoly]");
+    if (liquorButton && state) {
+      const enabled = liquorButton.dataset.liquorMonopoly === "true";
+      let result = simulation.setLiquorMonopoly(state, enabled);
+      if (result?.needsConfirm && window.confirm(`${result.reason}\n仍要开启专售令？`)) result = simulation.setLiquorMonopoly(state, enabled, { confirmed: true });
+      if (!result?.ok) { showToast(result?.reason || "酒类专售令设置失败", 3600); return; }
+      changed(true);
+      render(true);
+      showToast(enabled ? "酒类专售令已开启：综合商店与时代广场停售酒，居民买酒只去酒馆。" : "酒类专售令已关闭，综合商店与时代广场恢复卖酒。");
+      return;
+    }
     // 0.2.3 流通改革：把目标利润率一键应用到所有综合商店。
     const marginAllButton = closest(target, "[data-shop-margin-all]");
     if (marginAllButton && state) {

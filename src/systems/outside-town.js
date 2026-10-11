@@ -45,6 +45,10 @@ const SELL_RESERVE_DAYS = 30;
 // 库存超过目标 2 倍的部分每天损耗 2%（陈货、转卖），防止无限囤积。
 const STOCK_SPOIL_MULTIPLE = 2;
 const SUPPLY_MEMORY = 0.97;
+// 矿产（good.mine，见 mods/precious_metals）：买价在基准价 ±MINE_PRICE_SWING 内随库存摆动；
+// 库存每多一年产量，买价降 MINE_PRICE_SWING（库存 = 1 年产量时即基准价）。库存上限默认 3 年产量。
+const MINE_PRICE_SWING = 0.2;
+const MINE_DEFAULT_STOCK_MAX_YEARS = 3;
 
 const round2 = value => Math.round(value * 100) / 100;
 
@@ -88,8 +92,19 @@ function createTown(profile) {
     loans: [],
     loanStats: { totalIssuedJin: 0, totalRepaidJin: 0, totalInterestJin: 0, activeLoans: 0 }
   };
+  ensureTownGoods(town, profile, 1);
   ensurePriceFactors(town, profile);
   return town;
+}
+
+// 补齐商品状态：库存缺的按档案补（旧档没有的新商品）；矿产产量档 mines[itemId] 缺失时按档案懒初始化。
+export function ensureTownGoods(town, profile, year = 1) {
+  town.mines ||= {};
+  for (const [itemId, base] of Object.entries(profile.goods)) {
+    if (town.stocks[itemId] === undefined) town.stocks[itemId] = base.stock;
+    if (town.supply[itemId] === undefined) town.supply[itemId] = 1;
+    if (base.mine) town.mines[itemId] ||= { annualOutputJin: base.mine.annualOutputJin, lastYear: year };
+  }
 }
 
 // 补齐进口品的价格因子：新镇取目标值；旧档没有这两个字段时，按当前库存与繁荣度取目标值，之后照常逐日靠拢。
@@ -115,6 +130,7 @@ export function ensureOutsideTowns(state, content) {
   state.outsideTowns ||= createOutsideTowns(content);
   for (const profile of Object.values(profiles(content))) {
     const town = state.outsideTowns[profile.id] ||= createTown(profile);
+    ensureTownGoods(town, profile, state.year);
     ensurePriceFactors(town, profile);
   }
   return state.outsideTowns;
@@ -213,8 +229,26 @@ function midPrice(town, good, stock) {
   return good.basePrice * Math.max(0.35, Math.min(3, scarcity)) * prosperityFactor(town);
 }
 
+// 矿产的年产量（斤/年）：优先用状态里的当前产量，缺失时用档案值。
+export function mineAnnualOutputJin(town, good) {
+  return Number(town?.mines?.[good.id]?.annualOutputJin ?? good.mine?.annualOutputJin) || 0;
+}
+
+// 矿产买价（我们买）：基准价 × 库存摆动因子。库存 = 1 年产量时即基准价；每多 1 年产量降 MINE_PRICE_SWING，
+// 少 1 年产量升 MINE_PRICE_SWING，封在 ±MINE_PRICE_SWING 内。卖回价（外镇买我们的）= 买价 × (1 − 价差)，买了再卖回必亏价差。
+function mineBuyPrice(town, good, stock) {
+  const annual = mineAnnualOutputJin(town, good);
+  const years = annual > 0 ? Math.max(0, stock) / annual : 0;
+  const factor = Math.max(1 - MINE_PRICE_SWING, Math.min(1 + MINE_PRICE_SWING, 1 + MINE_PRICE_SWING * (1 - years)));
+  return good.basePrice * factor;
+}
+
 // direction: "sell" = 我们卖给外镇（外镇收购价），"buy" = 我们向外镇买。
 export function unitPrice(town, good, direction, stock = null) {
+  if (good.mine) {
+    const buy = mineBuyPrice(town, good, stock ?? town.stocks[good.id] ?? 0);
+    return direction === "sell" ? buy * (1 - spreadRate(town)) : buy;
+  }
   const mid = midPrice(town, good, stock ?? town.stocks[good.id] ?? 0);
   const half = spreadRate(town) / 2;
   return direction === "sell" ? mid * (1 - half) : mid * (1 + half);
@@ -325,9 +359,17 @@ export { recordTradeStats };
 
 // ---------------------------------------------------------------- 每日
 
+// 矿产一天入库的斤数：年产量 ÷ 天数，但库存不超过"当年产量 × 上限年数"。
+function mineDailyOutput(town, good, stockNow, daysPerYear) {
+  const annual = mineAnnualOutputJin(town, good);
+  const cap = annual * (good.mine.stockMaxYears ?? MINE_DEFAULT_STOCK_MAX_YEARS);
+  return Math.max(0, Math.min(annual / daysPerYear, cap - stockNow));
+}
+
 export function advanceOutsideTownDay(state, content) {
   const towns = ensureOutsideTowns(state, content);
   const staffed = buildingOperational(state, "foreign_trade_house");
+  const daysPerYear = content.rules.daysPerYear || 360;
   const rows = {};
   for (const town of Object.values(towns)) {
     const profile = outsideTownProfile(content, town.id);
@@ -338,12 +380,14 @@ export function advanceOutsideTownDay(state, content) {
       const good = { ...base, id: itemId };
       const need = dailyNeed(town, good);
       let stock = (town.stocks[itemId] || 0) + town.population * good.producePerPersonDay;
+      // 矿产：每天入库一天的产量，库存到"当年产量 × 上限年数"为止（不损耗、不消耗）。
+      if (good.mine) stock += mineDailyOutput(town, good, town.stocks[itemId] || 0, daysPerYear);
       const used = Math.min(stock, need);
       stock -= used;
-      // 自产品超过目标 2 倍、进口品超过 5 年用量的部分才开始损耗。
-      const cap = good.sellsToUs ? targetStock(town, good) * STOCK_SPOIL_MULTIPLE : need * 360 * 5;
+      // 自产品超过目标 2 倍、进口品超过 5 年用量的部分才开始损耗；矿产不损耗。
+      const cap = good.mine ? Infinity : good.sellsToUs ? targetStock(town, good) * STOCK_SPOIL_MULTIPLE : need * 360 * 5;
       if (stock > cap) stock -= (stock - cap) * 0.02;
-      town.stocks[itemId] = round2(stock);
+      town.stocks[itemId] = good.mine ? Math.round(stock * 1e6) / 1e6 : round2(stock);
       const satisfied = need > 0 ? used / need : 1;
       town.supply[itemId] = Math.round(((town.supply[itemId] ?? 1) * SUPPLY_MEMORY + satisfied * (1 - SUPPLY_MEMORY)) * 1e4) / 1e4;
       score += good.supplyWeight * town.supply[itemId];
@@ -377,6 +421,18 @@ export function advanceOutsideTownDay(state, content) {
 
 // ---------------------------------------------------------------- 每年（元旦）
 
+// 矿产年产量逐年增长：新产量 = max(旧产量 + 1, round(旧产量 × (1 + 增长%)))，每年只增一次（lastYear 防重复）。
+function growMines(town, profile, year) {
+  for (const [itemId, base] of Object.entries(profile.goods)) {
+    if (!base.mine) continue;
+    const mine = town.mines?.[itemId];
+    if (!mine || mine.lastYear >= year) continue;
+    const growth = Number(base.mine.annualGrowthPercent) || 0;
+    mine.annualOutputJin = Math.max(mine.annualOutputJin + 1, Math.round(mine.annualOutputJin * (100 + growth) / 100));
+    mine.lastYear = year;
+  }
+}
+
 export function settleOutsideTownYear(state, content) {
   const towns = ensureOutsideTowns(state, content);
   const rows = {};
@@ -385,6 +441,7 @@ export function settleOutsideTownYear(state, content) {
   for (const town of Object.values(towns)) {
     const profile = outsideTownProfile(content, town.id);
     if (!profile) continue;
+    growMines(town, profile, state.year);
     town.tradeClosed = false;
     town.harvestFactor = 1;
     town.weather = round2(0.75 + nextRandom(state) * 0.5);
@@ -480,7 +537,10 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
   }
 
   qty = Math.min(qty, Math.floor(sellableStock(town, good) * 100) / 100, freightUnits / content.precision.inventoryUnitsPerJin);
-  if (qty < 0.01) return { ok: false, reason: `${profile.name}的${item.name}只够自用，暂不外卖` };
+  if (qty < 0.01) {
+    if (!good.mine) return { ok: false, reason: `${profile.name}的${item.name}只够自用，暂不外卖` };
+    return { ok: false, reason: sellableStock(town, good) < 0.01 ? `${profile.name}的${item.name}库存不足` : "数量过小（最少 0.01 斤）" };
+  }
   const valueJin = round2(quoteValue(town, good, "buy", qty));
   const payUnits = quantityToUnits(valueJin, content);
   // 与贸易行同一口径：付款不得把镇库小麦压到口粮储备线以下（townSellableWheatUnits）。预检通过才动账。
@@ -597,15 +657,20 @@ export function selectOutsideTownView(state, content, townId = DEFAULT_OUTSIDE_T
     const good = { ...base, id: itemId };
     const need = dailyNeed(town, good);
     const stock = town.stocks[itemId] || 0;
+    // 矿产没有日耗：库存天数按"够几天的年产量"算，日产按年产量 ÷ 天数。
+    const annualOutput = good.mine ? mineAnnualOutputJin(town, good) : 0;
+    const perDay = annualOutput / (content.rules.daysPerYear || 360);
     return {
       itemId,
       name: content.items[itemId]?.name || itemId,
       unit: content.items[itemId]?.unit || "斤",
       stock: Math.round(stock),
-      stockDays: need > 0 ? Math.round(stock / need) : null,
+      stockDays: good.mine ? (perDay > 0 ? Math.round(stock / perDay) : null) : (need > 0 ? Math.round(stock / need) : null),
       targetDays: good.targetDays,
       dailyNeed: round2(need),
-      dailyProduce: round2(town.population * good.producePerPersonDay),
+      dailyProduce: good.mine ? round2(perDay) : round2(town.population * good.producePerPersonDay),
+      annualOutputJin: good.mine ? annualOutput : null,
+      wholesale: Boolean(content.items[itemId]?.wholesale),
       supply: Math.round((town.supply[itemId] ?? 1) * 100),
       sellPrice: round2(unitPrice(town, good, "sell")),
       buyPrice: good.sellsToUs ? round2(unitPrice(town, good, "buy")) : null,

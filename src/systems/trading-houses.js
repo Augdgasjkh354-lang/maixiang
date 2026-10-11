@@ -6,10 +6,10 @@
 //         进口量封顶：市场存量不超过 30 天销量（至少 20 斤）。
 //   运费：每运一斤付 freightVoucherPerJin 给镇库（同一条运费规则）。
 //   关税：出口按外镇付的货款收 policy.tradeTariff.exportPercent%，进口按付给外镇的货款收 importPercent%，交镇库。
-//   利润率 = (卖价 − 买价 − 运费 − 关税) / (买价 + 运费 [+ 进口关税]) 须达到门槛才做：
-//   出口利润门槛 policy.tradeMarginPercent（缺省 rules.tradeHouseTargetMarginPercent，20%），
-//   进口 policy.tradeImportMarginPercent（缺省 rules.tradeHouseImportMarginPercent，25%，更高，偏向出口）。
-//   排序时出口的利润率乘 tradeHouseExportPriority，同等条件先做出口。
+//   利润率 = (卖价 − 买价 − 运费 − 关税) / (买价 + 运费 [+ 进口关税]) 须达到门槛才做，门槛只防亏损（不低于 rules.tradeHouseMarginFloorPercent，5%）：
+//   出口利润门槛 policy.tradeMarginPercent（缺省 rules.tradeHouseTargetMarginPercent，5%），
+//   进口 policy.tradeImportMarginPercent（缺省 rules.tradeHouseImportMarginPercent，5%，不得低于出口）。
+//   排序看每斤净赚（扣运费与关税；运力与店员日额度的单位是斤），出口乘 tradeHouseExportPriority，同等条件先做出口。
 //   成交量：min(店员 × tradeHouseJinPerClerk, 当日运力 × tradeHouseCapacityShare 按店员数分的份额)，实际运力从运力池扣。
 //   只在外贸房在岗时做买卖（与镇长手动外贸同一条规则）。
 //
@@ -399,13 +399,27 @@ function pushRow(row, cand, result) {
   row.profitVoucherUnits += result.profitVoucherUnits;
 }
 
-// 排好序的候选：只留当下走得通、利润率够门槛的路（出口的利润率乘 tradeHouseExportPriority）。
+// 每斤净赚（粮券/斤，扣运费与关税）：运力和店员日额度的单位都是斤，按它排序才能把稀缺的斤数用在最赚钱的路上。
+function quickProfitPerJin(state, content, cand) {
+  const freight = freightVoucherPerJin(state, content);
+  if (cand.direction === "export") {
+    const price = wholesaleUnitPrice(state, cand.itemId, content);
+    return unitPrice(cand.town, cand.good, "sell") * (1 - tradeTariffRate(state, "export")) - (price + freight);
+  }
+  const price = wholesalePurchasePrice(state, cand.itemId, content);
+  return price - (unitPrice(cand.town, cand.good, "buy") * (1 + tradeTariffRate(state, "import")) + freight);
+}
+
+// 排好序的候选：只留当下走得通、利润率够门槛（不低于 5% 下限）的路；门槛只防亏损，排序看每斤净赚（出口乘 tradeHouseExportPriority）。
 function rankCandidates(state, content) {
   const exportPriority = content.rules.tradeHouseExportPriority ?? 1;
   return candidatesFor(state, content)
     .map(cand => ({ cand, ratio: quickMarginRatio(state, content, cand) }))
     .filter(row => row.ratio !== null && row.ratio + 1 >= tradeMarginTarget(state, content, row.cand.direction) - 1e-9)
-    .map(row => ({ ...row, rank: row.cand.direction === "export" ? row.ratio * exportPriority : row.ratio }))
+    .map(row => {
+      const perJin = quickProfitPerJin(state, content, row.cand);
+      return { ...row, perJin, rank: row.cand.direction === "export" ? perJin * exportPriority : perJin };
+    })
     .sort((a, b) => b.rank - a.rank);
 }
 

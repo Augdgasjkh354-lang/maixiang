@@ -237,6 +237,8 @@ export function createInitialState(options) {
       // 利润率政策（0—200，一位小数）：综合商店全局目标利润率；贸易行出口 / 进口利润门槛。
       // 印花税（%）：二级市场每笔成交按成交额由卖方承担，交镇库；镇库自己卖出不征（economy 在 systems/stock-exchange.js）。
       stampDutyPercent: content.rules.stampDutyDefaultPercent ?? 0.1,
+      // 酒类专售令（默认关）：开启后综合商店与时代广场停售四种酒，居民买酒只去酒馆（systems/shop-types.js）。
+      liquorMonopoly: false,
       shopMarginPercent: content.rules.generalStoreMarkupPercent ?? 20,
       tradeMarginPercent: content.rules.tradeHouseTargetMarginPercent ?? 20,
       tradeImportMarginPercent: content.rules.tradeHouseImportMarginPercent ?? 25,
@@ -356,6 +358,8 @@ export function createInitialState(options) {
     laborCompetition: { dayKey: null, day: { moves: 0 }, year: { moves: 0 }, recent: [] },
     goodsDemand: { todayDemandUnits: {}, day: {}, year: {} },
     industryExperience: {},
+    // 教育：schoolDays 为学堂累计实际办学天数（接待过学生的日子），见 systems/productivity.js 与 economy/productivity.js 的 educationBonus。
+    education: { schoolDays: 0 },
     // 各 mod 自己的状态（初值来自 mod 的 content.js initialState）。
     mods: structuredClone(content.modStates || {}),
     salt: {

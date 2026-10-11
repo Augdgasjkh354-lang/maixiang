@@ -75,8 +75,8 @@ test("伐木场与盐场按岗位人数生产；行业工资不混入面包链",
   assert.equal(simulation.setEmployment(saltState, saltworks.instanceId + "::salt_workers", 6).assigned, 6);
   simulation.advanceDay(saltState);
   assert.ok(Math.abs(saltState.accounts.town.salt / SCALE -
-    (30 - saltState.salt.day.satisfiedUnits / SCALE)) < 1e-10);
-  assert.equal(saltState.industries.salt.day.producedUnits.salt / SCALE, 30);
+    (60 - saltState.salt.day.satisfiedUnits / SCALE)) < 1e-10); // 6 名盐工 × 10 斤（每人每日产盐翻倍）
+  assert.equal(saltState.industries.salt.day.producedUnits.salt / SCALE, 60);
   // 默认日薪 10→5 斤（8cf03ae）：6 名盐工 × 5 = 30 斤。
   assert.equal(saltState.industries.salt.day.operatingWagesWheatUnits / SCALE, 30);
   assert.equal(saltState.business.day.operatingWagesWheatUnits, 0);
@@ -121,13 +121,13 @@ test("[slow] 年度盐需求精确；六名盐工连续生产全年的物理产�
   // 基线清理：年度报告经 annualPeriod() 展平（src/systems/annual-reports.js），
   // industries.salt 直接就是年度累计，不再有 .cumulative 层。
   const saltYear = state.annualReports[0].industries.salt;
-  // 基准 6 名盐工 × 5 斤/日 × 全年天数（360）= 10800 斤；一年 2190 工日的熟练度让人均产出逐日略升（年末约 +5%）。
+  // 基准 6 名盐工 × 10 斤/日（每人每日产盐翻倍，原 5 斤）× 全年天数（360）= 21600 斤；一年 2190 工日的熟练度让人均产出逐日略升（年末约 +5%）。
   const produced = saltYear.producedUnits.salt / SCALE;
-  const yearBaseJin = 6 * 5 * CONTENT.rules.daysPerYear;
+  const yearBaseJin = 6 * 10 * CONTENT.rules.daysPerYear;
   assert.ok(produced > yearBaseJin && produced < yearBaseJin * 1.06, `盐产量应略高于基准，实际${produced}`);
   assert.equal(state.annualReports[0].salt.demandUnits / SCALE, 66000);
   // 默认日薪 10→5 斤（8cf03ae）：6 名盐工年工资 21900→10950 斤。
-  assert.equal(saltYear.operatingWagesWheatUnits / SCALE, yearBaseJin);
+  assert.equal(saltYear.operatingWagesWheatUnits / SCALE, 6 * 5 * CONTENT.rules.daysPerYear);
   // 基线清理：0.2.3 起面粉/面包/盐只能经综合商店零售（consumer-market.js generalStoreOnly），
   // 本 fixture 只有盐场、没有商业街/综合商店，所以产出的盐全部留存镇库、零成交。
   assert.equal(saltYear.soldUnits / SCALE, 0);

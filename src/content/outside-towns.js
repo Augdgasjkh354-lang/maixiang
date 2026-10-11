@@ -9,6 +9,9 @@
 //   targetDays           理想库存 = 多少天的消耗；库存低于它就涨价，高于它就跌价
 //   sellsToUs            是否愿意把多余的卖给我们
 //   supplyWeight         对繁荣度的影响权重（缺了它民心受多大影响）
+//   mine                 矿产（可选）：{ annualOutputJin 年产斤数, annualGrowthPercent 每年增长%, stockMaxYears 库存上限（年产倍数，默认 3） }
+//                        每天入库一天的产量，每年年初按增长率涨产；无日耗、不损耗；买价在基准价 ±20% 内随库存摆动（见 systems/outside-town.js）。
+//                        银条、金条见 mods/precious_metals。
 // 小麦是外镇的口粮兼结算货币：每年收一次（耕地 × 亩产 × 天气），每天按人口吃掉。
 
 import { RULES } from "./rules.js";

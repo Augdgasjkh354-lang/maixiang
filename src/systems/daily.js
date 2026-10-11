@@ -42,7 +42,7 @@ import { settleLiquidityDay } from "./liquidity.js";
 import { fillMissingHouseholdLastHarvestIncome, maybeRefreshHouseholdIncomeExpectations } from "./income-expectation.js";
 import { accrueServiceDemand, processServiceDemand } from "./services.js";
 import { accrueGoodsDemand, buyGoodsForResidents, consumeGoods } from "./goods-demand.js";
-import { accrueIndustryExperience } from "./productivity.js";
+import { accrueEducationDay, accrueIndustryExperience } from "./productivity.js";
 import { resetWholesaleDay, resetWholesaleYear, reviewWholesaleAutoPricing, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
 import { settleOwnershipTakeovers } from "./ownership-takeover.js";
@@ -199,6 +199,8 @@ export const CORE_DAILY_STEPS = [
   { id: "repairWood", run: buyRepairWoodForResidents },
   { id: "goodsTrade", run: buyGoodsForResidents },
   { id: "services", run: processServiceDemand },
+  // 教育：学堂当天实际接待了学生才累计办学天数（服务结算之后，见 economy/productivity.js 的 educationBonus）。
+  { id: "education", run: accrueEducationDay },
   // 贸易行：店主与店员每天自己做外镇买卖（docs/TRADE.md）；在居民买完之后、外镇日结之前，用剩下的运力与批发存货。
   { id: "tradeHouses", run: settleTradingHouses },
 

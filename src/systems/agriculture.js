@@ -8,6 +8,7 @@ import { emptyReclaimState, emptyReclaimPeriod } from "../core/state.js";
 import { currencyScale } from "../economy/currency.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId } from "../economy/ledger.js";
+import { educationBonus } from "../economy/productivity.js";
 
 // ── 耕地开荒 ────────────────────────────────────────────────────────────────
 // 亩数是权威数据：state.agriculture.reclaimedAcres 记录已开荒亩数，
@@ -186,7 +187,8 @@ export function harvest(state, content) {
   const maximum = acres * content.agriculture.yieldPerAcre;
   const workCapacity = capacity * content.rules.growingDays;
   const proportion = Math.max(0, Math.min(1, state.agriculture.workUnits / workCapacity));
-  const totalUnits = quantityToUnits(maximum * proportion, content);
+  // 教育加成（economy/productivity.js）：学堂办学让农民也干得更快，收成在出工比例之上再乘全镇教育加成（无学堂时为 1）。
+  const totalUnits = quantityToUnits(maximum * proportion * educationBonus(state), content);
   const taxDays = (state.agriculture.taxDays || []).filter(row => row.year === state.year);
   const averageRateBps = taxDays.length
     ? Math.round(taxDays.reduce((sum, row) => sum + row.rateBps, 0) / taxDays.length)

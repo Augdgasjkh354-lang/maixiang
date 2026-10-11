@@ -17,7 +17,7 @@ export const BUILDING_ART_CATALOG = Object.freeze({
   bakery:{name:'面包房',connected:true}, lumberyard:{name:'伐木场',connected:true},
   stock_exchange:{name:'交易所',connected:true}, bank:{name:'银行',connected:true},
   saltworks:{name:'盐场',connected:true}, wholesale_market:{name:'批发市场',connected:true},
-  winery:{name:'酒坊',connected:true}, brewery:{name:'啤酒坊',connected:true}, craft_brewery:{name:'精酿坊',connected:true}, premium_winery:{name:'窖坊',connected:true},
+  winery:{name:'酒坊',connected:true},
   cotton_field:{name:'棉田',connected:true}, weaving_mill:{name:'织坊',connected:true},
   commercial_street:{name:'商业街',connected:true}, town_hall:{name:'政务厅',connected:true},
   livestock_base:{name:'养殖基地',connected:true}, times_square:{name:'时代广场',connected:true},
@@ -114,9 +114,6 @@ case 'logistics_center':return logisticsCenter(level);
 case 'dock':return dockScene(level);
 case 'trade_center':return tradeCenter(level);
 case 'winery':return house(-8,-6,.92,'酒')+wineJars()+wineFlag();
-case 'brewery':return house(-8,-6,.92,'啤')+wineJars()+wineFlag();
-case 'craft_brewery':return house(-8,-6,.92,'精')+wineJars()+wineFlag();
-case 'premium_winery':return house(-8,-6,.92,'窖')+wineJars()+wineFlag();
 case 'cotton_field':return cottonPlot()+thatchShed(-49,12,.6);
 case 'weaving_mill':return house(-8,-6,.92,'织')+clothRack();
 case 'public_housing': return courtyard()+house(-29,-9,.58)+house(27,7,.58)+house(-9,31,.58);

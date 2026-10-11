@@ -28,32 +28,17 @@ export const RECIPES = Object.freeze({
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
   }),
-  // 四种酒：无损耗。普通款每工日 3 批（30 斤麦）；高档款陈酿，每工日 1 批（普通的 1/3 工时），出粮比与普通款相同。
-  brewery_beer: Object.freeze({
-    id: "brewery_beer", name: "酿啤酒",
-    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
-    outputs: Object.freeze([{ itemId: "beer", quantity: 50 }]),
-    losses: Object.freeze([]),
-    batchesPerWorkerDay: 3
-  }),
-  craft_brewery_beer: Object.freeze({
-    id: "craft_brewery_beer", name: "酿高档啤酒",
-    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
-    outputs: Object.freeze([{ itemId: "beer_premium", quantity: 50 }]),
-    losses: Object.freeze([]),
-    batchesPerWorkerDay: 1
-  }),
-  winery_baijiu: Object.freeze({
-    id: "winery_baijiu", name: "酿普通白酒",
-    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
-    outputs: Object.freeze([{ itemId: "baijiu", quantity: 10 }]),
-    losses: Object.freeze([]),
-    batchesPerWorkerDay: 3
-  }),
-  premium_winery_baijiu: Object.freeze({
-    id: "premium_winery_baijiu", name: "窖藏高档白酒",
-    inputs: Object.freeze([{ itemId: "wheat", quantity: 10 }]),
-    outputs: Object.freeze([{ itemId: "baijiu_premium", quantity: 10 }]),
+  // 酒坊：一名工人一天酿一批，无损耗，一批同时出四种酒（啤酒 2 斤、高档啤酒 1 斤、普通白酒 2 斤、高档白酒 1 斤）。
+  // 投入小麦按出粮比折算：啤酒 1 斤麦出 5 斤、白酒 1 斤麦出 1 斤（高档款同比），2/5 + 1/5 + 2 + 1 = 3.6 斤。
+  winery_brewing: Object.freeze({
+    id: "winery_brewing", name: "酿酒（啤酒与白酒）",
+    inputs: Object.freeze([{ itemId: "wheat", quantity: 3.6 }]),
+    outputs: Object.freeze([
+      { itemId: "beer", quantity: 2 },
+      { itemId: "beer_premium", quantity: 1 },
+      { itemId: "baijiu", quantity: 2 },
+      { itemId: "baijiu_premium", quantity: 1 }
+    ]),
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
   }),

@@ -685,15 +685,20 @@ export function wholesaleAvgDemandUnits(state, itemId, content, days = 7) {
 
 // 镇营产出的入市余量（单位）：目标库存 − 现有库存（市场 + 镇库）。
 // 目标库存 = max(最低备货, 近 7 日需求 × 备货天数)。没有批发市场时返回 Infinity（不设闸门）。
-export function townOutputMarketRoomUnits(state, itemId, content) {
-  if (!hasWholesaleMarket(state)) return Number.POSITIVE_INFINITY;
+// 镇营产出的目标库存（库存单位）：max(最低备货, 近 7 日日均需求 × 备货天数)。
+export function townOutputTargetUnits(state, itemId, content) {
   const scale = content.precision.inventoryUnitsPerJin;
   const demand = wholesaleAvgDemandUnits(state, itemId, content, 7);
   const minimum = (content.rules.townOutputMinStockJin ?? 200) * scale;
   const stockDays = content.rules.townOutputStockDaysByItem?.[itemId] ?? content.rules.townOutputStockDays ?? 30;
-  const target = Math.max(minimum, demand * stockDays);
+  return Math.max(minimum, demand * stockDays);
+}
+
+// 镇营产出还能再备多少（目标库存 − 市场与镇库现存，库存单位）。
+export function townOutputMarketRoomUnits(state, itemId, content) {
+  if (!hasWholesaleMarket(state)) return Number.POSITIVE_INFINITY;
   const stock = Math.max(0, state.wholesaleMarket?.inventory?.[itemId] || 0) + Math.max(0, state.accounts?.town?.[itemId] || 0);
-  return Math.max(0, target - stock);
+  return Math.max(0, townOutputTargetUnits(state, itemId, content) - stock);
 }
 
 // ---------------------------------------------------------------- 批发市场自动调价（物价会动）

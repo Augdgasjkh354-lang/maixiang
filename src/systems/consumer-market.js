@@ -21,6 +21,7 @@ import { removeTownInventoryWithCost } from "../economy/business.js";
 import { populationStats } from "../selectors/labor.js";
 import { allocateIntegerByWeight } from "../core/allocation.js";
 import { priceElasticityDemandMultiplier } from "./shop-pricing.js";
+import { shopMayStockItem, usesGeneralRules } from "./shop-types.js";
 
 function rotated(list, offset) {
   if (!list.length) return list;
@@ -58,8 +59,10 @@ function sellerRowsForItem(state, itemId, directPrice, content, options = {}) {
     const sellsItem = retailItemIds.includes(itemId)
       || (def?.kind === "retail" && (shop.inventory?.[itemId] || 0) > 0);
     if (!sellsItem) continue;
-    // 只经商店卖的商品：综合商店都能卖；摊位只能卖它经营的日用品。
-    if (generalStoreOnly && def?.id !== "general" && def?.kind !== "stall") continue;
+    // 酒类专售令：只有酒馆卖酒（综合商店、时代广场停售）。
+    if (!shopMayStockItem(state, def, itemId, content)) continue;
+    // 只经商店卖的商品：综合商店、酒馆都能卖；摊位只能卖它经营的日用品。
+    if (generalStoreOnly && !usesGeneralRules(def) && def?.kind !== "stall") continue;
     const retailPrice = shopRetailPrice(state, shop.typeId, content, itemId, shop);
     const stock = shop.inventory?.[itemId] || 0;
     const soldToday = shopSoldTodayUnits(shop);
@@ -272,13 +275,14 @@ function registerStockoutDemand(state, itemId, unmetUnits, stockouts, householdN
 function applyRetailElasticity(state, itemId, desiredUnits, content, sellers) {
   if (!(desiredUnits > 0)) return desiredUnits;
   // 若卖家列表里没有综合商店，不应用弹性（避免压低镇库/公司/住户的销量）。
-  const hasGeneral = (sellers || []).some(row => row.type === "shop" && row.shopTypeId === "general");
+  const hasGeneral = (sellers || []).some(row => row.type === "shop" && usesGeneralRules(shopDefinition(content, row.shopTypeId)));
   if (!hasGeneral) return desiredUnits;
   let multiplier = 1;
   for (const shop of Object.values(state.shops || {})) {
     if (shop.status !== "open") continue;
-    if (shopDefinition(content, shop.typeId)?.id !== "general") continue;
+    if (!usesGeneralRules(shopDefinition(content, shop.typeId))) continue;
     if (!shopRetailItemIdsView(shop, content).includes(itemId)) continue;
+    if (!shopMayStockItem(state, shopDefinition(content, shop.typeId), itemId, content)) continue;
     const retailPrice = shopRetailPrice(state, shop.typeId, content, itemId, shop);
     if (retailPrice === null) continue;
     const shopMultiplier = priceElasticityDemandMultiplier(state, shop, itemId, retailPrice, content);

@@ -17,7 +17,7 @@ import { setPublicProcurementIntent as setPublicProcurementIntentSystem, clearPu
 import { openShop, openTownShop as openTownShopSystem, setShopMerchants, setShopClerks, closeShop, fundShopLiquidation } from "../systems/shops.js";
 import { setWholesalePrice, setWholesaleTownAllocation, setWholesalePurchasePrice, setWholesaleAutoPricing, stockpileWholesale as stockpileWholesaleSystem, releaseWholesale as releaseWholesaleSystem } from "../systems/wholesale-market.js";
 import { setShopTargetMarginPercent, setAllShopsTargetMarginPercent, setShopRetailPrice, isDynamicPricingShop } from "../systems/shop-pricing.js";
-import { MARGIN_POLICY_MAX_PERCENT, pinGlideBeforeChange, policyShopMarginPercent, policyTradeMarginPercent, shopOverrideMarginPercent } from "../economy/margin-policy.js";
+import { MARGIN_POLICY_MAX_PERCENT, pinGlideBeforeChange, policyShopMarginPercent, policyTradeMarginPercent, shopOverrideMarginPercent, tradeMarginFloorPercent } from "../economy/margin-policy.js";
 import { setBuildingOutputTarget } from "../systems/production.js";
 import { setServiceUnitPrice } from "../systems/services.js";
 import { reclaimFarmland as reclaimFarmlandSystem } from "../systems/agriculture.js";
@@ -374,6 +374,19 @@ export function setStampDuty(state, percent, content) {
   return { ok: true, value: state.policy.stampDutyPercent };
 }
 
+// 酒类专售令（默认关）：开启后综合商店与时代广场停售四种酒（存货留着、停售，关闭后恢复），居民买酒只去酒馆。
+// 没有营业中的酒馆时开启会让居民买不到酒：返回 needsConfirm，界面确认后以 options.confirmed 再调一次。
+export function setLiquorMonopoly(state, enabled, options = {}) {
+  if (typeof enabled !== "boolean") return { ok: false, reason: "开关须为布尔值" };
+  const taverns = Object.values(state.shops || {}).filter(shop => shop.typeId === "tavern" && shop.status === "open").length;
+  if (enabled && taverns === 0 && options.confirmed !== true) {
+    return { ok: false, needsConfirm: true, reason: "还没有营业中的酒馆，开启后居民买不到酒。" };
+  }
+  state.policy ||= {};
+  state.policy.liquorMonopoly = enabled;
+  return { ok: true, value: enabled, taverns };
+}
+
 export function setShopProfitTax(state, percent, content) {
   const value = Number(percent);
   const max = content.rules.shopProfitTaxMaximumPercent ?? 80;
@@ -409,6 +422,9 @@ export function setMarginPolicy(state, patch, content) {
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0 || value > MARGIN_POLICY_MAX_PERCENT) return { ok: false, reason: "利润率须为0—200%之间的有限数" };
     next[key] = Math.round(value * 10) / 10;
+    if (key !== "shopMarginPercent" && next[key] < tradeMarginFloorPercent(content)) {
+      return { ok: false, reason: `贸易行利润率不得低于下限${tradeMarginFloorPercent(content)}%（低于它做买卖容易亏本）` };
+    }
   }
   // 进口门槛不得低于出口（贸易行偏向出口）：按改后的有效值判断。
   // 同时改了进口且低于出口 → 拒绝；只改出口且超过当前进口 → 联动把进口抬到与出口相同（返回值 linked 与 note 说明）。
@@ -431,6 +447,8 @@ export function setMarginPolicy(state, patch, content) {
   for (const key of keys) {
     if (next[key] !== undefined) state.policy[key] = next[key];
   }
+  // 玩家设置过贸易行门槛：之后即使恰好等于旧版烘焙值（20 / 25）也按玩家的意思办，不再当“跟随默认”。
+  if (next.tradeMarginPercent !== undefined || next.tradeImportMarginPercent !== undefined) state.policy.tradeMarginSet = true;
   const note = linked
     ? `进口利润率不得低于出口，进口门槛已从${linked.fromPercent}%联动抬高到${linked.toPercent}%。`
     : null;

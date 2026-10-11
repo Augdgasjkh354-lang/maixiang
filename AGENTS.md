@@ -15,7 +15,7 @@
 ```bash
 node --test                                          # 跑全部测试（注意：不要写成 node --test tests/）
 node --test --test-concurrency=4                     # 同上但四路并行（4 核机器全量实测约 190 秒；默认是核数减一即 3 路）；各测试文件是独立进程，互不干扰
-node --test --test-skip-pattern='\[slow\]'           # 日常迭代：跳过标题带 [slow] 的慢测（实测约 95 秒，CPU 约减半）；合并前必须跑全量
+node --test --test-skip-pattern='\[slow\]'           # 日常迭代：跳过标题带 [slow] 的慢测（实测约 95 秒，CPU 约减半）；全量只在“一批改动要提交前”跑一次（见「验证改动」）
 node scripts/bundle-single.mjs --out index.html      # 打包成单文件，自带语法检查 + 30 天无界面冒烟
 node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输出每年指标 CSV
 node scripts/health-check.mjs 10                     # 十年经济体检：人口、货币分布、家底、基尼、物价、产业、履约；可加 --wealth-tax 1,3,5 --inheritance 30 --employer-share 100
@@ -123,10 +123,20 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 
 ## 验证改动
 
-- 逻辑改动：`node --test` + 跑一个相关场景（`scenarios/` 里有现成的）。
+**验证按改动大小分级，不要每步都套全套：**
+
+| 改动 | 要做的验证 |
+|---|---|
+| 改参数、文案、小开关 | 相关测试 + 打包（`bundle-single` 自带 30 天无界面冒烟，已够） |
+| 改了经济逻辑 | 再加一次 1 年体检（`node scripts/health-check.mjs 1`，约 2 分钟）：`validateState` 通过、钱粮账平、看几个关键数字 |
+| 改了界面 | 才用浏览器点一遍（见下） |
+| 一批改动要提交前 | 全量 `node --test --test-concurrency=4` **跑一次**（放后台，不要每步都跑，也不要让它卡住提交）；失败按“设计变了就改旧测试，真坏了才修代码”处理 |
+| 想知道某个改动的经济后果（物价、产业、就业连锁） | 才做改前改后的 3 年体检对照；纯参数微调、界面、存档、性能类改动不需要 |
+
 - 测试提速：同一文件里多个用例共用的昂贵夹具（满级建筑、推进数百天的状态）只构造一次，各用例用 `tests/helpers-fixture.js` 的 `cloneFixture` 深拷贝；别直接 `structuredClone`，它会丢掉 `state.project`（不可枚举访问器）。单用例耗时明显的测试标题加 `[slow] ` 前缀（见上方 `--test-skip-pattern`），不要因此删掉或跳过它。
 - 界面改动：打包后用浏览器（或 Playwright）打开 `index.html`，点"新游戏"实际操作一遍。打包冒烟只跑模拟、不渲染界面，界面报错它查不出来。
 - 验收以"账平"为准（`validateState` 通过、钱粮无凭空增减）。模拟最多跑 3 年，不跑 10 年；数值校准类需求另说。
+- 性能或存档类改动要“结果与改前一致”时，用哈希比对（`scripts/perf-bench.mjs`），不用人工看数字。
 - 写测试或脚本时，场景里可以直接给镇库加木材来跳过开局（`state.accounts.town.wood += 数量 * content.precision.inventoryUnitsPerJin`）。
 - 满级测试存档 `tests/fixtures/maxed-save.json`（约 10MB，不入库，需要时先生成）：每种建筑升到最高级、岗位填满、银行开到粮券阶段，用来测界面和功能（可在游戏里导入）；只测功能不测数值。用 `node scripts/make-maxed-save.mjs` 重新生成，生成逻辑在 `scripts/maxed-state.mjs`。
 
@@ -148,7 +158,7 @@ node scripts/health-check.mjs 10                     # 十年经济体检：人�
 派子 agent 时：
 - 写清楚要改哪些文件、不许碰哪些文件（并行的子 agent 不改同一个文件）、验收标准（测试、场景数字）。
 - 并行时子 agent 只用精确替换改文件，不整篇重写；默认不提交，由主 agent 审完统一提交。若让子 agent 提交，只能 `git add` 自己改的文件，禁止 `git add -A`。
-- 子 agent 交回后，另派子 agent 跑全部测试、打包、跑相关场景、界面改动在浏览器里点一遍并出报告；主 agent 读报告，对设计相关的关键改动抽查 diff，不亲自重复执行这些机械步骤。
+- 子 agent 交回后，按“验证改动”的分级决定验证范围，需要时另派子 agent 跑（全量测试、打包、体检、界面点一遍）并出报告；一批改动才做一轮验证，不要每个子任务都单独来一轮。主 agent 读报告，对设计相关的关键改动抽查 diff，不亲自重复执行这些机械步骤。
 - 不达标先退回给原子 agent 返工（指出具体问题和验收标准）；同一任务连续两次返工仍不达标，主 agent 亲自接手。
 - 能交给子 agent 的尽量交，主 agent 的精力留给设计判断、规划和最终决策。
 - 版本历史见 `CHANGELOG.md`，各子系统设计见 `docs/`。

@@ -1,5 +1,6 @@
 import { readJobCount } from "./labor.js";
 import { reclaimedAcres } from "../systems/agriculture.js";
+import { educationBonus } from "../economy/productivity.js";
 export function selectHarvestForecast(state, content) {
   const acres = reclaimedAcres(state, content);
   const capacity = acres / content.agriculture.acresPerFarmer;
@@ -10,5 +11,5 @@ export function selectHarvestForecast(state, content) {
     : farmers * content.rules.growingDays;
   const maximum = acres * content.agriculture.yieldPerAcre;
   const ratio = Math.max(0, Math.min(1, expectedWork / (capacity * content.rules.growingDays)));
-  return Math.round(maximum * ratio * 100) / 100;
+  return Math.round(maximum * ratio * educationBonus(state) * 100) / 100;
 }

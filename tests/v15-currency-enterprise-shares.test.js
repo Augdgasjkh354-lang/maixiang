@@ -358,7 +358,7 @@ test("上市企业实物生产税入镇库时同步转入对应库存成本基�
   const state = legacyVoucherState();
   const mill = addBuilding(state, "mill", "tax-cost-basis");
   state.policy.privateProductionTaxPercent.mill = 50;
-  const listed = formCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 80 });
+  const listed = formCompany(state, mill.id, { levels: 1, operatingCapitalVoucher: 0, initialMaterialQuantity: 160 });
   assert.equal(listed.ok, true, listed.reason);
   const company = state.companies[listed.companyId];
   setJobCount(state, `${mill.id}::millers::listed`, 1, CONTENT);

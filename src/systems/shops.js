@@ -24,6 +24,7 @@ import { accrueWages, payWages, pendingWages, wageArrears, wageBook } from "./em
 import { allocateInputToTown, buyWholesaleForOwner, hasWholesaleMarket, recordTownInputConsumption, wholesaleMonopolyItemIds, wholesaleUnitPrice } from "./wholesale-market.js";
 import { computeLaborMarket, poachWorkers, adjustShopWage, shopWage } from "./labor-market.js";
 import { farmSalePriceVoucher } from "./farm-pricing.js";
+import { shopMayStockItem, usesGeneralRules } from "./shop-types.js";
 import {
   ensureShopPricing, recordShopItemSale, recordShopDailyWageCost, recordPriceHistory,
   updateShopLossProtection, reviewShopPricing, selectShopPricingView, isDynamicPricingShop
@@ -131,7 +132,10 @@ export function shopDefinition(content, typeId) {
 
 // 店里当前实际经营的商品：后加的商品（optionalRetail，如酒、布）镇上有货或店里有存货才算。
 function activeRetailItemIds(state, shop, content) {
-  return shopRetailItemIds(shop, content).filter(itemId => !content.items[itemId]?.optionalRetail
+  const def = shopDefinition(content, shop.typeId);
+  // 酒类专售令：综合商店与时代广场不经营酒（存货留着、停售）；只有酒馆进货、卖酒。
+  return shopRetailItemIds(shop, content).filter(itemId => shopMayStockItem(state, def, itemId, content))
+    .filter(itemId => !content.items[itemId]?.optionalRetail
     || (state.wholesaleMarket?.inventory?.[itemId] || 0) > 0 || (state.accounts?.town?.[itemId] || 0) > 0 || (shop.inventory?.[itemId] || 0) > 0
     || ((shopDefinition(content, shop.typeId)?.id === "general" || shopDefinition(content, shop.typeId)?.kind === "stall") && farmsHaveStock(state, itemId, content)));
 }
@@ -258,7 +262,7 @@ function shopSerial(state, content) {
 export function shopClerkLimit(shop, content) {
   const def = shopDefinition(content, shop?.typeId);
   if (Number.isFinite(def?.maxClerks)) return def.maxClerks;
-  return def?.id === "general"
+  return usesGeneralRules(def)
     ? (content.rules.generalStoreMaxClerks || 50)
     : (content.rules.shopMaxClerks || 20);
 }
@@ -290,7 +294,7 @@ export function shopDailyCustomerCapacity(state, shop, content) {
   if (def?.kind === "farm") return 0;
   // 摊位按卖货量封顶，客流不另设限制。
   if (def?.kind === "stall") return shopMerchantCount(state, shop) * 1000;
-  if (def?.id !== "general") {
+  if (!usesGeneralRules(def)) {
     if (shopIsService(shop, content)) return serviceShopCapacityUses(state, shop, content);
     // 非综合商店零售店：按销售能力折算客流（商人60斤/店员120斤，每客2斤），避免恒0导致永远拒售。
     if (def?.kind === "retail") {
@@ -803,7 +807,7 @@ export function shopSalesCapacityUnits(state, shop, content) {
     const def = shopDefinition(content, shop.typeId);
     return Math.round(shopMerchantCount(state, shop) * (def.perKeeperSalesJin ?? 25) * content.precision.inventoryUnitsPerJin);
   }
-  if (shopDefinition(content, shop.typeId)?.id === "general") {
+  if (usesGeneralRules(shopDefinition(content, shop.typeId))) {
     const customers = shopDailyCustomerCapacity(state, shop, content);
     return Math.round(customers * shopJinPerCustomer(content) * content.precision.inventoryUnitsPerJin);
   }
@@ -1372,7 +1376,7 @@ function autoAdjustShopClerks(state, shop, content) {
     const avgCustomers = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.customerCount || 0), 0) / history.length : 0;
     const avgRejected = history.length ? history.reduce((sum, row) => sum + Math.max(0, row.rejectedCustomerCount || 0), 0) / history.length : 0;
     expected = avgCustomers + avgRejected;
-    if (shopDefinition(content, shop.typeId)?.id === "general") {
+    if (usesGeneralRules(shopDefinition(content, shop.typeId))) {
       const perStaff = Math.max(1, content.rules.generalStoreCustomersPerStaff || 20);
       const maxCustomers = content.rules.generalStoreMaxDailyCustomers || 1000;
       const merchants = shopMerchantCount(state, shop);

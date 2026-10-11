@@ -7,6 +7,7 @@ import { townOutputGate } from "../selectors/production.js";
 import { householdConvertibleWheatUnits, householdList, isActiveHousehold } from "../systems/households.js";
 import { targetBatchCap } from "../systems/production.js";
 import { industryTypeIds } from "../content/buildings.js";
+import { shopMayStockItem, usesGeneralRules } from "../systems/shop-types.js";
 import { priceFactorOf, retailFloorOf } from "./price-adjust.js";
 import { policyShopMarginPercent, shopEffectiveMarginPercent } from "./margin-policy.js";
 
@@ -47,9 +48,10 @@ export function shopRetailPrice(state, typeId, content, itemId = null, shop = nu
 }
 
 function retailPriceOf(state, def, content, productId, wholesale, shop) {
-  const markup = def.id === "general" ? policyShopMarginPercent(state, content) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
+  const generalRules = usesGeneralRules(def);
+  const markup = generalRules ? policyShopMarginPercent(state, content) / 100 : Math.max(0, def.markupPercent ?? 0) / 100;
   let retail = wholesale * (1 + markup);
-  if (def.id === "general" && shop) {
+  if (generalRules && shop) {
     const explicit = Number(shop.pricing?.retailPriceVoucherPerUnit?.[productId]);
     let base;
     if (Number.isFinite(explicit) && explicit > 0) base = explicit;
@@ -92,9 +94,14 @@ function stallTradePrices(state, def, content, productId, wholesale) {
 // 居民实际面对的综合商店零售价：营业中综合商店里最便宜的一家（与集市参考价同口径）；没有综合商店时按批发价加成。
 // 只用于需求测算（主食/盐/日用品的可买量），口径跟随店铺的目标利润率、现售价与物价系数。
 function generalStoreReferenceRetail(state, itemId, content) {
+  // 综合商店与酒馆（同规则店）里能卖这种商品的最便宜一家；酒类专售令下只有酒馆卖酒。
   const prices = Object.values(state.shops || {})
-    .filter(shop => shop.status === "open" && shop.typeId === "general")
-    .map(shop => shopRetailPrice(state, "general", content, itemId, shop))
+    .filter(shop => {
+      if (shop.status !== "open") return false;
+      const def = content.rules.shopTypes?.[shop.typeId];
+      return usesGeneralRules(def) && (def.itemIds || []).includes(itemId) && shopMayStockItem(state, def, itemId, content);
+    })
+    .map(shop => shopRetailPrice(state, shop.typeId, content, itemId, shop))
     .filter(price => price > 0);
   if (prices.length) return Math.min(...prices);
   return currentUnitPrice(state, itemId, content) * (1 + policyShopMarginPercent(state, content) / 100);
@@ -111,9 +118,10 @@ function outputItemForType(typeId, content) {
   return recipe?.outputs?.[0]?.itemId || null;
 }
 
-function outputPerBatch(typeId, content) {
+// 配方的全部产出（多产出联产如酒坊一批四种酒）：每种产出一批的库存单位数。
+function outputRowsForType(typeId, content) {
   const recipe = content.recipes[content.buildings[typeId]?.recipeId];
-  return Math.round((recipe?.outputs?.[0]?.quantity || 0) * content.precision.inventoryUnitsPerJin);
+  return (recipe?.outputs || []).map(row => ({ itemId: row.itemId, perBatch: Math.round(row.quantity * content.precision.inventoryUnitsPerJin) }));
 }
 
 // 市面上能卖给下家的现货：批发市场库存（民营产出都卖进这里）+ 公司库存 + 营业中店铺库存。
@@ -339,8 +347,7 @@ function desiredWorkers(row, batches, state, content) {
 
 // 某产业的生产目标：居民当日需求（含近期实销）+ 下游产业计划要用的原料 + 备货天数 − 市场现货。
 // 木材例外：对应一次性公共建设订单，不备货。
-function productionTargetForType(state, typeId, content, downstreamUnits) {
-  const itemId = outputItemForType(typeId, content);
+function productionTargetForType(state, typeId, content, downstreamUnits, itemId = outputItemForType(typeId, content)) {
   if (!itemId) return { itemId, demandUnits: 0, targetUnits: 0, basis: "无产品" };
   if (itemId === "wood") {
     const row = woodProcurementDemand(state, content);
@@ -401,9 +408,15 @@ function refreshOperatingPlanNow(state, content, force = false) {
   // 需求不封顶是关键：否则下游缺料少报需求 → 上游少产 → 下游更缺，一路缩到停产。
   const downstreamUnits = {};
   for (const typeId of order.slice().reverse()) {
-    const target = productionTargetForType(state, typeId, content, downstreamUnits);
-    const perBatch = outputPerBatch(typeId, content);
-    let totalBatches = perBatch > 0 ? Math.ceil(target.targetUnits / perBatch) : 0;
+    // 联产配方（一批同出几种）：每种产出各算一次目标，批次数取最宽松的一种（与镇营市场闸门同口径：任一产出还需要就开工，超出硬上限的部分由生产环节记损耗）。
+    let target = null;
+    let totalBatches = 0;
+    for (const output of outputRowsForType(typeId, content)) {
+      const row = productionTargetForType(state, typeId, content, downstreamUnits, output.itemId);
+      const batches = output.perBatch > 0 ? Math.ceil(row.targetUnits / output.perBatch) : 0;
+      if (!target || batches > totalBatches) { target = row; totalBatches = batches; }
+    }
+    if (!target) target = productionTargetForType(state, typeId, content, downstreamUnits);
     const producers = producerRows(state, typeId, content);
     if (totalBatches <= 0 && producers.some(row => row.ageDays < (content.rules.newBusinessTrialDays || 6))) totalBatches = 1;
     const rotation = plan.rotation[typeId] || 0;

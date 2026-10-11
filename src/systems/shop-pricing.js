@@ -17,6 +17,7 @@
 
 import { recordEvent } from "../economy/ledger.js";
 import { currentUnitPrice } from "../economy/prices.js";
+import { usesGeneralRules } from "./shop-types.js";
 import { nextPriceFactor, priceFactorOf, retailFloorOf, stockDaysOf } from "../economy/price-adjust.js";
 import { glideStepMarginPercent, pinGlideBeforeChange, policyShopMarginPercent, promotionMarginPercent,
   shopConfiguredMarginPercent, shopEffectiveMarginPercent, shopInForceMarginPercent, shopOverrideMarginPercent, MARGIN_POLICY_MAX_PERCENT } from "../economy/margin-policy.js";
@@ -34,7 +35,7 @@ export const PRICE_HISTORY_WINDOW_DAYS = 30;
 export function isDynamicPricingShop(shop, content) {
   const raw = content.rules.shopTypes?.[shop?.typeId];
   const def = raw?.aliasOf ? content.rules.shopTypes?.[raw.aliasOf] : raw;
-  return def?.id === "general";
+  return usesGeneralRules(def);
 }
 
 // 定价使用的目标利润率（%）：促销模式优先；否则生效中的目标（玩家设定的单店覆盖或全局默认，平滑过渡中可能尚未追平）。

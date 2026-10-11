@@ -52,13 +52,24 @@ function inheritanceTaxCard(view) {
 function marginPolicyCard(view) {
   const policy = view.policy || {};
   const shopDefault = policy.shopMarginPercent ?? CONTENT.rules.generalStoreMarkupPercent ?? 20;
-  const tradeExport = policy.tradeMarginPercent ?? CONTENT.rules.tradeHouseTargetMarginPercent ?? 20;
-  const tradeImport = policy.tradeImportMarginPercent ?? CONTENT.rules.tradeHouseImportMarginPercent ?? 25;
+  const tradeExport = policy.tradeMarginPercent ?? CONTENT.rules.tradeHouseTargetMarginPercent ?? 5;
+  const tradeImport = policy.tradeImportMarginPercent ?? CONTENT.rules.tradeHouseImportMarginPercent ?? 5;
   return `<details class="detail-block" data-detail-key="policy-margin"><summary>商店与贸易利润率</summary><div class="detail-body">
       <div class="row"><span class="label">综合商店默认目标利润率</span><div class="setting-input">${renderNumericInput(view, { key: "shop-margin-default", kind: "shop-margin-default", target: "policy", value: shopDefault, label: "综合商店默认目标利润率", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">贸易行出口利润门槛</span><div class="setting-input">${renderNumericInput(view, { key: "trade-margin-export", kind: "trade-margin-export", target: "policy", value: tradeExport, label: "贸易行出口利润门槛", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
       <div class="row"><span class="label">贸易行进口利润门槛</span><div class="setting-input">${renderNumericInput(view, { key: "trade-margin-import", kind: "trade-margin-import", target: "policy", value: tradeImport, label: "贸易行进口利润门槛", minimum: 0, maximum: 200, className: "setting-editor" })}<b>%</b></div></div>
       <div class="subtle">综合商店：未单独设置的店铺跟随默认值，改动后按7天复核平滑过渡（每次价格最多±10%），单店可在店铺详情里覆盖。贸易行：卖价（或买价）相对成本加运费的利润率达到门槛才成交；门槛越高成交越少。进口门槛不得低于出口：只调高出口时进口门槛会被联动抬到相同，调低进口低于出口则拒绝。</div>
+    </div></details>`;
+}
+
+// 酒类专售令（policy.liquorMonopoly，默认关）：开启后综合商店与时代广场停售四种酒，居民买酒只去酒馆。按钮在 app.js 的 click 处理里。
+function liquorMonopolyCard(view) {
+  const on = view.policy?.liquorMonopoly === true;
+  const taverns = (view.shops || []).filter(shop => shop.typeId === "tavern" && shop.status === "open").length;
+  return `<details class="detail-block" data-detail-key="policy-liquor"><summary>酒类专售令</summary><div class="detail-body">
+      <div class="row"><span class="label">酒类专售令</span><strong class="value">${on ? "已开启" : "未开启"}</strong><button class="${on ? "secondary" : "primary"}" data-liquor-monopoly="${on ? "false" : "true"}">${on ? "关闭专售令" : "开启专售令"}</button></div>
+      <div class="subtle">开启后综合商店与时代广场停售酒，居民买酒只去酒馆；先在商业街开酒馆再开启。</div>
+      <div class="row"><span class="label">营业中的酒馆</span><strong class="value">${number(taverns)}家</strong></div>
     </div></details>`;
 }
 
@@ -108,6 +119,7 @@ export function renderPolicy(view) {
   return `${reformCard}
     ${marginPolicyCard(view)}
     ${stampDutyCard(view)}
+    ${liquorMonopolyCard(view)}
     ${hasCommerce ? `<details class="detail-block" data-detail-key="policy-commerce"><summary>家庭与商业</summary><div class="detail-body">` : `<div class="cardlet policy-commerce">`}
       <div class="row"><span class="label">营业店铺日租</span><div class="setting-input">${renderNumericInput(view, { key: "shop-rent", kind: "shop-rent", target: "shops", value: view.policy.shopRentVoucher ?? 1, label: "每间营业店铺每日租金", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>
       ${hasStall ? `<div class="row"><span class="label">摊位日租</span><div class="setting-input">${renderNumericInput(view, { key: "stall-rent", kind: "stall-rent", target: "stalls", value: view.policy.stallRentVoucher ?? 2, label: "每摊每日摊租", minimum: 0, maximum: 100000, className: "setting-editor" })}<b>${moneyUnit}</b></div></div>

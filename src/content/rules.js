@@ -8,6 +8,10 @@ export const RULES = Object.freeze({
   saveVersion: SAVE_VERSION,
   daysPerYear: 360, // 12 个月 × 30 天（monthDays）；旧存档读档时日期按比例换算（persistence/migrations.js）
   monthDays: 30,
+  // 教育（学堂，systems/productivity.js 记账，economy/productivity.js 的 educationBonus）：学堂每实际接待学生办满 1 年，
+  // 全镇劳动产出（产业、农业）+1%。上限 +30%：防止办学无限复利、把产出拉成指数曲线；达到上限后办学天数再多也不再加成。
+  educationBonusPerYear: 0.01,
+  educationBonusMax: 0.3,
   growingDays: 270, // 秋收在 10 月 1 日（第 270 天，0 起算）
   foodPerPersonDay: 2,
   housingCapacity: 1000,
@@ -46,13 +50,13 @@ export const RULES = Object.freeze({
   dockJinPerWorker: 120,
   // 运力池最多攒这么多天的日运力，没用完的可以攒着。
   freightPoolMaxDays: 30,
-  // 私人贸易行运费（券/斤）：走物流中心与外贸房运力的部分；走码头的部分按 dockFreightVoucherPerJin。
-  freightVoucherPerJin: 0.06,
-  dockFreightVoucherPerJin: 0.03,
+  // 私人贸易行运费（券/斤）= 搬一斤货的人力成本（工人日薪 ÷ 每人日运力），由 systems/logistics.js 的 trunkFreightRate / dockFreightRate 从岗位工资与运力推出，不再单设常量。
   // 贸易中心 / 贸易行（docs/TRADE.md「贸易中心与贸易行」）：贸易行每天按店员数定成交量，另受当日运力的份额限制。
-  tradeHouseTargetMarginPercent: 20, // 出口利润率门槛的开局默认（政策页 policy.tradeMarginPercent 可调 0—200%）：单斤利润率（卖价 − 买价 − 运费）达到这个百分比（相对买价+运费）才做
-  tradeHouseImportMarginPercent: 25, // 进口利润率门槛的开局默认（政策 policy.tradeImportMarginPercent 可调；高于出口，贸易行偏向出口）
-  tradeHouseExportPriority: 1.5, // 排序时出口利润率乘这个系数，同等条件先做出口
+  // 贸易行只要有钱赚就该做：利润率只是防亏损的下限，不是目标。下限 tradeHouseMarginFloorPercent 以下一律不做；政策页的出口/进口门槛可以调高，但不能低于下限。
+  tradeHouseMarginFloorPercent: 5,
+  tradeHouseTargetMarginPercent: 5, // 出口利润率门槛的开局默认（政策页 policy.tradeMarginPercent 可调 5—200%）：单斤利润率（卖价 − 买价 − 运费 − 关税）达到这个百分比（相对买价+运费）才做
+  tradeHouseImportMarginPercent: 5, // 进口利润率门槛的开局默认（政策 policy.tradeImportMarginPercent 可调；不得低于出口门槛）
+  tradeHouseExportPriority: 1.5, // 排序时出口的每斤净利润乘这个系数，同等条件先做出口（运力与店员日额度的单位是斤，按每斤净赚排序）
   tradeHouseJinPerClerk: 300, // 每名店员（含商人）每天可成交的斤数
   tradeHouseCapacityShare: 0.8, // 各贸易行合计最多占当日运力的这个比例，按店员数分配；其余留给镇里
   tradeTariffMaximumPercent: 50, // 进出口关税上限（%）；默认 0，在贸易中心设
@@ -129,7 +133,7 @@ export const RULES = Object.freeze({
   stallRentDefaultVoucher: 2,
   // 时代广场集市：默认允许摆摊人数。
   stallKeeperDefaultLimit: 50,
-  stallTargetIncomeVoucher: 25, // 集市摆摊人数的自调节目标：摊主人均日分成（券）；利润高于它就吸纳更多待业者摊薄，见 stalls.js 的 targetKeepers
+  stallTargetIncomeVoucher: 10, // 集市摆摊人数的自调节目标：摊主人均日分成（券）；利润高于它就吸纳更多待业者摊薄，见 stalls.js 的 targetKeepers
   // 集市补贴：免租时长（天，三个月/半年/一年/三年）；批发特价三档，每斤少收 0.1/0.2/0.4 斤小麦（第 0 档不打折）。
   stallRentFreeOptionsDays: Object.freeze([90, 180, 360, 1080]),
   stallWholesaleDiscountTiers: Object.freeze([0, 0.1, 0.2, 0.4]),
@@ -276,6 +280,9 @@ export const RULES = Object.freeze({
   lending: Object.freeze({ maxDebtToWealthShare: 0.6, maxServiceShareOfIncome: 0.3, maxPerHouseholdJin: 20000, shopTermMonths: 24, villaTermMonths: 60 }),
   shopTypes: Object.freeze({
     general:Object.freeze({ id: "general", name: "综合商店", kind: "retail", itemIds: Object.freeze(["flour", "bread", "salt", "wood", "beer", "beer_premium", "baijiu", "baijiu_premium", "cloth"]) }),
+    // 酒馆（商业街）：只卖四种酒。generalRules 表示与综合商店同规则：接待能力（店员×接待数）、动态加价与调价、目标利润率、店员上限。
+    // 进货只从批发市场。酒类专售令（policy.liquorMonopoly）开启后，居民买酒只来这里。
+    tavern: Object.freeze({ id: "tavern", name: "酒馆", kind: "retail", generalRules: true, itemIds: Object.freeze(["beer", "beer_premium", "baijiu", "baijiu_premium"]) }),
     haircut: Object.freeze({ id: "haircut", name: "理发店", kind: "service", serviceId: "haircut" }),
     repair: Object.freeze({ id: "repair", name: "修补铺", kind: "service", serviceId: "repair" }),
     tea: Object.freeze({ id: "tea", name: "茶馆", kind: "service", serviceId: "tea" }),
@@ -313,6 +320,8 @@ export const RULES = Object.freeze({
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
   townOutputStockDays: 360, // 备货天数：目标库存相当于多少天的需求
+  // 联产配方（一批同出几种）每种产出的库存硬上限 = 目标库存 × 本倍数；超出的部分当批不入库，记加工损耗（滞销酒倒掉/自用）。
+  townOutputHardCapMultiple: 2,
   // 个别商品的备货天数覆盖：面包是易囤的成品，备太多会把磨坊有限的面粉全占走，居民买不到面粉（体检：面粉零售 0%、面包库存越堆越多）。
   townOutputStockDaysByItem: Object.freeze({ bread: 30 }),
   // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。

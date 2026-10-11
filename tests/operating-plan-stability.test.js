@@ -74,22 +74,23 @@ test("运营计划：积压时减产按备货缺口的 1/5 分期补齐，不会
 });
 
 test("运营计划：用工每周期最多招 2 人、裁 1 人；10% 以内的差额不折腾", () => {
-  // 日需求 100 斤：目标 = 100 + (200 − 现货) / 5。现货 225 斤 → 目标 95 斤 → 19 批 → 需 19 人。
+  // 盐场每批 10 斤（salt_gathering 产量翻倍）：日需求 200 斤，目标 = 200 + (400 − 现货) / 5。
+  // 现货 450 斤 → 目标 190 斤 → 19 批 → 需 19 人。
   const want = (workers, stockJin) => {
-    const state = saltState({ demandJin: 100, wholesaleSaltJin: stockJin });
+    const state = saltState({ demandJin: 200, wholesaleSaltJin: stockJin });
     setJobCount(state, "stab-salt::salt_workers::private", workers, CONTENT);
     return planRow(state);
   };
 
   // 现有 20 人，需 19 人：差 1，≤ floor(20×10%)=2，死区内不动。
-  assert.equal(want(20, 225).desiredWorkers, 20, "20 人、需 19 人：死区内维持 20");
+  assert.equal(want(20, 450).desiredWorkers, 20, "20 人、需 19 人：死区内维持 20");
 
   // 现有 20 人，需 17 人：差 3 超过死区，但裁人每周期最多 1 人 → 19。
-  assert.equal(want(20, 275).desiredWorkers, 19, "裁人每周期最多 1 人");
+  assert.equal(want(20, 550).desiredWorkers, 19, "裁人每周期最多 1 人");
 
-  // 现有 5 人，需 20 人以上：招人每周期最多 2 人 → 7。
+  // 现有 5 人，需 28 人：招人每周期最多 2 人 → 7。
   assert.equal(want(5, 0).desiredWorkers, 7, "招人每周期最多 2 人");
 
   // 现有 18 人，需 19 人：floor(18×10%)=1，差 1 在死区内，维持 18。
-  assert.equal(want(18, 225).desiredWorkers, 18, "18 人、需 19 人：死区内维持 18");
+  assert.equal(want(18, 450).desiredWorkers, 18, "18 人、需 19 人：死区内维持 18");
 });

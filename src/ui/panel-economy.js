@@ -16,11 +16,15 @@ function detail(key, title, body) {
 function renderIndustryProductivity(view) {
   const rows = (view.productivity || []).filter(row => row.workerDays > 0);
   const note = `<div class="subtle">生产工人每干一天累计一个工日；越熟练人均产出越高，越往后涨得越慢。建筑每升一级人均产出 +10%。</div>`;
-  if (!rows.length) return `<div class="subtle">尚无在岗生产工人。</div>${note}`;
+  const education = view.education
+    ? `<div class="row"><span class="label">教育加成</span><strong class="value">+${numberMax(view.education.bonusPercent, 1)}%（累计办学 ${number(view.education.schoolYears, 1)} 年）</strong></div>`
+      + `<div class="subtle">学堂每办满 1 年全镇劳动产出 +${numberMax(view.education.perYearPercent, 1)}%（上限 ${numberMax(view.education.maxPercent, 0)}%）。</div>`
+    : "";
+  if (!rows.length) return `${education}<div class="subtle">尚无在岗生产工人。</div>${note}`;
   const lines = rows.map(row => `<div class="row"><span class="label">${escapeHtml(row.name)}</span><strong class="value">熟练 +${numberMax(row.experiencePercent, 1)}% / 上限 ${number(row.maxPercent, 0)}%</strong></div>`
     + `<div class="meter"><span style="width:${Math.min(100, (row.experiencePercent / row.maxPercent) * 100).toFixed(1)}%"></span></div>`
     + `<div class="row"><span class="label">累计工日</span><strong class="value">${number(row.workerDays)}</strong></div>`).join("");
-  return `${lines}${note}`;
+  return `${education}${lines}${note}`;
 }
 
 export function renderEconomy(view) {

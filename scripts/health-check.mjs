@@ -15,7 +15,7 @@
 // 玩家策略（每年年初、第 1 天开工前执行一次，确定性，不随机）：
 //   1. 保持镇营生产岗位满员（默认；--no-fill-capacity 恢复旧行为：计划人数钉在开局配人数）：
 //      每个镇营生产建筑（带 industryTier 的 mill/bakery/saltworks/lumberyard/
-//      brewery/craft_brewery/winery/premium_winery/cotton_field/weaving_mill）每年年初把岗位补到产能满额，
+//      winery/cotton_field/weaving_mill）每年年初把岗位补到产能满额，
 //      新招人数受全镇闲置人口限制（不挖别的岗位、不超过可用人口）；从不主动裁员。
 //   2. 磨坊、面包房每年升一级：若该建筑没有在建工程、未达最高等级（10 级）、且 selectUpgradePreview
 //      显示材料可付（镇库木材不足时允许从批发市场采购，由镇库付券），就调用真实的 upgradeBuilding 命令。
@@ -50,7 +50,7 @@ const simulation = householdsArg ? createSimulation(CONTENT) : defaultSimulation
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 const MID_DAY = 180;
-const PRODUCER_TYPES = ["mill", "bakery", "saltworks", "lumberyard", "brewery", "craft_brewery", "winery", "premium_winery", "cotton_field", "weaving_mill"];
+const PRODUCER_TYPES = ["mill", "bakery", "saltworks", "lumberyard", "winery", "cotton_field", "weaving_mill"];
 const UPGRADE_TYPES = ["mill", "bakery"];
 const PRICE_ITEMS = ["flour", "bread", "salt", "wood", "beer", "baijiu", "cloth", "pork"];
 const OUTSIDE_TOWN_IDS = Object.keys(CONTENT.outsideTowns || {});
@@ -96,7 +96,7 @@ function buildTown(seed) {
   staff(add("mill"), 10); staff(add("bakery"), 10);
   staff(add("saltworks", 2, CONTENT.buildings.saltworks.requiredPlotFeature), 12);
   staff(add("lumberyard", 2, CONTENT.buildings.lumberyard.requiredPlotFeature), 12);
-  staff(add("brewery"), 4); staff(add("craft_brewery"), 2); staff(add("winery"), 4); staff(add("premium_winery"), 2);
+  staff(add("winery"), 12);
   staff(add("cotton_field"), 8); staff(add("weaving_mill"), 6);
   const base = add("livestock_base", 1);
   add("times_square", 1);

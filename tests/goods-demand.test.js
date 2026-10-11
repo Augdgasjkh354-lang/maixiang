@@ -12,8 +12,8 @@ import { isIndustryType, industryTypeIds } from "../src/content/buildings.js";
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
 
-test("新产业由建筑定义推导：四种酒坊、棉田、织坊与原四产业同等可民营/成立公司", () => {
-  for (const typeId of ["mill", "bakery", "lumberyard", "saltworks", "brewery", "craft_brewery", "winery", "premium_winery", "cotton_field", "weaving_mill"]) {
+test("新产业由建筑定义推导：酒坊、棉田、织坊与原四产业同等可民营/成立公司", () => {
+  for (const typeId of ["mill", "bakery", "lumberyard", "saltworks", "winery", "cotton_field", "weaving_mill"]) {
     assert.ok(isIndustryType(CONTENT, typeId), typeId);
   }
   const order = industryTypeIds(CONTENT);

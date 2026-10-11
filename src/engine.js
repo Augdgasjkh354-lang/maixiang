@@ -20,7 +20,7 @@ import {
   configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares,
   listBuilding, approveIpoApplication, rejectIpoApplication,
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
-  setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setStampDuty, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
+  setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setStampDuty, setLiquorMonopoly, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
   configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
   reclaimFarmland
 } from "./core/commands.js";
@@ -186,6 +186,7 @@ export function createSimulation(content) {
     setStampDuty: function (state, value) { return setStampDuty(state, value, definitions); },
     setTradeTariff: function (state, patch) { return setTradeTariff(state, patch, definitions); },
     setMarginPolicy: function (state, patch) { return setMarginPolicy(state, patch, definitions); },
+    setLiquorMonopoly: function (state, enabled, options) { return setLiquorMonopoly(state, enabled, options); },
     openResidentShop: function (state, buildingId, typeId, householdId) { return openResidentShop(state, buildingId, typeId, householdId, definitions); },
     openTownShop: function (state, buildingId) { return openTownShop(state, buildingId, definitions); },
     configureShopMerchants: function (state, shopId, count) { return configureShopMerchants(state, shopId, count, definitions); },

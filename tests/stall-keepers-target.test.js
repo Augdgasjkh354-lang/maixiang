@@ -54,13 +54,13 @@ test("亏损：减员 20%", () => {
 });
 
 test("偏差在 15% 以内不调；超出则调", () => {
-  // 20 人：利润 611 券/日 → 目标 ceil 22（+10%），639 → 23（+15%），都不动。
-  for (const profitVouchers of [611, 639]) {
+  // 目标人均日分成 10 券：20 人，利润 244 券/日 → 目标 22（+10%），256 → 23（+15%），都不动。
+  for (const profitVouchers of [244, 256]) {
     const r = stallCase({ seed: 7104 + profitVouchers, keepers: 20, profitVouchers });
     assert.equal(r.after, 20, `利润 ${profitVouchers} 券/日时偏差在 15% 内，不应调整，实际 ${r.after}`);
   }
-  // 667 券/日 → 目标 24（+20%），超出 15%，调到 24。
-  const moved = stallCase({ seed: 7120, keepers: 20, profitVouchers: 667 });
+  // 267 券/日 → 目标 24（+20%），超出 15%，调到 24。
+  const moved = stallCase({ seed: 7120, keepers: 20, profitVouchers: 267 });
   assert.equal(moved.after, 24, `偏差超过 15% 应调整，实际 ${moved.after}`);
 });
 
@@ -76,14 +76,14 @@ test("人数不超过允许摆摊人数，也不超过摊位数 × 2", () => {
   assert.equal(full.after, slotCap, "利润极高时应顶到摊位上限");
 });
 
-test("rules.stallTargetIncomeVoucher 缺省时回退 25 券", () => {
-  // 20 人、利润 611 券/日：目标 25 券 → 22 人（+10%，不动）；若目标是 50 券 → 11 人，会减员到 16。
+test("rules.stallTargetIncomeVoucher 缺省时回退 10 券", () => {
+  // 20 人、利润 244 券/日：目标 10 券 → 22 人（+10%，不动）；若目标是 20 券 → 11 人，会减员到 16。
   const { stallTargetIncomeVoucher: _omit, ...rulesWithout } = CONTENT.rules;
   const noKey = { ...CONTENT, rules: rulesWithout };
-  const fallback = stallCase({ seed: 7140, keepers: 20, profitVouchers: 611, content: noKey });
-  assert.equal(fallback.after, 20, `缺省时应按 25 券判断，实际 ${fallback.after}`);
+  const fallback = stallCase({ seed: 7140, keepers: 20, profitVouchers: 244, content: noKey });
+  assert.equal(fallback.after, 20, `缺省时应按 10 券判断，实际 ${fallback.after}`);
 
-  const explicit50 = { ...CONTENT, rules: { ...CONTENT.rules, stallTargetIncomeVoucher: 50 } };
-  const moved = stallCase({ seed: 7141, keepers: 20, profitVouchers: 611, content: explicit50 });
-  assert.equal(moved.after, 16, `显式设为 50 券时应按 50 券判断，实际 ${moved.after}`);
+  const explicit20 = { ...CONTENT, rules: { ...CONTENT.rules, stallTargetIncomeVoucher: 20 } };
+  const moved = stallCase({ seed: 7141, keepers: 20, profitVouchers: 244, content: explicit20 });
+  assert.equal(moved.after, 16, `显式设为 20 券时应按 20 券判断，实际 ${moved.after}`);
 });

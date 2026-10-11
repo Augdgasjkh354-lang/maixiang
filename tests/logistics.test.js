@@ -8,7 +8,7 @@ import { setJobCount } from "../src/systems/households.js";
 import { DAILY_STEPS } from "../src/systems/daily.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import {
-  dailyCapacityBySource, dailyCapacityJin, freightVoucherPerJin, selectLogisticsView,
+  dailyCapacityBySource, dailyCapacityJin, dockFreightRate, freightVoucherPerJin, selectLogisticsView, trunkFreightRate,
   stepLogistics, takeFreightCapacity, refundFreightCapacity
 } from "../src/systems/logistics.js";
 import { settleTradeAgreementsMonth } from "../src/systems/trade-agreements.js";
@@ -194,26 +194,31 @@ test("长期协定运力充足时全额交付，不违约，运力按交付量�
   assertValid(state, "全额交付后");
 });
 
-test("运费：按日运力加权，物流中心与外贸房为 0.06，码头为 0.03；没有运力时取 0.06", () => {
+test("运费 = 搬一斤货的人力成本（工人日薪 ÷ 每人日运力）：物流中心与外贸房约 0.0833，码头约 0.0417；按日运力加权；没有运力时取物流中心的单价", () => {
+  const porterWage = CONTENT.buildings.logistics_center.jobs.find(job => job.id === "porters").wagePerWorkerDay;
+  const dockerWage = CONTENT.buildings.dock.jobs.find(job => job.id === "dockers").wagePerWorkerDay;
+  assert.ok(Math.abs(trunkFreightRate(CONTENT) - porterWage / RULES.logisticsJinPerWorker) < 1e-12, "脚夫人力成本");
+  assert.ok(Math.abs(dockFreightRate(CONTENT) - dockerWage / RULES.dockJinPerWorker) < 1e-12, "码头工人力成本");
+  assert.ok(Math.abs(trunkFreightRate(CONTENT) - 5 / 60) < 1e-12 && Math.abs(dockFreightRate(CONTENT) - 5 / 120) < 1e-12, "默认工资 5 券：0.0833 与 0.0417");
   const empty = freshState(7310);
-  assert.equal(freightVoucherPerJin(empty, CONTENT), RULES.freightVoucherPerJin, "没有运力取基础运费");
+  assert.equal(freightVoucherPerJin(empty, CONTENT), trunkFreightRate(CONTENT), "没有运力取基础运费");
 
   const dockOnly = freshState(7311);
   addBuilding(dockOnly, "dock1", "dock", freePlot(dockOnly, "riverside"));
   staffJob(dockOnly, "dock1", "dockers", 2);
-  assert.ok(Math.abs(freightVoucherPerJin(dockOnly, CONTENT) - RULES.dockFreightVoucherPerJin) < 1e-9, "只有码头时取码头运费");
+  assert.ok(Math.abs(freightVoucherPerJin(dockOnly, CONTENT) - dockFreightRate(CONTENT)) < 1e-9, "只有码头时取码头运费");
 
   const trunkOnly = freshState(7312);
   addTradeHouse(trunkOnly);
   addBuilding(trunkOnly, "lc1", "logistics_center", freePlot(trunkOnly));
   staffJob(trunkOnly, "lc1", "porters", 5);
-  assert.equal(freightVoucherPerJin(trunkOnly, CONTENT), RULES.freightVoucherPerJin, "外贸房与物流中心取基础运费");
+  assert.equal(freightVoucherPerJin(trunkOnly, CONTENT), trunkFreightRate(CONTENT), "外贸房与物流中心取基础运费");
 
   const mixed = freshState(7313);
   addTradeHouse(mixed);
   addBuilding(mixed, "dock1", "dock", freePlot(mixed, "riverside"));
   staffJob(mixed, "dock1", "dockers", 1);
-  const expected = (300 * RULES.freightVoucherPerJin + 120 * RULES.dockFreightVoucherPerJin) / 420;
+  const expected = (300 * trunkFreightRate(CONTENT) + 120 * dockFreightRate(CONTENT)) / 420;
   assert.ok(Math.abs(freightVoucherPerJin(mixed, CONTENT) - expected) < 1e-9, "按日运力加权");
 });
 

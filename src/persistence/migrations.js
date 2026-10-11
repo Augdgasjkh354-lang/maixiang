@@ -10,7 +10,7 @@ import { syncShopEmployment } from "../systems/shops.js";
 import { syncResidentAggregates } from "../systems/households.js";
 import { convertSplitOwnership } from "../systems/ownership-migrate.js";
 import {
-  ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, renameItemIds, repairHouseholdTable, resetFailingSubsystems, sanitizeNumbers
+  ENTITY_MAPS, applyRenames, describeLoadReport, emptyLoadReport, mergeOntoBase, renameItemIds, renameLiquorBuildings, repairHouseholdTable, resetFailingSubsystems, sanitizeNumbers
 } from "./save-compat.js";
 
 export const MIN_SAVE_VERSION = 18;
@@ -50,7 +50,8 @@ function migrateCurrentVersion(raw, definitions, current) {
   const report = emptyLoadReport();
   // mod 在 content.js 的 save 里登记的改名与实体表（state.mods.<id>... 路径）。
   // 物品改名（wine → baijiu）先于字段改名：存档树里的物品键、值统一换成新 id。
-  const saved = applyRenames(renameItemIds(cloneJson(raw), report), report, definitions.modSave?.renames || []);
+  // 酒坊整合：旧的啤酒坊 / 精酿坊 / 窖坊改成酒坊（save-compat.js 的 renameLiquorBuildings）。
+  const saved = applyRenames(renameLiquorBuildings(renameItemIds(cloneJson(raw), report), report), report, definitions.modSave?.renames || []);
   // 家庭表按实体 id 存、不走底板合并：先逐户补齐、丢弃危险键，修不了的抛中文错误。
   repairHouseholdTable(saved, definitions, report);
   const base = createInitialState({ content: definitions });

@@ -99,7 +99,13 @@ export function planProductionAccounting(state, building, recipe, batches, conte
   });
   const targets = [...outputs, ...losses];
   if (targets.reduce((sum, row) => sum + row.weight, 0) === 0) {
-    for (const row of targets) row.weight = row.quantityUnits;
+    // 不可食用的产出（酒、布等，没有口粮当量）：按批发默认售价的价值比例分摊成本（多产出联产时各产出按价值分）。
+    const valueOf = (itemId, units) => units * (Number(content.rules.wholesaleDefaultSalePrices?.[itemId]) || 0);
+    for (const row of outputs) row.weight = valueOf(row.itemId, row.quantityUnits);
+    for (const row of losses) row.weight = valueOf(row.itemId, row.quantityUnits);
+    if (targets.reduce((sum, row) => sum + row.weight, 0) === 0) {
+      for (const row of targets) row.weight = row.quantityUnits;
+    }
   }
   const costs = splitCost(totalInputCost, targets);
   let processingLossWheatUnits = 0;
@@ -137,6 +143,8 @@ export function commitProductionAccounting(state, plan) {
   if (!industry) {
     bookAddAll(business, { processingLossWheatUnits: plan.processingLossWheatUnits, rawInputCostWheatUnits: plan.rawInputCostWheatUnits });
   }
+  // 联产超出库存硬上限的部分（滞销酒倒掉/自用）：成本记入加工损耗账。
+  if (plan.excessLossWheatUnits) bookAddAll(business, { processingLossWheatUnits: plan.excessLossWheatUnits });
   return plan;
 }
 

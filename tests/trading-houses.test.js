@@ -15,6 +15,7 @@ import { currentPaymentComposition, maximumPayableValueUnits, settleMonetaryPaym
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
 const V = CONTENT.precision.currencyUnitsPerVoucher;
+import { freightVoucherPerJin } from "../src/systems/logistics.js";
 const RULES = CONTENT.rules;
 const POOL_JIN = 300; // tradeFixture 默认运力池
 const SHARE_JIN = POOL_JIN * RULES.tradeHouseCapacityShare; // 单店独占时的运力份额（斤）
@@ -146,11 +147,11 @@ test("出口：批发存货有余量、利润率够 10% 时卖给外镇，运费
 
   // 批发市场：盐出库，售价 10 元/斤。
   assert.equal(state.wholesaleMarket.inventory.salt, beforeMarket - sold * I);
-  // 小麦进店：收入 = 外镇付的小麦；成本 = 批发售价；运费 = 斤数 × 0.06 券。
+  // 小麦进店：收入 = 外镇付的小麦；成本 = 批发售价；运费 = 斤数 × 人力成本运费（freightVoucherPerJin）。
   const revenue = row.revenueVoucherUnits / V;
   assert.ok(revenue > sold * 12, "外镇收购价约 12.25 斤/斤");
   assert.equal(row.cogsVoucherUnits, sold * 10 * V, "成本按批发售价");
-  assert.equal(row.freightVoucherUnits, Math.ceil(sold * RULES.freightVoucherPerJin * V - 1e-9), "运费按 0.06 券/斤付镇库");
+  assert.equal(row.freightVoucherUnits, Math.ceil(sold * freightVoucherPerJin(state, CONTENT) * V - 1e-9), "运费按人力成本付镇库");
   assert.ok(row.profitVoucherUnits > 0, "有利润");
   assert.ok(state.accounts.town.wheat > beforeTownWheat, "外镇付的小麦进镇库");
   // 镇库付货款给贸易行（出口收来的小麦），运费收进镇库：净额 = 运费 - 货款（券池不足时补发只会让镇库更多）。
@@ -200,10 +201,10 @@ test("利润率不到 10% 不做：外镇收购价 14.73，批发售价 14.2 时
 
 test("进口：店里有小麦、批发收购价够高时，向外镇买面粉，按收购价卖回批发市场", () => {
   const { state, shop } = tradeFixture(9107);
-  // 只测进口：盐不做出口（否则同一天外镇付的小麦会混进来）。面粉：外镇售价约 2.0 斤/斤，批发收购价 2.6 → 利润够 10%。
+  // 只测进口：盐不做出口（否则同一天外镇付的小麦会混进来）。面粉：外镇售价约 2.0 斤/斤，批发收购价 2.7 → 扣运费 0.083 后利润率仍过进口门槛 25%。
   // 盐的外镇收购价约 14.7，批发售价 15 时利润为负，不出口（只测进口）。
   assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
-  assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
+  assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.7).ok, true);
   const town = ensureOutsideTowns(state, CONTENT).minzhen;
   const beforeFlour = town.stocks.flour;
   const beforeWheat = town.wheatStockJin;
@@ -227,7 +228,7 @@ test("进口：店里有小麦、批发收购价够高时，向外镇买面粉�
 
 test("进口：镇库小麦不高于口粮储备线就不做", () => {
   const { state, shop } = tradeFixture(9108);
-  assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
+  assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.7).ok, true);
   state.accounts.town.wheat = 0;
   settleTradingHouses(state, CONTENT);
   assert.equal(lastRow(shop).importJin.flour, undefined);
@@ -237,7 +238,7 @@ test("进口量封顶：市场存量不超过 30 天销量", () => {
   const { state, shop } = tradeFixture(9109);
   // 盐的批发售价抬到 15（外镇收购价约 14.7，利润为负），不让盐出口抢走运力池（出口排序优先，会先用光运力）。
   assert.equal(simulation.configureWholesalePrice(state, "salt", 15).ok, true);
-  assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.6).ok, true);
+  assert.equal(simulation.configureWholesalePurchasePrice(state, "flour", 2.7).ok, true);
   setMarketSales(state, "flour", 10); // 日销 10 斤 → 封顶 300 斤，减去现存 0
   settleTradingHouses(state, CONTENT);
   const bought = lastRow(shop).importJin.flour || 0;

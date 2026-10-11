@@ -2,5 +2,6 @@
 import tea from "./tea/mod.js";
 import pottery from "./pottery/mod.js";
 import silk from "./silk/mod.js";
+import preciousMetals from "./precious_metals/mod.js";
 
-export const MODS = [tea, pottery, silk];
+export const MODS = [tea, pottery, silk, preciousMetals];

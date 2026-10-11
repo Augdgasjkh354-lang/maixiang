@@ -3,7 +3,7 @@ import { jobCount } from "./households.js";
 // 运力（docs/TRADE.md「运力」「运费」）：对外镇的货（镇长手动买卖、长期协定、将来的私人贸易行）都要从运力池里扣斤数。
 //   日运力 = 外贸房在岗的基础运力 + 物流中心脚夫 × logisticsJinPerWorker + 码头工 × dockJinPerWorker。
 //   池子每日按日运力补充，最多攒 freightPoolMaxDays 天的量。
-//   运费只给私人贸易行（镇里自己的货不付运费）：按日运力加权平均，码头运力部分用 dockFreightVoucherPerJin。
+//   运费只给私人贸易行（镇里自己的货不付运费）：按日运力加权平均；单价 = 人力成本（工人日薪 ÷ 每人日运力）。
 // 运力是斤数（不是粮券）；所有读取都不写 state，只有日结步骤和 take/refund 写池子。
 
 const HISTORY_LIMIT = 30;
@@ -79,11 +79,24 @@ export function refundFreightCapacity(state, jin) {
   return amount;
 }
 
+// 运费 = 搬一斤货的人力成本（用多少人力就付多少钱）：工人日薪 ÷ 每人日运力。
+// 走物流中心与外贸房运力的部分按脚夫的人力成本（5 ÷ 60 ≈ 0.0833 券/斤），走码头的部分按码头工（5 ÷ 120 ≈ 0.0417 券/斤）。
+// 工资和运力都来自内容定义，改工资或运力运费自动跟着变。
+function jobWage(content, typeId, jobId) {
+  return Number(content.buildings?.[typeId]?.jobs?.find(job => job.id === jobId)?.wagePerWorkerDay) || 0;
+}
+export function trunkFreightRate(content) {
+  return jobWage(content, PORTER_TYPE, PORTER_JOB) / Math.max(1, content.rules.logisticsJinPerWorker);
+}
+export function dockFreightRate(content) {
+  return jobWage(content, DOCK_TYPE, DOCK_JOB) / Math.max(1, content.rules.dockJinPerWorker);
+}
+
 function freightPriceFromSources(sources, content) {
   const trunkJin = sources.foreignTradeHouse + sources.logisticsCenter;
   const totalJin = trunkJin + sources.dock;
-  if (totalJin <= 0) return content.rules.freightVoucherPerJin;
-  return (trunkJin * content.rules.freightVoucherPerJin + sources.dock * content.rules.dockFreightVoucherPerJin) / totalJin;
+  if (totalJin <= 0) return trunkFreightRate(content);
+  return (trunkJin * trunkFreightRate(content) + sources.dock * dockFreightRate(content)) / totalJin;
 }
 
 // 私人贸易行每运一斤的运费（券/斤）：按日运力加权；没有运力时取物流中心的单价。

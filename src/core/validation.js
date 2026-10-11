@@ -8,6 +8,7 @@ import { validateContent } from "../content/validate.js";
 import { validateCurrencyInvariant } from "../economy/currency.js";
 import { bankLedgerInvariant } from "../systems/bank.js";
 import { buildingMaxLevel } from "../content/building-level.js";
+import { usesGeneralRules } from "../systems/shop-types.js";
 
 export function validateState(state, content) {
   const errors = [];
@@ -25,6 +26,9 @@ export function validateState(state, content) {
       errors.push("农民补贴累计无效");
     }
   }
+  // 教育（学堂累计办学天数）：非负有限数；缺失按 0 处理（读档由新开局底板补齐）。
+  const schoolDays = state?.education?.schoolDays ?? 0;
+  if (!Number.isFinite(schoolDays) || schoolDays < 0) errors.push("学堂累计办学天数无效");
   const logistics = state?.logistics;
   if (logistics) {
     for (const key of ["poolJin", "usedToday"]) {
@@ -141,6 +145,7 @@ export function validateState(state, content) {
     if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > (content.rules.tradeTariffMaximumPercent ?? 50))) errors.push("关税设置无效");
   }
   if (!Number.isFinite(state.policy?.shopProfitTaxPercent) || state.policy.shopProfitTaxPercent < 0 || state.policy.shopProfitTaxPercent > (content.rules.shopProfitTaxMaximumPercent || 80)) errors.push("商业利润税设置无效");
+  if (state.policy?.liquorMonopoly !== undefined && typeof state.policy.liquorMonopoly !== "boolean") errors.push("酒类专售令设置无效");
   if (state.policy?.stampDutyPercent !== undefined && (!Number.isFinite(state.policy.stampDutyPercent) || state.policy.stampDutyPercent < 0 || state.policy.stampDutyPercent > (content.rules.stampDutyMaximumPercent ?? 5))) errors.push("印花税率无效");
 
   if (!state.employment || !state.employment.wageRates) {
@@ -423,7 +428,7 @@ export function validateState(state, content) {
       if (!shop.collective && !shop.town && merchantCount > (shopTypeDef?.maxMerchants ?? content.rules.shopMaxMerchants ?? 4)) errors.push("商人超过上限：" + shop.id);
       if (shop.town && merchantCount > 0) errors.push("镇营店不应有商人：" + shop.id);
       const shopClerkMax = Number.isFinite(shopTypeDef?.maxClerks) ? shopTypeDef.maxClerks
-        : shopTypeDef?.id === "general" ? (content.rules.generalStoreMaxClerks || 50) : (content.rules.shopMaxClerks || 20);
+        : usesGeneralRules(shopTypeDef) ? (content.rules.generalStoreMaxClerks || 50) : (content.rules.shopMaxClerks || 20);
       if (clerkCount > shopClerkMax) errors.push("店员超过上限：" + shop.id);
       if (shop.status === "open") {
         if (!shop.collective && !shop.town && (!owner || !isActiveHousehold(owner) || (owner.jobs?.[merchantKey] || 0) < 1 || merchantCount < 1)) errors.push("商人岗位归属无效：" + shop.id);

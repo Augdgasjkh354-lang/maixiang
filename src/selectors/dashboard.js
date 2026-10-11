@@ -2,7 +2,8 @@ import { BUILDING_PRESENTATION } from "../content/world.js";
 import { MODS } from "../mods/registry.js";
 import { selectModViews } from "../mods/api.js";
 import { industryTypeIds, isIndustryType } from "../content/buildings.js";
-import { experienceBonus, industryWorkerDays, levelBonus, productivityFactor } from "../economy/productivity.js";
+import { policyTradeMarginPercent } from "../economy/margin-policy.js";
+import { educationBonus, experienceBonus, industryWorkerDays, levelBonus, productivityFactor } from "../economy/productivity.js";
 import { populationStats, selectJobRows, readJobCount, jobKeyForBuilding, privateJobKeyForBuilding, listedJobKeyForBuilding } from "./labor.js";
 import { selectAccounts, selectFoodDays, selectTotalQeq } from "./economy.js";
 import { productionStatus } from "./production.js";
@@ -170,12 +171,24 @@ const PRODUCTIVITY_MAX_PERCENT = 50;
 
 function productivityView(state, typeId, level, content) {
   if (!isIndustryType(content, typeId)) {
-    return { productivityFactor: null, levelBonusPercent: null, experienceBonusPercent: null };
+    return { productivityFactor: null, levelBonusPercent: null, experienceBonusPercent: null, educationBonusPercent: null };
   }
   return {
     productivityFactor: Math.round(productivityFactor(state, typeId, level) * 100) / 100,
     levelBonusPercent: Math.round((levelBonus(level) - 1) * 100),
-    experienceBonusPercent: Math.round((experienceBonus(state, typeId) - 1) * 1000) / 10
+    experienceBonusPercent: Math.round((experienceBonus(state, typeId) - 1) * 1000) / 10,
+    educationBonusPercent: Math.round((educationBonus(state) - 1) * 1000) / 10
+  };
+}
+
+// 教育（学堂）只读视图：累计办学年数（天数 ÷ 360）、当前全镇教育加成百分比、上限与每办满 1 年的加成。
+function educationView(state, content) {
+  const schoolDays = Math.max(0, state.education?.schoolDays || 0);
+  return {
+    schoolYears: Math.round(schoolDays / content.rules.daysPerYear * 100) / 100,
+    bonusPercent: Math.round((educationBonus(state) - 1) * 1000) / 10,
+    maxPercent: Math.round(content.rules.educationBonusMax * 1000) / 10,
+    perYearPercent: Math.round(content.rules.educationBonusPerYear * 1000) / 10
   };
 }
 
@@ -592,6 +605,7 @@ export function selectDashboard(state, content, selection) {
     relief: state.relief?.lastDay || null,
     buildings,
     productivity: industryProductivityRows(state, content),
+    education: educationView(state, content),
     constructionOptions: options,
     projects: projectViews,
     // 兼容旧调用方：单工程访问器仍然返回首个在建工程。
@@ -640,6 +654,9 @@ export function selectDashboard(state, content, selection) {
     // 银行建筑面板也读 bankStats / bondStats（利率、准备金率、国债），所以站点面板同样需要这一块。
     policy: (needPolicy || needSite) ? {
       ...(state.policy || { unemploymentBenefit: { enabled: false, dailyPerWorkerJin: 1 } }),
+      // 贸易行利润门槛显示有效值（旧档烘焙的 20/25 视为跟随默认，不低于下限），与读档后的实际取值一致。
+      tradeMarginPercent: policyTradeMarginPercent(state, content, "export"),
+      tradeImportMarginPercent: policyTradeMarginPercent(state, content, "import"),
       unemployed: labor.idle,
       dailyExpectedWheatJin: labor.idle * (state.policy?.unemploymentBenefit?.dailyPerWorkerJin || 0),
       dailyExpectedVoucher: labor.idle * (state.policy?.unemploymentBenefit?.dailyPerWorkerJin || 0),
@@ -848,7 +865,7 @@ export function selectDashboard(state, content, selection) {
     farmAcresMaximum: content.agriculture.acresMaximum ?? content.agriculture.acres,
     acresPerFarmer: content.agriculture.acresPerFarmer,
     farmYieldPerAcre: content.agriculture.yieldPerAcre,
-    farmMaximumHarvest: reclaimedAcres(state, content) * content.agriculture.yieldPerAcre,
+    farmMaximumHarvest: reclaimedAcres(state, content) * content.agriculture.yieldPerAcre * educationBonus(state),
     reclaim: needSite || needResidents ? selectReclaimView(state, content) : null,
     ledgerQuantity: function (row) {
       return row.quantityUnits / content.precision.inventoryUnitsPerJin;

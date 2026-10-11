@@ -7,7 +7,7 @@
 // - shop.pricing.glidePercent：生效中的目标（平滑过渡）。玩家改目标时先把旧的生效值记下（pinGlideBeforeChange），
 //   之后每次 7 天复核按价格 ±rules.generalStorePricingMaxStepPercent 的步幅追上新目标，追平后删除。
 // - state.policy.tradeMarginPercent / tradeImportMarginPercent：贸易行出口 / 进口利润门槛（0—200；
-//   缺省 rules.tradeHouseTargetMarginPercent / tradeHouseImportMarginPercent）。
+//   缺省 rules.tradeHouseTargetMarginPercent / tradeHouseImportMarginPercent，均不低于 rules.tradeHouseMarginFloorPercent，默认 5）。
 //
 // 只读函数不写 state；写入只在 pinGlideBeforeChange（由命令在改目标前调用）与复核（shop-pricing.js）里发生。
 
@@ -32,13 +32,27 @@ export function policyShopMarginPercent(state, content) {
   return policyPercent(state?.policy?.shopMarginPercent, content.rules.generalStoreMarkupPercent ?? 20);
 }
 
-// 贸易行利润门槛（%）：export 或 import。
+// 旧版开局烘焙进政策的贸易行门槛（出口 20%、进口 25%）：视为“跟随默认”，否则旧档改了默认也不生效（与综合商店 20% 同一做法）。
+export const LEGACY_BAKED_TRADE_EXPORT_PERCENT = 20;
+export const LEGACY_BAKED_TRADE_IMPORT_PERCENT = 25;
+
+// 贸易行利润下限（%）：低于它一律不做，政策门槛也不能低于它。
+export function tradeMarginFloorPercent(content) {
+  return clampPercent(Number(content.rules.tradeHouseMarginFloorPercent ?? 5));
+}
+
+// 贸易行利润门槛（%）：export 或 import。结果不低于利润下限。
 export function policyTradeMarginPercent(state, content, direction = "export") {
-  if (direction === "import") {
-    return policyPercent(state?.policy?.tradeImportMarginPercent,
-      content.rules.tradeHouseImportMarginPercent ?? content.rules.tradeHouseTargetMarginPercent ?? 25);
-  }
-  return policyPercent(state?.policy?.tradeMarginPercent, content.rules.tradeHouseTargetMarginPercent ?? 20);
+  const floor = tradeMarginFloorPercent(content);
+  const exportDefault = content.rules.tradeHouseTargetMarginPercent ?? 5;
+  const importDefault = content.rules.tradeHouseImportMarginPercent ?? exportDefault;
+  const isImport = direction === "import";
+  const raw = isImport ? state?.policy?.tradeImportMarginPercent : state?.policy?.tradeMarginPercent;
+  const legacy = isImport ? LEGACY_BAKED_TRADE_IMPORT_PERCENT : LEGACY_BAKED_TRADE_EXPORT_PERCENT;
+  const fallback = isImport ? importDefault : exportDefault;
+  const playerSet = Boolean(state?.policy?.tradeMarginSet);
+  const value = policyPercent(isFiniteNumber(raw) && (playerSet || raw !== legacy) ? raw : fallback, fallback);
+  return Math.max(floor, value);
 }
 
 // 单店覆盖值（%）；未单独设置时返回 null（跟随全局）。

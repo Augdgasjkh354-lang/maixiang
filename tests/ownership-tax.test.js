@@ -102,7 +102,7 @@ test("民营盐场按需求渐进用工并按实物税分账，工资债务不�
   const townWheat = state.accounts.town.wheat;
   const outcome = simulation.advanceDay(state);
   const privateResult = outcome.privateProduction.find(row => row.buildingId === salt.id);
-  // 基线清理：saltworks 每人每日 1 批、每批 5 斤；本 fixture 没有综合商店，
+  // 基线清理：saltworks 每人每日 1 批、每批 10 斤（salt_gathering 产量翻倍，见 CHANGELOG「磨坊与盐场产量翻倍」）；本 fixture 没有综合商店，
   // 盐无法零售给居民，`demandForOutput`(saltworks) 的 targetUnits 恒为 0，
   // 计划只给出"新店试营业 1 人"（rules.newBusinessTrialWorkers），
   // 所以首个日结就是 workers = batches = 1，而不是一步跨到调整上限
@@ -115,10 +115,10 @@ test("民营盐场按需求渐进用工并按实物税分账，工资债务不�
   const tax = state.privateEconomy.day.taxedUnits.salt;
   const residents = state.privateEconomy.day.outputUnits.salt;
   assert.equal(produced, tax + residents);
-  // 基线清理：默认民营生产税 10%，1 名盐工 1 批产 5 斤 → 税 0.5 斤、留 4.5 斤。
-  assert.equal(produced / CONTENT.precision.inventoryUnitsPerJin, 5);
-  assert.equal(tax / CONTENT.precision.inventoryUnitsPerJin, 0.5);
-  assert.equal(residents / CONTENT.precision.inventoryUnitsPerJin, 4.5);
+  // 基线清理：默认民营生产税 10%，1 名盐工 1 批产 10 斤 → 税 1 斤、留 9 斤。
+  assert.equal(produced / CONTENT.precision.inventoryUnitsPerJin, 10);
+  assert.equal(tax / CONTENT.precision.inventoryUnitsPerJin, 1);
+  assert.equal(residents / CONTENT.precision.inventoryUnitsPerJin, 9);
   assert.ok(state.accounts.town.wheat >= townWheat);
   assert.equal(state.payroll.lastDay.expectedWheatJin, 0);
   assert.equal(jobCount(state, `${salt.id}::salt_workers::private`), CONTENT.rules.newBusinessTrialWorkers);

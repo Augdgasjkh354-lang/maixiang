@@ -50,13 +50,14 @@ function flourRetail(state, shop) {
   return shopTradePrices(state, "general", CONTENT, "flour", shop).retailVoucherPerUnit;
 }
 
-test("利润率政策默认值：综合商店 20%、贸易出口 20%、进口 25%，与 rules 开局默认一致", () => {
+test("利润率政策默认值：综合商店 20%、贸易出口 5%、进口 5%（贸易行利润下限 5%），与 rules 开局默认一致", () => {
   const state = simulation.createInitialState({ seed: 4101 });
   assert.equal(state.policy.shopMarginPercent, 20);
-  assert.equal(state.policy.tradeMarginPercent, 20);
-  assert.equal(state.policy.tradeImportMarginPercent, 25);
-  assert.equal(CONTENT.rules.tradeHouseTargetMarginPercent, 20);
-  assert.equal(CONTENT.rules.tradeHouseImportMarginPercent, 25);
+  assert.equal(state.policy.tradeMarginPercent, 5);
+  assert.equal(state.policy.tradeImportMarginPercent, 5);
+  assert.equal(CONTENT.rules.tradeHouseTargetMarginPercent, 5);
+  assert.equal(CONTENT.rules.tradeHouseImportMarginPercent, 5);
+  assert.equal(CONTENT.rules.tradeHouseMarginFloorPercent, 5);
   assert.equal(policyShopMarginPercent(state, CONTENT), 20);
   valid(state);
 });
@@ -161,15 +162,21 @@ test("旧档兼容：烘焙的默认 20 视为跟随全局；其他值视为单�
   valid(state);
 });
 
-test("贸易行利润门槛随政策变化：出口默认 20%（乘数 1.2），调成 10% 后放宽；进口默认 25%", () => {
+test("贸易行利润门槛随政策变化：出口、进口默认都是 5% 下限（乘数 1.05），调高后收紧，不能低于下限", () => {
   const state = simulation.createInitialState({ seed: 4108 });
   const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≠ ${b}`);
-  close(tradeMarginTarget(state, CONTENT, "export"), 1.2);
-  close(tradeMarginTarget(state, CONTENT, "import"), 1.25);
-  assert.equal(selectTradeHouseView(state, CONTENT).targetMarginPercent, 20);
+  close(tradeMarginTarget(state, CONTENT, "export"), 1.05);
+  close(tradeMarginTarget(state, CONTENT, "import"), 1.05);
+  assert.equal(selectTradeHouseView(state, CONTENT).targetMarginPercent, 5);
+  const tooLow = simulation.setMarginPolicy(state, { tradeMarginPercent: 3 });
+  assert.equal(tooLow.ok, false);
+  assert.match(tooLow.reason, /不得低于下限5%/);
+  assert.equal(state.policy.tradeMarginPercent, 5, "拒绝时不写入");
   assert.equal(simulation.setMarginPolicy(state, { tradeMarginPercent: 10 }).ok, true);
   close(tradeMarginTarget(state, CONTENT, "export"), 1.1);
   assert.equal(selectTradeHouseView(state, CONTENT).targetMarginPercent, 10);
+  // 进口随出口联动抬到 10（进口不得低于出口），再单独调到 40。
+  close(tradeMarginTarget(state, CONTENT, "import"), 1.1);
   assert.equal(simulation.setMarginPolicy(state, { tradeImportMarginPercent: 40 }).ok, true);
   close(tradeMarginTarget(state, CONTENT, "import"), 1.4);
   assert.equal(policyTradeMarginPercent(state, CONTENT, "import"), 40);
@@ -179,7 +186,8 @@ test("贸易行利润门槛随政策变化：出口默认 20%（乘数 1.2），
 
 test("进口门槛不得低于出口：单独把进口调到出口以下拒绝且不写入；只调高出口则联动抬高进口并在返回值说明", () => {
   const state = simulation.createInitialState({ seed: 4109 });
-  // 开局：出口 20、进口 25。
+  // 开局：出口 5、进口 5。先把出口调到 25（进口联动到 25），再测“进口低于出口”被拒。
+  assert.equal(simulation.setMarginPolicy(state, { tradeMarginPercent: 25 }).ok, true);
   const low = simulation.setMarginPolicy(state, { tradeImportMarginPercent: 15 });
   assert.equal(low.ok, false);
   assert.equal(low.reason, "进口利润率不得低于出口");
