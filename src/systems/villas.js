@@ -97,24 +97,17 @@ export function settleVillaPurchases(state, content) {
   const owners = new Set(villas.sold.map(row => row.householdId));
   // 生活困难线以下的部分不计入可动用购房资金，避免掏空穷人。
   const minimumPerCapita = content.rules.householdLiving?.difficultPerCapitaVoucher ?? 30;
-  const candidates = householdList(state)
-    .filter(household => isActiveHousehold(household) && !owners.has(household.id))
-    .map(household => {
-      const reserve = Math.round(householdPopulation(household) * minimumPerCapita * scale);
-      const liquid = householdLiquidValueUnits(state, household, content);
-      return { household, liquid, affordable: liquid - reserve };
-    })
-    .filter(row => row.affordable >= priceUnits)
-    .sort((a, b) => b.liquid - a.liquid || String(a.household.id).localeCompare(String(b.household.id)));
+  // 每户的可动用资金只算一次（遍历全体家庭，较贵）：够买的进现款候选，不够的进借款候选。
+  const rows = [];
+  for (const household of householdList(state)) {
+    if (!isActiveHousehold(household) || owners.has(household.id)) continue;
+    const reserve = Math.round(householdPopulation(household) * minimumPerCapita * scale);
+    rows.push({ household, liquid: householdLiquidValueUnits(state, household, content), reserve });
+  }
+  const byLiquidity = (x, y) => y.liquid - x.liquid || String(x.household.id).localeCompare(String(y.household.id));
+  const candidates = rows.filter(row => row.liquid - row.reserve >= priceUnits).sort(byLiquidity);
   // 资金不足的候选（按可动用资金从多到少）：候选用完后再借款补缺口买房（docs/LENDING.md）。
-  const loanCandidates = householdList(state)
-    .filter(household => isActiveHousehold(household) && !owners.has(household.id))
-    .map(household => {
-      const reserve = Math.round(householdPopulation(household) * minimumPerCapita * scale);
-      return { household, liquid: householdLiquidValueUnits(state, household, content), reserve };
-    })
-    .filter(row => row.liquid - row.reserve < priceUnits)
-    .sort((a, b) => b.liquid - a.liquid || String(a.household.id).localeCompare(String(b.household.id)));
+  const loanCandidates = rows.filter(row => row.liquid - row.reserve < priceUnits).sort(byLiquidity);
   let loanIndex = 0;
   if (!candidates.length && !loanCandidates.length) return { sold: 0 };
   let sold = 0;
