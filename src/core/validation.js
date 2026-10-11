@@ -125,6 +125,12 @@ export function validateState(state, content) {
   }
   if (!Number.isFinite(state.policy?.employmentExchangeJin) || state.policy.employmentExchangeJin < (content.rules.employmentExchangeMinimumJin ?? 0) || state.policy.employmentExchangeJin > (content.rules.employmentExchangeMaximumJin ?? 50)) errors.push("就业换券额度无效");
   if (!Number.isFinite(state.policy?.shopRentVoucher) || state.policy.shopRentVoucher < 0) errors.push("店租设置无效");
+  {
+    const rent = state.policy?.publicHousingRentPerResidentDayJin;
+    const min = content.rules.publicHousingRentMinimumJin ?? 0;
+    const max = content.rules.publicHousingRentMaximumJin ?? 20;
+    if (rent !== undefined && (!Number.isFinite(rent) || rent < min || rent > max)) errors.push("公租房日租无效");
+  }
   for (const key of ["importPercent", "exportPercent"]) {
     const value = state.policy?.tradeTariff?.[key];
     if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > (content.rules.tradeTariffMaximumPercent ?? 50))) errors.push("关税设置无效");

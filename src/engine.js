@@ -20,7 +20,7 @@ import {
   configureCompanyWage, configureCompanyTargetWorkers, configureCompanySalePrice, addCompanyOperatingLevel, removeCompanyOperatingLevel, liquidateCompany, buybackCompanyShares,
   listBuilding, approveIpoApplication, rejectIpoApplication,
   setPublicProcurementIntent, clearPublicProcurementIntent, adoptRecommendedIndustryPrices, retainExistingIndustryPrices,
-  setEmploymentExchangeQuota, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
+  setEmploymentExchangeQuota, setPublicHousingRent, setShopRent, setStallRent, setStallKeeperLimit, setStallRentFree, setStallDiscountTier, setShopProfitTax, setTradeTariff, setMarginPolicy, openResidentShop, openTownShop, configureShopMerchants, configureShopClerks, closeResidentShop, fundResidentShopLiquidation,
   configureWholesalePrice, configureWholesaleTownAllocation, configureWholesalePurchasePrice, configureWholesaleAutoPricing, configureShopTargetMargin, configureAllShopsTargetMargin, configureShopRetailPrice, stockpileWholesale, releaseWholesale, setOutputTarget, configureServicePrice,
   reclaimFarmland
 } from "./core/commands.js";
@@ -176,6 +176,7 @@ export function createSimulation(content) {
     adoptRecommendedIndustryPrices: function (state) { return adoptRecommendedIndustryPrices(state, definitions); },
     retainExistingIndustryPrices: function (state) { return retainExistingIndustryPrices(state, definitions); },
     setEmploymentExchangeQuota: function (state, value) { return setEmploymentExchangeQuota(state, value, definitions); },
+    setPublicHousingRent: function (state, jin) { return setPublicHousingRent(state, jin, definitions); },
     setShopRent: function (state, value) { return setShopRent(state, value); },
     setStallRent: function (state, value) { return setStallRent(state, value); },
     setStallKeeperLimit: function (state, value) { return setStallKeeperLimit(state, value); },

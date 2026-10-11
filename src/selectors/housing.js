@@ -1,6 +1,14 @@
 import { populationStats } from "./labor.js";
 import { householdList, householdPopulation, isActiveHousehold } from "../systems/households.js";
 
+// 公租房当前日租（斤/人·日）：唯一入口，日结、选择器、界面都读它。
+// 政策缺省（旧档或未设置）回落到 rules.rentPerResidentDayWheatJin；0 = 免租，不做 || 回退。
+export function publicHousingRentPerResidentDayJin(state, content) {
+  const raw = state?.policy?.publicHousingRentPerResidentDayJin;
+  if (raw === undefined || raw === null) return content.rules.rentPerResidentDayWheatJin ?? 1;
+  return Number(raw);
+}
+
 export function selectHousing(state, content) {
   const people = populationStats(state).total;
   const villageCapacity = state.housing?.villageCapacity ?? content.rules.housingCapacity;
@@ -35,7 +43,8 @@ export function selectHousing(state, content) {
   let unassignedVillage = Math.min(unassignedPeople, villageLeft); villageLeft -= unassignedVillage; unassignedPeople -= unassignedVillage;
   let unassignedRental = 0;
   for (let i = 0; i < rentalDefs.length && unassignedPeople > 0; i += 1) { const count=Math.min(unassignedPeople,rentalLeft[i]); rentalLeft[i]-=count; rentalDefs[i].occupied+=count; unassignedPeople-=count; unassignedRental+=count; }
-  const rentals = rentalDefs.map((row, index) => ({ ...row, vacancies: rentalLeft[index], dailyRentDueWheatJin: row.occupied * (content.rules.rentPerResidentDayWheatJin || 1) }));
+  const rentPerPerson = publicHousingRentPerResidentDayJin(state, content);
+  const rentals = rentalDefs.map((row, index) => ({ ...row, vacancies: rentalLeft[index], dailyRentDueWheatJin: row.occupied * rentPerPerson }));
   const occupied = householdHousing.reduce((sum, row) => sum + row.people - row.unhousedPeople, 0) + unassignedVillage + unassignedRental;
   const shortage = householdHousing.reduce((sum, row) => sum + row.unhousedPeople, 0) + unassignedPeople;
   return {
@@ -49,6 +58,7 @@ export function selectHousing(state, content) {
     shortage,
     rentDuePeople: householdHousing.reduce((sum, row) => sum + row.rentalPeople, 0),
     unassignedRentalPeople: unassignedRental,
-    dailyRentDueWheatJin: householdHousing.reduce((sum, row) => sum + row.rentalPeople, 0) * (content.rules.rentPerResidentDayWheatJin || 1)
+    rentPerResidentDayJin: rentPerPerson,
+    dailyRentDueWheatJin: householdHousing.reduce((sum, row) => sum + row.rentalPeople, 0) * rentPerPerson
   };
 }

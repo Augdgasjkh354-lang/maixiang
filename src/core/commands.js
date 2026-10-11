@@ -310,6 +310,19 @@ export function setEmploymentExchangeQuota(state, jin, content) {
   return { ok: true, value: state.policy.employmentExchangeJin };
 }
 
+// 公租房日租（斤/人·日）：0—规则上限，一位小数；0 = 免租。
+export function setPublicHousingRent(state, jin, content) {
+  const value = typeof jin === "string" && jin.trim() === "" ? NaN : Number(jin);
+  const minimum = content.rules.publicHousingRentMinimumJin ?? 0;
+  const maximum = content.rules.publicHousingRentMaximumJin ?? 20;
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    return { ok: false, reason: `公租房日租须为${minimum}—${maximum}斤` };
+  }
+  state.policy ||= {};
+  state.policy.publicHousingRentPerResidentDayJin = Math.round(value * 10) / 10;
+  return { ok: true, value: state.policy.publicHousingRentPerResidentDayJin };
+}
+
 export function setShopRent(state, voucher) {
   const value = Number(voucher);
   if (!Number.isFinite(value) || value < 0 || value > 100000) return { ok: false, reason: "店租须为非负数" };

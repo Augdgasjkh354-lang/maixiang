@@ -68,7 +68,7 @@ sawmill: {
 
 需要独占资源位置时，在建筑配置加 `requiredPlotFeature`，并在 `src/content/world.js` 增加具有相同 `feature` 的稳定资源地块。共享资源库存仍来自 `state.accounts`，地图资源图标和选址由真实地块派生；不要另建一份经营状态。
 
-住房容量在建筑定义中用 `housingCapacity` 声明。`src/selectors/housing.js` 按村舍优先、已建公租房顺序计算实际入住；施工中的房屋不提供容量。租金通过 `src/systems/housing.js` 按入住人数收取，并保护基本口粮储备。
+住房容量在建筑定义中用 `housingCapacity` 声明。`src/selectors/housing.js` 按村舍优先、已建公租房顺序计算实际入住；施工中的房屋不提供容量。租金通过 `src/systems/housing.js` 按入住人数收取，并保护基本口粮储备。日租由玩家在公租房建筑面板调整（`policy.publicHousingRentPerResidentDayJin`，0—20 斤/人·日，0 为免租；缺省取 `rules.rentPerResidentDayWheatJin`），统一经 `src/selectors/housing.js` 的 `publicHousingRentPerResidentDayJin` 读取。
 
 ## 4. 配置 1–5 级原地升级
 

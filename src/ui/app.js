@@ -548,6 +548,9 @@ export function mountGame(root) {
     } else if (kind === "employment-exchange") {
       result = simulation.setEmploymentExchangeQuota(state, parsed.value);
       successMessage = `在岗居民每日换券额度已设为${number(parsed.value, 2)}斤。`;
+    } else if (kind === "public-housing-rent") {
+      result = simulation.setPublicHousingRent(state, parsed.value);
+      successMessage = `公租房日租已设为每人每日${number(parsed.value, 1)}斤${parsed.value === 0 ? "（免租）" : ""}。`;
     } else if (kind === "shop-target-margin") {
       // 单店目标利润率（覆盖全局默认）。
       result = simulation.configureShopTargetMargin(state, input.dataset.draftTarget, parsed.value);

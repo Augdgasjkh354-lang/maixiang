@@ -33,6 +33,9 @@ export const RULES = Object.freeze({
   saltAnnualDemandJinPerPerson: 10,
   saltPriceWheatPerJin: 10,
   rentPerResidentDayWheatJin: 1,
+  // 公租房日租可调范围（斤/人·日）：政策 policy.publicHousingRentPerResidentDayJin 缺省取 rentPerResidentDayWheatJin；0 = 免租。
+  publicHousingRentMinimumJin: 0,
+  publicHousingRentMaximumJin: 20,
   saltFoodReserveDays: 30,
   saltGraceDays: 30,
   buildingMaxLevel: 10,

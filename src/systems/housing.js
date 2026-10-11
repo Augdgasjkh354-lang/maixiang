@@ -3,14 +3,14 @@ import { bookAddAll, PERIODS } from "../economy/books.js";
 import { currentPaymentComposition, settleMonetaryPayment } from "../economy/payment.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { currentUnitPrice } from "../economy/prices.js";
-import { selectHousing } from "../selectors/housing.js";
+import { selectHousing, publicHousingRentPerResidentDayJin } from "../selectors/housing.js";
 import { activeHouseholds, householdConvertibleWheatUnits, householdList, syncResidentAggregates } from "./households.js";
 import { purchaseItemForResidents } from "./consumer-market.js";
 import { recordHouseholdRentDue, recordHouseholdRentPaid } from "./household-life.js";
 
 export function settleHousingRent(state, housingAtStart, content) {
   const scale = currencyScale(content);
-  const perPerson = content.rules.rentPerResidentDayWheatJin || 1;
+  const perPerson = publicHousingRentPerResidentDayJin(state, content);
   const dueRows = (housingAtStart.householdHousing || []).filter(row => row.rentalPeople > 0).map(row => ({ householdId: row.householdId, units: Math.round(row.rentalPeople * perPerson * scale) }));
   const dueUnits = dueRows.reduce((sum, row) => sum + row.units, 0);
   let collectedUnits = 0;
