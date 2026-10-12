@@ -238,3 +238,29 @@ test("超长时按序裁减，仍在 8KB 内", () => {
   const { issue } = gazetteFor(state, report(1));
   assert.ok(gazetteBytes(issue) <= GAZETTE_BYTE_LIMIT);
 });
+
+test("国民经济栏：GDP = 农业 + 工资 + 经营利润，人均与同比来自年报", () => {
+  const state = fresh();
+  setTownYears(state, 1.5);
+  const scale = CONTENT.precision.currencyUnitsPerVoucher;
+  const prev = report(1, { harvestQeq: 1000 * QEQ, populationAfterAging: 100, payroll: { accruedVoucherUnits: 200 * scale } });
+  const now = report(2, {
+    harvestQeq: 1200 * QEQ, populationAfterAging: 100, payroll: { accruedVoucherUnits: 300 * scale },
+    shops: { a: { accounts: { profitVoucherUnits: 80 * scale, taxExpenseVoucherUnits: 20 * scale } } },
+    companies: { b: { accounts: { profitVoucherUnits: -50 * scale } } }
+  });
+  const { issue } = gazetteFor(state, now, prev);
+  const eco = issue.sections.find(section => section.title === "国民经济");
+  assert.ok(eco, "应有国民经济栏");
+  // 1200 + 300 + (80+20-50) = 1550；上年 1200 → +29.2%；人均 15.5→取整 16
+  assert.match(eco.lines[0], /GDP约1,550券，同比\+29\.2%/);
+  assert.match(eco.lines[1], /人均GDP16券，同比\+29\.2%/);
+  assert.match(eco.lines[2], /农业77%、劳动报酬19%、经营利润3%/);
+});
+
+test("GDP 同比 ≥15% 且创新高时上头条", () => {
+  const state = fresh();
+  setTownYears(state, 1.5);
+  const { issue } = gazetteFor(state, report(2, { harvestQeq: 1000 * QEQ, payroll: { accruedVoucherUnits: 500 * CONTENT.precision.currencyUnitsPerVoucher } }), report(1, { harvestQeq: 1000 * QEQ }));
+  assert.match(issue.headline, /GDP增长50%|经济腾飞/);
+});

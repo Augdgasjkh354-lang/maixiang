@@ -14,6 +14,7 @@ import { householdIncomePerCapitaJin, householdPriceIndex, householdWealthUnits 
 import { computeLaborMarket } from "./labor-market.js";
 import { wholesaleMarketItemIds } from "./wholesale-market.js";
 import { wholesalePrice } from "./wholesale-price.js";
+import { gdpOfReport } from "../selectors/gdp.js";
 import { GAZETTE_ISSUE_LIMIT } from "../economy/gazette-notes.js";
 
 export const GAZETTE_BYTE_LIMIT = 8192;
@@ -73,6 +74,11 @@ function annualFacts(state, content, report) {
   f.marriages = Number(report.marriages) || 0;
   f.prevBirths = prev ? Number(prev.births) || 0 : null;
   f.prevDeaths = prev ? Number(prev.deaths) || 0 : null;
+  f.gdp = gdpOfReport(report, content);
+  f.prevGdp = prev ? gdpOfReport(prev, content) : null;
+  f.gdpGrowth = f.gdp && f.prevGdp && f.prevGdp.total > 0 ? (f.gdp.total / f.prevGdp.total - 1) * 100 : null;
+  f.perCapitaGrowth = f.gdp?.perCapita != null && f.prevGdp?.perCapita > 0 ? (f.gdp.perCapita / f.prevGdp.perCapita - 1) * 100 : null;
+  f.gdpMaxBefore = reports.reduce((max, row) => Math.max(max, gdpOfReport(row, content)?.total || 0), 0);
   f.monthDays = content.rules.monthDays || 30;
   f.gini = report.wealth?.gini ?? 0;
   f.prevGini = prev?.wealth?.gini ?? null;
@@ -229,6 +235,17 @@ function headlineFor(f) {
       () => `仓门推不开了：秋收${wan(f.harvestJin)}斤，是有镇以来最多的一年。`
     ]) });
   }
+  if (f.gdpGrowth != null && f.gdpGrowth <= -10) {
+    candidates.push({ score: 75, text: say(year, "head-gdp-down", [
+      () => `镇上GDP缩水${Math.abs(f.gdpGrowth).toFixed(0)}%，全年总产出降至${wan(f.gdp.total)}券。`,
+      () => `经济转冷：全镇产出${wan(f.gdp.total)}券，较上年减${Math.abs(f.gdpGrowth).toFixed(0)}%。`
+    ]) });
+  } else if (f.gdpGrowth != null && f.gdpGrowth >= 15 && f.gdp.total > f.gdpMaxBefore) {
+    candidates.push({ score: 68, text: say(year, "head-gdp-up", [
+      () => `GDP增长${f.gdpGrowth.toFixed(0)}%，全镇总产出${wan(f.gdp.total)}券创新高。`,
+      () => `经济腾飞：全年产出${wan(f.gdp.total)}券，比上年多${f.gdpGrowth.toFixed(0)}%。`
+    ]) });
+  }
   const topNote = f.notes[0];
   if (topNote) {
     candidates.push({ score: topNote.weight * 10 + 5, text: topNote.text });
@@ -327,6 +344,23 @@ function sectionStats(f) {
   lines.push(`物价指数${index.toFixed(2)}，较上年${changeText((index / f.prevPriceIndex - 1) * 100)}。`);
   if (f.peopleMaxBefore > 0 && f.people >= f.peopleMaxBefore) lines.push("人口为有镇以来最多。");
   return { title: "镇情数据", lines: lines.slice(0, 4) };
+}
+
+// 国民经济：GDP、人均 GDP、同比与构成（口径见 selectors/gdp.js）。
+function sectionEconomy(f) {
+  const g = f.gdp;
+  if (!g || !(g.total > 0)) return null;
+  let line = `GDP约${wan(g.total)}券`;
+  if (f.gdpGrowth != null) line += `，同比${changeText(f.gdpGrowth)}`;
+  const lines = [line + "。"];
+  if (g.perCapita != null) {
+    let per = `人均GDP${num(g.perCapita)}券`;
+    if (f.perCapitaGrowth != null) per += `，同比${changeText(f.perCapitaGrowth)}`;
+    lines.push(per + "。");
+  }
+  const share = value => `${(value / g.total * 100).toFixed(0)}%`;
+  lines.push(`构成：农业${share(g.agriculture)}、劳动报酬${share(g.wages)}、经营利润${share(g.profit)}。`);
+  return { title: "国民经济", lines };
 }
 
 function sectionGranary(f) {
@@ -443,6 +477,8 @@ function sectionEditorial(f) {
     if (r < 0.85) lines.push(say(y, "ed-harvest-bad", [() => "歉收之年，各家宜惜粮，镇库也该早作打算。", () => "收成不济，开春前口粮要精打细算。"]));
     else if (r > 1.15) lines.push(say(y, "ed-harvest-good", [() => "丰年固然可喜，却别忘了粮多伤农，价贱时留意收储。", () => "仓里有粮心不慌，盼来年风调雨顺。"]));
   }
+  if (f.perCapitaGrowth != null && f.perCapitaGrowth >= 5) lines.push(say(y, "ed-pcgdp-up", [() => "人均产出见涨，家家户户的日子有了起色。", () => "人均GDP上了台阶，是实打实的进步。"]));
+  else if (f.perCapitaGrowth != null && f.perCapitaGrowth <= -5) lines.push(say(y, "ed-pcgdp-down", [() => "人口在添而产出没跟上，人均GDP下滑，须设法添岗位、增产出。", () => "人均产出回落，每个人分到的蛋糕小了。"]));
   if (f.idle >= 300) lines.push(say(y, "ed-idle", [() => `闲人逾${num(Math.floor(f.idle / 100) * 100)}，有力气没处使，镇上该多开些工坊。`, () => "人手富余是好事也是隐忧，岗位须跟上。"]));
   else if (f.prevIdle != null && f.idle < f.prevIdle * 0.5) lines.push(say(y, "ed-jobs", [() => "找活干不难了，雇主需拿出像样的工钱才留得住人。", () => "人手趋紧，工钱怕是要往上走。"]));
   if (f.prevGini != null && f.gini - f.prevGini >= 0.02) lines.push(say(y, "ed-gini-up", [() => "贫富渐远，本报以为税收与救济可以斟酌。", () => "富者愈富非镇之福，望镇长留意。"]));
@@ -494,6 +530,7 @@ export function buildGazette(state, content, { report }) {
   const headline = headlineFor(f);
   const sections = [
     sectionStats(f),
+    sectionEconomy(f),
     sectionChronicle(f, headline),
     sectionLivelihood(f),
     sectionGranary(f),
