@@ -83,7 +83,7 @@ test("矿产：等级、熟练度、教育加成乘进产量（与产业同一 p
   assert.ok(processBuilding(edu.state, bld(edu.state, edu.id), CONTENT).batches > 10, "教育加成");
 });
 
-test("矿产需求闸门：批发市场存够 360 天需求（目标库存）时停产，不产出", () => {
+test("矿产需求闸门：批发市场存够 180 天需求（目标库存）时停产，不产出", () => {
   const { state, id } = world(9505, { typeId: "coal_mine", workers: 10 });
   marketOf(state).inventory.coal = Math.round(townOutputTargetUnits(state, "coal", CONTENT));
   const r = processBuilding(state, bld(state, id), CONTENT);

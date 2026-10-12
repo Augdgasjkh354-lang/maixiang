@@ -28,7 +28,7 @@ export const RECIPES = Object.freeze({
     losses: Object.freeze([]),
     batchesPerWorkerDay: 1
   }),
-  // 煤矿、铁矿：矿工每人每日一批（10 斤），需求闸门（demandGated）：批发市场存够 360 天需求就停。
+  // 煤矿、铁矿：矿工每人每日一批（10 斤），需求闸门（demandGated）：批发市场存够 180 天需求就停。
   coal_mining: Object.freeze({
     id: "coal_mining", name: "采煤",
     kind: "gather", demandGated: true, inputs: Object.freeze([]),

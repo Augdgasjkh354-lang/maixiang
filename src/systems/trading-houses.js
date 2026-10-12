@@ -14,7 +14,7 @@
 //   只在外贸房在岗时做买卖（与镇长手动外贸同一条规则）。
 //
 // 全部按"对同一外镇同一商品的同一方向"逐笔算价：每笔用当时的价格（大单逐段计价，越做越薄），按利润率取能做的最大量。
-// 每天的候选按入口利润率排序，贪心执行，直到运力、店员额度、资金、外镇库存或小麦用完。
+// 每天的候选按每斤净赚排序；同一候选的池子在多间贸易行之间按店员预算比例拆分（shareCandidate），直到运力、店员额度、资金、外镇库存或小麦用完。
 // 复杂度：O(贸易行 × 外镇 × 商品)（一天一次，没有逐户循环）。
 import { currencyScale } from "../economy/currency.js";
 import { policyTradeMarginPercent, tradeMarginFloorPercent } from "../economy/margin-policy.js";
@@ -495,6 +495,79 @@ function resumeTradeHouses(state, content) {
   }
 }
 
+// ---------------------------------------------------------------- 公平分摊（同一候选在多间贸易行之间拆分）
+// 一个候选（外镇×商品×方向）在某一遍里：
+//   池子 H = 出口：批发超保本线的余量（第一遍再受本镇同品配额）；进口：市场容量、外镇可卖量、镇库可付货款（取小）；均再与运力池取小。
+//   每行份额 = H × w_i ÷ Σw，w_i = 行的剩余店员预算（第一遍再受本镇配额），按份额逐笔成交（plan 仍逐笔检查利润率与价格）。
+//   一行没吃满份额（利润、资金、外镇库存不够）就退出本候选，它没用上的部分在下一轮回流给其他行；最多 TRADE_SHARE_ROUNDS 轮。
+//   只有一间贸易行时只做一轮，与旧的"逐候选单次成交"一致。
+//   行的先后按轮转起点轮流，只影响同一池子里谁先按当时价格成交（余数归属）。
+const TRADE_SHARE_ROUNDS = 3;
+
+function runWeightJin(run, cand, pass) {
+  const quota = pass === 1 ? (run.townQuotaJin[cand.town.id] || 0) : Infinity;
+  return Math.max(0, Math.min(run.remainingJin, quota));
+}
+
+// 候选的物理池（斤，只读）。出口：超保本线余量；进口：市场容量、外镇可卖、镇库可付货款。quotaJin 为第一遍的同品配额（第二遍 Infinity）。
+function candidatePoolJin(state, content, cand, quotaJin) {
+  const freight = freightPoolJin(state);
+  if (cand.direction === "export") return Math.max(0, Math.min(exportSurplusJin(state, content, cand.itemId), freight, quotaJin));
+  const scale = content.precision.inventoryUnitsPerJin;
+  const price = wholesalePurchasePrice(state, cand.itemId, content);
+  if (!(price > 0)) return 0;
+  const market = ensureWholesaleMarket(state, content);
+  const stockJin = nonNegative(market.inventory?.[cand.itemId]) / scale;
+  const roomJin = Math.max(IMPORT_STOCK_FLOOR_JIN, IMPORT_STOCK_CAP_DAYS * localAvgSoldJin(state, content, cand.itemId)) - stockJin;
+  const townCashJin = maximumPayableValueUnits(state, "town", content) / (currencyScale(content) * price);
+  return Math.max(0, Math.min(roomJin, sellableStock(cand.town, cand.good), freight, townCashJin, quotaJin));
+}
+
+function shareCandidate(state, content, cand, runs, ctx) {
+  const scale = content.precision.inventoryUnitsPerJin;
+  const itemKey = `${cand.itemId}|${cand.town.id}`;
+  const exportFirstPass = ctx.pass === 1 && cand.direction === "export";
+  const rounds = runs.length > 1 ? TRADE_SHARE_ROUNDS : 1;
+  const done = new Set();
+  for (let round = 0; round < rounds; round++) {
+    if (freightPoolJin(state) < MIN_JIN) return;
+    const weights = new Map();
+    for (const run of runs) {
+      if (done.has(run)) continue;
+      const w = runWeightJin(run, cand, ctx.pass);
+      if (w >= MIN_JIN) weights.set(run, w);
+    }
+    if (!weights.size) return;
+    const quotaJin = exportFirstPass ? (ctx.itemTownQuotaJin[itemKey] || 0) : Infinity;
+    const poolJin = candidatePoolJin(state, content, cand, quotaJin);
+    if (poolJin < MIN_JIN) return;
+    const totalW = [...weights.values()].reduce((sum, w) => sum + w, 0);
+    const active = [...weights.keys()];
+    const start = ctx.rotation % active.length;
+    ctx.rotation += 1;
+    const order = active.slice(start).concat(active.slice(0, start));
+    // 份额在本轮开始时按权重定好（各行之间互不挤占）。
+    const shares = new Map(order.map(run => [run, Math.min(weights.get(run), poolJin * weights.get(run) / totalW)]));
+    for (const run of order) {
+      const capJin = shares.get(run);
+      if (capJin < MIN_JIN || freightPoolJin(state) < MIN_JIN) continue;
+      const planRun = { ...run, remainingJin: capJin };
+      const plan = cand.direction === "export" ? planExport(state, content, planRun, cand) : planImport(state, content, planRun, cand);
+      if (!plan) { done.add(run); continue; }
+      const result = cand.direction === "export" ? executeExport(state, content, run, cand, plan) : executeImport(state, content, run, cand, plan);
+      if (!result?.ok) { done.add(run); continue; }
+      run.remainingJin = Math.max(0, run.remainingJin - result.qJin);
+      if (ctx.pass === 1) {
+        run.townQuotaJin[cand.town.id] = Math.max(0, (run.townQuotaJin[cand.town.id] || 0) - result.qJin);
+        if (exportFirstPass) ctx.itemTownQuotaJin[itemKey] = Math.max(0, (ctx.itemTownQuotaJin[itemKey] || 0) - result.qJin);
+      }
+      pushRow(run.row, cand, result);
+      // 没吃满份额：这一行对本候选到此为止（再算也是同样的限制），余额回流给其他行。
+      if (result.qJin < capJin - 1.5 / scale) done.add(run);
+    }
+  }
+}
+
 // 日结步骤 "tradeHouses"：每家营业中的贸易行做一天买卖。
 export function settleTradingHouses(state, content) {
   resumeTradeHouses(state, content);
@@ -517,6 +590,7 @@ export function settleTradingHouses(state, content) {
     // 两遍分配（防止利润率最高的镇独占预算与批发存货，另一镇整月为 0）：
     // 第一遍：每家贸易行把当日预算平分给当日有可做买卖的各镇，各镇只在自己的配额内成交；
     // 第二遍：配额没用完的预算再按利润排序分给所有能做的买卖。单笔的利润门槛、定价与逐段计价不变。
+    // 同一候选（外镇×商品×方向）的池子在各行之间按剩余店员预算比例拆分（见 shareCandidate），不是第一行先吃光。
     const townIds = [...new Set(ranked.map(({ cand }) => cand.town.id))];
     for (const run of runs) run.townQuotaJin = Object.fromEntries(townIds.map(id => [id, run.remainingJin / Math.max(1, townIds.length)]));
     // 同一种货的超保本线余量（批发市场）也按镇平分：各镇在第一遍只能取自己那一份。
@@ -529,36 +603,13 @@ export function settleTradingHouses(state, content) {
       const surplusJin = exportSurplusJin(state, content, itemId);
       for (const id of towns) itemTownQuotaJin[`${itemId}|${id}`] = surplusJin / towns.size;
     }
+    const ctx = { pass: 1, itemTownQuotaJin, rotation: Number(state.tradeHouseRotation) || 0 };
     for (const pass of [1, 2]) {
-      for (const { cand } of ranked) {
-        const itemKey = `${cand.itemId}|${cand.town.id}`;
-        for (const run of runs) {
-          if (run.remainingJin < MIN_JIN || freightPoolJin(state) < MIN_JIN) continue;
-          let capJin = run.remainingJin;
-          if (pass === 1) {
-            const quota = run.townQuotaJin[cand.town.id] || 0;
-            if (quota < MIN_JIN) continue;
-            capJin = Math.min(capJin, quota);
-            if (cand.direction === "export") {
-              const itemQuota = itemTownQuotaJin[itemKey] || 0;
-              if (itemQuota < MIN_JIN) continue;
-              capJin = Math.min(capJin, itemQuota);
-            }
-          }
-          const planRun = { ...run, remainingJin: capJin };
-          const plan = cand.direction === "export" ? planExport(state, content, planRun, cand) : planImport(state, content, planRun, cand);
-          if (!plan) continue;
-          const result = cand.direction === "export" ? executeExport(state, content, run, cand, plan) : executeImport(state, content, run, cand, plan);
-          if (!result?.ok) continue;
-          run.remainingJin = Math.max(0, run.remainingJin - result.qJin);
-          if (pass === 1) {
-            run.townQuotaJin[cand.town.id] = Math.max(0, (run.townQuotaJin[cand.town.id] || 0) - result.qJin);
-            if (cand.direction === "export") itemTownQuotaJin[itemKey] = Math.max(0, (itemTownQuotaJin[itemKey] || 0) - result.qJin);
-          }
-          pushRow(run.row, cand, result);
-        }
-      }
+      ctx.pass = pass;
+      for (const { cand } of ranked) shareCandidate(state, content, cand, runs, ctx);
     }
+    // 轮转起点存进状态（一个小计数，确定性），让余数与先后顺序每天轮流落在不同的行上。
+    state.tradeHouseRotation = ctx.rotation % 1000000;
   }
   // 收市后算当日可做上限（人手不限）：没有候选买卖时上限就是成交量。
   for (const run of runs) {

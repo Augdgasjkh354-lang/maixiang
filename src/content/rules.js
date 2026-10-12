@@ -61,6 +61,12 @@ export const RULES = Object.freeze({
   tradeHouseExportPriority: 1.5, // 排序时出口的每斤净利润乘这个系数，同等条件先做出口（运力与店员日额度的单位是斤，按每斤净赚排序）
   tradeHouseJinPerClerk: 300, // 每名店员（含商人）每天可成交的斤数
   tradeHouseCapacityShare: 0.8, // 各贸易行合计最多占当日运力的这个比例，按店员数分配；其余留给镇里
+  // 贸易行招人（shops.js 的 tradeHouseTargetClerks）：每 tradeHouseHireIntervalDays 天评估一次；目标人数 = ⌈min(近 7 日平均可做上限, 运力份额) ÷ tradeHouseJinPerClerk⌉（含商人，封顶店员上限）；
+  // 一次最多加 max(tradeHouseHireMinStep, ⌈现有店员 × tradeHouseHireMaxStepShare⌉) 人，直到目标；资金须够 tradeHouseHireCashMonths 个月的新增工资（一个月 = monthDays 天的工资）。
+  tradeHouseHireIntervalDays: 3,
+  tradeHouseHireMinStep: 2,
+  tradeHouseHireMaxStepShare: 0.5,
+  tradeHouseHireCashMonths: 0.1, // 0.1 个月 = 3 天工资，与改前的资金门槛等价（改前是 wage × 3，不是 3 个月）
   tradeTariffMaximumPercent: 50, // 进出口关税上限（%）；默认 0，在贸易中心设
   tradeHouseExportMinStockDays: 10, // 批发市场存量不到这么多天销量时，不出口这样货（保本地供应）
   tradeHouseImportShortageDays: 3, // 批发市场存量不到这么多天销量时视为紧缺（界面标记用）
@@ -375,10 +381,10 @@ export const RULES = Object.freeze({
   // 镇营产出闸门（市场积压）：镇营磨坊/面包房等按批发市场需求定产，不再无限入市。
   // 目标库存 = max(最低库存, 近 7 日需求 × 备货天数)；需求 = 市场售出 + 镇营自身领用。
   townOutputMinStockJin: 200, // 最低备货（斤）：没有销量时也保留这么多货
-  townOutputStockDays: 360, // 备货天数：目标库存相当于多少天的需求
+  townOutputStockDays: 180, // 备货天数：目标库存相当于多少天的需求（原为 360，收紧为 180 以减少镇营积压）
   // 个别商品的备货天数覆盖：面包是易囤的成品，备太多会把磨坊有限的面粉全占走，居民买不到面粉（体检：面粉零售 0%、面包库存越堆越多）。
-  // 野味易坏：备货 90 天（比面包长，给贸易行留货出口），不按全镇 360 天备货口径无限囤积（systems/arena.js 的野味入市闸门）。
-  townOutputStockDaysByItem: Object.freeze({ bread: 30, wild_game: 90 }),
+  // 野味（wild_game）不再单独覆盖，与其他镇营产出一样按全局 180 天备货（systems/arena.js 的野味入市闸门）。
+  townOutputStockDaysByItem: Object.freeze({ bread: 30 }),
   // 镇营吃小麦的口粮储备：磨坊/酒坊不得把镇库小麦压到 全镇人口 × 日口粮 × 天数 以下，留给救济与居民。
   townWheatReserveDays: 180,
   // 外贸稳定性（docs/TRADE.md「外镇价格与贸易行暂停」）。

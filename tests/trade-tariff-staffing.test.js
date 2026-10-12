@@ -229,22 +229,26 @@ function bigCapacityFixture(seed, clerks) {
   return fixture;
 }
 
-test("自动增员：近 7 天额度用满、卡在人手上、多一人有利可图 → 每月初加一人，连续两个月初共加 2 人", () => {
+test("自动增员：近 7 天额度用满、卡在人手上、多一人有利可图 → 每 3 天评估一次，加到目标人数后停住", () => {
   // 店主 + 1 店员 = 2 人 × 300 = 600 斤额度，份额 720 斤；全部用完，每斤利润 0.05 券（一人日增利润 15 券 > 日薪 10）。
-  // 用工每月 1 号审核一次，一次最多增减一人（systems/employment-contracts.js reviewStaffing）。
+  // 目标人数 = ⌈min(可做上限 900, 份额 720) ÷ 300⌉ = 3 人（含店主兼商人），即店员 2 人，一次加 1 人。
+  // 评估节奏：每 tradeHouseHireIntervalDays（3）天一次（按总日序，日序是 3 的倍数才评估）。
   const { state, shop } = bigCapacityFixture(9208, 1);
   const current = shopClerkCount(state, shop);
   assert.equal(current, 1);
-  state.day += (CONTENT.rules.monthDays - (state.day % CONTENT.rules.monthDays)) % CONTENT.rules.monthDays;
+  const every = CONTENT.rules.tradeHouseHireIntervalDays;
+  assert.equal(every, 3);
+  while ((state.day % every) !== 0) state.day += 1;
   // 当日可做上限 900 斤 > 人手预算 600 斤：生意做不完，是人手卡住。
   shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30, cap: 900 });
   prepareShopsForDay(state, CONTENT);
-  assert.equal(shopClerkCount(state, shop), current + 1, `月初审核一次只加一人，诊断：${shop.plan.staffingDiagnosis}`);
-  state.day += CONTENT.rules.monthDays;
-  shop.tradeLog = fakeLog({ used: 600, budget: 600, share: 720, profitVoucher: 30, cap: 900 });
-  prepareShopsForDay(state, CONTENT);
-  assert.equal(shopClerkCount(state, shop), current + 2, `应加 2 人，诊断：${shop.plan.staffingDiagnosis}`);
+  assert.equal(shopClerkCount(state, shop), current + 1, `第一次评估加到目标，诊断：${shop.plan.staffingDiagnosis}`);
   assert.equal(shop.plan.staffingDiagnosis, "生意做不完，加人");
+  // 目标已达到：再过一个评估周期不再加。
+  state.day += every;
+  shop.tradeLog = fakeLog({ used: 900, budget: 900, share: 900, profitVoucher: 30, cap: 900 });
+  prepareShopsForDay(state, CONTENT);
+  assert.equal(shopClerkCount(state, shop), current + 1, `目标已到，不再加人，诊断：${shop.plan.staffingDiagnosis}`);
   valid(state, "增员后");
 });
 

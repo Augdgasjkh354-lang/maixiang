@@ -1368,13 +1368,16 @@ function autoAdjustShopClerks(state, shop, content) {
   // 镇营综合商店的店员由镇里设定（configureShopClerks），自动审核不覆盖。
   if (shop.town) return;
   const serial = (state.year - 1) * (content.rules.daysPerYear || 365) + state.day;
-  // 正式员工：每月 1 号审核一次（新店第一次立即审核），一次最多增减一人。
+  // 正式员工：每月 1 号审核一次（新店第一次立即审核），一次最多增减一人；贸易行例外，每 tradeHouseHireIntervalDays 天审核一次（见 tradeHouseTargetClerks）。
   shop.plan ||= { lastAdjustedSerial: -1 };
   // 开张期（开店后 openingPeriodDays 天内）每天审核，尽快招够人。
   const opening = inOpeningPeriod(state, content, { year: shop.openedYear, day: (shop.openedDay ?? 1) - 1 });
-  if (shop.plan.lastAdjustedSerial >= 0 && !opening && (state.day % (content.rules.monthDays || 30)) !== 0) return;
-  shop.plan.lastAdjustedSerial = serial;
   const kind = shopKind(shop, content);
+  const tradeHouse = kind === "trade";
+  const hireEvery = Math.max(1, content.rules.tradeHouseHireIntervalDays ?? 3);
+  const reviewDue = tradeHouse ? serial % hireEvery === 0 : (state.day % (content.rules.monthDays || 30)) === 0;
+  if (shop.plan.lastAdjustedSerial >= 0 && !opening && !reviewDue) return;
+  shop.plan.lastAdjustedSerial = serial;
   if (kind === "stall") return;
   // 需求看过去 hiringDemandWindowDays（60）天；新店有 7 天记录就可以判断。
   const observation = Math.max(1, content.rules.hiringDemandWindowDays || 60);
@@ -1453,8 +1456,8 @@ function autoAdjustShopClerks(state, shop, content) {
       shop.plan.expectedDailySalesUnits = avgSalesUnits;
     }
   }
-  // 平时一次最多增减一人；近 30 天亏损时可以一次辞退到需要的人数（仍须满 30 天、付得起补偿）。
-  target = Math.max(recentlyLosing(shop) ? target : current - 1, Math.min(current + 1, target));
+  // 平时一次最多增减一人；近 30 天亏损时可以一次辞退到需要的人数（仍须满 30 天、付得起补偿）。贸易行自己定步长（tradeHouseTargetClerks）。
+  if (!tradeHouse) target = Math.max(recentlyLosing(shop) ? target : current - 1, Math.min(current + 1, target));
   // 付得起补偿才辞退（与 employment-contracts.js 的 reviewStaffing 同一规则）：一次辞几个人就要付得起几份补偿。
   if (target < current && !shop.collective) {
     const severance = Math.round(shopWage(state, shop, content) * Math.max(0, content.rules.severanceWageDays ?? 30) * currencyScale(content));
@@ -1777,13 +1780,11 @@ function recentlyLosing(shop) {
   return rows.reduce((sum, row) => sum + (Number(row.profitVoucherUnits) || 0), 0) < 0;
 }
 
-// 贸易行店员目标（与商业街店铺一样自己增减人）：看近 7 天成交额度用了多少。
-// 额度用满（≥85%）、额度卡在人手上（没到运力份额）、多一人的成交利润高于日薪且付得起 3 天工资 → 加人（每周期最多 +2）；
-// 用不到 40% 或亏损 → 减一人；7 天一笔买卖都没有则不减员（由暂停机制处理）。
-// 贸易行店员规则（docs/TRADE.md）：
-//   人手是否卡住成交，看"当日可做上限 capJin"（成交 + 收市后仍能做的买卖，人手不限）与人手预算 budgetJin 的关系：
-//   - 上限 > 预算 且 预算已用满（≥85%）→ 人手卡住：增员（每次最多 2 人，月初审核一次只加一人）。
-//     若预算已到运力份额（预算 ≥ 份额）→ 运力份额满，加人无用；若预算没用满 → 配额或运力卡住，不加人。
+// 贸易行店员目标（与商业街店铺一样自己增减人，docs/TRADE.md）。每 tradeHouseHireIntervalDays 天评估一次（autoAdjustShopClerks 控制节奏）。
+// 看近 7 天的"当日可做上限 capJin"（成交 + 收市后仍能做的买卖，人手不限）、运力份额 shareJin 与人手预算 budgetJin：
+//   - 上限 > 预算 且 预算已用满（≥85%）→ 人手卡住。若预算已到运力份额（加人无用）或预算没用满（配额/运力卡住）则不加。
+//     否则目标人数 = ⌈min(上限, 运力份额) ÷ tradeHouseJinPerClerk⌉（含商人，封顶店员上限）。有利可图（近期利润为正，或一人的日增利润 > 日薪）
+//     且资金够 tradeHouseHireCashMonths 个月的工资，才加：一次最多 max(tradeHouseHireMinStep, ⌈现有店员 × tradeHouseHireMaxStepShare⌉) 人，直到目标。
 //   - 上限 ≤ 预算 → 货源/配额/运力已用完，不因成交利用率低而减员（货源不足不是人手的错）。
 //   - 亏损且高于店员下限 → 减一人。
 //   - 店员下限 = min(2, 开店时的初始配置)：只防止减员过度，不因此强制加人。
@@ -1792,6 +1793,7 @@ function tradeHouseTargetClerks(state, shop, content) {
   const observation = Math.max(1, content.rules.operatingObservationDays || 7);
   const rows = (shop.tradeLog || []).slice(-observation);
   const current = shopClerkCount(state, shop);
+  const merchants = shopMerchantCount(state, shop);
   shop.plan ||= {};
   // 开店时的店员配置记为初始配置（只记一次）。
   shop.plan.initialClerks ??= current;
@@ -1815,7 +1817,10 @@ function tradeHouseTargetClerks(state, shop, content) {
   const marginalProfit = used > 0 ? profitVoucher / used * perClerk : 0;
   // 可动用资金含店里的支付小麦（贸易行出口收的是小麦）。
   const fundsVoucher = maximumPayableValueUnits(state, `shop:${shop.id}`, content) / currencyScale(content);
-  const add = Math.min(2, content.rules.operatingWorkerAdjustMaxPerCycle || 2);
+  const maxClerks = shopClerkLimit(shop, content);
+  const stepMin = Math.max(1, content.rules.tradeHouseHireMinStep ?? 2);
+  const stepShare = Math.max(0, content.rules.tradeHouseHireMaxStepShare ?? 0.5);
+  const cashDays = Math.max(0, content.rules.tradeHouseHireCashMonths ?? 1) * (content.rules.monthDays || 30);
   let target = current;
   let diagnosis = "生意与人手匹配";
   if (used <= 0) {
@@ -1828,11 +1833,19 @@ function tradeHouseTargetClerks(state, shop, content) {
     // 可做的买卖比人手预算多：看是不是人手卡住。
     if (budget + 1e-6 >= share) diagnosis = "运力份额已满，加人无用";
     else if (budgetUse < 0.85) diagnosis = "配额或运力卡住，人手不是瓶颈";
-    else if (marginalProfit <= wage) diagnosis = "生意做不完，但增员不盈利";
-    else if (fundsVoucher < (current + add) * wage * 3) diagnosis = "生意做不完，资金不足暂不加人";
     else {
-      target = current + add;
-      diagnosis = "生意做不完，加人";
+      const wantStaff = Math.ceil(Math.min(cap, share) / perClerk - 1e-9);
+      const wantClerks = Math.min(maxClerks, Math.max(0, wantStaff - merchants));
+      if (wantClerks <= current) diagnosis = "生意做得完，人手已够";
+      else if (!(profitVoucher > 0 || marginalProfit > wage)) diagnosis = "生意做不完，但增员不盈利";
+      else {
+        const step = Math.min(wantClerks - current, Math.max(stepMin, Math.ceil(current * stepShare)));
+        if (fundsVoucher < (current + step) * wage * cashDays) diagnosis = "生意做不完，资金不足暂不加人";
+        else {
+          target = current + step;
+          diagnosis = "生意做不完，加人";
+        }
+      }
     }
   } else {
     diagnosis = "货源或配额已用完，人手不减";

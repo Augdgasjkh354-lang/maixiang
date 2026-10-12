@@ -10,7 +10,7 @@ import { jobKeyForBuilding } from "../src/selectors/labor.js";
 import { grantResidentVouchers } from "./helpers-v16.js";
 
 // 面包备货天数单独覆盖（rules.townOutputStockDaysByItem）：面包是易囤的成品，只备 30 天销量；
-// 其他商品仍按全局 townOutputStockDays（360 天）。覆盖表缺省时回退全局值。
+// 其他商品仍按全局 townOutputStockDays（180 天）。覆盖表缺省时回退全局值。
 // 夹具口径同 operating-plan-town.test.js：直接放建成的建筑，跳过施工。
 
 const I = CONTENT.precision.inventoryUnitsPerJin;
@@ -36,7 +36,7 @@ function demandHistory(state, itemId, jinPerDay) {
   }
 }
 
-// 不带覆盖表的内容：备货天数全部回退全局 360 天（对照组）。
+// 不带覆盖表的内容：备货天数全部回退全局 180 天（对照组）。
 function contentWithoutOverrides() {
   return { ...CONTENT, rules: { ...CONTENT.rules, townOutputStockDaysByItem: undefined } };
 }
@@ -49,15 +49,15 @@ function marketState({ seed }) {
   return state;
 }
 
-test("面包备货目标按 30 天销量，其他商品（面粉、盐）仍按 360 天", () => {
+test("面包备货目标按 30 天销量，其他商品（面粉、盐）仍按 180 天", () => {
   const state = marketState({ seed: 9101 });
   demandHistory(state, "bread", 100);
   demandHistory(state, "flour", 100);
   demandHistory(state, "salt", 100);
-  // 面包：目标 = 100 斤/天 × 30 天 = 3000 斤；面粉、盐：目标 = 100 × 360 = 36000 斤。
+  // 面包：目标 = 100 斤/天 × 30 天 = 3000 斤；面粉、盐：目标 = 100 × 180 = 18000 斤。
   assert.equal(townOutputMarketRoomUnits(state, "bread", CONTENT), 3000 * I, "面包余量按 30 天");
-  assert.equal(townOutputMarketRoomUnits(state, "flour", CONTENT), 36000 * I, "面粉余量仍按 360 天");
-  assert.equal(townOutputMarketRoomUnits(state, "salt", CONTENT), 36000 * I, "盐余量仍按 360 天");
+  assert.equal(townOutputMarketRoomUnits(state, "flour", CONTENT), 18000 * I, "面粉余量仍按 180 天");
+  assert.equal(townOutputMarketRoomUnits(state, "salt", CONTENT), 18000 * I, "盐余量仍按 180 天");
 });
 
 test("面包库存超过 30 天需求时面包房停产，且不再从市场领走面粉", () => {
@@ -91,13 +91,13 @@ test("面包库存低于 30 天需求时面包房照常开工并领用面粉（�
   assert.ok(state.wholesaleMarket.inventory.flour <= flourBefore - FLOUR_PER_BATCH, "至少消耗一批面粉");
 });
 
-test("rules 没有覆盖表时面包回退全局 townOutputStockDays（360 天）", () => {
+test("rules 没有覆盖表时面包回退全局 townOutputStockDays（180 天）", () => {
   const state = marketState({ seed: 9104 });
   demandHistory(state, "bread", 100);
   const plain = contentWithoutOverrides();
-  assert.equal(townOutputMarketRoomUnits(state, "bread", plain), 36000 * I, "无覆盖表：面包按全局 360 天");
+  assert.equal(townOutputMarketRoomUnits(state, "bread", plain), 18000 * I, "无覆盖表：面包按全局 180 天");
   state.wholesaleMarket.inventory.bread = 3500 * I;
-  assert.equal(townOutputMarketRoomUnits(state, "bread", plain), (36000 - 3500) * I, "无覆盖表：库存 3500 斤仍远低于目标");
+  assert.equal(townOutputMarketRoomUnits(state, "bread", plain), (18000 - 3500) * I, "无覆盖表：库存 3500 斤仍远低于目标");
   assert.equal(townOutputMarketRoomUnits(state, "bread", CONTENT), 0, "有覆盖表：同库存已超过 30 天目标");
 });
 
