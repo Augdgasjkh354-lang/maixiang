@@ -3425,7 +3425,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod22 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-b688195";
+       const BUILD_ID = "0203-ed02242";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -26695,6 +26695,7 @@ return { accrueEducationDay, EXPERIENCE_EXTRA_TYPE_IDS, accrueIndustryExperience
 // ===== systems/annual-reports.js =====
 const __mxmod118 = (() => {
 const { computeWealthStats } = __mxmod110;
+const { wholesalePrice } = __mxmod52;
 const YEAR_TOTAL_FIELDS = ["harvestQeq", "consumptionQeq", "operatingWagesQeq", "constructionPayQeq", "reliefQeq", "processingLossQeq", "unemploymentPaidQeq", "wagePaidQeq", "wageArrearsQeq"];
 
 function cloneValue(value) {
@@ -26769,6 +26770,35 @@ function companyDistributionIndex(state, reports = []) {
   return rows;
 }
 
+// 镇营产出的增加值（券）：产量 ×（市价 − 配方原料按市价折的成本），再与镇营工资对照（镇报 GDP 用）。
+// 产量来自 business 与各行业账本的全年 producedUnits（只含镇营建筑；公司与民营另有账本）。
+function townProductionSummary(state, content) {
+  const perJin = content.precision.inventoryUnitsPerJin;
+  const price = itemId => wholesalePrice(state, itemId, content) || Number(content.items[itemId]?.openingCostWheatPerJin) || 0;
+  const inputCostPerJin = itemId => {
+    for (const recipe of Object.values(content.recipes || {})) {
+      const flexInputs = recipe.flex?.itemIds?.includes(itemId) ? recipe.flex.inputsPerJin?.[itemId] : null;
+      if (flexInputs) return Object.entries(flexInputs).reduce((sum, [id, q]) => sum + q * price(id), 0);
+      const out = (recipe.outputs || []).find(row => row.itemId === itemId);
+      if (out && out.quantity > 0) return (recipe.inputs || []).reduce((sum, row) => sum + row.quantity * price(row.itemId), 0) / out.quantity;
+    }
+    return 0;
+  };
+  const produced = {};
+  const addProduced = map => { for (const [itemId, units] of Object.entries(map || {})) produced[itemId] = (produced[itemId] || 0) + units; };
+  addProduced(state.business?.year?.producedUnits);
+  let wageUnits = state.business?.year?.operatingWagesWheatUnits || 0;
+  for (const industry of Object.values(state.industries || {})) {
+    addProduced(industry.year?.producedUnits);
+    wageUnits += industry.year?.operatingWagesWheatUnits || 0;
+  }
+  let valueAdded = 0;
+  for (const [itemId, units] of Object.entries(produced)) {
+    valueAdded += (units / perJin) * Math.max(0, price(itemId) - inputCostPerJin(itemId));
+  }
+  return { valueAddedVoucher: valueAdded, wagesVoucher: wageUnits / perJin };
+}
+
        function buildAnnualReport(state, content, { householdLifeYear, peopleBefore, peopleAfter, demography, closingQeq }) {
   const companies = {};
   for (const company of Object.values(state.companies || {})) companies[company.id] = companyAnnualSummary(company);
@@ -26792,6 +26822,7 @@ function companyDistributionIndex(state, reports = []) {
     fiscal: annualPeriod(state.fiscal),
     stampDuty: annualPeriod(state.stampDuty),
     salt: annualPeriod(state.salt),
+    townProduction: townProductionSummary(state, content),
     companies,
     shops,
     householdLife: cloneValue(householdLifeYear),
@@ -26874,7 +26905,8 @@ return { selectAccounts, selectFoodDays, selectTotalQeq };
 const __mxmod120 = (() => {
 // 镇 GDP（只读，由年报估算，收入法，单位：券，1 券 ≈ 1 斤小麦）：
 //   GDP = 农业产出（秋收）+ 劳动报酬（全年应计工资，含镇营）+ 经营利润（店铺与公司，含已缴利润税，亏损抵减但总和不低于 0）
-// 镇营部门按成本计价（只有工资，没有利润）；这是估算口径，用来看规模与同比，不是会计恒等式。
+//         + 镇营盈余（镇营产出按市价折算的增加值 − 镇营工资，不低于 0；年报 townProduction，旧年报没有则为 0）
+// 民营建筑的产出暂未单独计价（其收入已在居民收入里，不在经营利润里）；这是估算口径，用来看规模与同比，不是会计恒等式。
        function gdpOfReport(report, content) {
   if (!report) return null;
   const scale = content.precision.currencyUnitsPerVoucher;
@@ -26886,9 +26918,11 @@ const __mxmod120 = (() => {
     profit += ((accounts.profitVoucherUnits || 0) + (accounts.taxExpenseVoucherUnits || 0)) / scale;
   }
   profit = Math.max(0, profit);
-  const total = agriculture + wages + profit;
+  const tp = report.townProduction || {};
+  const townSurplus = Math.max(0, (tp.valueAddedVoucher || 0) - (tp.wagesVoucher || 0));
+  const total = agriculture + wages + profit + townSurplus;
   const people = Number(report.populationAfterAging) || 0;
-  return { agriculture, wages, profit, total, perCapita: people > 0 ? total / people : null };
+  return { agriculture, wages, profit, townSurplus, total, perCapita: people > 0 ? total / people : null };
 }
 return { gdpOfReport };
 })();
@@ -27248,7 +27282,7 @@ function sectionEconomy(f) {
     lines.push(per + "。");
   }
   const share = value => `${(value / g.total * 100).toFixed(0)}%`;
-  lines.push(`构成：农业${share(g.agriculture)}、劳动报酬${share(g.wages)}、经营利润${share(g.profit)}。`);
+  lines.push(`构成：农业${share(g.agriculture)}、劳动报酬${share(g.wages)}、经营利润${share(g.profit)}${g.townSurplus > 0 ? `、镇营盈余${share(g.townSurplus)}` : ""}。`);
   return { title: "国民经济", lines };
 }
 

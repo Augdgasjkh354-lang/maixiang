@@ -5,6 +5,8 @@ import { recordEvent } from "../src/economy/ledger.js";
 import { GAZETTE_NOTES_PER_YEAR, GAZETTE_ISSUE_LIMIT } from "../src/economy/gazette-notes.js";
 import { buildGazette, settleGazetteYear, gazetteBytes, GAZETTE_BYTE_LIMIT } from "../src/systems/gazette.js";
 import { selectFoodDays } from "../src/selectors/economy.js";
+import { gdpOfReport } from "../src/selectors/gdp.js";
+import { buildAnnualReport } from "../src/systems/annual-reports.js";
 import { renderGazettePanel } from "../src/ui/panel-gazette.js";
 import { migrateSave } from "../src/persistence/migrations.js";
 import { validateState } from "../src/core/validation.js";
@@ -263,4 +265,29 @@ test("GDP 同比 ≥15% 且创新高时上头条", () => {
   setTownYears(state, 1.5);
   const { issue } = gazetteFor(state, report(2, { harvestQeq: 1000 * QEQ, payroll: { accruedVoucherUnits: 500 * CONTENT.precision.currencyUnitsPerVoucher } }), report(1, { harvestQeq: 1000 * QEQ }));
   assert.match(issue.headline, /GDP增长50%|经济腾飞/);
+});
+
+test("GDP 含镇营盈余：增加值 − 镇营工资，亏本部分不计负", () => {
+  const state = fresh();
+  setTownYears(state, 1.5);
+  const base = report(2, { harvestQeq: 1000 * QEQ, populationAfterAging: 100 });
+  const withTown = { ...base, townProduction: { valueAddedVoucher: 400, wagesVoucher: 150 } };
+  const loss = { ...base, townProduction: { valueAddedVoucher: 100, wagesVoucher: 150 } };
+  assert.equal(gdpOfReport(withTown, CONTENT).total, 1250);
+  assert.equal(gdpOfReport(loss, CONTENT).total, 1000);
+  const { issue } = gazetteFor(state, withTown);
+  assert.match(issue.sections.find(section => section.title === "国民经济").lines[2], /镇营盈余20%/);
+});
+
+test("buildAnnualReport 的 townProduction：伐木按市价计、面粉扣小麦成本", () => {
+  const state = fresh();
+  const per = CONTENT.precision.inventoryUnitsPerJin;
+  state.industries.forestry.year.producedUnits = { wood: 100 * per };
+  state.industries.forestry.year.operatingWagesWheatUnits = 30 * per;
+  const price = id => state.wholesaleMarket.pricesVoucherPerUnit[id] || 0;
+  const summary = buildAnnualReport(state, CONTENT, {
+    householdLifeYear: {}, peopleBefore: { total: 1 }, peopleAfter: { total: 1 }, demography: { births: 0, deaths: 0, marriages: 0, laborChange: {} }, closingQeq: 0
+  }).townProduction;
+  assert.ok(Math.abs(summary.valueAddedVoucher - 100 * price("wood")) < 1e-6);
+  assert.equal(summary.wagesVoucher, 30);
 });

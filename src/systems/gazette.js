@@ -359,7 +359,7 @@ function sectionEconomy(f) {
     lines.push(per + "。");
   }
   const share = value => `${(value / g.total * 100).toFixed(0)}%`;
-  lines.push(`构成：农业${share(g.agriculture)}、劳动报酬${share(g.wages)}、经营利润${share(g.profit)}。`);
+  lines.push(`构成：农业${share(g.agriculture)}、劳动报酬${share(g.wages)}、经营利润${share(g.profit)}${g.townSurplus > 0 ? `、镇营盈余${share(g.townSurplus)}` : ""}。`);
   return { title: "国民经济", lines };
 }
 

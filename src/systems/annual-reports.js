@@ -1,4 +1,5 @@
 import { computeWealthStats } from "./wealth-stats.js";
+import { wholesalePrice } from "./wholesale-price.js";
 
 const YEAR_TOTAL_FIELDS = ["harvestQeq", "consumptionQeq", "operatingWagesQeq", "constructionPayQeq", "reliefQeq", "processingLossQeq", "unemploymentPaidQeq", "wagePaidQeq", "wageArrearsQeq"];
 
@@ -74,6 +75,35 @@ function companyDistributionIndex(state, reports = []) {
   return rows;
 }
 
+// 镇营产出的增加值（券）：产量 ×（市价 − 配方原料按市价折的成本），再与镇营工资对照（镇报 GDP 用）。
+// 产量来自 business 与各行业账本的全年 producedUnits（只含镇营建筑；公司与民营另有账本）。
+function townProductionSummary(state, content) {
+  const perJin = content.precision.inventoryUnitsPerJin;
+  const price = itemId => wholesalePrice(state, itemId, content) || Number(content.items[itemId]?.openingCostWheatPerJin) || 0;
+  const inputCostPerJin = itemId => {
+    for (const recipe of Object.values(content.recipes || {})) {
+      const flexInputs = recipe.flex?.itemIds?.includes(itemId) ? recipe.flex.inputsPerJin?.[itemId] : null;
+      if (flexInputs) return Object.entries(flexInputs).reduce((sum, [id, q]) => sum + q * price(id), 0);
+      const out = (recipe.outputs || []).find(row => row.itemId === itemId);
+      if (out && out.quantity > 0) return (recipe.inputs || []).reduce((sum, row) => sum + row.quantity * price(row.itemId), 0) / out.quantity;
+    }
+    return 0;
+  };
+  const produced = {};
+  const addProduced = map => { for (const [itemId, units] of Object.entries(map || {})) produced[itemId] = (produced[itemId] || 0) + units; };
+  addProduced(state.business?.year?.producedUnits);
+  let wageUnits = state.business?.year?.operatingWagesWheatUnits || 0;
+  for (const industry of Object.values(state.industries || {})) {
+    addProduced(industry.year?.producedUnits);
+    wageUnits += industry.year?.operatingWagesWheatUnits || 0;
+  }
+  let valueAdded = 0;
+  for (const [itemId, units] of Object.entries(produced)) {
+    valueAdded += (units / perJin) * Math.max(0, price(itemId) - inputCostPerJin(itemId));
+  }
+  return { valueAddedVoucher: valueAdded, wagesVoucher: wageUnits / perJin };
+}
+
 export function buildAnnualReport(state, content, { householdLifeYear, peopleBefore, peopleAfter, demography, closingQeq }) {
   const companies = {};
   for (const company of Object.values(state.companies || {})) companies[company.id] = companyAnnualSummary(company);
@@ -97,6 +127,7 @@ export function buildAnnualReport(state, content, { householdLifeYear, peopleBef
     fiscal: annualPeriod(state.fiscal),
     stampDuty: annualPeriod(state.stampDuty),
     salt: annualPeriod(state.salt),
+    townProduction: townProductionSummary(state, content),
     companies,
     shops,
     householdLife: cloneValue(householdLifeYear),
