@@ -140,7 +140,7 @@ test("民营欠薪连续超过30天：整栋收回镇营；存货先抵欠薪，
   assertValid(state, "收回后");
 });
 
-test("存货不够抵欠薪时余额由镇库偿付给工人，记事件", () => {
+test("存货不够抵欠薪时余额由镇库偿付给工人", () => {
   const state = simulation.createInitialState({ seed: 7105 });
   addBuilding(state, "wholesale_market", "wm-advance");
   const owner = householdList(state).filter(isActiveHousehold)[1];

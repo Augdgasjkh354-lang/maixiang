@@ -240,8 +240,9 @@ function finishProject(state, project, content, results) {
   initializeBuildingJobs(state, building, content);
   const name = definition ? definition.name : project.typeId;
   releaseProjectWorkers(state, project, content);
+  // 镇报：大型建筑（斗兽场、冶炼厂）权重更高。
   recordEvent(state, name + "落成，可以安排工人开工了。", content,
-    { day: state.day + 1 });
+    { day: state.day + 1, gazette: { kind: "built", weight: project.typeId === "arena" || project.typeId === "smelter" ? 6 : 3 } });
   results.push({ instanceId: project.instanceId, status: "completed", completed: true, building, workers: 0 });
   return { instanceId: project.instanceId, result: { status: "completed", completed: true, building } };
 }

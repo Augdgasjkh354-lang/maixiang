@@ -110,7 +110,7 @@ export function signTradeAgreement(state, { itemId, annualJin, years, content, t
     signDay: state.day
   };
   rows.push(agreement);
-  recordEvent(state, `与${profile.name}签订${content.items[itemId]?.name || itemId}长期协定：每年${Math.round(quantity)}，锁定单价${price}${trusted ? "（关系融洽，价×1.05）" : ""}，为期${term}年。`, content);
+  recordEvent(state, `与${profile.name}签订${content.items[itemId]?.name || itemId}长期协定：每年${Math.round(quantity)}，锁定单价${price}${trusted ? "（关系融洽，价×1.05）" : ""}，为期${term}年。`, content, { gazette: { kind: "trade", weight: 3 } });
   return { ok: true, agreement };
 }
 
@@ -147,12 +147,12 @@ function breachAgreement(state, agreement, town, profile, content, { itemName, l
   agreement.breachCount = (agreement.breachCount || 0) + 1;
   changeRelations(town, -AGREEMENT_BREACH_RELATIONS_LOSS);
   const owedText = paid.shortfallJin > 0 ? `，镇库小麦不足，尚欠${Math.round(paid.shortfallJin)}斤` : "";
-  recordEvent(state, `${eventLead}，向${profile.name}赔付小麦${Math.round(paid.paidJin)}斤${owedText}。`, content);
+  recordEvent(state, `${eventLead}，向${profile.name}赔付小麦${Math.round(paid.paidJin)}斤${owedText}。`, content, { gazette: { kind: "default", weight: 4 } });
   if (agreement.breachCount < AGREEMENT_BREACH_LIMIT) return { terminated: false };
   agreement.status = "terminated";
   agreement.terminatedYear = state.year;
   agreement.terminatedDay = state.day;
-  recordEvent(state, `${profile.name}连续${AGREEMENT_BREACH_LIMIT}个月未收到${itemName}，单方面解约。`, content);
+  recordEvent(state, `${profile.name}连续${AGREEMENT_BREACH_LIMIT}个月未收到${itemName}，单方面解约。`, content, { gazette: { kind: "default", weight: 4 } });
   return { terminated: true };
 }
 

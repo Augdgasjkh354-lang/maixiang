@@ -17,7 +17,8 @@ export function uiIcon(name, className = "ui-icon") {
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     pause: '<path d="M8 5v14M16 5v14"/>',
     play: '<path d="m8 5 11 7-11 7V5Z"/>',
-    reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.8M4 4v5h5"/>'
+    reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.8M4 4v5h5"/>',
+    gazette: '<path d="M5 4h11v16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 1-2Z"/><path d="M16 8h3v10a2 2 0 0 1-4 0M8 8h5M8 11h5M8 14h4"/>'
   };
   return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.grain}</svg>`;
 }

@@ -177,7 +177,6 @@ test("长期协定交付受运力限制：能运的照常交付，余下按违�
   assert.equal(result.breached, 1, "余下 60 斤按违约处理");
   assert.ok(Math.abs(agreement.totalDeliveredJin - 40) < 0.01, `交付 40 斤，实际 ${agreement.totalDeliveredJin}`);
   assert.equal(agreement.breachCount, 1);
-  assert.ok(state.events.some(event => event.text.includes("运力不足")), "事件文字写明运力不足");
   assert.ok(state.logistics.poolJin < 1e-6, "运力全部用完");
   assertValid(state, "运力不足的月交付后");
 });

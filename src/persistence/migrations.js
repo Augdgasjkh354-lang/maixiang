@@ -76,6 +76,8 @@ function migrateCurrentVersion(raw, definitions, current) {
   const base = createInitialState({ content: definitions });
   const entityMaps = new Set([...ENTITY_MAPS, ...(definitions.modSave?.entityMaps || [])]);
   const state = mergeOntoBase(cloneJson(base), saved, "", report, entityMaps);
+  // 账本事件已取消（不再存 state.events）：旧档里的事件流水丢弃，不进新档。
+  delete state.events;
   state.version = current;
   state.schemaVersion = current;
   // 货币阶段已删除，只留银行入口标记。

@@ -37,8 +37,9 @@ function expenseTotal(state) {
   return state.bank.cumulative?.depositInterestExpense || 0;
 }
 
-function bankNoticeEvents(state, text) {
-  return state.events.filter(event => event.text.includes(text));
+// 欠镇库增长的提示每年最多一次：记录在 bank.debtNoticeYear（提示只看它，不再写事件流水）。
+function noticeYearIs(state, year) {
+  return state.bank.debtNoticeYear === year;
 }
 
 test("银行现金充足：存款利息由银行自付，镇库不动，费用计入银行三段账（日、年、累计）", () => {
@@ -82,8 +83,7 @@ test("银行现金不够付息：镇库托底垫付（bank_town_advance），记
   assert.equal(state.bank.debtToTownUnits, state.bank.totalAdvancedUnits - state.bank.totalRepaidUnits, "欠镇库 = 累计垫付 − 累计还款");
   assert.equal(state.bank.interestPayableUnits, 0, "镇库够付，当日付清");
   assert.equal(state.bank.stats.interestPaidVoucherUnits, due, "利息全部计入存款");
-  assert.equal(bankNoticeEvents(state, "存款利息时银行现金不足").length, 1, "欠镇库增长要有一次提示");
-  assert.ok(bankNoticeEvents(state, "存款利息时银行现金不足")[0].text.includes(`镇库垫付${String(Math.round(due / V * 100) / 100)}券`), "提示写明金额");
+  assert.equal(noticeYearIs(state, state.year), true, "欠镇库增长要记下本年提示");
   assert.equal(bankLedgerInvariant(state).valid, true);
   assert.equal(validateCurrencyInvariant(state, CONTENT).valid, true);
 });
@@ -96,13 +96,13 @@ test("欠镇库的增长提示每年最多一次：同年再次垫付只改账�
     issueTownVouchers(state, 500 * V, CONTENT, "测试：镇库粮券");
     settleBankDay(state, CONTENT);
   }
-  assert.equal(bankNoticeEvents(state, "存款利息时银行现金不足").length, 1, "同年只提示一次");
+  assert.equal(noticeYearIs(state, 2), true, "同年只提示一次");
   assert.ok(state.bank.totalAdvancedUnits > 0, "账目照常增长");
   state.year = 3;
   drainBankCash(state);
   issueTownVouchers(state, 500 * V, CONTENT, "测试：镇库粮券");
   settleBankDay(state, CONTENT);
-  assert.equal(bankNoticeEvents(state, "存款利息时银行现金不足").length, 2, "跨年后再提示一次");
+  assert.equal(noticeYearIs(state, 3), true, "跨年后再提示一次");
   assert.equal(bankLedgerInvariant(state).valid, true);
 });
 
@@ -118,7 +118,7 @@ test("镇库也付不起：未付部分顺延为银行应付利息，下日补�
   assert.equal(state.bank.stats.interestPaidVoucherUnits, 0, "没付出的利息不计入存款");
   assert.equal(bankLedgerInvariant(state).valid, true, "应付计入台账守恒");
   assert.ok(state.bank.retainedVoucherUnits < 0, "留存利润可为负");
-  assert.ok(state.events.some(event => event.text.includes("顺延为应付")), "顺延要留下事件");
+  assert.ok(state.bank.interestPayableUnits > 0, "顺延要留下应付利息");
 
   // 第二日镇库得到部分粮券（现金仍见底，第一日的存款流入已在别处）：先付当日利息的一部分，旧欠按存款分摊补付。
   const partial = Math.floor(dayOne / 2);

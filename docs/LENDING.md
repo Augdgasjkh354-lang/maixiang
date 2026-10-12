@@ -51,7 +51,7 @@
 6. 银行已建成（`bankAvailable`）。
 
 放款分录：`bank.cashVoucherUnits -= units`；`household.voucherUnits += units`（用 `economy/` 现有的转账原语，别手写）；
-`bank.loans.push(loan)`；`bank.stats.loansIssuedCount/VoucherUnits` 累加；记一条事件和账本（类型 `household_loan_issue`，付款方 `bank`、收款方 `household:<id>`）。
+`bank.loans.push(loan)`；`bank.stats.loansIssuedCount/VoucherUnits` 累加；记账本（类型 `household_loan_issue`，付款方 `bank`、收款方 `household:<id>`）。
 放款后调用 `syncResidentAggregates`（居民汇总是缓存），然后才让原流程（开店、买别墅）去付款。
 
 接入点：
@@ -69,14 +69,14 @@
 4. 实还全额：`missedInstalments = 0`，`nextDueDayIndex += 30`。不足：已还的先冲利息再冲本金，欠期数按实际未还期数重算：`missedInstalments = max(0, 原欠期 + 1 − floor(实还 ÷ 一期月供))`（本期加原欠期共 原欠期+1 期，已还的整期从中扣掉；不足一整期的部分不折减），`nextDueDayIndex += 30`。例：欠 1 期时到期只还 1 期月供，欠期仍为 1；还清全部欠期后为 0，之后每期只收一期月供。
 5. 还款分录：`bank.cashVoucherUnits += paid`；`loan.outstandingVoucherUnits -= paid`；`bank.stats.loansRepaidVoucherUnits`、`interestEarnedVoucherUnits`（先冲利息）累加；账本类型 `household_loan_repay`。
 6. 有欠期的贷款，每天额外检查一次：住户有富余（同第 2 条口径）就补还欠款，直到欠期清零。**有钱就还**。
-7. `outstandingVoucherUnits <= 0` → `status = "repaid"`，记事件。
+7. `outstandingVoucherUnits <= 0` → `status = "repaid"`。
 
 月供与计息：月供按固定利率算，若中途政策利率调整，**已发放贷款利率不变**（`loan.rateAnnualPercent` 在发放时固定，日计息读这一字段，不读当前政策利率——现有公司贷款也这样，统一）。
 
 ## 核销
 
 唯一触发：借款住户整户无人 / 迁出，家产归镇库（`redistribution.js` 的 `escheatHousehold`）：
-先用该户手头与存款还一部分（正常还款分录），剩余 `outstanding` 全部核销——`status = "written_off"`、`bank.stats.badDebtVoucherUnits +=`、`bank.retainedVoucherUnits -=`（可为负，沿用现有核销写法），记事件。
+先用该户手头与存款还一部分（正常还款分录），剩余 `outstanding` 全部核销——`status = "written_off"`、`bank.stats.badDebtVoucherUnits +=`、`bank.retainedVoucherUnits -=`（可为负，沿用现有核销写法）。
 **不**因欠期天数核销，**不**关店、**不**收房。
 
 分家（`household-split.js`）：贷款留在原户，不拆分。

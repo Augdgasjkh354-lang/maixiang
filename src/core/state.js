@@ -224,9 +224,10 @@ function placeStandardOpening(state, content) {
       completed: { year: state.year, day: state.day + 1 }
     });
   }
-  if (rows.length && state.events?.[0]) {
+  if (rows.length) {
+    // 开局提示走界面上的一次性横幅（state.openingHint），玩家点掉后置空。
     const names = rows.map(row => content.buildings[row.typeId].name).join("、");
-    state.events[0].text += `${names}已建好，开局不派工：记得在就业面板设人数，否则没有产出。`;
+    state.openingHint = `新任镇长上任。${names}已建好，开局不派工：记得在就业面板设人数，否则没有产出。`;
   }
 }
 
@@ -430,10 +431,10 @@ export function createInitialState(options) {
     ledger: [],
     ledgerSequence: 0,
     transactionSequence: 0,
-    events: [{
-      year: 1, day: 1,
-      text: "新任镇长上任。居民每人领得一千斤粮券，镇库另存券池六百七十万斤；小麦仍是口粮与价值尺度，今日镇务暂歇。"
-    }]
+    // 镇报素材库（systems/gazette.js）：notes 当年要闻，issues 最近各期，readYear 已读的最新一期年份，marks 年终快照（同比用）。
+    gazette: { notes: [], issues: [], readYear: 0, marks: null },
+    // 开局提示（仅标准开局）：界面上的一次性横幅，玩家点掉后置空。
+    openingHint: null
   };
   createInitialHouseholds(state, content);
   issueOpeningVouchers(state, content);

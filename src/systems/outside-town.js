@@ -469,7 +469,7 @@ export function settleOutsideTownYear(state, content) {
       const pick = nextRandom(state);
       if (pick < 0.3) {
         event = "蝗灾"; town.harvestFactor = 0.55;
-        recordEvent(state, `${profile.name}遭蝗灾，今秋收成将大减。`, content, { day: 1 });
+        recordEvent(state, `${profile.name}遭蝗灾，今秋收成将大减。`, content, { day: 1, gazette: { kind: "outside", weight: 3 } });
       } else if (pick < 0.6) {
         event = "丰收"; town.harvestFactor = 1.15;
         recordEvent(state, `${profile.name}风调雨顺，今秋有望丰收。`, content, { day: 1 });
@@ -483,7 +483,7 @@ export function settleOutsideTownYear(state, content) {
     town.event = event ? { type: event, year: state.year } : null;
     if (town.relations < RELATIONS_BREAKOFF && nextRandom(state) < 0.3) {
       town.tradeClosed = true;
-      recordEvent(state, `${profile.name}与我镇关系破裂，商路断绝。`, content, { day: 1 });
+      recordEvent(state, `${profile.name}与我镇关系破裂，商路断绝。`, content, { day: 1, gazette: { kind: "outside", weight: 4 } });
     }
     // 人口只增不减：每年 +0.5%（繁荣度 0）到 +3%（繁荣度 100）；口粮不足的年份停止增长。
     const rate = town.supply.food < 0.97 ? 0 : 0.005 + 0.025 * Math.max(0, Math.min(100, town.prosperity)) / 100;

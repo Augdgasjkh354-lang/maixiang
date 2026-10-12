@@ -311,7 +311,7 @@ export function liquidateCompanyToTown(state, companyId, content) {
     addTownCostBasis(state, itemId, cost);
   }
   const levels = closeCompanyToTown(state, company, building, content);
-  recordEvent(state, `${company.name}完成债务优先清算，整栋建筑划回镇营。`, content, { day: state.day + 1 });
+  recordEvent(state, `${company.name}完成债务优先清算，整栋建筑划回镇营。`, content, { day: state.day + 1, gazette: { kind: "bankrupt", weight: 4 } });
   return { ok: true, levelsReturned: levels };
 }
 
@@ -377,7 +377,7 @@ export function liquidateCompanyForArrears(state, companyId, content) {
   const cancelledResidentShares = company.residentShares || 0;
   const cancelledFundShares = company.fundShares || 0;
   const levels = closeCompanyToTown(state, company, building, content);
-  recordEvent(state, `${company.name}连续欠薪超过${content.rules.ownershipTakeoverArrearsDays || 30}天，债务清算：存货抵欠薪${Math.round(inKindValueUnits / content.precision.currencyUnitsPerVoucher)}券，镇库垫付${Math.round(townAdvanceUnits / content.precision.currencyUnitsPerVoucher)}券；居民股份${cancelledResidentShares}股、基金股份${cancelledFundShares}股作废，整栋建筑收回镇营。`, content, { day: state.day + 1 });
+  recordEvent(state, `${company.name}连续欠薪超过${content.rules.ownershipTakeoverArrearsDays || 30}天，债务清算：存货抵欠薪${Math.round(inKindValueUnits / content.precision.currencyUnitsPerVoucher)}券，镇库垫付${Math.round(townAdvanceUnits / content.precision.currencyUnitsPerVoucher)}券；居民股份${cancelledResidentShares}股、基金股份${cancelledFundShares}股作废，整栋建筑收回镇营。`, content, { day: state.day + 1, gazette: { kind: "bankrupt", weight: 4 } });
   return { ok: true, companyId, arrearsBeforeUnits: arrearsBefore, inKindValueUnits, townAdvanceUnits, transferredClaimsUnits, cancelledResidentShares, cancelledFundShares, levelsReturned: levels };
 }
 

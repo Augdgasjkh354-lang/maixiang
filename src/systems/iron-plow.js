@@ -57,6 +57,6 @@ export function setIronPlowReform(state, content, acres) {
   if (jobsBefore > capacityAfter) setJobCount(state, roleId, capacityAfter, content, { type: "town", id: "fields" });
   const released = Math.max(0, jobsBefore - jobCount(state, roleId));
   recordEvent(state, `铁犁牛耕改革：替代耕地 ${previous} → ${acres} 亩（上限 ${preview.cap} 亩）；农田岗位 ${capacityBefore} → ${capacityAfter} 人` +
-    (released > 0 ? `，${released} 名农民转为待业。` : "。"), content);
+    (released > 0 ? `，${released} 名农民转为待业。` : "。"), content, { gazette: { kind: "reform", weight: 3 } });
   return { ok: true, acres, previous, cap: preview.cap, capacityBefore, capacityAfter, released, reason: null };
 }

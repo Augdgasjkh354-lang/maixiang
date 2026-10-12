@@ -431,7 +431,6 @@ test("零资金暂停的贸易行：业主有钱 → 下一个检查日补资并
   assert.equal(shop.status, "open", `应当恢复营业：${shop.statusReason}`);
   assert.equal(days % 10, 0, `只在检查日恢复，实际第 ${days} 天`);
   assert.ok(maximumPayableValueUnits(state, `shop:${shop.id}`, CONTENT) > 0, "业主补足了营运资金");
-  assert.ok(state.events.some(event => event.text.includes("业主补资")), "事件写明业主补资");
   valid(state, "零资金恢复后");
 });
 

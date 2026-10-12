@@ -63,7 +63,7 @@ function takeoverPrivateBuilding(state, building, content, days) {
   syncResidentAggregates(state, content);
   const ownerName = household?.name || "业主";
   const voucherUnits = content.precision.currencyUnitsPerVoucher;
-  recordEvent(state, `${ownerName}经营的${definition.name}连续欠薪超过${days - 1}天，整栋收回镇营：存货抵欠薪${Math.round(inKindValueUnits / voucherUnits)}券，镇库垫付${Math.round(townAdvanceUnits / voucherUnits)}券，业主不再得到补偿。`, content, { day: state.day + 1 });
+  recordEvent(state, `${ownerName}经营的${definition.name}连续欠薪超过${days - 1}天，整栋收回镇营：存货抵欠薪${Math.round(inKindValueUnits / voucherUnits)}券，镇库垫付${Math.round(townAdvanceUnits / voucherUnits)}券，业主不再得到补偿。`, content, { day: state.day + 1, gazette: { kind: "bankrupt", weight: 4 } });
   return {
     kind: "private", buildingId: building.id, ownerHouseholdId: household?.id || null, days,
     arrearsBeforeUnits: arrearsBefore, inKindValueUnits, townAdvanceUnits, transferredClaimsUnits,

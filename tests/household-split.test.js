@@ -244,7 +244,7 @@ test("读档：250 户大户局面序列化后读回，每户不超过 8 人并�
   valid(loaded);
 });
 
-test("年终推进：超过 8 人的户被分家，事件里有“分了家”", () => {
+test("年终推进：超过 8 人的户被分家，户数增加", () => {
   const state = simulation.createInitialState({ seed: 7007 });
   const owner = households(state).find(household => householdWorkingAge(household) >= 2);
   growTo(state, owner, { children: 4, workers: 8, elders: 3 });
@@ -257,6 +257,5 @@ test("年终推进：超过 8 人的户被分家，事件里有“分了家”",
   for (const household of households(state)) {
     assert.ok(householdPopulation(household) <= MAX, `${household.id} 年终后仍超过 ${MAX} 人`);
   }
-  assert.ok(state.events.some(event => /分了家/.test(event.text)), "应有分家事件");
   valid(state);
 });

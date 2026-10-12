@@ -293,6 +293,18 @@ function selectHeaderVoucher(state, content) {
   };
 }
 
+// 镇报（只读）：unread = 有未读的最新一期（readYear 之后）；archive 为最近各期，新的在前。
+function gazetteView(state) {
+  const gazette = state.gazette || {};
+  const issues = Array.isArray(gazette.issues) ? gazette.issues : [];
+  const latest = issues[issues.length - 1] || null;
+  return {
+    unread: Boolean(latest) && latest.year > (Number(gazette.readYear) || 0),
+    latest,
+    archive: issues.slice().reverse()
+  };
+}
+
 export function selectDashboard(state, content, selection) {
   const panel = selection?.panel || "all";
   const full = panel === "all";
@@ -848,7 +860,7 @@ export function selectDashboard(state, content, selection) {
     inventoryUnitsPerJin: content.precision.inventoryUnitsPerJin,
     qeqUnitsPerJin: content.precision.qeqUnitsPerJin,
     currencyUnitsPerVoucher: voucherScale,
-    events: state.events,
+    gazette: gazetteView(state),
     plots: state.plots,
     plotOccupants: full ? state.plots.map(function (plot) {
       const plotProject = projectViews.find(row => row.plotId === plot.id) || null;

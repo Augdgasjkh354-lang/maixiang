@@ -24,6 +24,7 @@ import { renderPolicy, WEALTH_TAX_RATE_KEYS, WEALTH_TAX_THRESHOLD_KEYS } from ".
 import { CONTENT } from "../content/index.js";
 import { renderSite, setIronPlowPreview } from "./panel-site.js";
 import { renderSettings } from "./panel-settings.js";
+import { gazetteSheetMarkup, renderGazettePanel } from "./panel-gazette.js";
 import { compact, escapeHtml, number, numberMax, moneyUnit } from "./format.js";
 import { parseNumericDraft, shouldCommitNumericDraftOnChange, shouldDeferNumericPanelRender } from "./numeric-drafts.js";
 import { createDashboardViewCache } from "./dashboard-view-cache.js";
@@ -105,8 +106,8 @@ export function mountGame(root) {
   let lastAdvanceRenderAt = -Infinity;
   let advanceRenderPending = false;
   let renderedMapSignature = "";
-  let renderedEventsSignature = "";
-  let latestEventKey = null;
+  // 上次看到的收获年份（变化时放收获的声音；null = 尚未渲染过，刚读档/开局时不放）。
+  let lastSeenHarvestYear = null;
   let upgradePreviewId = null;
   let demolitionPreviewId = null;
   let rightSalePreviewId = null;
@@ -135,12 +136,6 @@ export function mountGame(root) {
 
   managerOpen = true;
   navigation.openPanel("settings");
-
-  latestEventKey = eventKey(state?.events?.[0]);
-
-  function eventKey(event) {
-    return event ? `${event.year}:${event.day}:${event.text}` : "";
-  }
 
   function showToast(message, duration = 2600) {
     toast.show(message, duration);
@@ -346,28 +341,42 @@ export function mountGame(root) {
     hint.hidden = !instruction;
   }
 
-  function renderEvents(view) {
-    const nav = navigation.state;
-    const newest = view.events[0];
-    const nextEventKey = eventKey(newest);
-    const isNewEvent = Boolean(latestEventKey && nextEventKey && nextEventKey !== latestEventKey);
-    if (isNewEvent) navigation.revealEvents();
-    const signature = `${nav.eventsExpanded}|${nav.eventsDismissed}|${view.events.map(event => `${event.year}:${event.day}:${event.text}`).join("|")}`;
-    if (signature === renderedEventsSignature) return;
-    renderedEventsSignature = signature;
-    const bubble = $("#eventFloat");
-    bubble.hidden = nav.eventsDismissed;
-    if (isNewEvent && /收获|秋收/.test(newest?.text || "")) {
-      sound.playHarvest();
+  // 界面浮层：开局横幅（一次性，点掉即清）、年度镇报（新一期未读时弹出并暂停时光）、收获的声音。
+  function renderOverlays(view) {
+    const harvestYear = state.agriculture?.lastHarvestYear ?? 0;
+    if (lastSeenHarvestYear !== null && harvestYear !== lastSeenHarvestYear) sound.playHarvest();
+    lastSeenHarvestYear = harvestYear;
+    const hint = state.openingHint || "";
+    $("#openingBanner").hidden = !hint;
+    setText($("#openingText"), hint);
+    renderGazetteModal(view);
+  }
+
+  function hideOverlays() {
+    $("#openingBanner").hidden = true;
+    $("#gazetteModal").hidden = true;
+  }
+
+  function renderGazetteModal(view) {
+    const modal = $("#gazetteModal");
+    const latest = view.gazette?.latest || null;
+    if (!(view.gazette?.unread && latest)) {
+      modal.hidden = true;
+      return;
     }
-    latestEventKey = nextEventKey;
-    $("#latestEvent").textContent = newest?.text || "镇上平静，日子照常向前。";
-    $("#eventToggle").setAttribute("aria-expanded", String(nav.eventsExpanded));
-    const history = $("#eventHistory");
-    history.hidden = !nav.eventsExpanded;
-    history.innerHTML = nav.eventsExpanded
-      ? view.events.slice(0, 5).map(event => `<div class="event-line"><time>第${number(event.year)}年 · 第${number(event.day)}${event.untilDay && event.untilDay > event.day ? `–${number(event.untilDay)}` : ""}日</time>${escapeHtml(event.text)}</div>`).join("")
-      : "";
+    // 同一期只在刚出现时换内容并暂停时光；之后的重绘不动。
+    const alreadyOpen = !modal.hidden && modal.dataset.year === String(latest.year);
+    if (!alreadyOpen) {
+      $("#gazetteModalBody").innerHTML = gazetteSheetMarkup(latest);
+      modal.dataset.year = String(latest.year);
+      if (!clock.paused) {
+        clock.pause();
+        // 本帧的头部是暂停之前画的，这里同步一次，免得顶栏还显示在走。
+        view.paused = true;
+        renderHeader(view);
+      }
+    }
+    modal.hidden = false;
   }
 
   function panelMarkup(view) {
@@ -390,6 +399,7 @@ export function mountGame(root) {
       case "residents": return renderResidents(view);
       case "business": return renderEconomy(view);
       case "policy": return renderPolicy(view);
+      case "gazette": return renderGazettePanel(view, navigation.state.gazetteYear);
       // 贸易行的买卖数字只在经营面板的视图里；站点面板单独补上（只读）。
       case "site": return renderSite(view);
       case "settings": return renderSettings(view, null, settingsUi());
@@ -666,7 +676,7 @@ export function mountGame(root) {
     const panelName = navigation.state.activePanel;
     const titles = {
       build: "建设", residents: "镇民与就业", business: "经营与粮账",
-      policy: "政策", settings: "设置", site: "地方详情"
+      policy: "政策", gazette: "镇报", settings: "设置", site: "地方详情"
     };
     const kicker = $("#panelKicker");
     setText(kicker, titles[panelName] || "镇务");
@@ -725,6 +735,7 @@ export function mountGame(root) {
     root.classList.toggle("no-active-save", !state);
     if (!state) {
       latestView = null;
+      hideOverlays();
       renderPanel(null, forcePanel);
       return;
     }
@@ -741,7 +752,7 @@ export function mountGame(root) {
     }
     drawVillageMapCanvas($("#mapTerrainCanvas"), view, navigation.state, animationTime, latestMapModel);
     updateMapMotion($("#mapWorld"), view);
-    renderEvents(view);
+    renderOverlays(view);
     root.querySelectorAll(".bottom-nav .tab").forEach(button => {
       const selectedPanel = navigation.state.activePanel === "site"
         ? navigation.state.returnPanel : navigation.state.activePanel;
@@ -780,8 +791,7 @@ export function mountGame(root) {
     animationTime = 0;
     renderedMapSignature = "";
     latestMapModel = null;
-    renderedEventsSignature = "";
-    latestEventKey = eventKey(state.events?.[0]);
+    lastSeenHarvestYear = null;
     saveNotice = entry.savedAt
       ? `最近保存：${new Date(entry.savedAt).toLocaleString("zh-CN", { hour12: false })} · 成功`
       : "尚未保存";
@@ -826,8 +836,7 @@ export function mountGame(root) {
     mapCamera.reset();
     renderedMapSignature = "";
     latestMapModel = null;
-    renderedEventsSignature = "";
-    latestEventKey = eventKey(state.events?.[0]);
+    lastSeenHarvestYear = null;
     render(true);
   }
 
@@ -1080,7 +1089,7 @@ export function mountGame(root) {
             managerOpen = true;
             renderedMapSignature = "";
             latestMapModel = null;
-            renderedEventsSignature = "";
+            lastSeenHarvestYear = null;
           }
           render(true);
           showToast(result.current ? "已删除当前存档，请选择存档或开始新游戏。" : "存档已删除。");
@@ -1194,16 +1203,21 @@ export function mountGame(root) {
       render();
       return;
     }
-    if (closest(target, "#eventToggle")) {
-      navigation.state.eventsExpanded = !navigation.state.eventsExpanded;
-      navigation.state.eventsDismissed = false;
-      renderedEventsSignature = "";
+    if (closest(target, "[data-dismiss-opening]")) {
+      if (state) { state.openingHint = null; changed(true); }
       render();
       return;
     }
-    if (closest(target, "#eventClose")) {
-      navigation.dismissEvents();
-      renderedEventsSignature = "";
+    if (closest(target, "[data-gazette-accept]")) {
+      const issues = state?.gazette?.issues || [];
+      const latest = issues[issues.length - 1];
+      if (latest) { state.gazette.readYear = latest.year; changed(true); }
+      render();
+      return;
+    }
+    const gazetteIssue = closest(target, "[data-gazette-issue]");
+    if (gazetteIssue) {
+      navigation.state.gazetteYear = Number(gazetteIssue.dataset.gazetteIssue);
       render();
       return;
     }

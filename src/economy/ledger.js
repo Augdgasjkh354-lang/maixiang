@@ -1,5 +1,6 @@
 import { RULES } from "../content/rules.js";
 import { recordFinancialFlow } from "./financial-flows.js";
+import { addGazetteNote } from "./gazette-notes.js";
 
 // 账本批次（日结期间开启）：钱货照常逐笔结清，账本行先按"类型、付款方、收款方、物品、日期"合并，
 // 批次结束时一次写入并计入资金流统计（只读这几个字段且是累加，合计不变）。一天几万笔小额买卖
@@ -120,43 +121,18 @@ export function recordLedger(state, entry, content, options = {}) {
   }
 }
 
+// 账本事件（state.events）已取消：玩家不再有事件流水。recordEvent 保留签名，调用点照旧，但默认什么也不存。
+// 打了 options.gazette（{ kind, weight }）的消息写进镇报素材库（economy/gazette-notes.js），年终由 systems/gazette.js 编成镇报。
+// mergeKey / mergedText 等旧的事件合并参数已无效果。
 export function recordEvent(state, text, content, options = {}) {
-  const eventDay = Math.max(1, Math.min(content.rules.daysPerYear, options.day ?? state.day));
-  // 事件合并（0.1.11 机制补回）：同 mergeKey 且在合并窗口内的重复事件折叠为一条，
-  // 改写 untilDay/mergeCount/mergeAmount，并用 mergedText 生成聚合叙述句。
-  if (options.mergeKey) {
-    const mergeWindowDays = Math.max(1, Math.floor(options.mergeWindowDays || 1));
-    const existing = state.events.find(e => e.mergeKey === options.mergeKey);
-    const baseDay = existing ? (existing.untilDay ?? existing.day) : null;
-    if (existing && existing.year === state.year && baseDay != null &&
-        eventDay - baseDay >= 0 && eventDay - baseDay <= mergeWindowDays) {
-      existing.untilDay = eventDay;
-      existing.mergeCount = (existing.mergeCount || 1) + 1;
-      existing.mergeAmount = (existing.mergeAmount || 0) + (options.amount || 0);
-      if (typeof options.mergedText === "function") {
-        existing.text = options.mergedText(existing.mergeCount, existing.mergeAmount);
-      } else {
-        existing.text = text;
-      }
-      return;
-    }
-    state.events.unshift({
-      year: state.year,
-      day: eventDay,
-      text,
-      mergeKey: options.mergeKey,
-      mergeCount: 1,
-      mergeAmount: options.amount || 0
-    });
-    if (state.events.length > 24) state.events.length = 24;
-    return;
-  }
-  state.events.unshift({
+  if (!options.gazette) return;
+  addGazetteNote(state, {
     year: state.year,
-    day: eventDay,
+    day: Math.max(1, Math.min(content.rules.daysPerYear, options.day ?? state.day)),
+    kind: options.gazette.kind,
+    weight: options.gazette.weight,
     text
   });
-  if (state.events.length > 24) state.events.length = 24;
 }
 
 export function makeTransactionId(state) {

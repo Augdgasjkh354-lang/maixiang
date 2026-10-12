@@ -34,7 +34,7 @@ export function sellBuildingToPrivate(state, buildingId, options = {}, content) 
   period.yearWheatUnits += priceUnits;
   period.cumulativeWheatUnits += priceUnits;
   if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
-  recordEvent(state, `${household.name}以${preview.priceWheatJin.toLocaleString("zh-CN")}斤小麦等值整栋购入${definition.name}（${building.level}级），由民营经营。`, content, { day: state.day + 1 });
+  recordEvent(state, `${household.name}以${preview.priceWheatJin.toLocaleString("zh-CN")}斤小麦等值整栋购入${definition.name}（${building.level}级），由民营经营。`, content, { day: state.day + 1, gazette: { kind: "ownership", weight: 4 } });
   return {
     ok: true, preview, buildingId, ownerHouseholdId: household.id, priceVoucherUnits: priceUnits,
     transactionId: payment.transactionId, movedWorkers: moved.movedWorkers
@@ -67,6 +67,6 @@ export function buyBuildingBackFromPrivate(state, buildingId, content) {
   if (!payment.ok) return { ok: false, reason: payment.reason || "镇库资金不足，无法回购", preview };
   const moved = transferBuildingOwnership(state, building, { kind: "town", id: null }, content);
   if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
-  recordEvent(state, `镇库以${preview.valuationWheatJin.toLocaleString("zh-CN")}斤小麦等值向${household?.name || "业主"}回购${definition.name}，整栋收回镇营。`, content, { day: state.day + 1 });
+  recordEvent(state, `镇库以${preview.valuationWheatJin.toLocaleString("zh-CN")}斤小麦等值向${household?.name || "业主"}回购${definition.name}，整栋收回镇营。`, content, { day: state.day + 1, gazette: { kind: "ownership", weight: 4 } });
   return { ok: true, buildingId, priceVoucherUnits: priceUnits, transactionId: payment.transactionId, movedWorkers: moved.movedWorkers };
 }

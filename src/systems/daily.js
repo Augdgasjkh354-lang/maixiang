@@ -49,6 +49,7 @@ import { payOxMaintenanceDay, resetCattleDay, resetCattleYear } from "./cattle.j
 import { accrueEducationDay, accrueIndustryExperience } from "./productivity.js";
 import { resetWholesaleDay, resetWholesaleYear, reviewWholesaleAutoPricing, runWholesaleIntake, snapshotWholesaleHistory } from "./wholesale-market.js";
 import { applyCompanyDistributionsToAnnualReport, buildAnnualReport } from "./annual-reports.js";
+import { settleGazetteYear } from "./gazette.js";
 import { settleOwnershipTakeovers } from "./ownership-takeover.js";
 import { settleIpoApplications } from "./ipo.js";
 import { settleOwnerUpgrades } from "./building-development.js";
@@ -295,6 +296,9 @@ export const CORE_DAILY_STEPS = [
     resetYearBooks(state, content);
     return report;
   } },
+
+  // 年度镇报（systems/gazette.js）：紧跟年报，编当年一期并清空要闻素材；纯读取，不消耗随机数。
+  { id: "gazette", when: (state, content, day) => Boolean(day.annualReport), run: (state, content, day) => settleGazetteYear(state, content, day.annualReport) },
 
   // ── 外镇（放最后，不扰动前面系统的随机数流）与历史记录
   { id: "outsideTownYear", when: newYearDay, run: settleOutsideTownYear },

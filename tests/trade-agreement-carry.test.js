@@ -40,7 +40,7 @@ function assertValid(state, label = "") {
   assert.equal(check.valid, true, `${label} ${check.errors.join("；")}`);
 }
 
-test("商路断绝的月份：长协交付顺延到下月，不计违约、不动关系分，写事件说明顺延", () => {
+test("商路断绝的月份：长协交付顺延到下月，不计违约、不动关系分", () => {
   const state = agreementState(7401);
   const agreement = state.tradeAgreements[0];
   const town = state.outsideTowns[agreement.townId];
@@ -56,7 +56,6 @@ test("商路断绝的月份：长协交付顺延到下月，不计违约、不�
   assert.equal(town.relations, relationsBefore, "关系分不变");
   assert.ok(Math.abs(agreement.carryJin - 100) < 0.01, `待交累计 100 斤，实际 ${agreement.carryJin}`);
   assert.ok(agreement.totalDeliveredJin === undefined || agreement.totalDeliveredJin === 0, "没有交付");
-  assert.ok(state.events.some(event => event.text.includes("商路断绝") && event.text.includes("顺延")), "事件文字写明顺延");
   assertValid(state, "顺延之后");
 });
 

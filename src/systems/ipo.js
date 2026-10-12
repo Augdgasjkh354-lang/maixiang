@@ -127,7 +127,7 @@ export function listBuilding(state, buildingId, options, content) {
   const definition = content.buildings[building.typeId];
   const sellerName = seller.kind === "household" ? (state.households.byId[owner.id]?.name || "业主") : "镇库";
   const price = (terms.priceUnits / currencyScale(content)).toLocaleString("zh-CN", { maximumFractionDigits: 3 });
-  recordEvent(state, `${company.name}（${terms.ticker}）由${sellerName}整栋划入${definition.name}（${levels}级），在交易所挂牌，总股本${terms.totalShares.toLocaleString("zh-CN")}股；挂出${terms.offeredShares.toLocaleString("zh-CN")}股，每股${price}粮券，${sellerName}保留其余股份。`, content, { day: state.day + 1 });
+  recordEvent(state, `${company.name}（${terms.ticker}）由${sellerName}整栋划入${definition.name}（${levels}级），在交易所挂牌，总股本${terms.totalShares.toLocaleString("zh-CN")}股；挂出${terms.offeredShares.toLocaleString("zh-CN")}股，每股${price}粮券，${sellerName}保留其余股份。`, content, { day: state.day + 1, gazette: { kind: "listing", weight: 5 } });
   return {
     ok: true, companyId: company.id, ticker: terms.ticker, levels,
     totalShares: terms.totalShares, offeredShares: terms.offeredShares, keptShares: terms.totalShares - terms.offeredShares,

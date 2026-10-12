@@ -49,5 +49,5 @@ export function noteBankDebtGrowth(state, content, amount, reason) {
   if (!bank || !(amount > 0) || bank.debtNoticeYear === state.year) return;
   bank.debtNoticeYear = state.year;
   const scale = currencyScale(content);
-  recordEvent(state, `${reason}，镇库垫付${voucherText(amount, scale)}券，银行欠镇库累计${voucherText((bank.debtToTownUnits || 0), scale)}券（本年仅提示一次）。`, content);
+  recordEvent(state, `${reason}，镇库垫付${voucherText(amount, scale)}券，银行欠镇库累计${voucherText((bank.debtToTownUnits || 0), scale)}券（本年仅提示一次）。`, content, { gazette: { kind: "bank", weight: 4 } });
 }

@@ -1,3 +1,16 @@
+## 未发布 · 年度镇报，移除事件日志
+
+- **移除事件日志**：`state.events` 与界面上的"镇上近事"浮层（含样式、点击处理）全部删除。`recordEvent(state, text, content, opts)` 保留签名、调用点不动，但默认什么也不存；只有带 `opts.gazette = { kind, weight }` 的消息才进镇报素材库 `state.gazette.notes`（`economy/gazette-notes.js`，每年最多 40 条，满了替换掉最低权重）。账本流水 `state.ledger` / 粮券流水不受影响。
+- **开局提示改为横幅**：标准开局的"已建好、记得派人"提示写进 `state.openingHint`，界面上显示一次性横幅，点"知道了"置空（进存档，不会刷新重弹）。
+- **年度镇报**（`systems/gazette.js`，日结 `gazette` 步骤紧跟年报）：纯读取、不消耗随机数，同状态逐字相同。一期 = 刊头（第 N 期 = 年份）+ 头条（候选打分取最高，没有大事用"平安年"模板）+ 最多 8 栏（镇情数据、农事与粮仓、市井物价、工商要闻、股市简讯、外镇来信、人物、镇长手记）。每期 <3KB。
+  - 同比所需的上期快照存 `state.gazette.marks`（物价指数、批发价、上市公司股价、外镇繁荣度与关系分、闲人数、斗兽场累计出席）；`issues` 保留最近 12 期；`readYear` 记已读的最新一期。
+  - 界面：新一期未读时弹出镇报卡片并暂停时光，"收下"记 `readYear`；底部导航新增"镇报"，可翻阅往期。深色模式、手机宽度均有样式。
+  - 选择器 `selectDashboard` 新增只读的 `gazette: { unread, latest, archive }`。
+- **存档**：不改 SAVE_VERSION；旧档读入时丢弃 `events`（`persistence/migrations.js`），镇报与横幅字段用底板。`validateState` 不再校验 events，改为校验 `gazette` / `openingHint` 结构。
+- **测试**：新增 `tests/gazette.test.js`（17 项，含一项 [slow] 跑满一年）。删除 `tests/event-merge.test.js`（整文件测事件合并）。断言事件文字的用例：能改成状态/账的改成断言状态（如 `bank.debtNoticeYear`、`bank.interestPayableUnits`、`shop.status`、`openingHint`），其余直接删掉对应断言；被删断言的测试：`estate-succession`（hasEvent 系列 6 处）、`bank-interest-by-bank`（提示次数 → debtNoticeYear）、`money-supply`、`shop-liquidation-daily`、`simulation`、`standard-opening`、`v023-circulation-reform`、`bank-town-advance`、`household-split`、`ipo-whole`、`logistics`、`ownership-migrate`（2）、`trade-agreement-carry`、`trade-agreement-term`（4）、`trade-fixes-carry-reserve`（2）、`trading-houses`、`bugfix-regressions`（事件日更断言改为 `project.started.day`，删掉导航气泡用例改为镇报面板用例）。
+- **等价性**：改前改后用同一镇子（`perf-bench` 的构造）跑 370 天，去掉 `events` / `gazette` / `openingHint` 后的状态哈希逐段一致（含第 1 年年终的镇报步骤）。
+- **文档**：`docs/LENDING.md`、`docs/OWNERSHIP.md`、`docs/STOCK.md`、`docs/TRADE.md` 去掉"记事件"的说法。
+
 ## 未发布 · 备货闸门 180 天、贸易行招人与流量分摊
 
 - **备货闸门 360 → 180 天**：`rules.townOutputStockDays` 改为 180；删除野味的 90 天覆盖（野味同全局 180 天），面包 30 天覆盖保留。所有引用（`townOutputTargetUnits` / `townOutputMarketRoomUnits`：镇营加工、煤矿铁矿等 demandGated、冶炼厂、酒坊阀门、野味入市闸门）都经这两个函数，没有再写死 360 的地方。外镇 `targetDays`（民镇、王镇的存货目标）与金银外镇档案不是镇营备货闸门，未改。

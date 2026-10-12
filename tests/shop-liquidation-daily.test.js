@@ -82,7 +82,6 @@ test("清算中的店铺：日结每天推进，未满 30 天仍清算中，满 
   assert.equal(shop.liabilities.rentVoucherUnits, 0);
   assert.equal(shop.liabilities.taxVoucherUnits, 0);
   assert.equal(shop.statusReason, "清算完成，已停业");
-  assert.ok(state.events.some(e => /清算\d+天仍资不抵债.*坏账核销/.test(String(e.text)) && String(e.text).includes(shop.name)), "应记录坏账核销事件");
   valid(state, "核销关门后");
   for (let day = 0; day < 5; day += 1) simulation.advanceDay(state);
   assert.equal(shop.status, "closed", "关门后不再变动");

@@ -282,7 +282,7 @@ function settleMaturity(state, issue, content) {
   if (bankLoss > 0) ensureBankState(state).retainedVoucherUnits -= bankLoss;
   issue.holdings = [];
   issue.status = "defaulted";
-  recordEvent(state, `国债${issue.id}违约！镇库无力偿还，持有者血本无归。`, content);
+  recordEvent(state, `国债${issue.id}违约！镇库无力偿还，持有者血本无归。`, content, { gazette: { kind: "default", weight: 5 } });
 }
 
 // 提前赎回：拿回本金 + 持有期应计利息的 50%（API；界面后续接）

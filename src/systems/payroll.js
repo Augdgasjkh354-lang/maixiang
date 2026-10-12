@@ -188,7 +188,7 @@ function payDailyWagesNow(state, laborAtStart, content) {
     unpaidCurrentVoucher: Math.max(0, unpaidCurrent) / scale, unpaidCurrentWheatJin: Math.max(0, unpaidCurrent) / scale, arrearsBalanceVoucher: outstanding / scale, arrearsBalanceWheatJin: outstanding / scale
   };
   if (unpaidCurrent > 0) recordEvent(state, `镇库支付能力不足，发薪日新增欠薪 ${(unpaidCurrent / scale).toLocaleString("zh-CN")}斤小麦等值。`, content, {
-    day: state.day + 1, mergeKey: "town-wage-arrears", mergeWindowDays: 3, amount: unpaidCurrent,
+    day: state.day + 1, gazette: { kind: "wage", weight: 4 }, mergeKey: "town-wage-arrears", mergeWindowDays: 3, amount: unpaidCurrent,
     mergedText: (count, amount) => `近3日镇库支付能力不足，累计新增欠薪 ${(amount / scale).toLocaleString("zh-CN")}斤小麦等值（${count}次）。`
   });
   return payroll.lastDay;

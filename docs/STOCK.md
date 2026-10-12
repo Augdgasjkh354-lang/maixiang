@@ -55,7 +55,7 @@
 - 分红额 = 近一季（最近 90 天）净利润 × 分红比例（`company.payoutPercent`，缺省 `sharePayoutDefaultPercent` = 60%）。封顶：未分配利润、可自由支配现金（扣工作营运资金储备）、本季利润为负或欠薪则不分。
 - 分红比例：镇库控股（镇库持股过半）的公司由镇长设置（`configureDividend`，0—100%）；民营上市公司按公司自身策略，镇长不能改。
 - 每股分红 = 分红额 ÷ 总股本，取整到内部单位。持股人按股数入账：居民户（`enterprise_dividend`）、社保基金（`recordFundDividend`）、镇库（`town`）。付款走统一支付层。
-- 分红记入 `company.quarterlyDividends`（最近 8 条）和事件日志。它不进年报的 `dividendHistory`（那是年度利润分配）。年度结算仍照旧：分红先扣未分配利润，年末剩下的按原规则分配。
+- 分红记入 `company.quarterlyDividends`（最近 8 条）。它不进年报的 `dividendHistory`（那是年度利润分配）。年度结算仍照旧：分红先扣未分配利润，年末剩下的按原规则分配。
 
 ### 除权
 

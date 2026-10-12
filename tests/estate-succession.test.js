@@ -89,10 +89,6 @@ function kill(state, household) {
   releaseExcessHouseholdEmployment(state);
 }
 
-function hasEvent(state, text) {
-  return state.events.some(event => String(event.text).includes(text));
-}
-
 function memoryStorage() {
   const store = new Map();
   return {
@@ -122,7 +118,6 @@ test("别墅：整户失效后别墅回到空置，欠税免除，日结别墅�
   assert.equal(villas.taxArrearsValueUnits[owner.id], undefined, "死户欠税免除");
   assert.equal(isVacant(), true, "别墅重新空置");
   assert.equal(state.redistribution.year.escheatVillas, 1);
-  assert.ok(hasEvent(state, "别墅1栋空置待售"));
   valid(state, "别墅归公后");
 
   // 再卖：给一户足够的钱（其余家户的家底远低于它），别墅价压到 100 券。
@@ -162,7 +157,6 @@ test("商店：业主失效，商人接手；现金、库存、员工原样保�
   assert.equal(clerk.jobs[clerkKey(id)], 1, "店员不受影响");
   assert.equal((owner.shopIds || []).includes(id), false);
   assert.ok((merchant.shopIds || []).includes(id));
-  assert.ok(hasEvent(state, `${deadName}无人继承，其开的综合商店由${merchant.name}（原商人）接手。`), "记下事件");
 
   // 利润分配：按 ownerHouseholdId 付给新业主（死户不得钱）。
   const deadBefore = owner.voucherUnits;
@@ -195,7 +189,6 @@ test("商店：没有商人时由店员接手（岗位多者优先），店员�
   assert.equal(clerkA.jobs[merchantKey(id)], 1, "接手后在本店任商人");
   assert.equal(shopClerkCount(state, shop), clerksBefore - 1, "另一位店员留任");
   assert.equal(clerkB.jobs[clerkKey(id)], 1);
-  assert.ok(hasEvent(state, "由" + clerkA.name + "（原店员）接手"));
   valid(state, "店员接手后");
 });
 
@@ -215,7 +208,6 @@ test("商店：无商人无店员时由家底最厚的一户接手，且不接�
   assert.equal(shop.ownerHouseholdId, second.id, "跳过已在商业街开店的最富一户");
   assert.equal(shop.status, "open");
   assert.equal(second.jobs[merchantKey(shop.id)], 1);
-  assert.ok(hasEvent(state, "（家底最厚的一户）接手"));
   assert.equal(otherShop.ownerHouseholdId, richest.id, "别人的店不受影响");
   valid(state, "家底接手后");
 });
@@ -239,7 +231,7 @@ test("贸易行与养殖场同样交接给商人", () => {
   valid(state, "贸易行与养殖场交接后");
 });
 
-test("无人可接手：店铺保持暂停并记一次事件，之后每日不重复记", () => {
+test("无人可接手：店铺保持暂停，之后每日不变", () => {
   const state = town(7106);
   const [owner] = idleHouseholds(state, 1);
   const shop = openShop(state, "cs1", "general", owner);
@@ -255,12 +247,8 @@ test("无人可接手：店铺保持暂停并记一次事件，之后每日不�
   settleEscheat(state, CONTENT);
   assert.equal(shop.ownerHouseholdId, owner.id, "没有接手人，业主不变");
   assert.equal(shop.status, "paused");
-  assert.ok(hasEvent(state, `${owner.name}无人继承，其开的综合商店无人接手，店铺暂停。`));
-  const count = () => state.events.filter(event => String(event.text).includes("无人接手")).length;
-  const once = count();
   prepareShopsForDay(state, CONTENT);
   settleEscheat(state, CONTENT);
-  assert.equal(count(), once, "不重复记事件");
   assert.equal(shop.status, "paused");
   valid(state, "无人接手");
 });
@@ -277,7 +265,6 @@ test("旧档里已暂停的孤儿店：日结店铺步骤里自动交接并恢�
   prepareShopsForDay(state, CONTENT);
   assert.equal(shop.ownerHouseholdId, merchant.id);
   assert.equal(shop.status, "open");
-  assert.ok(hasEvent(state, `${owner.name}无人继承，其开的综合商店由${merchant.name}（原商人）接手。`));
   valid(state, "孤儿店恢复后");
 });
 

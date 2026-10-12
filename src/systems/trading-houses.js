@@ -456,7 +456,7 @@ function enterTradePause(state, shop, content) {
   releaseShopStaffing(state, shop);
   shop.status = "paused";
   shop.statusReason = "暂无可做的买卖，暂停营业";
-  recordEvent(state, `${shop.name}连续${days}天无买卖且亏损，暂停营业（店员遣散，业主保留）。`, content, { day: state.day + 1 });
+  recordEvent(state, `${shop.name}连续${days}天无买卖且亏损，暂停营业（店员遣散，业主保留）。`, content, { day: state.day + 1, gazette: { kind: "shop", weight: 3 } });
 }
 
 // 有没有任一可做的买卖：只读。budgetJin 用暂停前的人手估算；assumeCashUnits 为补资后的营运资金（不要求店里现在有钱）。

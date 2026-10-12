@@ -44,28 +44,15 @@ test("a shortage on the final day of a year survives year-end rollover", () => {
     "year-end bookkeeping must not erase the last day's active shortage");
 });
 
-test("events emitted before the daily increment use the visible calendar day", () => {
+test("build start is stored on the visible calendar day", () => {
   const construction = simulation.createInitialState();
   addInventory(construction, "town", "wood", 600, "test stock", "test", CONTENT);
   simulation.advanceDays(construction, 40);
   assert.equal(construction.day, 40);
   const started = simulation.buildAt(construction, "mill", "east");
   assert.equal(started.ok, true);
-  assert.equal(construction.events[0].day, 41,
+  assert.equal(construction.project.started.day, 41,
     "an action taken while the UI shows day 41 must be recorded as day 41");
-
-  const shortage = simulation.createInitialState();
-  simulation.advanceDays(shortage, 2);
-  shortage.autoRelief = false;
-  changeInventory(
-    shortage, "residents", "wheat", -shortage.accounts.residents.wheat,
-    "test empty resident grain", "test_adjustment", CONTENT
-  );
-  clearAllHouseholdVouchers(shortage);
-  simulation.advanceDay(shortage);
-  const shortageEvent = shortage.events.find(event => event.text.includes("居民口粮短缺"));
-  assert.equal(shortageEvent?.day, 3,
-    "a shortage during the third simulated day must not be dated one day early");
 });
 
 
@@ -89,17 +76,13 @@ test("mobile build picking state is distinct from build preview state", () => {
   assert.equal(isChoosingBuildPlot({ activePanel: "build", buildType: null, previewPlotId: null }), false);
 });
 
-test("[slow] fresh-game history starts on day 1 and harvest ledger matches harvest day", () => {
+test("[slow] fresh-game harvest ledger rows use the harvest day", () => {
   const state = simulation.createInitialState({ seed: 20260925 });
-  assert.equal(state.events[0].day, 1, "the first visible day must not be recorded as day 0");
-
   simulation.advanceDays(state, CONTENT.rules.growingDays);
   const harvestRows = state.ledger.filter(row => row.type === "harvest");
   assert.ok(harvestRows.length >= 2);
   assert.ok(harvestRows.every(row => row.day === CONTENT.rules.growingDays),
     "harvest ledger rows must use the same day as the harvest event");
-  const harvestEvent = state.events.find(event => event.text.includes("麦收入仓"));
-  assert.equal(harvestEvent?.day, CONTENT.rules.growingDays);
 });
 
 test("construction metadata uses the visible calendar day", () => {
@@ -118,15 +101,14 @@ test("construction metadata uses the visible calendar day", () => {
     "completion during the 80th visible day must be stored as day 80");
 });
 
-test("dismissed event bubble can be revealed again for a later event", async () => {
+test("gazette panel selection is cleared when the view resets", async () => {
   const { createNavigationState } = await import("../src/ui/navigation-state.js");
   const nav = createNavigationState();
-  nav.state.eventsExpanded = true;
-  nav.dismissEvents();
-  assert.equal(nav.state.eventsDismissed, true);
-  assert.equal(nav.state.eventsExpanded, false);
-  nav.revealEvents();
-  assert.equal(nav.state.eventsDismissed, false);
+  nav.openPanel("gazette");
+  assert.equal(nav.state.activePanel, "gazette");
+  nav.state.gazetteYear = 2;
+  nav.resetView();
+  assert.equal(nav.state.gazetteYear, null);
 });
 
 test("settings error text is HTML-escaped", async () => {

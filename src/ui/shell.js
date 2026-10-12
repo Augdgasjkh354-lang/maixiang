@@ -35,7 +35,7 @@ export const SHELL_HTML = `<main class="shell">
       <div class="map-zoom" role="group" aria-label="地图缩放">
         <button data-map-zoom="1" aria-label="放大地图">＋</button><button data-map-reset aria-label="复位地图">${uiIcon("reset")}</button><button data-map-zoom="-1" aria-label="缩小地图">−</button>
       </div>
-      <div class="event-float" id="eventFloat"><button id="eventToggle" class="event-toggle" aria-expanded="false">镇上近事 <span id="latestEvent">新任镇长上任</span></button><button class="event-close" id="eventClose" aria-label="收起事件">${uiIcon("close")}</button><div class="event-history" id="eventHistory" hidden></div></div>
+      <div class="opening-banner" id="openingBanner" role="status" hidden><p id="openingText"></p><button class="opening-dismiss" type="button" data-dismiss-opening>知道了</button></div>
       <aside class="panel-surface" id="panelSurface" data-panel-surface hidden aria-label="镇务面板">
         <div class="panel-grip" aria-hidden="true"><span></span></div>
         <div class="panel-heading"><span class="panel-kicker" id="panelKicker">镇务</span><button id="panelClose" class="panel-close" aria-label="关闭面板">${uiIcon("close")}</button></div>
@@ -48,6 +48,13 @@ export const SHELL_HTML = `<main class="shell">
       <button class="tab" data-panel="residents">${uiIcon("residents")}<span>镇民</span></button>
       <button class="tab" data-panel="business">${uiIcon("market")}<span>经营</span></button>
       <button class="tab" data-panel="policy">${uiIcon("policy")}<span>政策</span></button>
+      <button class="tab" data-panel="gazette">${uiIcon("gazette")}<span>镇报</span></button>
     </nav>
   </section>
+  <div class="gazette-modal" id="gazetteModal" hidden>
+    <div class="gazette-modal-card" role="dialog" aria-modal="true" aria-label="本年镇报">
+      <div id="gazetteModalBody"></div>
+      <button class="gazette-accept" type="button" data-gazette-accept>收下</button>
+    </div>
+  </div>
 </main>`;

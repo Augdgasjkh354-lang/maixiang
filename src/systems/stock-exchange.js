@@ -198,7 +198,7 @@ export function listCompanyOnExchange(state, companyId, options, content) {
   }, content);
   if (!terms.ok) return terms;
   applyCompanyListing(state, company, terms, { kind: "town" }, content);
-  recordEvent(state, `${company.name}（${terms.ticker}）在交易所挂牌，总股本${terms.totalShares.toLocaleString("zh-CN")}股；挂牌不代表已全部售出。`, content, { day: state.day + 1 });
+  recordEvent(state, `${company.name}（${terms.ticker}）在交易所挂牌，总股本${terms.totalShares.toLocaleString("zh-CN")}股；挂牌不代表已全部售出。`, content, { day: state.day + 1, gazette: { kind: "listing", weight: 5 } });
   return { ok: true, ticker: terms.ticker, totalShares: terms.totalShares, offeredShares: terms.offeredShares, priceVoucherUnits: terms.priceUnits, townShares: terms.totalShares, sellerOwner: "town" };
 }
 
@@ -305,7 +305,7 @@ export function executeTownBuyback(state, companyId, options, content) {
   if (boughtShares <= 0) return { ok: false, reason: "回购未成交", preview };
   // 回购可能减少业主家庭的持股，发行池股数不得超过卖方实际持股。
   company.shareSale.offeredShares = Math.min(company.shareSale.offeredShares || 0, sellerHoldingShares(state, company));
-  recordEvent(state, `镇库以玩家定价回购${company.name}${boughtShares.toLocaleString("zh-CN")}股。`, content, { day: state.day + 1 });
+  recordEvent(state, `镇库以玩家定价回购${company.name}${boughtShares.toLocaleString("zh-CN")}股。`, content, { day: state.day + 1, gazette: { kind: "stock", weight: 3 } });
   return { ok: true, boughtShares, paidVoucherUnits: paid, sellers, preview };
 }
 

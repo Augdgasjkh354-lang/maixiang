@@ -381,7 +381,7 @@ function escheatHousehold(state, household, content) {
   const valueUnits = totals.voucherUnits + totals.inventoryValueUnits;
   const villaText = totals.villaCount ? `，别墅${totals.villaCount}栋空置待售` : "";
   if (movable) {
-    recordEvent(state, `${household.name}整户失效，家产归镇库：粮券与存款${Math.round(totals.voucherUnits / scale)}券、库存折${Math.round(totals.inventoryValueUnits / scale)}券、股票${totals.shareCount}股、民营建筑${totals.buildingCount}栋收归镇营${villaText}。`, content, { day: state.day + 1 });
+    recordEvent(state, `${household.name}整户失效，家产归镇库：粮券与存款${Math.round(totals.voucherUnits / scale)}券、库存折${Math.round(totals.inventoryValueUnits / scale)}券、股票${totals.shareCount}股、民营建筑${totals.buildingCount}栋收归镇营${villaText}。`, content, { day: state.day + 1, gazette: { kind: "escheat", weight: 4 } });
   } else if (totals.villaCount) {
     recordEvent(state, `${household.name}整户失效，别墅${totals.villaCount}栋空置待售。`, content, { day: state.day + 1 });
   }

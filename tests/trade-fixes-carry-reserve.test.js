@@ -55,7 +55,6 @@ test("外镇付不起的月份：本月应交整笔顺延到下月，下月一�
   assert.equal(agreement.breachCount, 0);
   assert.ok(Math.abs(agreement.carryJin - 100) < 0.01, `顺延 100 斤，实际 ${agreement.carryJin}`);
   assert.equal(town.relations, relationsBefore - 3, "关系分 −3");
-  assert.ok(state.events.some(event => event.text.includes("交付顺延") && event.text.includes("待交累计")), "事件写明顺延与待交量");
   assertValid(state, "第一个月之后");
 
   town.wheatStockJin = 1e9; // 外镇恢复付款
@@ -68,7 +67,7 @@ test("外镇付不起的月份：本月应交整笔顺延到下月，下月一�
   assertValid(state, "第二个月之后");
 });
 
-test("长协期满时仍有顺延量：不顺延，到期事件明说随协定作废，顺延量清零", () => {
+test("长协期满时仍有顺延量：不顺延，顺延量清零", () => {
   const state = agreementState(7502);
   const agreement = state.tradeAgreements[0];
   const town = state.outsideTowns[agreement.townId];
@@ -81,10 +80,6 @@ test("长协期满时仍有顺延量：不顺延，到期事件明说随协定�
   assert.equal(agreement.status, "expired", "期满");
   assert.equal(agreement.carryJin, 0, "顺延量清零");
   assert.equal(agreement.breachCount, 0, "期满不计违约");
-  assert.ok(
-    state.events.some(event => event.text.includes("已到期") && event.text.includes("随协定作废")),
-    "到期事件写明顺延量随协定作废"
-  );
   assertValid(state, "期满之后");
 });
 

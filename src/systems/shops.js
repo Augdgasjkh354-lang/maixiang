@@ -677,7 +677,7 @@ export function openShop(state, buildingId, typeId, content, preferredHouseholdI
   household.shopIds ||= [];
   household.shopIds.push(shopId);
   syncShopEmployment(state, content);
-  if (definition.kind !== "stall") recordEvent(state, `${household.name}在${hostName}开出${definition.name}。`, content, { day: state.day + 1 });
+  if (definition.kind !== "stall") recordEvent(state, `${household.name}在${hostName}开出${definition.name}。`, content, { day: state.day + 1, gazette: { kind: "shop", weight: 2 } });
   return { ok: true, shopId, householdId: household.id, startupVoucher: startupUnits / currencyScale(content) };
 }
 
@@ -719,7 +719,7 @@ function openTownShopRecord(state, building, typeId, definition, content) {
   state.shops[shopId] = shop;
   ensureShopBooks(shop, content);
   syncShopEmployment(state, content);
-  recordEvent(state, `镇里在商业街开出${shop.name}，店员由镇里设定。`, content, { day: state.day + 1 });
+  recordEvent(state, `镇里在商业街开出${shop.name}，店员由镇里设定。`, content, { day: state.day + 1, gazette: { kind: "shop", weight: 3 } });
   return { ok: true, shopId, householdId: null, town: true, startupVoucher: 0 };
 }
 
@@ -2058,7 +2058,7 @@ function windUpTownShop(state, shop, content) {
   }
   shop.pricingBasisVoucherUnits = {};
   syncShopEmployment(state, content);
-  recordEvent(state, `${shop.name}停业，库存归镇库。`, content, { day: state.day + 1 });
+  recordEvent(state, `${shop.name}停业，库存归镇库。`, content, { day: state.day + 1, gazette: { kind: "shop", weight: 3 } });
   return { ok: true, shopId: shop.id, liquidationPending: false, status: shop.status, liabilitiesVoucherUnits: shopLiabilityTotal(shop) };
 }
 
@@ -2074,7 +2074,7 @@ export function closeShop(state, shopId, content, automatic = false) {
     shop.status = "liquidating";
     shop.liquidatingSinceSerial = shopSerial(state, content);
     shop.statusReason = automatic ? "自动停业，待清算" : "已停业，待清算";
-    recordEvent(state, `${shop.name}${automatic ? "长期无法经营，进入清算" : "停业并进入清算"}。`, content, { day: state.day + 1 });
+    recordEvent(state, `${shop.name}${automatic ? "长期无法经营，进入清算" : "停业并进入清算"}。`, content, { day: state.day + 1, gazette: { kind: "bankrupt", weight: 3 } });
   }
   payDailyLiabilities(state, shop, content);
   // 旧档的清算店铺可能没有起算日：从读到的这一天起重新计 30 天，不能因缺字段立即核销。
@@ -2090,7 +2090,7 @@ export function closeShop(state, shopId, content, automatic = false) {
     shop.liabilities.claimsPayment = {};
     shop.liabilities.rentPaymentClaim = currentPaymentComposition(state, 0);
     shop.liabilities.taxPaymentClaim = currentPaymentComposition(state, 0);
-    recordEvent(state, `${shop.name}清算${liquidatingDays}天仍资不抵债，${Math.round(writtenOff / content.precision.currencyUnitsPerVoucher)}券坏账核销，强制关闭。`, content);
+    recordEvent(state, `${shop.name}清算${liquidatingDays}天仍资不抵债，${Math.round(writtenOff / content.precision.currencyUnitsPerVoucher)}券坏账核销，强制关闭。`, content, { gazette: { kind: "bankrupt", weight: 4 } });
   }
   const finalized = finalizeShopLiquidation(state, shop, content);
   syncShopEmployment(state, content);

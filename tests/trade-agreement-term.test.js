@@ -77,7 +77,6 @@ test("期限按结算月计：N 年合约履约满 12N 个月，与签约是第 
     assert.equal(settlements, 12 * years, `第${day}天签${years}年期应结算 ${12 * years} 次，实际 ${settlements}`);
     assert.ok(Math.abs(agreement.totalDeliveredJin - 100 * 12 * years) < 0.01, `交付 ${100 * 12 * years} 斤，实际 ${agreement.totalDeliveredJin}`);
     assert.equal(agreement.breachCount, 0, "每月都按时交付，不违约");
-    assert.ok(state.events.some(event => event.text.includes("长期协定已到期")), "到期写事件");
     assertValid(state, `第${day}天签${years}年期到期后`);
   }
 });
@@ -111,7 +110,6 @@ test("库存不足：能交的部分照常交付，短缺一截算一次违约�
   const expectedPenaltyJin = agreement.annualJin * agreement.pricePerUnit * 0.1 * 0.4;
   const paidJin = result.revenueJin - (state.accounts.town.wheat - wheatBefore) / I;
   assert.ok(Math.abs(paidJin - expectedPenaltyJin) < 0.05, `赔偿约 ${expectedPenaltyJin.toFixed(2)} 斤，实际 ${paidJin.toFixed(2)}`);
-  assert.ok(state.events.some(event => event.text.includes("库存不足") && event.text.includes("只交付60斤")), "事件写明库存不足与实交量");
   assert.equal(state.wholesaleMarket.inventory.salt, 0, "批发库存被取完");
   assertValid(state, "库存不足的部分交付后");
 });
@@ -130,7 +128,6 @@ test("库存完全没有：整月未交，赔偿为年货值 10%，与原来的�
   const expectedPenaltyJin = agreement.annualJin * agreement.pricePerUnit * 0.1;
   const paidJin = (wheatBefore - state.accounts.town.wheat) / I;
   assert.ok(Math.abs(paidJin - expectedPenaltyJin) < 0.05, `整月违约赔偿约 ${expectedPenaltyJin.toFixed(2)} 斤，实际 ${paidJin.toFixed(2)}`);
-  assert.ok(state.events.some(event => event.text.includes("未能交付")), "事件写明未能交付");
   assertValid(state, "整月违约后");
 });
 
@@ -147,7 +144,6 @@ test("运力不足按同一口径：运力余量先于库存用完，未交部�
   const expectedPenaltyJin = agreement.annualJin * agreement.pricePerUnit * 0.1 * 0.6;
   const paidJin = result.revenueJin - (state.accounts.town.wheat - wheatBefore) / I;
   assert.ok(Math.abs(paidJin - expectedPenaltyJin) < 0.05, `赔偿约 ${expectedPenaltyJin.toFixed(2)} 斤，实际 ${paidJin.toFixed(2)}`);
-  assert.ok(state.events.some(event => event.text.includes("运力不足")), "事件写明运力不足");
   assertValid(state, "运力不足的部分交付后");
 });
 

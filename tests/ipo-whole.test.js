@@ -347,7 +347,6 @@ test("民营业主经营好但现金不够升级：检查日自动递交申请�
   assert.equal(application.offerPercent, 49);
   assert.ok(application.priceVoucherPerShare >= 0.001);
   assert.equal(application.filedSerial, 30);
-  assert.ok(state.events.some(event => /递交上市申请/.test(event.text)), "递交申请有事件");
   atSerial(state, 60);
   setRecentProfit(state, mill, 60);
   settleIpoApplications(state, CONTENT);

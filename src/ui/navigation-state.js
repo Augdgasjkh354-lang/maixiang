@@ -1,4 +1,4 @@
-const MAIN_PANELS = new Set(["build", "residents", "business", "policy", "settings"]);
+const MAIN_PANELS = new Set(["build", "residents", "business", "policy", "gazette", "settings"]);
 
 export function isChoosingBuildPlot(state) {
   return state?.activePanel === "build" && Boolean(state.buildType) && !state.previewPlotId;
@@ -11,8 +11,8 @@ export function createNavigationState() {
     buildType: null,
     previewPlotId: null,
     returnPanel: null,
-    eventsExpanded: false,
-    eventsDismissed: false
+    // 镇报面板里当前翻到的那一期（null 表示最新一期）。
+    gazetteYear: null
   };
 
   function clearBuild() {
@@ -74,19 +74,11 @@ export function createNavigationState() {
       state.activePanel = "build";
       state.selectedSite = null;
     },
-    revealEvents() {
-      state.eventsDismissed = false;
-    },
-    dismissEvents() {
-      state.eventsDismissed = true;
-      state.eventsExpanded = false;
-    },
     resetView() {
       state.activePanel = null;
       state.selectedSite = null;
       state.returnPanel = null;
-      state.eventsExpanded = false;
-      state.eventsDismissed = false;
+      state.gazetteYear = null;
       clearBuild();
     }
   };

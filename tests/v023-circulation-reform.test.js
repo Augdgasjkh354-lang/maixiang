@@ -245,7 +245,7 @@ test("0.2.3 动态加价：需求弹性——售价每贵10%购买量降5%", () 
   assert.ok(Math.abs(tenPercentLess - 1.05) < 1e-9, "便宜10%应增5%");
 });
 
-test("0.2.3 动态加价：连续30天亏损进入促销模式并向玩家预警", () => {
+test("0.2.3 动态加价：连续30天亏损进入促销模式", () => {
   const state = legacyVoucherState({ seed: 2312 });
   const street = addBuilding(state, "commercial_street", "cs-12");
   const owner = householdList(state).find(h => householdIdleWorkers(h) > 0);
@@ -253,7 +253,6 @@ test("0.2.3 动态加价：连续30天亏损进入促销模式并向玩家预警
   const opened = simulation.openResidentShop(state, street.id, "general", owner.id);
   const shop = state.shops[opened.shopId];
   ensureShopPricing(shop, CONTENT);
-  const eventsBefore = state.events.length;
   for (let day = 0; day < 30; day += 1) {
     state.day = day;
     updateShopLossProtection(state, shop, CONTENT, -100);
@@ -261,8 +260,6 @@ test("0.2.3 动态加价：连续30天亏损进入促销模式并向玩家预警
   assert.equal(shop.pricing.promotion, true, "连续30天亏损应进入促销模式");
   assert.equal(simulation.configureWholesalePrice(state, "bread", 2).ok, true);
   assert.equal(shopTradePrices(state, "general", CONTENT, "bread", shop).retailVoucherPerUnit, 2 * 1.05, "促销模式下目标利润率临时降至5%");
-  assert.ok(state.events.length > eventsBefore, "应向玩家发出预警事件");
-  assert.match(state.events[0].text, /促销/);
 });
 
 test("0.2.3 动态加价面板：每商品一行 + 商店总览", () => {

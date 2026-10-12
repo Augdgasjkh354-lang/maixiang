@@ -66,14 +66,14 @@ test("标准开局：不派工（岗位全部为空），开局文字提示派�
   assert.ok(rows.length >= EXPECTED.length, "开局建筑都有岗位行");
   for (const row of rows) assert.equal(row.count, 0, `${row.key} 不派工`);
   assert.equal(state.logistics.poolJin, 0, "没有码头工就没有运力");
-  assert.match(state.events[0].text, /伐木场、盐场、码头、煤矿、铁矿已建好.*就业面板设人数/);
+  assert.match(state.openingHint, /伐木场、盐场、码头、煤矿、铁矿已建好.*就业面板设人数/);
 });
 
 test("空白开局是默认：不放任何建筑；显式 opening: blank 与默认一致；未知开局报错", () => {
   const blank = simulation.createInitialState({ seed: 9103 });
   assert.equal(blank.buildings.length, 0);
   assert.equal(blank.nextInstanceNumber, 1);
-  assert.equal(blank.events[0].text.includes("已建好"), false, "空白开局不带建造提示");
+  assert.equal(blank.openingHint, null, "空白开局不带建造提示");
   const explicit = simulation.createInitialState({ seed: 9103, opening: "blank" });
   assert.equal(JSON.stringify(explicit), JSON.stringify(blank), "显式 blank 与默认逐位一致");
   assert.throws(() => simulation.createInitialState({ seed: 9103, opening: "nope" }), /未知开局/);

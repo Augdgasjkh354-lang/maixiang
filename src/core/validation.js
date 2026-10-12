@@ -69,15 +69,13 @@ export function validateState(state, content) {
   }
   if (!Array.isArray(state.cohorts) || !Array.isArray(state.buildings) ||
       !Array.isArray(state.plots) || !Array.isArray(state.ledger) ||
-      !Array.isArray(state.annualReports) || !Array.isArray(state.events)) {
+      !Array.isArray(state.annualReports)) {
     errors.push("人口、建筑、地图或账目结构缺失");
     return { valid: false, errors };
   }
-  if (state.events.some(event => !Number.isInteger(event?.year) || event.year < 1 ||
-      !Number.isInteger(event?.day) || event.day < 1 || event.day > content.rules.daysPerYear ||
-      typeof event?.text !== "string" ||
-      (event.untilDay != null && (!Number.isInteger(event.untilDay) || event.untilDay < event.day || event.untilDay > content.rules.daysPerYear)))) {
-    errors.push("事件日期或内容无效");
+  if (state.openingHint != null && typeof state.openingHint !== "string") errors.push("开局提示无效");
+  if (state.gazette != null && (!Array.isArray(state.gazette.notes) || !Array.isArray(state.gazette.issues))) {
+    errors.push("镇报素材库结构无效");
   }
   if (state.ledger.some(row => !Number.isInteger(row?.year) || row.year < 1 ||
       !Number.isInteger(row?.day) || row.day < 1 || row.day > content.rules.daysPerYear)) {

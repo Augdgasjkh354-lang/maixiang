@@ -333,7 +333,7 @@ function settleBankLoansDay(state, content, bank, policy, dayIndex) {
         bank.stats.badDebtVoucherUnits += loan.outstandingVoucherUnits;
         // 核销：资产消失、无现金进账，留存利润等额减少。
         bank.retainedVoucherUnits -= loan.outstandingVoucherUnits;
-        recordEvent(state, `银行贷款${loan.id}（${borrowerName(state, loan)}）逾期${loan.overdueDays}天，${loan.outstandingVoucherUnits}券核销为坏账。`, content);
+        recordEvent(state, `银行贷款${loan.id}（${borrowerName(state, loan)}）逾期${loan.overdueDays}天，${loan.outstandingVoucherUnits}券核销为坏账。`, content, { gazette: { kind: "default", weight: 4 } });
         loan.outstandingVoucherUnits = 0;
       }
     }

@@ -223,7 +223,7 @@ test("民营胜过上市公司：公司清算，民营业主得整栋，镇营�
   assert.match(millLines(loaded)[0], new RegExp(`^磨坊整栋归属：民营户${h1.name}（公司.+清算：股东回购 100 粮券）$`));
 });
 
-test("镇库付不起补偿：按能付的付，报告和事件写明未付金额", () => {
+test("镇库付不起补偿：按能付的付，报告写明未付金额", () => {
   const state = simulation.createInitialState({ seed:8108 });
   const [h1] = activeHouseholds(state);
   const mill = addMill(state, "mill-broke", 3);
@@ -234,7 +234,6 @@ test("镇库付不起补偿：按能付的付，报告和事件写明未付金�
   const loaded = loadOldSave(old);
   assertValid(loaded);
   assert.match(millLines(loaded)[0], /补偿民营 1 户 0 粮券，镇库付不起 [\d.]+ 粮券/);
-  assert.ok(loaded.events.some(row => JSON.stringify(row).includes("还差")), "应有未付补偿的事件");
   assert.ok(loadReportMessage(loaded).includes("整栋归属换算 1 栋"));
 });
 
@@ -310,7 +309,6 @@ test("公司清算时镇库付不起股份：付得起的回购，其余注销�
   assert.equal(loaded.companies[company.id], undefined);
   assert.equal(loaded.households.byId[h1.id].shares?.[company.id], undefined);
   assert.match(millLines(loaded)[0], /^磨坊整栋归属：镇里（公司.+清算：股东回购 0 粮券，300股镇库付不起、注销（应付 100 粮券））$/);
-  assert.ok(loaded.events.some(row => JSON.stringify(row).includes("注销")), "未付股份应有事件");
 });
 
 test("换算后再读一次是空操作（幂等）", () => {

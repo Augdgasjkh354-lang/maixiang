@@ -116,7 +116,7 @@ test("银行现金不够付息时镇库托底垫付（记为欠镇库），镇�
   assert.equal(voucherBalance(state, "town"), 0, "镇库不透支");
   assert.ok(depositsTotal(state) >= depositsBefore, "没有利息入账时存款不减少");
   assert.equal(bankLedgerInvariant(state).valid, true);
-  assert.ok(state.events.some(event => event.text.includes("顺延为应付")), "顺延要留下事件");
+  assert.ok(state.bank.interestPayableUnits > 0, "顺延要留下应付利息");
 
   // 镇库有少量粮券：先垫付再付息；应付 = 原应付 + 本日费用 − 本日实付（逐笔对账）。
   const payableBefore = state.bank.interestPayableUnits;
