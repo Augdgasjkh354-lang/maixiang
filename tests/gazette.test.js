@@ -146,7 +146,7 @@ test("settleGazetteYear：存入 issues，超过 12 期只留最近 12 期，清
   assert.equal(state.gazette.issues[0].year, 3);
   assert.equal(state.gazette.issues.at(-1).year, GAZETTE_ISSUE_LIMIT + 2);
   assert.equal(state.gazette.marks.year, GAZETTE_ISSUE_LIMIT + 2);
-  assert.ok(state.gazette.issues.every(issue => gazetteBytes(issue) < GAZETTE_BYTE_LIMIT), "每期 <3KB");
+  assert.ok(state.gazette.issues.every(issue => gazetteBytes(issue) < GAZETTE_BYTE_LIMIT), "每期 <8KB");
 });
 
 test("[slow] 日结跑满一年：年终生成第 1 期，未读；读后不再未读；状态合法", () => {
@@ -212,4 +212,29 @@ test("镇报面板：默认最新一期、点期号翻阅、正文转义", () =>
   assert.match(html, /&lt;b&gt;坏&lt;\/b&gt;/);
   assert.doesNotMatch(html, /<b>坏<\/b>/);
   assert.match(renderGazettePanel({ gazette: { archive: [] } }), /镇报还未出版/);
+});
+
+test("新栏目：年度大事记按日期列出、民生有出生去世、本报评论必有一句", () => {
+  const state = fresh();
+  setTownYears(state, 1.5);
+  recordEvent(state, "斗兽场落成。", CONTENT, { day: 95, gazette: { kind: "built", weight: 6 } });
+  recordEvent(state, "东街开出一家店。", CONTENT, { day: 40, gazette: { kind: "shop", weight: 2 } });
+  recordEvent(state, "戏园落成。", CONTENT, { day: 200, gazette: { kind: "built", weight: 3 } });
+  const { issue } = gazetteFor(state, report(1, { births: 120, deaths: 60, marriages: 30 }));
+  const chronicle = issue.sections.find(section => section.title === "年度大事记");
+  assert.ok(chronicle, "应有年度大事记");
+  assert.ok(chronicle.lines.every(line => /^\d+月\d+日　/.test(line)));
+  const text = chronicle.lines.join("|");
+  assert.ok(text.indexOf("东街") < text.indexOf("戏园"), "按发生先后");
+  const life = issue.sections.find(section => section.title === "民生");
+  assert.match(life.lines.join(""), /添丁120口.*故去60人/);
+  assert.ok(issue.sections.find(section => section.title === "本报评论").lines.length >= 1);
+});
+
+test("超长时按序裁减，仍在 8KB 内", () => {
+  const state = fresh();
+  setTownYears(state, 1.5);
+  for (let i = 0; i < 40; i += 1) recordEvent(state, "很长的一条要闻".repeat(15) + i, CONTENT, { day: i + 1, gazette: { kind: "built", weight: 3 } });
+  const { issue } = gazetteFor(state, report(1));
+  assert.ok(gazetteBytes(issue) <= GAZETTE_BYTE_LIMIT);
 });

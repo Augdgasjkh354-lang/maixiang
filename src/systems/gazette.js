@@ -1,7 +1,7 @@
 // 年度镇报（《麦乡镇报》）：每年年终、年报生成之后编一期。纯读取：只看年报与当前 state，不消耗随机数
 // （措辞用 (年份 + 栏目) 的稳定哈希选模板，同种子同结果）。素材库见 economy/gazette-notes.js。
 //
-// 一期 issue：{ year, headline, sections: [{ title, lines }] }；每期 <3KB（UTF-8），超了先从要闻里减。
+// 一期 issue：{ year, headline, sections: [{ title, lines, kind? }] }；每期 <8KB（UTF-8），超了按 TRIM_ORDER 从副刊、要闻等处逐行减。
 // marks 是年终快照（物价指数、各商品批发价、上市公司股价、外镇繁荣度、闲人数、斗兽场出席累计），
 // 只用来算"较上年"；下一期生成后被覆盖。
 
@@ -16,7 +16,9 @@ import { wholesaleMarketItemIds } from "./wholesale-market.js";
 import { wholesalePrice } from "./wholesale-price.js";
 import { GAZETTE_ISSUE_LIMIT } from "../economy/gazette-notes.js";
 
-export const GAZETTE_BYTE_LIMIT = 3072;
+export const GAZETTE_BYTE_LIMIT = 8192;
+// 超长时按此顺序逐行去掉（每栏至少留一行）。
+const TRIM_ORDER = ["茶馆闲谈", "集市小广告", "工商要闻", "人物", "年度大事记", "市井物价"];
 
 const SECTOR_NAMES = {
   forestry: "伐木", salt: "盐业", coal: "煤炭", iron: "铁器", smelting: "冶炼", jewelry: "金银器",
@@ -66,6 +68,12 @@ function annualFacts(state, content, report) {
   f.peopleMaxBefore = reports.reduce((max, row) => Math.max(max, row.populationAfterAging || 0), 0);
   f.households = householdList(state).filter(isActiveHousehold).length;
   f.satisfaction = Number(state.satisfaction) || 0;
+  f.births = Number(report.births) || 0;
+  f.deaths = Number(report.deaths) || 0;
+  f.marriages = Number(report.marriages) || 0;
+  f.prevBirths = prev ? Number(prev.births) || 0 : null;
+  f.prevDeaths = prev ? Number(prev.deaths) || 0 : null;
+  f.monthDays = content.rules.monthDays || 30;
   f.gini = report.wealth?.gini ?? 0;
   f.prevGini = prev?.wealth?.gini ?? null;
 
@@ -182,6 +190,7 @@ function annualFacts(state, content, report) {
 
   // 要闻：素材库里权重最高的（同权重先发生的在前）
   f.notes = (state.gazette?.notes || []).slice().sort((a, b) => b.weight - a.weight || a.day - b.day);
+  f.reports = reports;
   return f;
 }
 
@@ -316,7 +325,8 @@ function sectionStats(f) {
   lines.push(mood + "。");
   const index = f.priceIndex;
   lines.push(`物价指数${index.toFixed(2)}，较上年${changeText((index / f.prevPriceIndex - 1) * 100)}。`);
-  return { title: "镇情数据", lines: lines.slice(0, 3) };
+  if (f.peopleMaxBefore > 0 && f.people >= f.peopleMaxBefore) lines.push("人口为有镇以来最多。");
+  return { title: "镇情数据", lines: lines.slice(0, 4) };
 }
 
 function sectionGranary(f) {
@@ -337,7 +347,7 @@ function sectionGranary(f) {
 
 function sectionPrices(f) {
   // 只列真有涨跌的（变动不足 0.5% 的不算新闻）。
-  const rows = f.movers.filter(row => Math.abs(row.change) >= 0.5).slice(0, 3)
+  const rows = f.movers.filter(row => Math.abs(row.change) >= 0.5).slice(0, 5)
     .map(row => `${row.name}${signedPct(row.change)}：${row.base.toFixed(2)}→${row.now.toFixed(2)}券/${row.unit}`);
   return rows.length ? { title: "市井物价", lines: rows } : null;
 }
@@ -349,7 +359,6 @@ function sectionIndustry(f) {
   if (f.topProfit) parts.push(`获利最多的是${f.topProfit.name}（${wan(f.topProfit.profit)}券）`);
   if (f.topLoss) parts.push(`亏得最多的是${f.topLoss.name}（${wan(f.topLoss.profit)}券）`);
   if (parts.length) lines.push(parts.join("，") + "。");
-  for (const note of f.notes.filter(row => row.weight >= 3).slice(0, 2)) lines.push("· " + note.text);
   return lines.length ? { title: "工商要闻", lines: lines.slice(0, 3) } : null;
 }
 
@@ -397,26 +406,113 @@ function sectionAdvice(f) {
   return { title: "镇长手记", lines: tips.slice(0, 2) };
 }
 
+
+function dateText(day, monthDays) {
+  const d = Math.max(1, Math.floor(day));
+  return `${Math.floor((d - 1) / monthDays) + 1}月${((d - 1) % monthDays) + 1}日`;
+}
+
+// 年度大事记：当年素材库按发生先后列出（权重 ≥2，最多 6 条；头条已用的那条不重复）。
+function sectionChronicle(f, headline) {
+  const rows = f.notes.filter(row => row.weight >= 2 && row.text !== headline).slice(0, 6)
+    .sort((a, b) => a.day - b.day || b.weight - a.weight);
+  if (!rows.length) return null;
+  return { title: "年度大事记", kind: "wide", lines: rows.map(row => `${dateText(row.day, f.monthDays)}　${row.text}`) };
+}
+
+// 民生：出生、去世、婚嫁与闲人，各与上年比。
+function sectionLivelihood(f) {
+  const lines = [];
+  const vs = (now, before, unit) => (before == null ? "" : `（${Math.abs(now - before) < 1 ? "与上年持平" : `较上年${now >= before ? "多" : "少"}${num(Math.abs(now - before))}${unit}`}）`);
+  if (f.births || f.deaths) lines.push(`添丁${num(f.births)}口${vs(f.births, f.prevBirths, "口")}，故去${num(f.deaths)}人${vs(f.deaths, f.prevDeaths, "人")}。`);
+  if (f.marriages > 0) lines.push(`${num(f.marriages)}对新人成家。`);
+  if (f.births + f.deaths > 0) {
+    const net = f.births - f.deaths;
+    lines.push(net >= 0 ? `生多于死，净增${num(net)}口。` : `死多于生，净减${num(-net)}口。`);
+  }
+  lines.push(f.prevIdle != null ? `待业闲人${num(f.idle)}，${deltaText(f.idle - f.prevIdle)}。` : `待业闲人${num(f.idle)}。`);
+  return { title: "民生", lines: lines.slice(0, 4) };
+}
+
+// 本报评论：根据全年形势给出两三句编者评语，措辞按年份稳定选取。
+function sectionEditorial(f) {
+  const y = f.year;
+  const lines = [];
+  if (f.prevHarvestJin != null && f.prevHarvestJin > 0) {
+    const r = f.harvestJin / f.prevHarvestJin;
+    if (r < 0.85) lines.push(say(y, "ed-harvest-bad", [() => "歉收之年，各家宜惜粮，镇库也该早作打算。", () => "收成不济，开春前口粮要精打细算。"]));
+    else if (r > 1.15) lines.push(say(y, "ed-harvest-good", [() => "丰年固然可喜，却别忘了粮多伤农，价贱时留意收储。", () => "仓里有粮心不慌，盼来年风调雨顺。"]));
+  }
+  if (f.idle >= 300) lines.push(say(y, "ed-idle", [() => `闲人逾${num(Math.floor(f.idle / 100) * 100)}，有力气没处使，镇上该多开些工坊。`, () => "人手富余是好事也是隐忧，岗位须跟上。"]));
+  else if (f.prevIdle != null && f.idle < f.prevIdle * 0.5) lines.push(say(y, "ed-jobs", [() => "找活干不难了，雇主需拿出像样的工钱才留得住人。", () => "人手趋紧，工钱怕是要往上走。"]));
+  if (f.prevGini != null && f.gini - f.prevGini >= 0.02) lines.push(say(y, "ed-gini-up", [() => "贫富渐远，本报以为税收与救济可以斟酌。", () => "富者愈富非镇之福，望镇长留意。"]));
+  else if (f.prevGini != null && f.prevGini - f.gini >= 0.02) lines.push(say(y, "ed-gini-down", [() => "家底差距收窄，乡里和睦之象。", () => "贫富相近，邻里自然少些口角。"]));
+  if (f.priceIndex / f.prevPriceIndex > 1.1) lines.push(say(y, "ed-price-up", [() => "物价上扬，薪水追不上，百姓怨声渐起。", () => "东西越买越贵，主妇们直摇头。"]));
+  else if (f.priceIndex / f.prevPriceIndex < 0.92) lines.push(say(y, "ed-price-down", [() => "物价回落，买卖人利薄，居家过日子倒松快。", () => "市面渐贱，店家须当心积货。"]));
+  if (f.satisfaction < 50) lines.push(say(y, "ed-mood-low", [() => "居民舒心值偏低，口粮、盐与日用品供得上吗？", () => "民心不安，当务之急是让百姓吃饱穿暖。"]));
+  else if (f.satisfaction >= 80) lines.push(say(y, "ed-mood-high", [() => "家家安乐，镇上笑声多。", () => "人心安定，正是谋长远的好时候。"]));
+  if (!lines.length) lines.push(say(y, "ed-calm", [() => "本年无大起落，稳扎稳打，便是进步。", () => "平淡的一年，细水长流。", () => "没有大事可议，倒也难得清静。"]));
+  return { title: "本报评论", kind: "editorial", lines: lines.slice(0, 3) };
+}
+
+// 乡里经济榜：本期各行业产值前三。
+function sectionSectors(report) {
+  const rows = Object.entries(report.industries || {})
+    .map(([sector, row]) => ({ name: SECTOR_NAMES[sector] || sector, revenue: row?.revenueWheatUnits || 0 }))
+    .filter(row => row.revenue > 0).sort((a, b) => b.revenue - a.revenue || a.name.localeCompare(b.name)).slice(0, 3);
+  if (rows.length < 2) return null;
+  return { title: "行业产值榜", lines: rows.map((row, i) => `第${i + 1}名　${row.name}`) };
+}
+
+const CHAT_LINES = [
+  "老张说：今年的麦穗沉甸甸，来年准是好光景。", "李婶嫌盐贵，隔壁王嫂偏说比去年便宜了些。", "茶摊上有人打赌：下一座要盖的是戏园还是斗兽场。",
+  "张木匠说，修房的木头是越来越好找了。", "渡口的老艄公讲，外镇来的货船比往年多了。", "村头的老人念叨：粮仓满，心不慌。",
+  "小孩们在晒谷场追闹，说要赶在秋收前学会打算盘。", "有人说镇长近来总在仓房转，怕是在算账。", "货郎叹气：路好走了，竞争的人也多了。"
+];
+const AD_LINES = [
+  "【启事】东街面铺招学徒，管饭，月钱面议。", "【寻物】丢失蓝布包一个，内有账本，拾者酬谢小麦十斤。", "【出让】农具成色九成新，价格好商量。",
+  "【招租】向阳铺面一间，临近集市，欲租从速。", "【启事】本镇戏班择日开唱，各位乡亲捧场。", "【代写】书信契约，价廉。",
+  "【收购】上好木料，量大价优。", "【招工】工坊缺人手，薪酬按月结。"
+];
+function pickDistinct(year, slot, pool, count) {
+  const out = [];
+  let k = 0;
+  while (out.length < count && k < pool.length * 3) {
+    const line = pool[hashText(`${year}:${slot}:${k}`) % pool.length];
+    if (!out.includes(line)) out.push(line);
+    k += 1;
+  }
+  return out;
+}
+function sectionChat(f) { return { title: "茶馆闲谈", lines: pickDistinct(f.year, "chat", CHAT_LINES, 2) }; }
+function sectionAds(f) { return { title: "集市小广告", lines: pickDistinct(f.year, "ads", AD_LINES, 2) }; }
+
 // ---------------------------------------------------------------- 编期
 
 export function buildGazette(state, content, { report }) {
   const f = annualFacts(state, content, report);
+  const headline = headlineFor(f);
   const sections = [
     sectionStats(f),
+    sectionChronicle(f, headline),
+    sectionLivelihood(f),
     sectionGranary(f),
     sectionPrices(f),
+    sectionSectors(report),
     sectionIndustry(f),
     sectionStocks(f),
     sectionTowns(f),
     sectionPeople(f),
-    sectionAdvice(f)
+    sectionEditorial(f),
+    sectionAdvice(f),
+    sectionChat(f),
+    sectionAds(f)
   ].filter(section => section && section.lines.length);
-  const issue = { year: f.year, headline: headlineFor(f), sections: sections.map(({ title, lines }) => ({ title, lines })) };
-  // 超长就从工商要闻里逐条去掉（要闻最长，也最可省）；仍超则保留现状（测试会报）。
-  for (const section of issue.sections) {
-    while (byteLength(JSON.stringify(issue)) > GAZETTE_BYTE_LIMIT && section.title === "工商要闻" && section.lines.length > 1) {
-      section.lines.pop();
-    }
+  const issue = { year: f.year, headline, sections: sections.map(({ title, lines, kind }) => (kind ? { title, lines, kind } : { title, lines })) };
+  // 超长就按 TRIM_ORDER 逐栏逐行去掉（每栏至少留一行）；仍超则保留现状（测试会报）。
+  for (const title of TRIM_ORDER) {
+    const section = issue.sections.find(row => row.title === title);
+    while (section && byteLength(JSON.stringify(issue)) > GAZETTE_BYTE_LIMIT && section.lines.length > 1) section.lines.pop();
   }
   const marks = {
     year: f.year,

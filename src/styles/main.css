@@ -638,12 +638,18 @@ button.wide { width: 100%; }
 .gazette-col { padding: 8px 0; border-top: 1px solid var(--paper-rule); }
 .gazette-col:first-child { border-top: 0; }
 .gazette-col h3 { margin: 0 0 4px; font-size: 13px; font-weight: 800; letter-spacing: .12em; color: var(--paper-accent); }
+.gazette-wide p { padding-left: 2px; border-bottom: 1px dotted var(--paper-rule); }
+.gazette-wide p:last-child { border-bottom: 0; }
+.gazette-editorial { background: #8a3b2a12; border-left: 3px solid var(--paper-accent); padding-left: 10px; }
+.gazette-editorial p { font-style: italic; }
 .gazette-col p { margin: 0 0 3px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 @media (min-width: 560px) {
   .gazette-body { grid-template-columns: 1fr 1fr; }
   .gazette-col { padding: 8px 12px; border-top: 0; }
   .gazette-col:nth-child(even) { border-left: 1px solid var(--paper-rule); }
   .gazette-col:nth-child(-n+2) { border-top: 0; }
+  .gazette-wide, .gazette-editorial { grid-column: 1 / -1; border-left-width: 0; }
+  .gazette-editorial { border-left: 3px solid var(--paper-accent); }
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .gazette-sheet { --paper: #2d2a20; --paper-ink: #ece3c8; --paper-muted: #b2a683; --paper-rule: #6e6446; --paper-accent: #e6b270; box-shadow: inset 0 0 0 3px #00000040; }

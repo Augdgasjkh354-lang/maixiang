@@ -2,7 +2,7 @@ import { escapeHtml } from "./format.js";
 
 // 镇报的报纸式版面（只读，数据来自 selectDashboard 的 gazette）：刊头、头条、分栏。
 export function gazetteSheetMarkup(issue) {
-  const columns = issue.sections.map(section => `<section class="gazette-col">
+  const columns = issue.sections.map(section => `<section class="gazette-col${section.kind ? ` gazette-${section.kind}` : ""}">
       <h3>${escapeHtml(section.title)}</h3>
       ${section.lines.map(line => `<p>${escapeHtml(line)}</p>`).join("")}
     </section>`).join("");
