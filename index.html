@@ -2396,8 +2396,8 @@ const PREFIXES = [["household:", "household"], ["company:", "company"], ["shop:"
 const parsedOwners = new Map();
 const PARSED_OWNER_CACHE_LIMIT = 20000;
        function parseOwner(owner) {
-  const cached = typeof owner === "string" ? parsedOwners.get(owner) : undefined;
-  if (cached) return cached;
+  const cached = parsedOwners.get(owner);
+  if (cached !== undefined) return cached;
   let parsed = { kind: null, id: null };
   if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") parsed = { kind: owner, id: null };
   else {
@@ -2614,7 +2614,8 @@ const ledgerBatches = new WeakMap();
   if (ledgerBatches.has(state)) return false;
   // rows / currency：按首次出现顺序排列的待写入行（写入顺序与合并前后的账一致）；
   // rowIndex / currencyIndex：合并用的查找表。查找用嵌套 Map（付款方 → 收款方 → 类型），不再每笔拼一个长字符串再算哈希。
-  ledgerBatches.set(state, { rows: [], rowIndex: new Map(), currency: [], currencyIndex: new Map() });
+  // 账本行与粮券流水共用一棵索引树（节点里两个叶子数组各管各的），带"上次命中"缓存：一笔转账先查粮券流水再查账本行，用同一组键。
+  ledgerBatches.set(state, { rows: [], currency: [], index: new Map(), lastA: undefined, lastB: undefined, lastC: undefined, lastNode: null });
   return true;
 }
 
@@ -2630,14 +2631,17 @@ const ledgerBatches = new WeakMap();
 function keyPart(value) { return typeof value === "string" ? value : String(value); }
 
 // 在 a → b → c 三层嵌套 Map 里取（或建）叶子数组。
-function leafList(index, a, b, c) {
+function batchNode(batch, a, b, c) {
+  if (batch.lastNode !== null && batch.lastA === a && batch.lastB === b && batch.lastC === c) return batch.lastNode;
+  const index = batch.index;
   let level2 = index.get(a);
   if (level2 === undefined) { level2 = new Map(); index.set(a, level2); }
   let level3 = level2.get(b);
   if (level3 === undefined) { level3 = new Map(); level2.set(b, level3); }
-  let leaf = level3.get(c);
-  if (leaf === undefined) { leaf = []; level3.set(c, leaf); }
-  return leaf;
+  let node = level3.get(c);
+  if (node === undefined) { node = { rows: [], cur: [] }; level3.set(c, node); }
+  batch.lastA = a; batch.lastB = b; batch.lastC = c; batch.lastNode = node;
+  return node;
 }
 
        function withLedgerBatch(state, content, fn) {
@@ -2662,7 +2666,7 @@ function leafList(index, a, b, c) {
   const f = keyPart(from ?? "");
   const d = keyPart(to ?? "");
   // 付款方为空的流水（铸币、换券，owner 才是主体）以 owner 作第一层键。
-  const leaf = leafList(batch.currencyIndex, f !== "" ? f : o, d, t);
+  const leaf = batchNode(batch, f !== "" ? f : o, d, t).cur;
   for (let i = 0; i < leaf.length; i += 1) {
     const item = leaf[i];
     if (item.owner === o && item.from === f) return item.entry;
@@ -2675,7 +2679,7 @@ function leafList(index, a, b, c) {
   const o = keyPart(owner ?? "");
   const f = keyPart(from ?? "");
   const d = keyPart(to ?? "");
-  leafList(batch.currencyIndex, f !== "" ? f : o, d, t).push({ owner: o, from: f, entry });
+  batchNode(batch, f !== "" ? f : o, d, t).cur.push({ owner: o, from: f, entry });
   batch.currency.push(entry);
 }
 
@@ -2696,7 +2700,7 @@ function writeLedgerRow(state, row, content) {
   if (batch) {
     // 同类型、同付款方、同收款方、同物品、同日的账合并成一行。
     const itemId = keyPart(entry.itemId);
-    const leaf = leafList(batch.rowIndex, keyPart(entry.source), keyPart(entry.destination), keyPart(entry.type));
+    const leaf = batchNode(batch, keyPart(entry.source), keyPart(entry.destination), keyPart(entry.type)).rows;
     for (let i = 0; i < leaf.length; i += 1) {
       const item = leaf[i];
       if (item.itemId === itemId && item.year === year && item.day === day) {
@@ -3425,7 +3429,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod22 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-ed02242";
+       const BUILD_ID = "0203-f15996c";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -4590,22 +4594,61 @@ const CAPITAL_RETURN_TYPES = new Set(["shop_capital_refund", "shop_close_distrib
 
 const WAGE_TYPES = new Set(["wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment", "enterprise_wage_payment", "private_wage_payment", "shop_wage_payment"]);
 
+// 付款类型 → 分类位（按类型字符串缓存，省去每笔付款查好几张 Set）。
+const DEBIT_COST = 1, DEBIT_INVEST = 2, DEBIT_LIFE = 4, DEBIT_SERVICE = 8;
+const CREDIT_CAPITAL = 1, CREDIT_INCOME = 2, CREDIT_WAGE = 4, CREDIT_BUDGET = 8;
+const debitClassCache = new Map();
+const creditClassCache = new Map();
+function debitClass(type) {
+  let cls = debitClassCache.get(type);
+  if (cls === undefined) {
+    cls = 0;
+    if (BUDGET_COST_TYPES.has(type)) cls |= DEBIT_COST;
+    if (INVESTMENT_TYPES.has(type)) cls |= DEBIT_INVEST;
+    else if (LIFE_EXPENSE_TYPES.has(type)) { cls |= DEBIT_LIFE; if (type === "shop_service_sale") cls |= DEBIT_SERVICE; }
+    if (typeof type === "string") debitClassCache.set(type, cls);
+  }
+  return cls;
+}
+function creditClass(type) {
+  let cls = creditClassCache.get(type);
+  if (cls === undefined) {
+    cls = 0;
+    if (CAPITAL_RETURN_TYPES.has(type)) cls |= CREDIT_CAPITAL;
+    else if (INCOME_TYPES.has(type)) cls |= CREDIT_INCOME;
+    if (WAGE_TYPES.has(type)) cls |= CREDIT_WAGE;
+    if (BUDGET_INCOME_TYPES.has(type)) cls |= CREDIT_BUDGET;
+    if (typeof type === "string") creditClassCache.set(type, cls);
+  }
+  return cls;
+}
+
 function recordVoucherDebit(state, householdId, units, type, content) {
   const household = state.households?.byId?.[householdId];
   if (!household) return;
-  if (BUDGET_COST_TYPES.has(type)) add(household, "budgetCostVoucherUnits", units, content);
-  if (INVESTMENT_TYPES.has(type)) add(household, "investmentVoucherUnits", units, content);
-  else if (LIFE_EXPENSE_TYPES.has(type)) { add(household, "expenseVoucherUnits", units, content); add(household, "lifeExpenseVoucherUnits", units, content); if (type === "shop_service_sale") add(household, "serviceExpenseVoucherUnits", units, content); }
-  else add(household, "expenseVoucherUnits", units, content);
+  // 与逐个 add 同义：金额无效则什么都不记（连家庭生活账也不建）；顺序与原先一致。
+  if (!Number.isFinite(units) || units <= 0) return;
+  const cls = debitClass(type);
+  const life = ensureHouseholdLife(household, content);
+  if (cls & DEBIT_COST) bookAdd(life, "budgetCostVoucherUnits", units);
+  if (cls & DEBIT_INVEST) bookAdd(life, "investmentVoucherUnits", units);
+  else if (cls & DEBIT_LIFE) {
+    bookAdd(life, "expenseVoucherUnits", units); bookAdd(life, "lifeExpenseVoucherUnits", units);
+    if (cls & DEBIT_SERVICE) bookAdd(life, "serviceExpenseVoucherUnits", units);
+  } else bookAdd(life, "expenseVoucherUnits", units);
 }
 
 function recordVoucherCredit(state, householdId, units, type, content) {
   const household = state.households?.byId?.[householdId];
   if (!household) return;
-  if (CAPITAL_RETURN_TYPES.has(type)) add(household, "capitalReturnVoucherUnits", units, content);
-  else if (INCOME_TYPES.has(type)) add(household, "incomeVoucherUnits", units, content);
-  if (WAGE_TYPES.has(type)) add(household, "wagePaidVoucherUnits", units, content);
-  if (BUDGET_INCOME_TYPES.has(type)) add(household, "budgetIncomeVoucherUnits", units, content);
+  if (!Number.isFinite(units) || units <= 0) return;
+  const cls = creditClass(type);
+  if (cls === 0) return;
+  const life = ensureHouseholdLife(household, content);
+  if (cls & CREDIT_CAPITAL) bookAdd(life, "capitalReturnVoucherUnits", units);
+  else if (cls & CREDIT_INCOME) bookAdd(life, "incomeVoucherUnits", units);
+  if (cls & CREDIT_WAGE) bookAdd(life, "wagePaidVoucherUnits", units);
+  if (cls & CREDIT_BUDGET) bookAdd(life, "budgetIncomeVoucherUnits", units);
 }
 
 // 没有逐户明细时（单户对单户的付款，最常见）直接按账户名定位那一户，不再临时拼行数组。

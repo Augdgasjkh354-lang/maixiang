@@ -20,8 +20,8 @@ const PREFIXES = [["household:", "household"], ["company:", "company"], ["shop:"
 const parsedOwners = new Map();
 const PARSED_OWNER_CACHE_LIMIT = 20000;
 export function parseOwner(owner) {
-  const cached = typeof owner === "string" ? parsedOwners.get(owner) : undefined;
-  if (cached) return cached;
+  const cached = parsedOwners.get(owner);
+  if (cached !== undefined) return cached;
   let parsed = { kind: null, id: null };
   if (owner === "town" || owner === "residents" || owner === "social" || owner === "bank") parsed = { kind: owner, id: null };
   else {

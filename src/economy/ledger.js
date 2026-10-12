@@ -13,7 +13,8 @@ export function openLedgerBatch(state) {
   if (ledgerBatches.has(state)) return false;
   // rows / currency：按首次出现顺序排列的待写入行（写入顺序与合并前后的账一致）；
   // rowIndex / currencyIndex：合并用的查找表。查找用嵌套 Map（付款方 → 收款方 → 类型），不再每笔拼一个长字符串再算哈希。
-  ledgerBatches.set(state, { rows: [], rowIndex: new Map(), currency: [], currencyIndex: new Map() });
+  // 账本行与粮券流水共用一棵索引树（节点里两个叶子数组各管各的），带"上次命中"缓存：一笔转账先查粮券流水再查账本行，用同一组键。
+  ledgerBatches.set(state, { rows: [], currency: [], index: new Map(), lastA: undefined, lastB: undefined, lastC: undefined, lastNode: null });
   return true;
 }
 
@@ -29,14 +30,17 @@ export function closeLedgerBatch(state, content) {
 function keyPart(value) { return typeof value === "string" ? value : String(value); }
 
 // 在 a → b → c 三层嵌套 Map 里取（或建）叶子数组。
-function leafList(index, a, b, c) {
+function batchNode(batch, a, b, c) {
+  if (batch.lastNode !== null && batch.lastA === a && batch.lastB === b && batch.lastC === c) return batch.lastNode;
+  const index = batch.index;
   let level2 = index.get(a);
   if (level2 === undefined) { level2 = new Map(); index.set(a, level2); }
   let level3 = level2.get(b);
   if (level3 === undefined) { level3 = new Map(); level2.set(b, level3); }
-  let leaf = level3.get(c);
-  if (leaf === undefined) { leaf = []; level3.set(c, leaf); }
-  return leaf;
+  let node = level3.get(c);
+  if (node === undefined) { node = { rows: [], cur: [] }; level3.set(c, node); }
+  batch.lastA = a; batch.lastB = b; batch.lastC = c; batch.lastNode = node;
+  return node;
 }
 
 export function withLedgerBatch(state, content, fn) {
@@ -61,7 +65,7 @@ export function findCurrencyBatchEntry(batch, type, owner, from, to) {
   const f = keyPart(from ?? "");
   const d = keyPart(to ?? "");
   // 付款方为空的流水（铸币、换券，owner 才是主体）以 owner 作第一层键。
-  const leaf = leafList(batch.currencyIndex, f !== "" ? f : o, d, t);
+  const leaf = batchNode(batch, f !== "" ? f : o, d, t).cur;
   for (let i = 0; i < leaf.length; i += 1) {
     const item = leaf[i];
     if (item.owner === o && item.from === f) return item.entry;
@@ -74,7 +78,7 @@ export function addCurrencyBatchEntry(batch, type, owner, from, to, entry) {
   const o = keyPart(owner ?? "");
   const f = keyPart(from ?? "");
   const d = keyPart(to ?? "");
-  leafList(batch.currencyIndex, f !== "" ? f : o, d, t).push({ owner: o, from: f, entry });
+  batchNode(batch, f !== "" ? f : o, d, t).cur.push({ owner: o, from: f, entry });
   batch.currency.push(entry);
 }
 
@@ -95,7 +99,7 @@ export function recordLedger(state, entry, content, options = {}) {
   if (batch) {
     // 同类型、同付款方、同收款方、同物品、同日的账合并成一行。
     const itemId = keyPart(entry.itemId);
-    const leaf = leafList(batch.rowIndex, keyPart(entry.source), keyPart(entry.destination), keyPart(entry.type));
+    const leaf = batchNode(batch, keyPart(entry.source), keyPart(entry.destination), keyPart(entry.type)).rows;
     for (let i = 0; i < leaf.length; i += 1) {
       const item = leaf[i];
       if (item.itemId === itemId && item.year === year && item.day === day) {

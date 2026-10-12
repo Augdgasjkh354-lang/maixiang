@@ -109,22 +109,61 @@ export const BUDGET_COST_TYPES = new Set(["wholesale_sale", "private_wage_paymen
 
 const WAGE_TYPES = new Set(["wage_payment", "construction_wage_payment", "wage_arrears_payment", "construction_wage_arrears_payment", "enterprise_wage_payment", "private_wage_payment", "shop_wage_payment"]);
 
+// 付款类型 → 分类位（按类型字符串缓存，省去每笔付款查好几张 Set）。
+const DEBIT_COST = 1, DEBIT_INVEST = 2, DEBIT_LIFE = 4, DEBIT_SERVICE = 8;
+const CREDIT_CAPITAL = 1, CREDIT_INCOME = 2, CREDIT_WAGE = 4, CREDIT_BUDGET = 8;
+const debitClassCache = new Map();
+const creditClassCache = new Map();
+function debitClass(type) {
+  let cls = debitClassCache.get(type);
+  if (cls === undefined) {
+    cls = 0;
+    if (BUDGET_COST_TYPES.has(type)) cls |= DEBIT_COST;
+    if (INVESTMENT_TYPES.has(type)) cls |= DEBIT_INVEST;
+    else if (LIFE_EXPENSE_TYPES.has(type)) { cls |= DEBIT_LIFE; if (type === "shop_service_sale") cls |= DEBIT_SERVICE; }
+    if (typeof type === "string") debitClassCache.set(type, cls);
+  }
+  return cls;
+}
+function creditClass(type) {
+  let cls = creditClassCache.get(type);
+  if (cls === undefined) {
+    cls = 0;
+    if (CAPITAL_RETURN_TYPES.has(type)) cls |= CREDIT_CAPITAL;
+    else if (INCOME_TYPES.has(type)) cls |= CREDIT_INCOME;
+    if (WAGE_TYPES.has(type)) cls |= CREDIT_WAGE;
+    if (BUDGET_INCOME_TYPES.has(type)) cls |= CREDIT_BUDGET;
+    if (typeof type === "string") creditClassCache.set(type, cls);
+  }
+  return cls;
+}
+
 function recordVoucherDebit(state, householdId, units, type, content) {
   const household = state.households?.byId?.[householdId];
   if (!household) return;
-  if (BUDGET_COST_TYPES.has(type)) add(household, "budgetCostVoucherUnits", units, content);
-  if (INVESTMENT_TYPES.has(type)) add(household, "investmentVoucherUnits", units, content);
-  else if (LIFE_EXPENSE_TYPES.has(type)) { add(household, "expenseVoucherUnits", units, content); add(household, "lifeExpenseVoucherUnits", units, content); if (type === "shop_service_sale") add(household, "serviceExpenseVoucherUnits", units, content); }
-  else add(household, "expenseVoucherUnits", units, content);
+  // 与逐个 add 同义：金额无效则什么都不记（连家庭生活账也不建）；顺序与原先一致。
+  if (!Number.isFinite(units) || units <= 0) return;
+  const cls = debitClass(type);
+  const life = ensureHouseholdLife(household, content);
+  if (cls & DEBIT_COST) bookAdd(life, "budgetCostVoucherUnits", units);
+  if (cls & DEBIT_INVEST) bookAdd(life, "investmentVoucherUnits", units);
+  else if (cls & DEBIT_LIFE) {
+    bookAdd(life, "expenseVoucherUnits", units); bookAdd(life, "lifeExpenseVoucherUnits", units);
+    if (cls & DEBIT_SERVICE) bookAdd(life, "serviceExpenseVoucherUnits", units);
+  } else bookAdd(life, "expenseVoucherUnits", units);
 }
 
 function recordVoucherCredit(state, householdId, units, type, content) {
   const household = state.households?.byId?.[householdId];
   if (!household) return;
-  if (CAPITAL_RETURN_TYPES.has(type)) add(household, "capitalReturnVoucherUnits", units, content);
-  else if (INCOME_TYPES.has(type)) add(household, "incomeVoucherUnits", units, content);
-  if (WAGE_TYPES.has(type)) add(household, "wagePaidVoucherUnits", units, content);
-  if (BUDGET_INCOME_TYPES.has(type)) add(household, "budgetIncomeVoucherUnits", units, content);
+  if (!Number.isFinite(units) || units <= 0) return;
+  const cls = creditClass(type);
+  if (cls === 0) return;
+  const life = ensureHouseholdLife(household, content);
+  if (cls & CREDIT_CAPITAL) bookAdd(life, "capitalReturnVoucherUnits", units);
+  else if (cls & CREDIT_INCOME) bookAdd(life, "incomeVoucherUnits", units);
+  if (cls & CREDIT_WAGE) bookAdd(life, "wagePaidVoucherUnits", units);
+  if (cls & CREDIT_BUDGET) bookAdd(life, "budgetIncomeVoucherUnits", units);
 }
 
 // 没有逐户明细时（单户对单户的付款，最常见）直接按账户名定位那一户，不再临时拼行数组。
