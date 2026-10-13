@@ -17,6 +17,7 @@ node --test                                          # 跑全部测试（注意�
 node --test --test-concurrency=4                     # 同上但四路并行（4 核机器全量实测约 190 秒；默认是核数减一即 3 路）；各测试文件是独立进程，互不干扰
 node --test --test-skip-pattern='\[slow\]'           # 日常迭代：跳过标题带 [slow] 的慢测（实测约 95 秒，CPU 约减半）；全量只在“攒了 3—5 次迭代后”跑一次（见「验证改动」）
 node scripts/bundle-single.mjs --out index.html      # 打包成单文件，自带语法检查 + 30 天无界面冒烟
+node scripts/ui-smoke.mjs                           # 界面冒烟：无头浏览器新游戏→逐个面板点按钮→跑几秒，查 console 报错（改了界面必跑；需 Playwright，云端已装）
 node scripts/simulate.mjs scenarios/<场景>.json      # 跑数值场景，输出每年指标 CSV
 node scripts/health-check.mjs 10                     # 十年经济体检：人口、货币分布、家底、基尼、物价、产业、履约；可加 --wealth-tax 1,3,5 --inheritance 30 --employer-share 100
 ```
