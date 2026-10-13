@@ -11,7 +11,8 @@ import { currencyScale } from "../economy/currency.js";
 import { currentUnitPrice } from "../economy/prices.js";
 import { maximumPayableValueUnits } from "../economy/payment.js";
 import { householdConvertibleWheatUnits } from "./households.js";
-import { privateJobKeyForBuilding, readJobCount } from "../selectors/labor.js";
+import { jobKeyForBuilding, privateJobKeyForBuilding, readJobCount } from "../selectors/labor.js";
+import { transferWageClaimsToTown, wageBook } from "./employer.js";
 import { buildingOwner, companyOfBuilding, daySerialOf, valueUnitsOfGoods } from "./ownership.js";
 import { createIndependentCompany } from "./companies.js";
 import { privateWageRate, townWageRate } from "./payroll.js";
@@ -121,6 +122,11 @@ export function listBuilding(state, buildingId, options, content) {
   const company = state.companies[created.companyId];
   const seller = owner.kind === "household" ? { kind: "household", householdId: owner.id } : { kind: "town" };
   applyCompanyListing(state, company, terms, seller, content);
+  // 民营建筑整栋划入公司：旧的民营工资账随建筑转走（工资债权转为镇营工资债权），不残留在建筑上给下一任主人。
+  const privateBook = state.privateEconomy?.payrollByBuilding?.[buildingId];
+  const listedJob = content.buildings[building.typeId]?.jobs?.[0];
+  if (privateBook && listedJob) transferWageClaimsToTown(state, wageBook(privateBook), jobKeyForBuilding(buildingId, listedJob.id), content);
+  if (state.privateEconomy?.payrollByBuilding) delete state.privateEconomy.payrollByBuilding[buildingId];
   delete building.privateProfitHistory;
   if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
   if (state.ipoApplications) delete state.ipoApplications[buildingId];

@@ -1076,14 +1076,19 @@ function procureTownStoreFromMarket(state, shop, itemId, wantedUnits, content) {
   const none = { boughtUnits: 0, paidVoucherUnits: 0, subsidyVoucherUnits: 0 };
   if (!hasWholesaleMarket(state) || !wholesaleMonopolyItemIds(content).includes(itemId) || !(wantedUnits > 0)) return none;
   // 供货份额上限：镇营店当日每种商品最多拿批发市场可售量（进货前的库存，镇营店先进货，即私营店尚未进货时的库存）的 supplyShareMax，余下留给私营店。
-  const stock = Math.max(0, state.wholesaleMarket.inventory?.[itemId] || 0);
+  // 同日多家镇营店合计也只能拿到“首家镇营店进货时”的批发库存的份额（基准在当日第一次进货时记下，日终随 market.day 重置）。
+  const market = state.wholesaleMarket;
   const share = Math.min(1, Math.max(0, Number(content.rules.townShop?.supplyShareMax ?? 0.5)));
-  const capUnits = Math.floor(stock * share);
+  const day = market.day ||= {};
+  const quota = day.townStoreQuota ||= {};
+  const row = quota[itemId] ||= { baseUnits: Math.max(0, market.inventory?.[itemId] || 0), takenUnits: 0 };
+  const capUnits = Math.max(0, Math.floor(row.baseUnits * share) - row.takenUnits);
   const askUnits = Math.min(Math.floor(wantedUnits), capUnits);
   if (askUnits <= 0) return none;
   const moved = allocateInputToTown(state, itemId, askUnits, content, `${shop.name}从批发市场进货（镇库内部调拨，不付钱）`);
   if (!moved.ok || !(moved.movedUnits > 0)) return none;
   const units = moved.movedUnits;
+  row.takenUnits += units;
   const out = removeTownInventoryWithCost(state, itemId, units, content);
   recordLedger(state, { type: "town_store_restock", transactionId: makeTransactionId(state), source: "town", destination: `shop:${shop.id}`,
     itemId, quantityUnits: units, qeqUnits: 0, reason: `${shop.name}从镇库领货（内部调拨，不付钱）` }, content);
@@ -1665,10 +1670,12 @@ export function windUpCollectiveShop(state, shop, content) {
   const cash = maximumFullyPayableValueUnits(state, `shop:${shop.id}`, maximumPayableValueUnits(state, `shop:${shop.id}`, content), content);
   if (cash > 0) distributeCollectiveProfit(state, shop, cash, content);
   setJobCount(state, merchantJobKey(shop), 0, null);
+  // 剩货归镇库：成本基础随货转入镇库的成本账（与镇营店停业 windUpTownShop 同口径）。
   for (const [itemId, units] of Object.entries(shop.inventory || {})) {
-    if (units <= 0) continue;
-    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + units;
-    shop.inventory[itemId] = 0;
+    if (!(units > 0)) continue;
+    const taken = takeStock(shop, itemId, units, { strict: true });
+    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + taken.units;
+    addTownCostBasis(state, itemId, Math.max(0, Math.floor(taken.costUnits)));
   }
   const leftover = maximumPayableValueUnits(state, `shop:${shop.id}`, content);
   if (leftover > 0) settleMonetaryPayment(state, `shop:${shop.id}`, "town", currentPaymentComposition(state, leftover), content,
@@ -2066,6 +2073,8 @@ export function closeShop(state, shopId, content, automatic = false) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
   if (shop.status === "closed") return { ok: true, shopId, alreadyClosed: true, liquidationPending: false };
+  // 集体摊位没有业主，由时代广场的摊位人数自动经营（stalls.js）；停业只会留下一个仍在招人的清算店。拆除广场时由 windUpCollectiveShop 收摊。
+  if (shop.collective) return { ok: false, reason: "集体摊位由时代广场自动经营，不能停业" };
   if (shop.town) return windUpTownShop(state, shop, content);
   if (shop.status !== "liquidating") {
     settleShopTaxAndDistribution(state, shop, content, true, { allowDistribution: false });

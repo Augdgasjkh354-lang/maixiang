@@ -55,6 +55,7 @@ export function setBreadPrice(state, wheatPerBreadJin, content) {
 }
 
 export function setUnemploymentPolicy(state, patch) {
+  patch ||= {};
   const enabled = patch.enabled === undefined
     ? state.policy.unemploymentBenefit.enabled
     : Boolean(patch.enabled);

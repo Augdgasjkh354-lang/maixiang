@@ -1,6 +1,7 @@
 import { nextRandom } from "../core/random.js";
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { addInventory, changeInventory, quantityToUnits, unitsToQuantity } from "../economy/inventory.js";
+import { putStock } from "../economy/trade.js";
 import { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } from "../content/outside-towns.js";
 import { RULES } from "../content/rules.js";
 import { hasWholesaleMarket, ensureWholesaleMarket, depositWholesalePurchasedInventory, takeWholesaleInventoryForExport } from "./wholesale-market.js";
@@ -532,14 +533,20 @@ export function tradeWithOutsideTown(state, direction, itemId, quantityJin, cont
     if (qtyUnits <= 0) return { ok: false, reason: "数量过小" };
     // 货源：先批发市场，不足再镇库；镇库也不够就把市场已出的货退回。
     let fromMarketUnits = 0;
-    if (hasWholesaleMarket(state)) fromMarketUnits = takeWholesaleInventoryForExport(state, itemId, qtyUnits, content).units || 0;
+    let fromMarketCostUnits = 0;
+    if (hasWholesaleMarket(state)) {
+      const taken = takeWholesaleInventoryForExport(state, itemId, qtyUnits, content);
+      fromMarketUnits = taken.units || 0;
+      fromMarketCostUnits = taken.costVoucherUnits || 0;
+    }
     const remainingUnits = qtyUnits - fromMarketUnits;
     if (remainingUnits > 0) {
       const take = changeInventory(state, "town", itemId, -remainingUnits, `对${profile.name}出口${item.name}`, "trade_export", content, transactionId);
       if (!take.ok) {
         if (fromMarketUnits > 0) {
+          // 退回批发市场时连同成本基础一起退回（取货时已从市场带走）。
           const market = ensureWholesaleMarket(state, content);
-          market.inventory[itemId] = (market.inventory[itemId] || 0) + fromMarketUnits;
+          putStock(market, itemId, fromMarketUnits, fromMarketCostUnits);
         }
         return { ok: false, reason: `批发市场与镇库的${item.name}不足` };
       }

@@ -1,5 +1,6 @@
 import { makeTransactionId, recordEvent, recordLedger } from "../economy/ledger.js";
 import { addInventory, quantityToUnits, unitsToQuantity } from "../economy/inventory.js";
+import { putStock } from "../economy/trade.js";
 import { DEFAULT_OUTSIDE_TOWN_ID } from "../content/outside-towns.js";
 import { takeWholesaleInventoryForExport, hasWholesaleMarket, wholesaleMonopolyItemIds } from "./wholesale-market.js";
 import { freightCapacityUnits, takeFreightCapacity } from "./logistics.js";
@@ -114,9 +115,10 @@ export function signTradeAgreement(state, { itemId, annualJin, years, content, t
   return { ok: true, agreement };
 }
 
-function returnToMarket(state, itemId, units) {
+// 退货入市：连同取货时带走的成本基础一起退回（否则批发库存的成本凭空消失）。
+function returnToMarket(state, itemId, units, costUnits = 0) {
   const market = state.wholesaleMarket;
-  if (units > 0 && market?.inventory) market.inventory[itemId] = (market.inventory[itemId] || 0) + units;
+  if (units > 0 && market?.inventory) putStock(market, itemId, units, costUnits);
 }
 
 // 违约金从镇库小麦扣，不够就扣光。
@@ -190,11 +192,12 @@ function settleAgreementMonth(state, agreement, content, result) {
   const wantUnits = quantityToUnits(dueJin, content);
   // 运力：本月能运出的量不超过运力池余量；批发市场可售量再限一次。
   const askUnits = Math.min(wantUnits, freightCapacityUnits(state, content));
-  const takenUnits = hasWholesaleMarket(state) && askUnits > 0 ? (takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content)?.units || 0) : 0;
+  const taken = hasWholesaleMarket(state) && askUnits > 0 ? takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content) : { units: 0, costVoucherUnits: 0 };
+  const takenUnits = taken?.units || 0;
   const actualJin = unitsToQuantity(takenUnits, content);
   const orderJin = round2(actualJin * agreement.pricePerUnit);
   if (payableWheatJin(town, profile) < orderJin) {
-    returnToMarket(state, agreement.itemId, takenUnits);
+    returnToMarket(state, agreement.itemId, takenUnits, taken?.costVoucherUnits || 0);
     // 对方付不起：本月应交（含之前顺延的）整笔顺延到下月，不计我方违约（与商路断绝口径一致）。
     agreement.carryJin = dueJin;
     changeRelations(town, -AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS);

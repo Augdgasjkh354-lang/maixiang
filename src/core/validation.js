@@ -17,7 +17,7 @@ export function validateState(state, content) {
   const ss = state?.socialSecurity;
   if (ss) {
     for (const key of ["cashVoucherUnits", "debtToTownUnits"]) {
-      if (!Number.isSafeInteger(ss[key] || 0) || (ss[key] || 0) < 0) errors.push("社保基金账户无效：" + key);
+      if (!Number.isSafeInteger(ss[key] ?? 0) || (ss[key] ?? 0) < 0) errors.push("社保基金账户无效：" + key);
     }
     if (ss.farmerSubsidyPerFarmerJin !== undefined && (!Number.isFinite(ss.farmerSubsidyPerFarmerJin) || ss.farmerSubsidyPerFarmerJin < 0)) {
       errors.push("农民补贴标准无效");
@@ -118,7 +118,7 @@ export function validateState(state, content) {
       }
       if (householdEmploymentCount(household) > householdWorkingAge(household)) errors.push("家庭就业超过劳动年龄人数：" + household.id);
       if (household.oxGapDays !== undefined && !(Number.isFinite(household.oxGapDays) && household.oxGapDays >= 0)) errors.push("家庭耕牛欠养天数无效：" + household.id);
-      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(household.inventory[itemId] || 0) || (household.inventory[itemId] || 0) < 0) errors.push("家庭库存无效：" + household.id + "/" + itemId);
+      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(household.inventory[itemId] ?? 0) || (household.inventory[itemId] ?? 0) < 0) errors.push("家庭库存无效：" + household.id + "/" + itemId);
       if (!isActiveHousehold(household) && householdEmploymentCount(household) > 0) errors.push("无人家庭仍占用岗位：" + household.id);
     }
     for (const itemId of Object.keys(content.items)) {
@@ -318,9 +318,9 @@ export function validateState(state, content) {
     for (const period of PERIODS) {
       const group = industry[period];
       if (!group || !group.producedUnits ||
-          !Number.isSafeInteger(group.soldUnits || 0) || (group.soldUnits || 0) < 0 ||
-          !Number.isSafeInteger(group.revenueWheatUnits || 0) || (group.revenueWheatUnits || 0) < 0 ||
-          !Number.isSafeInteger(group.operatingWagesWheatUnits || 0) || (group.operatingWagesWheatUnits || 0) < 0) {
+          !Number.isSafeInteger(group.soldUnits ?? 0) || (group.soldUnits ?? 0) < 0 ||
+          !Number.isSafeInteger(group.revenueWheatUnits ?? 0) || (group.revenueWheatUnits ?? 0) < 0 ||
+          !Number.isSafeInteger(group.operatingWagesWheatUnits ?? 0) || (group.operatingWagesWheatUnits ?? 0) < 0) {
         errors.push("行业经营账字段无效：" + sector + "/" + period);
       }
     }
@@ -334,7 +334,7 @@ export function validateState(state, content) {
   }
   for (const period of PERIODS) {
     const row = state.stampDuty?.[period];
-    if (row && (!Number.isSafeInteger(row.stampDutyUnits || 0) || (row.stampDutyUnits || 0) < 0)) errors.push("印花税账无效：" + period);
+    if (row && (!Number.isSafeInteger(row.stampDutyUnits ?? 0) || (row.stampDutyUnits ?? 0) < 0)) errors.push("印花税账无效：" + period);
   }
   const reform = state.monetaryReform;
   if (!reform || typeof reform.legacyBankAccess !== "boolean") {
@@ -391,7 +391,7 @@ export function validateState(state, content) {
         if (!Number.isInteger(company.totalShares) || company.totalShares <= 0 || company.totalShares % company.listedLevels !== 0 ||
             !Number.isInteger(company.townShares) || company.townShares < 0 ||
             !Number.isInteger(company.residentShares) || company.residentShares < 0 ||
-            !Number.isInteger(company.fundShares || 0) || (company.fundShares || 0) < 0 ||
+            !Number.isInteger(company.fundShares ?? 0) || (company.fundShares ?? 0) < 0 ||
             company.townShares + company.residentShares + (company.fundShares || 0) !== company.totalShares) errors.push("上市公司股份总数或持股结构无效：" + companyId);
         const householdShareSum = Object.values(company.householdShares || {}).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
         if (householdShareSum !== company.residentShares) errors.push("居民逐户持股与公司居民持股不一致：" + companyId);
@@ -414,14 +414,14 @@ export function validateState(state, content) {
       if (sellerIsHousehold && !state.households?.byId?.[shareSeller]) errors.push("发行池卖方家庭不存在：" + companyId);
       const sellerHolding = sellerIsHousehold ? (company.householdShares?.[shareSeller] || 0) : (company.townShares || 0);
       if (!Number.isInteger(company.shareSale?.offeredShares) || company.shareSale.offeredShares < 0 || company.shareSale.offeredShares > sellerHolding ||
-          !Number.isSafeInteger(company.shareSale?.sharePriceVoucherUnits || 0) || (company.shareSale?.sharePriceVoucherUnits || 0) < 0 ||
-          !Number.isSafeInteger(company.shareSale?.cumulativeProceedsVoucherUnits || 0) || (company.shareSale?.cumulativeProceedsVoucherUnits || 0) < 0) {
+          !Number.isSafeInteger(company.shareSale?.sharePriceVoucherUnits ?? 0) || (company.shareSale?.sharePriceVoucherUnits ?? 0) < 0 ||
+          !Number.isSafeInteger(company.shareSale?.cumulativeProceedsVoucherUnits ?? 0) || (company.shareSale?.cumulativeProceedsVoucherUnits ?? 0) < 0) {
         errors.push("企业股份出售记录无效：" + companyId);
       }
       for (const period of PERIODS) {
         const account = company.accounts?.[period];
         if (!account || ["revenueVoucherUnits", "cogsVoucherUnits", "wageExpenseVoucherUnits", "wagesPaidVoucherUnits", "inputPurchaseVoucherUnits", "taxCostVoucherUnits", "processingLossVoucherUnits", "profitVoucherUnits"]
-          .some(key => !Number.isSafeInteger(account[key] || 0))) errors.push("企业核算账无效：" + companyId + "/" + period);
+          .some(key => !Number.isSafeInteger(account[key] ?? 0))) errors.push("企业核算账无效：" + companyId + "/" + period);
       }
     }
     // 上市申请与驳回冷却（docs/OWNERSHIP.md 第 2 条）：只查结构；业主变更后的失效申请由日结清理，不算非法。
@@ -463,8 +463,8 @@ export function validateState(state, content) {
       }
       if (shop.herdCarry !== undefined && !(Number.isFinite(shop.herdCarry) && shop.herdCarry >= 0 && shop.herdCarry <= 1)) errors.push("养牛场开新小牛余数无效：" + shop.id);
       if (!["open", "paused", "liquidating", "closed"].includes(shop.status)) errors.push("店铺状态无效：" + shop.id);
-      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(shop.inventory?.[itemId] || 0) || (shop.inventory?.[itemId] || 0) < 0) errors.push("店铺库存无效：" + shop.id + "/" + itemId);
-      for (const key of ["wageVoucherUnits", "rentVoucherUnits", "taxVoucherUnits"]) if (!Number.isSafeInteger(shop.liabilities?.[key] || 0) || (shop.liabilities?.[key] || 0) < 0) errors.push("店铺欠款无效：" + shop.id);
+      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(shop.inventory?.[itemId] ?? 0) || (shop.inventory?.[itemId] ?? 0) < 0) errors.push("店铺库存无效：" + shop.id + "/" + itemId);
+      for (const key of ["wageVoucherUnits", "rentVoucherUnits", "taxVoucherUnits"]) if (!Number.isSafeInteger(shop.liabilities?.[key] ?? 0) || (shop.liabilities?.[key] ?? 0) < 0) errors.push("店铺欠款无效：" + shop.id);
       const merchantKey = `shop:${shop.id}:merchant`;
       const clerkKey = `shop:${shop.id}:clerk`;
       const merchantCount = jobCount(state, merchantKey);

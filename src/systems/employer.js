@@ -11,7 +11,7 @@
 import { allocateIntegerByWeight } from "../core/allocation.js";
 import { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } from "../economy/payment.js";
 import { recordHouseholdWageDue } from "./household-life.js";
-import { jobAssignments, syncResidentAggregates } from "./households.js";
+import { isActiveHousehold, jobAssignments, syncResidentAggregates } from "./households.js";
 
 export function wageBook(holder) {
   holder.claimsVoucherUnits ||= {};
@@ -87,8 +87,8 @@ export function payWages(state, book, payers, content, type, reason, options = {
   let matured = 0;
   if (options.overdueOnly) matured = 0; // 只还已到期的欠薪（如年度结算前），不动待发
   else if (Number.isFinite(options.payDay)) {
-    if (dayOfMonth(state, content) < options.payDay) return { paid: 0, rows: [], matured: 0 };
-    matured = matureWages(state, book, content);
+    // 发薪日之前不转待发为到期，但已到期未付的欠薪每天照常补付（不能在这里早退）。
+    if (dayOfMonth(state, content) >= options.payDay) matured = matureWages(state, book, content);
   } else matured = matureWages(state, book, content, { all: true });
   const list = (Array.isArray(payers) ? payers : [payers]).map(payer => typeof payer === "string" ? { id: payer } : payer);
   const previousDefer = Boolean(state._deferHouseholdSync);
@@ -98,6 +98,9 @@ export function payWages(state, book, payers, content, type, reason, options = {
   for (const householdId of Object.keys(book.claimsVoucherUnits).sort()) {
     const due = book.claimsVoucherUnits[householdId] || 0;
     if (due <= 0) continue;
+    // 已无人的户不再付工资：付给空户，日结的家产归公会把钱原样收回镇库（镇库付给镇库）。债权留账，见 docs/REDISTRIBUTION.md。
+    const recipient = state.households?.byId?.[householdId];
+    if (recipient && !isActiveHousehold(recipient)) continue;
     let obligation = normalizePaymentObligation(book.claimsPayment[householdId] || due, state);
     let householdPaid = 0;
     for (const payer of list) {

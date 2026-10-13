@@ -40,6 +40,7 @@ export function loadState(storage, content) {
   } catch {
     throw new Error("本机存档无法读取。原存档未更改。");
   }
+  if (!parsed || typeof parsed !== "object") throw new Error("本机存档无法读取。原存档未更改。");
   const currentVersion = definitions.rules.saveVersion;
   const storedVersion = Math.max(Number(parsed.version) || 0, Number(parsed.schemaVersion) || 0);
   if (storedVersion !== currentVersion) {

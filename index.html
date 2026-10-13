@@ -3429,7 +3429,7 @@ return { validateContent };
 // ===== content/version.js =====
 const __mxmod22 = (() => {
 const APP_VERSION = "0.2.3";
-       const BUILD_ID = "0203-f15996c";
+       const BUILD_ID = "0203-922244e";
 return { APP_VERSION, BUILD_ID };
 })();
 
@@ -5644,7 +5644,7 @@ const __mxmod32 = (() => {
 const { allocateIntegerByWeight } = __mxmod19;
 const { addPaymentObligation, currentPaymentComposition, normalizePaymentObligation, settleMonetaryPayment } = __mxmod31;
 const { recordHouseholdWageDue } = __mxmod27;
-const { jobAssignments, syncResidentAggregates } = __mxmod26;
+const { isActiveHousehold, jobAssignments, syncResidentAggregates } = __mxmod26;
 function wageBook(holder) {
   holder.claimsVoucherUnits ||= {};
   holder.claimsPayment ||= {};
@@ -5719,8 +5719,8 @@ function wageBook(holder) {
   let matured = 0;
   if (options.overdueOnly) matured = 0; // 只还已到期的欠薪（如年度结算前），不动待发
   else if (Number.isFinite(options.payDay)) {
-    if (dayOfMonth(state, content) < options.payDay) return { paid: 0, rows: [], matured: 0 };
-    matured = matureWages(state, book, content);
+    // 发薪日之前不转待发为到期，但已到期未付的欠薪每天照常补付（不能在这里早退）。
+    if (dayOfMonth(state, content) >= options.payDay) matured = matureWages(state, book, content);
   } else matured = matureWages(state, book, content, { all: true });
   const list = (Array.isArray(payers) ? payers : [payers]).map(payer => typeof payer === "string" ? { id: payer } : payer);
   const previousDefer = Boolean(state._deferHouseholdSync);
@@ -5730,6 +5730,9 @@ function wageBook(holder) {
   for (const householdId of Object.keys(book.claimsVoucherUnits).sort()) {
     const due = book.claimsVoucherUnits[householdId] || 0;
     if (due <= 0) continue;
+    // 已无人的户不再付工资：付给空户，日结的家产归公会把钱原样收回镇库（镇库付给镇库）。债权留账，见 docs/REDISTRIBUTION.md。
+    const recipient = state.households?.byId?.[householdId];
+    if (recipient && !isActiveHousehold(recipient)) continue;
     let obligation = normalizePaymentObligation(book.claimsPayment[householdId] || due, state);
     let householdPaid = 0;
     for (const payer of list) {
@@ -15091,14 +15094,19 @@ function procureTownStoreFromMarket(state, shop, itemId, wantedUnits, content) {
   const none = { boughtUnits: 0, paidVoucherUnits: 0, subsidyVoucherUnits: 0 };
   if (!hasWholesaleMarket(state) || !wholesaleMonopolyItemIds(content).includes(itemId) || !(wantedUnits > 0)) return none;
   // 供货份额上限：镇营店当日每种商品最多拿批发市场可售量（进货前的库存，镇营店先进货，即私营店尚未进货时的库存）的 supplyShareMax，余下留给私营店。
-  const stock = Math.max(0, state.wholesaleMarket.inventory?.[itemId] || 0);
+  // 同日多家镇营店合计也只能拿到“首家镇营店进货时”的批发库存的份额（基准在当日第一次进货时记下，日终随 market.day 重置）。
+  const market = state.wholesaleMarket;
   const share = Math.min(1, Math.max(0, Number(content.rules.townShop?.supplyShareMax ?? 0.5)));
-  const capUnits = Math.floor(stock * share);
+  const day = market.day ||= {};
+  const quota = day.townStoreQuota ||= {};
+  const row = quota[itemId] ||= { baseUnits: Math.max(0, market.inventory?.[itemId] || 0), takenUnits: 0 };
+  const capUnits = Math.max(0, Math.floor(row.baseUnits * share) - row.takenUnits);
   const askUnits = Math.min(Math.floor(wantedUnits), capUnits);
   if (askUnits <= 0) return none;
   const moved = allocateInputToTown(state, itemId, askUnits, content, `${shop.name}从批发市场进货（镇库内部调拨，不付钱）`);
   if (!moved.ok || !(moved.movedUnits > 0)) return none;
   const units = moved.movedUnits;
+  row.takenUnits += units;
   const out = removeTownInventoryWithCost(state, itemId, units, content);
   recordLedger(state, { type: "town_store_restock", transactionId: makeTransactionId(state), source: "town", destination: `shop:${shop.id}`,
     itemId, quantityUnits: units, qeqUnits: 0, reason: `${shop.name}从镇库领货（内部调拨，不付钱）` }, content);
@@ -15680,10 +15688,12 @@ function collectiveCashStranded(state, shop, content) {
   const cash = maximumFullyPayableValueUnits(state, `shop:${shop.id}`, maximumPayableValueUnits(state, `shop:${shop.id}`, content), content);
   if (cash > 0) distributeCollectiveProfit(state, shop, cash, content);
   setJobCount(state, merchantJobKey(shop), 0, null);
+  // 剩货归镇库：成本基础随货转入镇库的成本账（与镇营店停业 windUpTownShop 同口径）。
   for (const [itemId, units] of Object.entries(shop.inventory || {})) {
-    if (units <= 0) continue;
-    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + units;
-    shop.inventory[itemId] = 0;
+    if (!(units > 0)) continue;
+    const taken = takeStock(shop, itemId, units, { strict: true });
+    state.accounts.town[itemId] = (state.accounts.town[itemId] || 0) + taken.units;
+    addTownCostBasis(state, itemId, Math.max(0, Math.floor(taken.costUnits)));
   }
   const leftover = maximumPayableValueUnits(state, `shop:${shop.id}`, content);
   if (leftover > 0) settleMonetaryPayment(state, `shop:${shop.id}`, "town", currentPaymentComposition(state, leftover), content,
@@ -16081,6 +16091,8 @@ function windUpTownShop(state, shop, content) {
   const shop = ensureShops(state, content)[shopId];
   if (!shop) return { ok: false, reason: "店铺不存在" };
   if (shop.status === "closed") return { ok: true, shopId, alreadyClosed: true, liquidationPending: false };
+  // 集体摊位没有业主，由时代广场的摊位人数自动经营（stalls.js）；停业只会留下一个仍在招人的清算店。拆除广场时由 windUpCollectiveShop 收摊。
+  if (shop.collective) return { ok: false, reason: "集体摊位由时代广场自动经营，不能停业" };
   if (shop.town) return windUpTownShop(state, shop, content);
   if (shop.status !== "liquidating") {
     settleShopTaxAndDistribution(state, shop, content, true, { allowDistribution: false });
@@ -17256,6 +17268,8 @@ const { recordEvent } = __mxmod18;
 const { selectOperatingRightPreview } = __mxmod76;
 const { householdConvertibleWheatUnits } = __mxmod26;
 const { buildingOwner, transferBuildingOwnership } = __mxmod48;
+const { transferWageClaimsToTown, wageBook } = __mxmod32;
+const { jobKeyForBuilding } = __mxmod40;
 function sellBuildingToPrivate(state, buildingId, options = {}, content) {
   const requested = options?.priceVoucher;
   if (requested !== undefined && !(Number.isFinite(Number(requested)) && Number(requested) > 0)) {
@@ -17314,6 +17328,11 @@ function sellBuildingToPrivate(state, buildingId, options = {}, content) {
     currentPaymentComposition(state, priceUnits), content,
     "operating_right_buyback", `镇库按估值回购${definition.name}经营权`, { requireFull: true });
   if (!payment.ok) return { ok: false, reason: payment.reason || "镇库资金不足，无法回购", preview };
+  // 旧业主的民营工资账随建筑一起收归镇营：工资债权转为镇营的工资债权，民营账删除（与整户失效、收回一致），不残留给下一任业主。
+  const job = definition.jobs?.[0];
+  const privateBook = state.privateEconomy?.payrollByBuilding?.[buildingId];
+  if (privateBook && job) transferWageClaimsToTown(state, wageBook(privateBook), jobKeyForBuilding(buildingId, job.id), content);
+  if (state.privateEconomy?.payrollByBuilding) delete state.privateEconomy.payrollByBuilding[buildingId];
   const moved = transferBuildingOwnership(state, building, { kind: "town", id: null }, content);
   if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
   recordEvent(state, `镇库以${preview.valuationWheatJin.toLocaleString("zh-CN")}斤小麦等值向${household?.name || "业主"}回购${definition.name}，整栋收回镇营。`, content, { day: state.day + 1, gazette: { kind: "ownership", weight: 4 } });
@@ -17942,7 +17961,8 @@ const { currencyScale } = __mxmod29;
 const { currentUnitPrice } = __mxmod43;
 const { maximumPayableValueUnits } = __mxmod31;
 const { householdConvertibleWheatUnits } = __mxmod26;
-const { privateJobKeyForBuilding, readJobCount } = __mxmod40;
+const { jobKeyForBuilding, privateJobKeyForBuilding, readJobCount } = __mxmod40;
+const { transferWageClaimsToTown, wageBook } = __mxmod32;
 const { buildingOwner, companyOfBuilding, daySerialOf, valueUnitsOfGoods } = __mxmod48;
 const { createIndependentCompany } = __mxmod65;
 const { privateWageRate, townWageRate } = __mxmod38;
@@ -18048,6 +18068,11 @@ function cooldownActive(state, buildingId, householdId, serial) {
   const company = state.companies[created.companyId];
   const seller = owner.kind === "household" ? { kind: "household", householdId: owner.id } : { kind: "town" };
   applyCompanyListing(state, company, terms, seller, content);
+  // 民营建筑整栋划入公司：旧的民营工资账随建筑转走（工资债权转为镇营工资债权），不残留在建筑上给下一任主人。
+  const privateBook = state.privateEconomy?.payrollByBuilding?.[buildingId];
+  const listedJob = content.buildings[building.typeId]?.jobs?.[0];
+  if (privateBook && listedJob) transferWageClaimsToTown(state, wageBook(privateBook), jobKeyForBuilding(buildingId, listedJob.id), content);
+  if (state.privateEconomy?.payrollByBuilding) delete state.privateEconomy.payrollByBuilding[buildingId];
   delete building.privateProfitHistory;
   if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
   if (state.ipoApplications) delete state.ipoApplications[buildingId];
@@ -18628,6 +18653,7 @@ const __mxmod82 = (() => {
 const { nextRandom } = __mxmod54;
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod18;
 const { addInventory, changeInventory, quantityToUnits, unitsToQuantity } = __mxmod20;
+const { putStock } = __mxmod44;
 const { DEFAULT_OUTSIDE_TOWN_ID, OUTSIDE_TOWNS } = __mxmod8;
 const { RULES } = __mxmod3;
 const { hasWholesaleMarket, ensureWholesaleMarket, depositWholesalePurchasedInventory, takeWholesaleInventoryForExport } = __mxmod46;
@@ -19159,14 +19185,20 @@ function growMines(town, profile, year) {
     if (qtyUnits <= 0) return { ok: false, reason: "数量过小" };
     // 货源：先批发市场，不足再镇库；镇库也不够就把市场已出的货退回。
     let fromMarketUnits = 0;
-    if (hasWholesaleMarket(state)) fromMarketUnits = takeWholesaleInventoryForExport(state, itemId, qtyUnits, content).units || 0;
+    let fromMarketCostUnits = 0;
+    if (hasWholesaleMarket(state)) {
+      const taken = takeWholesaleInventoryForExport(state, itemId, qtyUnits, content);
+      fromMarketUnits = taken.units || 0;
+      fromMarketCostUnits = taken.costVoucherUnits || 0;
+    }
     const remainingUnits = qtyUnits - fromMarketUnits;
     if (remainingUnits > 0) {
       const take = changeInventory(state, "town", itemId, -remainingUnits, `对${profile.name}出口${item.name}`, "trade_export", content, transactionId);
       if (!take.ok) {
         if (fromMarketUnits > 0) {
+          // 退回批发市场时连同成本基础一起退回（取货时已从市场带走）。
           const market = ensureWholesaleMarket(state, content);
-          market.inventory[itemId] = (market.inventory[itemId] || 0) + fromMarketUnits;
+          putStock(market, itemId, fromMarketUnits, fromMarketCostUnits);
         }
         return { ok: false, reason: `批发市场与镇库的${item.name}不足` };
       }
@@ -20647,6 +20679,7 @@ return { BOND_MAX_EXTENSIONS, ensureBondState, bondAvailable, transferBondHoldin
 const __mxmod87 = (() => {
 const { makeTransactionId, recordEvent, recordLedger } = __mxmod18;
 const { addInventory, quantityToUnits, unitsToQuantity } = __mxmod20;
+const { putStock } = __mxmod44;
 const { DEFAULT_OUTSIDE_TOWN_ID } = __mxmod8;
 const { takeWholesaleInventoryForExport, hasWholesaleMarket, wholesaleMonopolyItemIds } = __mxmod46;
 const { freightCapacityUnits, takeFreightCapacity } = __mxmod81;
@@ -20751,9 +20784,10 @@ function nextAgreementId(state) {
   return { ok: true, agreement };
 }
 
-function returnToMarket(state, itemId, units) {
+// 退货入市：连同取货时带走的成本基础一起退回（否则批发库存的成本凭空消失）。
+function returnToMarket(state, itemId, units, costUnits = 0) {
   const market = state.wholesaleMarket;
-  if (units > 0 && market?.inventory) market.inventory[itemId] = (market.inventory[itemId] || 0) + units;
+  if (units > 0 && market?.inventory) putStock(market, itemId, units, costUnits);
 }
 
 // 违约金从镇库小麦扣，不够就扣光。
@@ -20827,11 +20861,12 @@ function settleAgreementMonth(state, agreement, content, result) {
   const wantUnits = quantityToUnits(dueJin, content);
   // 运力：本月能运出的量不超过运力池余量；批发市场可售量再限一次。
   const askUnits = Math.min(wantUnits, freightCapacityUnits(state, content));
-  const takenUnits = hasWholesaleMarket(state) && askUnits > 0 ? (takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content)?.units || 0) : 0;
+  const taken = hasWholesaleMarket(state) && askUnits > 0 ? takeWholesaleInventoryForExport(state, agreement.itemId, askUnits, content) : { units: 0, costVoucherUnits: 0 };
+  const takenUnits = taken?.units || 0;
   const actualJin = unitsToQuantity(takenUnits, content);
   const orderJin = round2(actualJin * agreement.pricePerUnit);
   if (payableWheatJin(town, profile) < orderJin) {
-    returnToMarket(state, agreement.itemId, takenUnits);
+    returnToMarket(state, agreement.itemId, takenUnits, taken?.costVoucherUnits || 0);
     // 对方付不起：本月应交（含之前顺延的）整笔顺延到下月，不计我方违约（与商路断绝口径一致）。
     agreement.carryJin = dueJin;
     changeRelations(town, -AGREEMENT_PARTNER_BREACH_RELATIONS_LOSS);
@@ -21746,6 +21781,7 @@ function setWageRate(state, roleId, dailyJin, content) {
 }
 
        function setUnemploymentPolicy(state, patch) {
+  patch ||= {};
   const enabled = patch.enabled === undefined
     ? state.policy.unemploymentBenefit.enabled
     : Boolean(patch.enabled);
@@ -22746,7 +22782,7 @@ function validateState(state, content) {
   const ss = state?.socialSecurity;
   if (ss) {
     for (const key of ["cashVoucherUnits", "debtToTownUnits"]) {
-      if (!Number.isSafeInteger(ss[key] || 0) || (ss[key] || 0) < 0) errors.push("社保基金账户无效：" + key);
+      if (!Number.isSafeInteger(ss[key] ?? 0) || (ss[key] ?? 0) < 0) errors.push("社保基金账户无效：" + key);
     }
     if (ss.farmerSubsidyPerFarmerJin !== undefined && (!Number.isFinite(ss.farmerSubsidyPerFarmerJin) || ss.farmerSubsidyPerFarmerJin < 0)) {
       errors.push("农民补贴标准无效");
@@ -22847,7 +22883,7 @@ function validateState(state, content) {
       }
       if (householdEmploymentCount(household) > householdWorkingAge(household)) errors.push("家庭就业超过劳动年龄人数：" + household.id);
       if (household.oxGapDays !== undefined && !(Number.isFinite(household.oxGapDays) && household.oxGapDays >= 0)) errors.push("家庭耕牛欠养天数无效：" + household.id);
-      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(household.inventory[itemId] || 0) || (household.inventory[itemId] || 0) < 0) errors.push("家庭库存无效：" + household.id + "/" + itemId);
+      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(household.inventory[itemId] ?? 0) || (household.inventory[itemId] ?? 0) < 0) errors.push("家庭库存无效：" + household.id + "/" + itemId);
       if (!isActiveHousehold(household) && householdEmploymentCount(household) > 0) errors.push("无人家庭仍占用岗位：" + household.id);
     }
     for (const itemId of Object.keys(content.items)) {
@@ -23047,9 +23083,9 @@ function validateState(state, content) {
     for (const period of PERIODS) {
       const group = industry[period];
       if (!group || !group.producedUnits ||
-          !Number.isSafeInteger(group.soldUnits || 0) || (group.soldUnits || 0) < 0 ||
-          !Number.isSafeInteger(group.revenueWheatUnits || 0) || (group.revenueWheatUnits || 0) < 0 ||
-          !Number.isSafeInteger(group.operatingWagesWheatUnits || 0) || (group.operatingWagesWheatUnits || 0) < 0) {
+          !Number.isSafeInteger(group.soldUnits ?? 0) || (group.soldUnits ?? 0) < 0 ||
+          !Number.isSafeInteger(group.revenueWheatUnits ?? 0) || (group.revenueWheatUnits ?? 0) < 0 ||
+          !Number.isSafeInteger(group.operatingWagesWheatUnits ?? 0) || (group.operatingWagesWheatUnits ?? 0) < 0) {
         errors.push("行业经营账字段无效：" + sector + "/" + period);
       }
     }
@@ -23063,7 +23099,7 @@ function validateState(state, content) {
   }
   for (const period of PERIODS) {
     const row = state.stampDuty?.[period];
-    if (row && (!Number.isSafeInteger(row.stampDutyUnits || 0) || (row.stampDutyUnits || 0) < 0)) errors.push("印花税账无效：" + period);
+    if (row && (!Number.isSafeInteger(row.stampDutyUnits ?? 0) || (row.stampDutyUnits ?? 0) < 0)) errors.push("印花税账无效：" + period);
   }
   const reform = state.monetaryReform;
   if (!reform || typeof reform.legacyBankAccess !== "boolean") {
@@ -23120,7 +23156,7 @@ function validateState(state, content) {
         if (!Number.isInteger(company.totalShares) || company.totalShares <= 0 || company.totalShares % company.listedLevels !== 0 ||
             !Number.isInteger(company.townShares) || company.townShares < 0 ||
             !Number.isInteger(company.residentShares) || company.residentShares < 0 ||
-            !Number.isInteger(company.fundShares || 0) || (company.fundShares || 0) < 0 ||
+            !Number.isInteger(company.fundShares ?? 0) || (company.fundShares ?? 0) < 0 ||
             company.townShares + company.residentShares + (company.fundShares || 0) !== company.totalShares) errors.push("上市公司股份总数或持股结构无效：" + companyId);
         const householdShareSum = Object.values(company.householdShares || {}).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
         if (householdShareSum !== company.residentShares) errors.push("居民逐户持股与公司居民持股不一致：" + companyId);
@@ -23143,14 +23179,14 @@ function validateState(state, content) {
       if (sellerIsHousehold && !state.households?.byId?.[shareSeller]) errors.push("发行池卖方家庭不存在：" + companyId);
       const sellerHolding = sellerIsHousehold ? (company.householdShares?.[shareSeller] || 0) : (company.townShares || 0);
       if (!Number.isInteger(company.shareSale?.offeredShares) || company.shareSale.offeredShares < 0 || company.shareSale.offeredShares > sellerHolding ||
-          !Number.isSafeInteger(company.shareSale?.sharePriceVoucherUnits || 0) || (company.shareSale?.sharePriceVoucherUnits || 0) < 0 ||
-          !Number.isSafeInteger(company.shareSale?.cumulativeProceedsVoucherUnits || 0) || (company.shareSale?.cumulativeProceedsVoucherUnits || 0) < 0) {
+          !Number.isSafeInteger(company.shareSale?.sharePriceVoucherUnits ?? 0) || (company.shareSale?.sharePriceVoucherUnits ?? 0) < 0 ||
+          !Number.isSafeInteger(company.shareSale?.cumulativeProceedsVoucherUnits ?? 0) || (company.shareSale?.cumulativeProceedsVoucherUnits ?? 0) < 0) {
         errors.push("企业股份出售记录无效：" + companyId);
       }
       for (const period of PERIODS) {
         const account = company.accounts?.[period];
         if (!account || ["revenueVoucherUnits", "cogsVoucherUnits", "wageExpenseVoucherUnits", "wagesPaidVoucherUnits", "inputPurchaseVoucherUnits", "taxCostVoucherUnits", "processingLossVoucherUnits", "profitVoucherUnits"]
-          .some(key => !Number.isSafeInteger(account[key] || 0))) errors.push("企业核算账无效：" + companyId + "/" + period);
+          .some(key => !Number.isSafeInteger(account[key] ?? 0))) errors.push("企业核算账无效：" + companyId + "/" + period);
       }
     }
     // 上市申请与驳回冷却（docs/OWNERSHIP.md 第 2 条）：只查结构；业主变更后的失效申请由日结清理，不算非法。
@@ -23192,8 +23228,8 @@ function validateState(state, content) {
       }
       if (shop.herdCarry !== undefined && !(Number.isFinite(shop.herdCarry) && shop.herdCarry >= 0 && shop.herdCarry <= 1)) errors.push("养牛场开新小牛余数无效：" + shop.id);
       if (!["open", "paused", "liquidating", "closed"].includes(shop.status)) errors.push("店铺状态无效：" + shop.id);
-      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(shop.inventory?.[itemId] || 0) || (shop.inventory?.[itemId] || 0) < 0) errors.push("店铺库存无效：" + shop.id + "/" + itemId);
-      for (const key of ["wageVoucherUnits", "rentVoucherUnits", "taxVoucherUnits"]) if (!Number.isSafeInteger(shop.liabilities?.[key] || 0) || (shop.liabilities?.[key] || 0) < 0) errors.push("店铺欠款无效：" + shop.id);
+      for (const itemId of Object.keys(content.items)) if (!Number.isSafeInteger(shop.inventory?.[itemId] ?? 0) || (shop.inventory?.[itemId] ?? 0) < 0) errors.push("店铺库存无效：" + shop.id + "/" + itemId);
+      for (const key of ["wageVoucherUnits", "rentVoucherUnits", "taxVoucherUnits"]) if (!Number.isSafeInteger(shop.liabilities?.[key] ?? 0) || (shop.liabilities?.[key] ?? 0) < 0) errors.push("店铺欠款无效：" + shop.id);
       const merchantKey = `shop:${shop.id}:merchant`;
       const clerkKey = `shop:${shop.id}:clerk`;
       const merchantCount = jobCount(state, merchantKey);
@@ -30687,6 +30723,7 @@ function preserveRaw(storage, raw, label) {
   } catch {
     throw new Error("本机存档无法读取。原存档未更改。");
   }
+  if (!parsed || typeof parsed !== "object") throw new Error("本机存档无法读取。原存档未更改。");
   const currentVersion = definitions.rules.saveVersion;
   const storedVersion = Math.max(Number(parsed.version) || 0, Number(parsed.schemaVersion) || 0);
   if (storedVersion !== currentVersion) {

@@ -3,6 +3,8 @@ import { recordEvent } from "../economy/ledger.js";
 import { selectOperatingRightPreview } from "../selectors/operating-rights.js";
 import { householdConvertibleWheatUnits } from "./households.js";
 import { buildingOwner, transferBuildingOwnership } from "./ownership.js";
+import { transferWageClaimsToTown, wageBook } from "./employer.js";
+import { jobKeyForBuilding } from "../selectors/labor.js";
 
 // 整栋卖给民营（镇长操作，docs/OWNERSHIP.md 第 1 条）。
 // 要价 = options.priceVoucher（镇长改过的价）；未给时用预览价（已存的要价，或整栋估值）。
@@ -65,6 +67,11 @@ export function buyBuildingBackFromPrivate(state, buildingId, content) {
     currentPaymentComposition(state, priceUnits), content,
     "operating_right_buyback", `镇库按估值回购${definition.name}经营权`, { requireFull: true });
   if (!payment.ok) return { ok: false, reason: payment.reason || "镇库资金不足，无法回购", preview };
+  // 旧业主的民营工资账随建筑一起收归镇营：工资债权转为镇营的工资债权，民营账删除（与整户失效、收回一致），不残留给下一任业主。
+  const job = definition.jobs?.[0];
+  const privateBook = state.privateEconomy?.payrollByBuilding?.[buildingId];
+  if (privateBook && job) transferWageClaimsToTown(state, wageBook(privateBook), jobKeyForBuilding(buildingId, job.id), content);
+  if (state.privateEconomy?.payrollByBuilding) delete state.privateEconomy.payrollByBuilding[buildingId];
   const moved = transferBuildingOwnership(state, building, { kind: "town", id: null }, content);
   if (state.market?.operatingRightPrices) delete state.market.operatingRightPrices[buildingId];
   recordEvent(state, `镇库以${preview.valuationWheatJin.toLocaleString("zh-CN")}斤小麦等值向${household?.name || "业主"}回购${definition.name}，整栋收回镇营。`, content, { day: state.day + 1, gazette: { kind: "ownership", weight: 4 } });
